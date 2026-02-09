@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# Production
+/dist
+
+# Build analysis
+bundle-analysis*
+bundlenew*.txt
+bundleold*.txt
+stats.html
+
+# Data and large files
+digest*txt
+dm-mono-main/
+old ui/
+
+# Assets (Root level only, source assets in ui/assets/ are tracked)
+*.svg
+*.png
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System Files
+.DS_Store
+Thumbs.db
+
+promptmeth/
+
+# Documentation
+scripts/
+docs/
+*.md    
+*.txt
+*.d.ts
+
+.*test.ts
+src/core/V31Verification.ts
+docs/*
+jest.config.js
+oldaiturnblock.tsx
+oldsynthesisbubble.tsx
+/fonts/
+/scripts/*
+package-lock.json
+coderabbit
+Grok-Api-js/*

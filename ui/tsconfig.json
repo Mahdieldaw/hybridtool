@@ -1,0 +1,30 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "react",
+      "react-dom",
+      "chrome",
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": [
+        "../shared/*"
+      ]
+    }
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx",
+    "./**/*.d.ts",
+    "types/**/*.d.ts",
+    "../shared/**/*.ts"
+  ],
+  "exclude": [
+    "../dist",
+    "docs",
+    "../node_modules",
+    "src/oi.js"
+  ]
+}

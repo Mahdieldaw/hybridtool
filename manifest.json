@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "HTOS",
+  "version": "0.1",
+  "background": {
+    "service_worker": "bg.js"
+  },
+  "permissions": [
+    "alarms",
+    "declarativeNetRequest",
+    "offscreen",
+    "storage",
+    "tabs",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "https://grok.com/*",
+    "http://localhost:3000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.openai.com/*"
+      ],
+      "js": [
+        "cs-openai.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "HTOS"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+    "192": "icons/icon-192.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "oi.html",
+        "oi.js",
+        "src/oi.js",
+        "models/*",
+        "onnx/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "cross_origin_opener_policy": {
+    "value": "same-origin"
+  },
+  "cross_origin_embedder_policy": {
+    "value": "require-corp"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
+  }
+}

@@ -1,0 +1,10 @@
+/* Offscreen document styles */
+body {
+  margin: 0;
+  padding: 0;
+  /* Avoid forcing a solid black background globally -- use transparent to prevent visual overlay
+       if this stylesheet is accidentally applied to the visible UI. The offscreen document should
+       be invisible and not affect the main UI rendering. */
+  background: transparent;
+  overflow: hidden;
+}

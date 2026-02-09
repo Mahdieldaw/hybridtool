@@ -1,0 +1,25 @@
+// Centralized message type constants used between UI and background SW
+export const DEFAULT_THREAD = "default-thread";
+export const EXECUTE_WORKFLOW = "EXECUTE_WORKFLOW";
+export const CONTINUE_COGNITIVE_WORKFLOW = "CONTINUE_COGNITIVE_WORKFLOW";
+export const WORKFLOW_COMPLETE = "WORKFLOW_COMPLETE";
+export const WORKFLOW_STEP_UPDATE = "WORKFLOW_STEP_UPDATE";
+export const WORKFLOW_PROGRESS = "WORKFLOW_PROGRESS";
+export const WORKFLOW_PARTIAL_COMPLETE = "WORKFLOW_PARTIAL_COMPLETE";
+export const PARTIAL_RESULT = "PARTIAL_RESULT";
+export const TURN_FINALIZED = "TURN_FINALIZED";
+export const TURN_CREATED = "TURN_CREATED";
+export const MAPPER_ARTIFACT_READY = "MAPPER_ARTIFACT_READY";
+
+export const GET_FULL_HISTORY = "GET_FULL_HISTORY";
+export const GET_HISTORY_SESSION = "GET_HISTORY_SESSION";
+
+// Maintenance / cleanup
+export const DELETE_SESSION = "DELETE_SESSION";
+export const DELETE_SESSIONS = "DELETE_SESSIONS";
+// Rename existing session title
+export const RENAME_SESSION = "RENAME_SESSION";
+
+
+export const REFRESH_AUTH_STATUS = "REFRESH_AUTH_STATUS";
+export const RETRY_PROVIDERS = "RETRY_PROVIDERS";

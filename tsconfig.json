@@ -1,0 +1,60 @@
+{
+  "compilerOptions": {
+    "useUnknownInCatchVariables": true,
+    "target": "es2022",
+    "baseUrl": ".",
+    "lib": [
+      "DOM",
+      "ES2022"
+    ],
+    "allowJs": true,
+    "checkJs": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noImplicitAny": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "typeRoots": [
+      "./node_modules/@types",
+      "./ui/types"
+    ],
+    "paths": {
+      "react-window": [
+        "./ui/types/react-window.d.ts"
+      ],
+      "react-window/*": [
+        "./ui/types/react-window.d.ts"
+      ],
+      "@shared/*": [
+        "./shared/*"
+      ]
+    },
+    "types": [
+      "react",
+      "react-dom",
+      "chrome",
+      "node",
+      "jest"
+    ]
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx",
+    "./**/*.d.ts",
+    "./**/*.js"
+  ],
+  "exclude": [
+    "dist",
+    "docs",
+    "node_modules"
+  ]
+}
