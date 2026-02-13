@@ -22,6 +22,8 @@ interface Props {
   traversalState?: any;
   batchResponses?: Array<{ modelIndex: number; text: string; providerId?: string }> | null | undefined;
   completeness?: any;
+  preSemantic?: any;
+  embeddingStatus?: any;
   shape?: ProblemStructure | null | undefined;
 }
 
@@ -132,6 +134,8 @@ export function ParagraphSpaceView({
   regions,
   traversalState,
   batchResponses,
+  preSemantic,
+  embeddingStatus,
   shape,
 }: Props) {
   /* state */
@@ -149,6 +153,7 @@ export function ParagraphSpaceView({
   const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
   const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
+  const [rightTab, setRightTab] = useState<"source" | "structure">("source");
 
   const textPanelRef = useRef<HTMLDivElement>(null);
 
@@ -312,6 +317,119 @@ export function ParagraphSpaceView({
     const r = regionOptions.find((r) => r.id === regionFilter);
     return r ? new Set(r.nodeIds) : null;
   }, [regionFilter, regionOptions]);
+
+  const selectRegion = useCallback((rid: string) => {
+    setRegionFilter(rid);
+    setRightTab("source");
+    const r = regionOptions.find((x) => x.id === rid);
+    const firstPid = r?.nodeIds?.[0];
+    if (!firstPid) return;
+    requestAnimationFrame(() => {
+      const el = textPanelRef.current?.querySelector(`[data-pid="${firstPid}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, [regionOptions]);
+
+  const topologyStats = useMemo(() => {
+    const nodeIds = (graph?.nodes || []).map((n) => String(n.paragraphId)).filter(Boolean);
+    const idSet = new Set(nodeIds);
+    const edges = (graph?.edges || []).filter((e) => idSet.has(String(e.source)) && idSet.has(String(e.target)));
+    const mutual = (mutualEdges || []).filter((e) => idSet.has(String(e.source)) && idSet.has(String(e.target)));
+    const strong = (strongEdges || []).filter((e) => idSet.has(String(e.source)) && idSet.has(String(e.target)));
+
+    const n = nodeIds.length;
+    const degree = new Map<string, number>();
+    for (const id of nodeIds) degree.set(id, 0);
+    for (const e of edges) {
+      const s = String(e.source);
+      const t = String(e.target);
+      degree.set(s, (degree.get(s) || 0) + 1);
+      degree.set(t, (degree.get(t) || 0) + 1);
+    }
+    const isolatedCount = Array.from(degree.values()).filter((d) => d === 0).length;
+
+    const adj = new Map<string, string[]>();
+    for (const id of nodeIds) adj.set(id, []);
+    for (const e of edges) {
+      const s = String(e.source);
+      const t = String(e.target);
+      adj.get(s)?.push(t);
+      adj.get(t)?.push(s);
+    }
+    const seen = new Set<string>();
+    const componentSizes: number[] = [];
+    for (const id of nodeIds) {
+      if (seen.has(id)) continue;
+      const stack = [id];
+      seen.add(id);
+      let size = 0;
+      while (stack.length) {
+        const cur = stack.pop()!;
+        size += 1;
+        for (const nxt of adj.get(cur) || []) {
+          if (seen.has(nxt)) continue;
+          seen.add(nxt);
+          stack.push(nxt);
+        }
+      }
+      componentSizes.push(size);
+    }
+    componentSizes.sort((a, b) => b - a);
+    const componentCount = componentSizes.length;
+    const largestComponent = componentSizes[0] || 0;
+
+    const density = n <= 1 ? 0 : edges.length / (n * (n - 1));
+    return {
+      nodeCount: n,
+      knnEdgeCount: edges.length,
+      mutualEdgeCount: mutual.length,
+      strongEdgeCount: strong.length,
+      isolatedCount,
+      componentCount,
+      largestComponent,
+      density,
+    };
+  }, [graph, mutualEdges, strongEdges]);
+
+  const preSemanticData = useMemo(() => {
+    if (!preSemantic || typeof preSemantic !== "object") return null;
+    const ps = preSemantic as any;
+    const lens = ps?.lens || null;
+    const regionization = ps?.regionization || null;
+    const regionProfiles = Array.isArray(ps?.regionProfiles) ? ps.regionProfiles : [];
+    const oppositions = Array.isArray(ps?.oppositions) ? ps.oppositions : [];
+    const hints = ps?.hints || null;
+    return { lens, regionization, regionProfiles, oppositions, hints };
+  }, [preSemantic]);
+
+  const unattendedRegions = useMemo(() => {
+    const profiles = preSemanticData?.regionProfiles;
+    if (!Array.isArray(profiles) || profiles.length === 0) return [];
+    const items = profiles.map((p: any) => {
+      const regionId = String(p?.regionId || "").trim();
+      const tier = String(p?.tier || "").trim();
+      const tierConfidence = typeof p?.tierConfidence === "number" ? p.tierConfidence : null;
+      const nodeCount = typeof p?.mass?.nodeCount === "number" ? p.mass.nodeCount : null;
+      const isolation = typeof p?.geometry?.isolation === "number" ? p.geometry.isolation : null;
+      const likelyClaims = typeof p?.predicted?.likelyClaims === "number" ? p.predicted.likelyClaims : null;
+      return { regionId, tier, tierConfidence, nodeCount, isolation, likelyClaims };
+    }).filter((x) => x.regionId);
+
+    return items
+      .filter((x) => x.tier === "floor" || (x.isolation != null && x.isolation >= 0.7) || (x.tierConfidence != null && x.tierConfidence < 0.45))
+      .sort((a, b) => {
+        const tierScore = (t: string) => (t === "floor" ? 0 : t === "hill" ? 1 : t === "peak" ? 2 : 3);
+        const ta = tierScore(a.tier);
+        const tb = tierScore(b.tier);
+        if (ta !== tb) return ta - tb;
+        const ia = a.isolation ?? -1;
+        const ib = b.isolation ?? -1;
+        if (ia !== ib) return ib - ia;
+        const na = a.nodeCount ?? -1;
+        const nb = b.nodeCount ?? -1;
+        return nb - na;
+      });
+  }, [preSemanticData]);
 
   const filteredParagraphIds = useMemo(() => {
     const set = new Set<string>();
@@ -543,6 +661,11 @@ export function ParagraphSpaceView({
                     stroke={isHighlighted ? style.stroke.replace(/[\d.]+\)$/, "0.65)") : style.stroke}
                     strokeWidth={isHighlighted ? 2.5 : 1.5}
                     strokeDasharray={isHighlighted ? "none" : "none"}
+                    style={{ cursor: "pointer" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectRegion(h.id);
+                    }}
                   />
                 );
               })}
@@ -631,110 +754,284 @@ export function ParagraphSpaceView({
           </div>
         </div>
 
-        {/* ═══ RIGHT: Source text panel ════════════════════════════ */}
+        {/* ═══ RIGHT: Panel ════════════════════════════════════════ */}
         <div className="w-[400px] min-w-[300px] max-w-[480px] h-full border-l border-white/10 flex flex-col bg-black/10">
           <div className="px-4 py-2.5 border-b border-white/10 flex items-center justify-between">
-            <div className="text-xs text-text-muted font-medium">Source Text</div>
-            <div className="text-[11px] text-text-muted">{paragraphList.length} paragraphs</div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className={clsx(
+                  "px-3 py-1 rounded-full text-[11px] border",
+                  rightTab === "source"
+                    ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                    : "bg-transparent border-border-subtle text-text-muted"
+                )}
+                onClick={() => setRightTab("source")}
+              >
+                Source Text
+              </button>
+              <button
+                type="button"
+                className={clsx(
+                  "px-3 py-1 rounded-full text-[11px] border",
+                  rightTab === "structure"
+                    ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                    : "bg-transparent border-border-subtle text-text-muted"
+                )}
+                onClick={() => setRightTab("structure")}
+              >
+                Structure
+              </button>
+            </div>
+            <div className="text-[11px] text-text-muted">
+              {rightTab === "source" ? `${paragraphList.length} paragraphs` : `${topologyStats.nodeCount} nodes`}
+            </div>
           </div>
 
-          <div ref={textPanelRef} className="flex-1 overflow-auto custom-scrollbar px-3 py-2 space-y-1">
-            {modelGroups.map(([mi, paras]) => {
-              const color = modelColorByIndex.get(mi) || MODEL_COLORS[0];
-              const provider = modelProviders.get(mi);
-              return (
-                <div key={`model-${mi}`}>
-                  {/* Model group header */}
-                  <div className="flex items-center gap-2 py-2 mt-1 first:mt-0">
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                    <div className="text-[11px] font-semibold text-text-primary tracking-wide">
-                      Model {mi}
-                      {provider && <span className="font-normal text-text-muted ml-1.5">{provider}</span>}
+          {rightTab === "source" ? (
+            <div ref={textPanelRef} className="flex-1 overflow-auto custom-scrollbar px-3 py-2 space-y-1">
+              {modelGroups.map(([mi, paras]) => {
+                const color = modelColorByIndex.get(mi) || MODEL_COLORS[0];
+                const provider = modelProviders.get(mi);
+                return (
+                  <div key={`model-${mi}`}>
+                    <div className="flex items-center gap-2 py-2 mt-1 first:mt-0">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                      <div className="text-[11px] font-semibold text-text-primary tracking-wide">
+                        Model {mi}
+                        {provider && <span className="font-normal text-text-muted ml-1.5">{provider}</span>}
+                      </div>
+                      <div className="flex-1 border-b border-white/5" />
+                      <div className="text-[10px] text-text-muted">{paras.length}p</div>
                     </div>
-                    <div className="flex-1 border-b border-white/5" />
-                    <div className="text-[10px] text-text-muted">{paras.length}p</div>
-                  </div>
 
-                  {/* Paragraphs in this model */}
-                  {paras.map((p) => {
-                    const fate = paragraphFates.get(p.id) as ParagraphFate | undefined;
-                    const isReferenced = referencedParagraphIds.has(p.id);
-                    const isHovered = hoveredParagraphId === p.id;
-                    const isSelected = selectedParagraphId === p.id;
-                    const isClaimHighlighted = !!hoveredClaim && hoveredClaim.sourceParagraphIds.includes(p.id);
+                    {paras.map((p) => {
+                      const fate = paragraphFates.get(p.id) as ParagraphFate | undefined;
+                      const isReferenced = referencedParagraphIds.has(p.id);
+                      const isHovered = hoveredParagraphId === p.id;
+                      const isSelected = selectedParagraphId === p.id;
+                      const isClaimHighlighted = !!hoveredClaim && hoveredClaim.sourceParagraphIds.includes(p.id);
 
-                    // Linked claims for this paragraph
-                    const linkedClaimIds = paragraphToClaimIds.get(p.id) || [];
-                    const linkedClaims = linkedClaimIds.map((cid) => (claims || []).find((c) => c.id === cid)).filter(Boolean);
+                      const linkedClaimIds = paragraphToClaimIds.get(p.id) || [];
+                      const linkedClaims = linkedClaimIds.map((cid) => (claims || []).find((c) => c.id === cid)).filter(Boolean);
 
-                    // Display text based on fate
-                    const baseText = p.text || "";
-                    let displayText = baseText;
-                    let textClass = "text-text-primary";
-                    let fateIndicator: string | null = null;
+                      const baseText = p.text || "";
+                      let displayText = baseText;
+                      let textClass = "text-text-primary";
+                      let fateIndicator: string | null = null;
 
-                    if (useFates) {
-                      if (fate === "skeleton") {
-                        displayText = maskText(baseText);
-                        textClass = "text-amber-400/70";
-                      } else if (fate === "removed") {
-                        displayText = "";
-                        fateIndicator = "[stripped]";
-                        textClass = "text-slate-500 italic";
-                      } else if (fate === "orphan") {
-                        textClass = "text-text-primary/60";
-                      } else if (fate === "protected") {
-                        textClass = "text-text-primary";
+                      if (useFates) {
+                        if (fate === "skeleton") {
+                          displayText = maskText(baseText);
+                          textClass = "text-amber-400/70";
+                        } else if (fate === "removed") {
+                          displayText = "";
+                          fateIndicator = "[stripped]";
+                          textClass = "text-slate-500 italic";
+                        } else if (fate === "orphan") {
+                          textClass = "text-text-primary/60";
+                        } else if (fate === "protected") {
+                          textClass = "text-text-primary";
+                        }
                       }
-                    }
 
-                    // Badge
-                    const badgeInfo = useFates && fate
-                      ? (FATE_BADGE[fate] || { label: fate, cls: "bg-slate-500/15 text-slate-300" })
-                      : isReferenced
-                        ? { label: "ref", cls: "bg-sky-500/12 text-sky-300" }
-                        : { label: "orphan", cls: "bg-slate-500/12 text-slate-400" };
+                      const badgeInfo = useFates && fate
+                        ? (FATE_BADGE[fate] || { label: fate, cls: "bg-slate-500/15 text-slate-300" })
+                        : isReferenced
+                          ? { label: "ref", cls: "bg-sky-500/12 text-sky-300" }
+                          : { label: "orphan", cls: "bg-slate-500/12 text-slate-400" };
 
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        data-pid={p.id}
-                        className={clsx(
-                          "w-full text-left rounded-lg border px-3 py-2 transition-all mb-1",
-                          isClaimHighlighted ? "border-amber-400/40 bg-amber-500/5 ring-1 ring-amber-400/20" :
-                            (isHovered || isSelected) ? "border-white/25 bg-white/5" :
-                              "border-white/[0.06] bg-black/10 hover:bg-white/[0.03] hover:border-white/10",
-                        )}
-                        onMouseEnter={() => setHoveredParagraphId(p.id)}
-                        onMouseLeave={() => setHoveredParagraphId(null)}
-                        onClick={() => setSelectedParagraphId((prev) => (prev === p.id ? null : p.id))}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="text-[10px] text-text-muted/60 font-mono">{p.id}</div>
-                          <div className="flex-1" />
-                          <div className={clsx("text-[9px] px-1.5 py-0.5 rounded-full font-medium", badgeInfo.cls)}>{badgeInfo.label}</div>
-                        </div>
-                        <div className={clsx("text-xs whitespace-pre-wrap break-words leading-relaxed", textClass)}>
-                          {fateIndicator ? fateIndicator : (displayText || "(empty)")}
-                        </div>
-                        {/* linked claims tooltip */}
-                        {(isSelected || isHovered) && linkedClaims.length > 0 && (
-                          <div className="mt-1.5 pt-1.5 border-t border-white/5">
-                            <div className="text-[9px] text-text-muted/60 mb-0.5">Claims:</div>
-                            {linkedClaims.slice(0, 4).map((c: any) => (
-                              <div key={c.id} className="text-[10px] text-amber-300/70 truncate">{"\u25C7"} {c.label || c.id}</div>
-                            ))}
-                            {linkedClaims.length > 4 && <div className="text-[9px] text-text-muted">+{linkedClaims.length - 4} more</div>}
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          data-pid={p.id}
+                          className={clsx(
+                            "w-full text-left rounded-lg border px-3 py-2 transition-all mb-1",
+                            isClaimHighlighted ? "border-amber-400/40 bg-amber-500/5 ring-1 ring-amber-400/20" :
+                              (isHovered || isSelected) ? "border-white/25 bg-white/5" :
+                                "border-white/[0.06] bg-black/10 hover:bg-white/[0.03] hover:border-white/10",
+                          )}
+                          onMouseEnter={() => setHoveredParagraphId(p.id)}
+                          onMouseLeave={() => setHoveredParagraphId(null)}
+                          onClick={() => setSelectedParagraphId((prev) => (prev === p.id ? null : p.id))}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="text-[10px] text-text-muted/60 font-mono">{p.id}</div>
+                            <div className="flex-1" />
+                            <div className={clsx("text-[9px] px-1.5 py-0.5 rounded-full font-medium", badgeInfo.cls)}>{badgeInfo.label}</div>
                           </div>
-                        )}
-                      </button>
-                    );
-                  })}
+                          <div className={clsx("text-xs whitespace-pre-wrap break-words leading-relaxed", textClass)}>
+                            {fateIndicator ? fateIndicator : (displayText || "(empty)")}
+                          </div>
+                          {(isSelected || isHovered) && linkedClaims.length > 0 && (
+                            <div className="mt-1.5 pt-1.5 border-t border-white/5">
+                              <div className="text-[9px] text-text-muted/60 mb-0.5">Claims:</div>
+                              {linkedClaims.slice(0, 4).map((c: any) => (
+                                <div key={c.id} className="text-[10px] text-amber-300/70 truncate">{"\u25C7"} {c.label || c.id}</div>
+                              ))}
+                              {linkedClaims.length > 4 && <div className="text-[9px] text-text-muted">+{linkedClaims.length - 4} more</div>}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-auto custom-scrollbar px-4 py-3 space-y-3">
+              <div className="bg-black/20 border border-white/10 rounded-xl p-3">
+                <div className="text-[11px] text-text-muted font-medium mb-2">Embedding</div>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className={clsx(
+                    "px-2 py-1 rounded-full border",
+                    embeddingStatus === "computed"
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                      : embeddingStatus === "failed"
+                        ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                        : "bg-white/5 border-white/10 text-text-muted"
+                  )}>
+                    {embeddingStatus ? String(embeddingStatus) : "unknown"}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+
+              <div className="bg-black/20 border border-white/10 rounded-xl p-3">
+                <div className="text-[11px] text-text-muted font-medium mb-2">Topology</div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-text-muted">
+                  <div>Nodes: <span className="text-text-primary">{topologyStats.nodeCount}</span></div>
+                  <div>Components: <span className="text-text-primary">{topologyStats.componentCount}</span></div>
+                  <div>KNN edges: <span className="text-text-primary">{topologyStats.knnEdgeCount}</span></div>
+                  <div>Largest: <span className="text-text-primary">{topologyStats.largestComponent}</span></div>
+                  <div>Mutual: <span className="text-text-primary">{topologyStats.mutualEdgeCount}</span></div>
+                  <div>Strong: <span className="text-text-primary">{topologyStats.strongEdgeCount}</span></div>
+                  <div>Isolated: <span className="text-text-primary">{topologyStats.isolatedCount}</span></div>
+                  <div>Density: <span className="text-text-primary">{Math.round(topologyStats.density * 1000) / 1000}</span></div>
+                </div>
+              </div>
+
+              <div className="bg-black/20 border border-white/10 rounded-xl p-3">
+                <div className="text-[11px] text-text-muted font-medium mb-2">Regions</div>
+                {regionOptions.length === 0 ? (
+                  <div className="text-[11px] text-text-muted">No region data available.</div>
+                ) : (
+                  <div className="space-y-1">
+                    {regionOptions.map((r) => {
+                      const modelSet = new Set<number>();
+                      for (const pid of r.nodeIds) {
+                        const n = (graph?.nodes || []).find((x) => String(x.paragraphId) === String(pid));
+                        if (!n) continue;
+                        if (typeof n.modelIndex === "number") modelSet.add(n.modelIndex);
+                      }
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          className={clsx(
+                            "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                            regionFilter !== "all" && r.id === regionFilter
+                              ? "border-brand-500/50 bg-brand-500/10"
+                              : "border-white/10 bg-black/10 hover:bg-white/[0.03]"
+                          )}
+                          onClick={() => selectRegion(r.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="text-[11px] font-medium text-text-primary">{r.kind ? `${r.kind}: ${r.id}` : `Region ${r.id}`}</div>
+                            <div className="flex-1" />
+                            <div className="text-[10px] text-text-muted">{r.nodeIds.length} nodes</div>
+                            <div className="text-[10px] text-text-muted">{modelSet.size} models</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-black/20 border border-white/10 rounded-xl p-3">
+                <div className="text-[11px] text-text-muted font-medium mb-2">Oppositions</div>
+                {preSemanticData?.oppositions?.length ? (
+                  <div className="space-y-1">
+                    {preSemanticData.oppositions.slice(0, 10).map((o: any, idx: number) => (
+                      <div key={`${o.regionA}-${o.regionB}-${idx}`} className="text-[11px] text-text-muted">
+                        <span className="text-text-primary">{String(o.regionA)}</span> ↔ <span className="text-text-primary">{String(o.regionB)}</span>
+                        <span className="ml-2">{typeof o.similarity === "number" ? o.similarity.toFixed(3) : ""}</span>
+                        {typeof o.stanceConflict === "boolean" && <span className="ml-2">{o.stanceConflict ? "stance conflict" : "aligned"}</span>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-text-muted">No opposition data available.</div>
+                )}
+              </div>
+
+              <div className="bg-black/20 border border-white/10 rounded-xl p-3">
+                <div className="text-[11px] text-text-muted font-medium mb-2">Predictions</div>
+                {preSemanticData?.hints || preSemanticData?.lens ? (
+                  <div className="space-y-1 text-[11px] text-text-muted">
+                    {preSemanticData?.lens?.regime && (
+                      <div>Regime: <span className="text-text-primary">{String(preSemanticData.lens.regime)}</span></div>
+                    )}
+                    {typeof preSemanticData?.lens?.confidence === "number" && (
+                      <div>Lens confidence: <span className="text-text-primary">{Math.round(preSemanticData.lens.confidence * 100)}%</span></div>
+                    )}
+                    {typeof preSemanticData?.lens?.shouldRunClustering === "boolean" && (
+                      <div>Clustering: <span className="text-text-primary">{preSemanticData.lens.shouldRunClustering ? "yes" : "no"}</span></div>
+                    )}
+                    {preSemanticData?.hints?.predictedShape?.predicted && (
+                      <div>Predicted shape: <span className="text-text-primary">{String(preSemanticData.hints.predictedShape.predicted)}</span></div>
+                    )}
+                    {typeof preSemanticData?.hints?.predictedShape?.confidence === "number" && (
+                      <div>Shape confidence: <span className="text-text-primary">{Math.round(preSemanticData.hints.predictedShape.confidence * 100)}%</span></div>
+                    )}
+                    {Array.isArray(preSemanticData?.hints?.expectedClaimCount) && (
+                      <div>Expected claims: <span className="text-text-primary">{String(preSemanticData.hints.expectedClaimCount[0])}–{String(preSemanticData.hints.expectedClaimCount[1])}</span></div>
+                    )}
+                    {typeof preSemanticData?.hints?.expectedConflicts === "number" && (
+                      <div>Expected conflicts: <span className="text-text-primary">{String(preSemanticData.hints.expectedConflicts)}</span></div>
+                    )}
+                    {typeof preSemanticData?.hints?.expectedDissent === "boolean" && (
+                      <div>Expected dissent: <span className="text-text-primary">{preSemanticData.hints.expectedDissent ? "yes" : "no"}</span></div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-text-muted">No prediction data available.</div>
+                )}
+              </div>
+
+              <div className="bg-black/20 border border-white/10 rounded-xl p-3">
+                <div className="text-[11px] text-text-muted font-medium mb-2">Unattended Regions</div>
+                {unattendedRegions.length === 0 ? (
+                  <div className="text-[11px] text-text-muted">No unattended regions detected.</div>
+                ) : (
+                  <div className="space-y-1">
+                    {unattendedRegions.slice(0, 10).map((r) => (
+                      <button
+                        key={`unattended-${r.regionId}`}
+                        type="button"
+                        className="w-full text-left px-3 py-2 rounded-lg border border-white/10 bg-black/10 hover:bg-white/[0.03] transition-colors"
+                        onClick={() => selectRegion(r.regionId)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="text-[11px] font-medium text-text-primary">{r.regionId}</div>
+                          {r.tier && <div className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-text-muted">{r.tier}</div>}
+                          <div className="flex-1" />
+                          {r.nodeCount != null && <div className="text-[10px] text-text-muted">{r.nodeCount} nodes</div>}
+                          {r.isolation != null && <div className="text-[10px] text-text-muted">iso {r.isolation.toFixed(2)}</div>}
+                          {r.likelyClaims != null && <div className="text-[10px] text-text-muted">{r.likelyClaims} claims</div>}
+                        </div>
+                      </button>
+                    ))}
+                    {unattendedRegions.length > 10 && (
+                      <div className="text-[11px] text-text-muted">+{unattendedRegions.length - 10} more</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

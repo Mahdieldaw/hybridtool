@@ -184,10 +184,10 @@ export class SessionManager {
     mapping?: unknown;
     singularity?: unknown;
   } {
-    const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
-    const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+    const batch = request?.batch ? this._safeArtifact(request.batch) : undefined;
+    const mapping = request?.mapping ? this._safeArtifact(request.mapping) : undefined;
     const singularity = request?.singularity
-      ? this._toJsonSafe(request.singularity)
+      ? this._safeArtifact(request.singularity)
       : undefined;
     return { batch, mapping, singularity };
   }
@@ -606,11 +606,7 @@ export class SessionManager {
         } catch (_) { }
 
         const newContexts = this._extractContextsFromResult(result);
-        const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
-        const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
-        const singularity = request?.singularity
-          ? this._toJsonSafe(request.singularity)
-          : undefined;
+        const { batch, mapping, singularity } = this._extractArtifacts(request);
 
         const updatedAi: Record<string, unknown> = {
           ...existingAi,

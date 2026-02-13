@@ -25,6 +25,7 @@
     "../dist",
     "docs",
     "../node_modules",
-    "src/oi.js"
+    "src/oi.js",
+    "components/legacy structural ui patterns/**/*"
   ]
 }

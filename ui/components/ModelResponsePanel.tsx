@@ -196,16 +196,25 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
     const allBatchResponsesText = useMemo(() => {
         const t: any = turnsMap.get(shownTurnId);
-        const batch = t && t.type === "ai" ? (t as any).batchResponses : null;
+        const batch =
+            t && t.type === "ai"
+                ? ((t as any)?.batch?.responses ?? (t as any).batchResponses)
+                : null;
         if (!batch || typeof batch !== "object") return "";
 
         const normalized: Record<string, any> = {};
         Object.entries(batch as Record<string, any>).forEach(([pid, val]) => {
-            const arr = Array.isArray(val) ? val : [val];
-            const latest = arr[arr.length - 1];
-            if (latest && typeof latest === "object") {
-                normalized[String(pid)] = latest;
-            }
+            const candidate = Array.isArray(val) ? val[val.length - 1] : val;
+            if (!candidate || typeof candidate !== "object") return;
+            const text = String((candidate as any).text || "").trim();
+            if (!text) return;
+            normalized[String(pid)] = {
+                ...candidate,
+                text,
+                meta: (candidate as any).modelIndex != null
+                    ? { ...(candidate as any).meta, modelIndex: (candidate as any).modelIndex }
+                    : (candidate as any).meta,
+            };
         });
 
         const ordered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id));
@@ -216,8 +225,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         const parts: string[] = [];
         [...ordered, ...extras].forEach((pid) => {
             const resp = normalized[pid];
-            const text = String(resp?.text || "").trim();
-            if (!text) return;
             const providerName =
                 LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === pid)?.name || pid;
             parts.push(formatProviderResponseForMd(resp, providerName));

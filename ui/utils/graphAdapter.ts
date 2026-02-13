@@ -13,6 +13,7 @@ const isClaimType = (value: unknown): value is Claim["type"] =>
 const mapGraphEdgeTypeToEdgeType = (value: unknown): Edge["type"] => {
     if (value === "conflicts") return "conflicts";
     if (value === "tradeoff") return "tradeoff";
+    if (value === "prerequisite") return "prerequisite";
     if (value === "supports") return "supports";
     if (value === "complements") return "supports";
     if (value === "bifurcation") return "supports";

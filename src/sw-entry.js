@@ -783,6 +783,46 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           let turns = await sm.adapter.getTurnsBySessionId(sessionId);
           turns = Array.isArray(turns) ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt)) : [];
 
+          const bucketizeResponses = (resps) => {
+            const buckets = {
+              providers: {},
+              mappingResponses: {},
+              singularityResponses: {},
+            };
+
+            for (const r of resps || []) {
+              if (!r) continue;
+              const providerId = r.providerId;
+              if (!providerId) continue;
+
+              const entry = {
+                providerId,
+                text: r.text || "",
+                status: r.status || "completed",
+                createdAt: r.createdAt || Date.now(),
+                updatedAt: r.updatedAt || r.createdAt || Date.now(),
+                meta: r.meta || {},
+                responseIndex: r.responseIndex ?? 0,
+              };
+
+              if (r.responseType === "batch") {
+                (buckets.providers[providerId] ||= []).push(entry);
+              } else if (r.responseType === "mapping") {
+                (buckets.mappingResponses[providerId] ||= []).push(entry);
+              } else if (r.responseType === "singularity") {
+                (buckets.singularityResponses[providerId] ||= []).push(entry);
+              }
+            }
+
+            for (const group of Object.values(buckets)) {
+              for (const pid of Object.keys(group)) {
+                group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+              }
+            }
+
+            return buckets;
+          };
+
           const rounds = [];
           for (let i = 0; i < turns.length; i++) {
             const user = turns[i];
@@ -807,12 +847,28 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                   ? primaryAi.meta.pipelineStatus
                   : undefined);
 
+            let providers = {};
+            let mappingResponses = {};
+            let singularityResponses = {};
+            try {
+              if (sm.adapter.getResponsesByTurnId) {
+                const resps = await sm.adapter.getResponsesByTurnId(primaryAi.id);
+                const buckets = bucketizeResponses(resps);
+                providers = buckets.providers || {};
+                mappingResponses = buckets.mappingResponses || {};
+                singularityResponses = buckets.singularityResponses || {};
+              }
+            } catch (_) { }
+
             rounds.push({
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
               ...(primaryAi?.batch ? { batch: primaryAi.batch } : {}),
               ...(primaryAi?.mapping ? { mapping: primaryAi.mapping } : {}),
               ...(primaryAi?.singularity ? { singularity: primaryAi.singularity } : {}),
+              ...(Object.keys(providers).length > 0 ? { providers } : {}),
+              ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
+              ...(Object.keys(singularityResponses).length > 0 ? { singularityResponses } : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
               createdAt: user.createdAt || 0, completedAt: primaryAi.updatedAt || 0
             });

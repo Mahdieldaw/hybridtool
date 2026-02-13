@@ -1,9 +1,9 @@
 import { getHealthTracker } from './provider-health-tracker.js';
 import { StepExecutor } from './execution/StepExecutor';
-import { StreamingManager } from './execution/StreamingManager';
+import { StreamingManager } from './execution/streamingmanager';
 import { ContextManager } from './execution/ContextManager';
 import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
-import { TurnEmitter } from './execution/TurnEmitter';
+import { TurnEmitter } from './execution/turnemitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
 import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';

@@ -33,6 +33,7 @@ export function buildCognitiveArtifact(
       },
       preSemantic: pipeline?.preSemantic
         ? {
+          ...pipeline.preSemantic,
           hint: pipeline.preSemantic.lens?.shape ?? 'sparse',
           regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
             id: r.id,
@@ -41,6 +42,7 @@ export function buildCognitiveArtifact(
           })),
         }
         : undefined,
+      structuralValidation: mapper?.structuralValidation ?? undefined,
       alignment: mapper?.alignment ?? undefined,
     },
     semantic: {
@@ -74,6 +76,7 @@ export function buildCognitiveArtifact(
           cycles: [],
         },
     },
+    traversalAnalysis: mapper?.traversalAnalysis ?? undefined,
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
       query: mapper?.query ?? undefined,

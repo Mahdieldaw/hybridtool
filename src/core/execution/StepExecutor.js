@@ -761,7 +761,7 @@ export class StepExecutor {
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      paragraphResult.paragraphs
+      indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
     );
 
     const promptLength = mappingPrompt.length;
@@ -832,14 +832,17 @@ export class StepExecutor {
                 const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
                 const unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
 
+                let enrichedClaims = [];
+
                 const mapperClaimsForProvenance = (parseResult.output.claims || []).map((c) => ({
                   id: c.id,
                   label: c.label,
                   text: c.text,
                   supporters: Array.isArray(c.supporters) ? c.supporters : [],
+                  challenges: c?.challenges || null,
                 }));
 
-                const enrichedClaims = await reconstructProvenance(
+                enrichedClaims = await reconstructProvenance(
                   mapperClaimsForProvenance,
                   shadowResult.statements,
                   paragraphResult.paragraphs,
@@ -850,6 +853,7 @@ export class StepExecutor {
                   unifiedEdges,
                   statementEmbeddingResult?.embeddings || null
                 );
+
 
                 let completeness = null;
                 try {
@@ -930,7 +934,7 @@ export class StepExecutor {
                 const conflictClaimIdSet = new Set();
                 const conflictAdj = new Map();
                 for (const e of unifiedEdges) {
-                  if (!e || e.type !== 'conflict') continue;
+                  if (!e || e.type !== 'conflicts') continue;
                   const from = String(e.from || '').trim();
                   const to = String(e.to || '').trim();
                   if (!from || !to) continue;
@@ -999,7 +1003,8 @@ export class StepExecutor {
 
                 for (const e of unifiedEdges) {
                   if (!e) continue;
-                  if (e.type === 'conflict') {
+                  const edgeType = String(e.type || '').trim();
+                  if (edgeType === 'conflicts') {
                     const from = String(e.from || '').trim();
                     const to = String(e.to || '').trim();
                     if (!from || !to) continue;
@@ -1044,9 +1049,20 @@ export class StepExecutor {
                   };
                 });
 
+                const conflictEdges = unifiedEdges.filter((e) => {
+                  if (!e || !e.from || !e.to) return false;
+                  const t = String(e.type || '').trim();
+                  return t === 'conflicts';
+                });
+
+                const traversalEdges = conflictEdges.map((e) => ({
+                  ...e,
+                  type: 'conflicts',
+                }));
+
                 const traversalGraph = {
                   claims: serializedClaims,
-                  edges: unifiedEdges,
+                  edges: traversalEdges,
                   conditionals: unifiedConditionals,
                   tiers,
                   maxTier: tiers.length - 1,
@@ -1095,15 +1111,19 @@ export class StepExecutor {
 
                   const EDGE_SUPPORTS = 'supports';
                   const EDGE_CONFLICTS = 'conflicts';
+                  const EDGE_PREREQUISITE = 'prerequisite';
 
-                  const mappedEdges = unifiedEdges
-                    .filter((e) => e && e.from && e.to && e.type === 'conflict')
+                  const semanticEdges = unifiedEdges
+                    .filter((e) => e && e.from && e.to)
                     .map((e) => {
-                      return {
-                        from: e.from,
-                        to: e.to,
-                        type: EDGE_CONFLICTS,
-                      };
+                      const t = String(e.type || '').trim();
+                      if (t === 'conflicts') return { ...e, type: EDGE_CONFLICTS };
+                      if (t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
+                      return e;
+                    })
+                    .filter((e) => {
+                      const t = String(e.type || '').trim();
+                      return t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE;
                     });
 
                   const derivedSupportEdges = [];
@@ -1113,29 +1133,67 @@ export class StepExecutor {
                   // - High similarity between claim source paragraphs + compatible stance => support.
                   // - Consider geometry/topology proximity as an additional signal.
 
-                  for (const cond of unifiedConditionals) {
-                    const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
-                    for (let i = 0; i < affected.length; i++) {
-                      const a = String(affected[i] || '').trim();
-                      if (!a) continue;
-                      for (let j = i + 1; j < affected.length; j++) {
-                        const b = String(affected[j] || '').trim();
-                        if (!b || a === b) continue;
-                        const k1 = `${a}::${b}::supports`;
-                        if (!supportKey.has(k1)) {
-                          supportKey.add(k1);
-                          derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
-                        }
-                        const k2 = `${b}::${a}::supports`;
-                        if (!supportKey.has(k2)) {
-                          supportKey.add(k2);
-                          derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
+                  const hasAnySupportEdges = semanticEdges.some((e) => String(e?.type || '') === EDGE_SUPPORTS);
+                  if (!hasAnySupportEdges) {
+                    for (const cond of unifiedConditionals) {
+                      const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
+                      for (let i = 0; i < affected.length; i++) {
+                        const a = String(affected[i] || '').trim();
+                        if (!a) continue;
+                        for (let j = i + 1; j < affected.length; j++) {
+                          const b = String(affected[j] || '').trim();
+                          if (!b || a === b) continue;
+                          const k1 = `${a}::${b}::supports`;
+                          if (!supportKey.has(k1)) {
+                            supportKey.add(k1);
+                            derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
+                          }
+                          const k2 = `${b}::${a}::supports`;
+                          if (!supportKey.has(k2)) {
+                            supportKey.add(k2);
+                            derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
+                          }
                         }
                       }
                     }
                   }
 
                   const ghosts = null;
+                  let traversalAnalysis = null;
+
+                  try {
+                    const { buildMechanicalTraversal } = await import('../traversal/buildMechanicalTraversal');
+                    const draftMapperArtifact = {
+                      id: `artifact-${Date.now()}`,
+                      query: payload.originalPrompt,
+                      turn: context.turn || 0,
+                      timestamp: new Date().toISOString(),
+                      model_count: citationOrder.length,
+                      claims: enrichedClaims,
+                      edges: [...semanticEdges, ...derivedSupportEdges],
+                      ghosts,
+                      narrative: String(parseResult.narrative || '').trim(),
+                      conditionals: unifiedConditionals,
+                    };
+
+                    const tempCognitiveForTraversal = buildCognitiveArtifact(draftMapperArtifact, {
+                      shadow: {
+                        extraction: shadowResult || null,
+                        delta: shadowDelta || null,
+                      },
+                      paragraphProjection: paragraphResult || null,
+                      substrate: {
+                        graph: substrateGraph,
+                      },
+                      preSemantic: preSemanticInterpretation || null,
+                    });
+
+                    traversalAnalysis = await buildMechanicalTraversal(tempCognitiveForTraversal, {
+                      statementEmbeddings: statementEmbeddingResult?.embeddings || null,
+                    });
+                  } catch (_) {
+                    traversalAnalysis = null;
+                  }
 
                   mapperArtifact = {
                     id: `artifact-${Date.now()}`,
@@ -1145,7 +1203,7 @@ export class StepExecutor {
                     model_count: citationOrder.length,
 
                     claims: enrichedClaims,
-                    edges: [...mappedEdges, ...derivedSupportEdges],
+                    edges: [...semanticEdges, ...derivedSupportEdges],
                     ghosts,
                     narrative: String(parseResult.narrative || '').trim(),
                     conditionals: unifiedConditionals,
@@ -1153,6 +1211,7 @@ export class StepExecutor {
                     // NEW DATA (not in V1)
                     traversalGraph,
                     forcingPoints,
+                    traversalAnalysis,
                     preSemantic: preSemanticInterpretation || null,
                     ...(completeness ? { completeness } : {}),
                     ...(alignmentResult ? { alignment: alignmentResult } : {}),
@@ -1183,7 +1242,11 @@ export class StepExecutor {
                     structuralValidation = null;
                   }
 
-                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${mappedEdges.length} edges`);
+                  if (mapperArtifact) {
+                    mapperArtifact.structuralValidation = structuralValidation;
+                  }
+
+                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${semanticEdges.length} edges`);
                 } catch (err) {
                   // processLogger.error or console.error with context
                   console.error('[StepExecutor] Mapper artifact build failed:', err);
@@ -1633,7 +1696,7 @@ export class StepExecutor {
       ConciergeService = null;
     }
 
-	    let singularityPrompt;
+    let singularityPrompt;
 
     if (!ConciergeService) {
       throw new Error("ConciergeService is not available. Cannot execute Singularity step.");

@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
@@ -14,17 +14,17 @@ import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
 import { ParagraphSpaceView } from "./ParagraphSpaceView";
+import { ShadowAuditView } from "./cognitive/ShadowAuditView";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
 // ============================================================================
 
 import { computeStructuralAnalysis } from "../../src/core/PromptMethods";
-import type { ProblemStructure, StructuralAnalysis } from "../../shared/contract";
+import type { GraphTopology, ProblemStructure, StructuralAnalysis } from "../../shared/contract";
+import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
-
-import { useSingularityOutput } from "../hooks/useSingularityOutput";
 
 import { StructuralInsight } from "./StructuralInsight";
 
@@ -49,6 +49,48 @@ interface ParsedTheme {
   name: string;
   options: ParsedOption[];
 }
+
+type TraversalAnalysisStatus = "passing" | "filtered";
+
+type TraversalAnalysisStatement = {
+  id: string;
+  modelIndex: number | null;
+  stance: string | null;
+  confidence: number | null;
+  text: string;
+};
+
+type TraversalAnalysisCondition = {
+  id: string;
+  clause: string | null;
+  strength: number;
+  status: TraversalAnalysisStatus;
+  filterReason?: string;
+  claimIds: string[];
+  statements: TraversalAnalysisStatement[];
+};
+
+type TraversalAnalysisOrphan = {
+  statement: TraversalAnalysisStatement;
+  clause: string | null;
+  reason: string;
+};
+
+type TraversalAnalysisConflict = {
+  id: string;
+  status: TraversalAnalysisStatus;
+  significance: number;
+  threshold: number;
+  reason: string;
+  claimA: { id: string; label: string; supportCount: number };
+  claimB: { id: string; label: string; supportCount: number };
+};
+
+type TraversalAnalysis = {
+  conditions: TraversalAnalysisCondition[];
+  conflicts: TraversalAnalysisConflict[];
+  orphans: TraversalAnalysisOrphan[];
+};
 
 /**
  * Build themes from claims - supports BOTH role-based AND type-based grouping
@@ -261,7 +303,151 @@ function normalizeGraphTopologyCandidate(value: any): any | null {
   if (Array.isArray(candidate.nodes) && Array.isArray(candidate.edges)) return candidate;
   if (candidate.topology && Array.isArray(candidate.topology.nodes) && Array.isArray(candidate.topology.edges)) return candidate.topology;
   if (candidate.graphTopology && Array.isArray(candidate.graphTopology.nodes) && Array.isArray(candidate.graphTopology.edges)) return candidate.graphTopology;
+  if (Array.isArray(candidate.claims) && Array.isArray(candidate.edges)) {
+    const nodes = candidate.claims
+      .map((c: any) => {
+        const id = c?.id != null ? String(c.id) : "";
+        if (!id) return null;
+        return {
+          id,
+          label: typeof c?.label === "string" && c.label.trim() ? c.label.trim() : id,
+          theme: typeof c?.type === "string" ? c.type : undefined,
+          support_count: typeof c?.support_count === "number" ? c.support_count : undefined,
+          supporters: Array.isArray(c?.supporters) ? c.supporters : undefined,
+        };
+      })
+      .filter(Boolean);
+
+    const edges = candidate.edges
+      .map((e: any) => {
+        const source = e?.source != null ? String(e.source) : e?.from != null ? String(e.from) : "";
+        const target = e?.target != null ? String(e.target) : e?.to != null ? String(e.to) : "";
+        if (!source || !target) return null;
+        return {
+          source,
+          target,
+          type: typeof e?.type === "string" ? e.type : "supports",
+          reason: typeof e?.reason === "string" ? e.reason : undefined,
+        };
+      })
+      .filter(Boolean);
+
+    return { nodes, edges } satisfies GraphTopology;
+  }
   return null;
+}
+
+function clamp01(x: number) {
+  if (!Number.isFinite(x)) return 0;
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
+}
+
+function normalizeTraversalAnalysisFromArtifact(value: any): TraversalAnalysis | null {
+  if (!value || typeof value !== "object") return null;
+
+  if (Array.isArray((value as any).conditions) && Array.isArray((value as any).conflicts) && Array.isArray((value as any).orphans)) {
+    const v = value as any;
+    return {
+      conditions: Array.isArray(v.conditions) ? v.conditions : [],
+      conflicts: Array.isArray(v.conflicts) ? v.conflicts : [],
+      orphans: Array.isArray(v.orphans) ? v.orphans : [],
+    };
+  }
+
+  const mech = value as any;
+  const mechConditions = mech?.conditionals?.conditions;
+  const mechConflicts = mech?.conflicts?.conflicts;
+  const mechOrphans = mech?.conditionals?.orphanedConditionalStatements;
+
+  if (!Array.isArray(mechConditions) && !Array.isArray(mechConflicts) && !Array.isArray(mechOrphans)) {
+    return null;
+  }
+
+  const gateStrengthToNumber = (s: any) => {
+    if (s === "strong") return 1;
+    if (s === "weak") return 0.5;
+    if (s === "inert") return 0.1;
+    return 0.3;
+  };
+
+  const conditions: TraversalAnalysisCondition[] = Array.isArray(mechConditions)
+    ? mechConditions.map((c: any) => {
+      const gateStrength = c?.gateAnalysis?.gateStrength;
+      const strength = clamp01(gateStrengthToNumber(gateStrength));
+      const status: TraversalAnalysisStatus = gateStrength === "inert" ? "filtered" : "passing";
+      const claimIds = Array.isArray(c?.affectedClaims) ? c.affectedClaims.map((ac: any) => String(ac?.claimId || "").trim()).filter(Boolean) : [];
+      const statements: TraversalAnalysisStatement[] = Array.isArray(c?.sourceStatements)
+        ? c.sourceStatements.map((s: any) => ({
+          id: String(s?.id || "").trim(),
+          modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : null,
+          stance: typeof s?.stance === "string" ? s.stance : null,
+          confidence: typeof s?.confidence === "number" ? s.confidence : null,
+          text: String(s?.text || "").trim(),
+        })).filter((s: TraversalAnalysisStatement) => !!s.id)
+        : [];
+
+      return {
+        id: String(c?.id || "").trim() || `cond_${Math.random().toString(36).slice(2)}`,
+        clause: typeof c?.canonicalClause === "string" ? c.canonicalClause : (typeof c?.cluster?.canonicalClause === "string" ? c.cluster.canonicalClause : null),
+        strength,
+        status,
+        ...(status === "filtered" ? { filterReason: "inert gate" } : {}),
+        claimIds,
+        statements,
+      };
+    })
+    : [];
+
+  const conflicts: TraversalAnalysisConflict[] = Array.isArray(mechConflicts)
+    ? mechConflicts.map((c: any) => {
+      const passed = !!c?.passedFilter;
+      const sig = typeof c?.analysis?.significance === "number" ? c.analysis.significance : 0;
+      const threshold = typeof c?.filterDetails?.significanceThreshold === "number" ? c.filterDetails.significanceThreshold : 0.3;
+      const reason = passed
+        ? "passes filter"
+        : (typeof c?.filterDetails?.overrideReason === "string" && c.filterDetails.overrideReason.trim())
+          ? c.filterDetails.overrideReason.trim()
+          : "filtered out";
+
+      const claimAId = String(c?.claimA?.id || "").trim();
+      const claimBId = String(c?.claimB?.id || "").trim();
+      const claimALabel = String(c?.claimA?.label || claimAId).trim() || claimAId;
+      const claimBLabel = String(c?.claimB?.label || claimBId).trim() || claimBId;
+      const supportA = typeof c?.claimA?.supporterCount === "number" ? c.claimA.supporterCount : 0;
+      const supportB = typeof c?.claimB?.supporterCount === "number" ? c.claimB.supporterCount : 0;
+
+      return {
+        id: String(c?.id || "").trim() || `conflict_${Math.random().toString(36).slice(2)}`,
+        status: passed ? "passing" : "filtered",
+        significance: sig,
+        threshold,
+        reason,
+        claimA: { id: claimAId, label: claimALabel, supportCount: supportA },
+        claimB: { id: claimBId, label: claimBLabel, supportCount: supportB },
+      };
+    })
+    : [];
+
+  const orphans: TraversalAnalysisOrphan[] = Array.isArray(mechOrphans)
+    ? mechOrphans.map((o: any) => {
+      const statementId = String(o?.statementId || o?.id || "").trim();
+      return {
+        statement: {
+          id: statementId,
+          modelIndex: typeof o?.modelIndex === "number" ? o.modelIndex : null,
+          stance: typeof o?.stance === "string" ? o.stance : null,
+          confidence: typeof o?.confidence === "number" ? o.confidence : null,
+          text: String(o?.text || "").trim(),
+        },
+        clause: typeof o?.extractedClause === "string" ? o.extractedClause : null,
+        reason: String(o?.reason || "not used as evidence for any conditional claim").trim() || "not used as evidence for any conditional claim",
+      };
+    }).filter((o: TraversalAnalysisOrphan) => !!o.statement.id)
+    : [];
+
+  return { conditions, conflicts, orphans };
 }
 
 // ============================================================================
@@ -508,7 +694,7 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
         </svg>
-        Back to Graph
+        Clear selection
       </button>
 
       <div className="flex flex-col items-center mb-8">
@@ -667,14 +853,17 @@ export const DecisionMapSheet = React.memo(() => {
   const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+  const sessionId = useAtomValue(currentSessionIdAtom);
+  const lastSessionIdRef = useRef<string | null>(sessionId);
 
   const setToast = useSetAtom(toastAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'json'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'evidence' | 'traversal'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
+  const [traversalSubTab, setTraversalSubTab] = useState<"conditions" | "conflicts" | "orphans">("conditions");
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -684,11 +873,29 @@ export const DecisionMapSheet = React.memo(() => {
 
   useEffect(() => {
     if (openState) {
-      setActiveTab(openState.tab || 'graph');
+      const raw = String(openState.tab || 'graph');
+      const mapped: 'graph' | 'narrative' | 'options' | 'space' | 'evidence' | 'traversal' =
+        raw === 'shadow' || raw === 'evidence' || raw === 'json'
+          ? 'evidence'
+          : raw === 'traversal'
+            ? 'traversal'
+            : raw === 'graph' || raw === 'narrative' || raw === 'options' || raw === 'space'
+              ? raw
+              : 'graph';
+      setActiveTab(mapped);
       setSelectedNode(null);
       setSheetHeightRatio(0.5);
+      setTraversalSubTab("conditions");
     }
   }, [openState?.turnId, openState?.tab]);
+
+  useEffect(() => {
+    const prev = lastSessionIdRef.current;
+    lastSessionIdRef.current = sessionId;
+    if (prev !== sessionId && openState) {
+      setOpenState(null);
+    }
+  }, [sessionId, openState, setOpenState]);
 
   const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -750,17 +957,6 @@ export const DecisionMapSheet = React.memo(() => {
     return mappingProvider || aiTurn?.meta?.mapper || undefined;
   }, [mappingProvider, aiTurn?.meta?.mapper]);
 
-  useEffect(() => {
-    console.log('🔬 Phase persistence:', {
-      turnId: aiTurn?.id,
-      batch: !!aiTurn?.batch,
-      mapping: !!aiTurn?.mapping,
-      singularity: !!aiTurn?.singularity,
-    });
-  }, [aiTurn?.id, aiTurn?.batch, aiTurn?.mapping, aiTurn?.singularity]);
-
-  const singularityState = useSingularityOutput(aiTurn?.id || null);
-
   const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
 
   const providerContexts = useAtomValue(providerContextsAtom);
@@ -770,6 +966,14 @@ export const DecisionMapSheet = React.memo(() => {
     const ctx = pid ? providerContexts?.[pid] : null;
     const v = ctx?.rawMappingText;
     if (typeof v === 'string' && v.trim()) return v;
+    const mappingResponses = (aiTurn as any)?.mappingResponses;
+    if (pid && mappingResponses && typeof mappingResponses === 'object') {
+      const entry = (mappingResponses as any)[pid];
+      const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+      const last = arr.length > 0 ? arr[arr.length - 1] : null;
+      const t = typeof last?.text === 'string' ? last.text : typeof last === 'string' ? last : '';
+      if (typeof t === 'string' && t.trim()) return t;
+    }
     const narrative = (mappingArtifact as any)?.semantic?.narrative;
     if (typeof narrative === 'string') return narrative;
     if (narrative && typeof narrative === 'object') {
@@ -780,7 +984,7 @@ export const DecisionMapSheet = React.memo(() => {
       }
     }
     return '';
-  }, [activeMappingPid, providerContexts, mappingArtifact]);
+  }, [activeMappingPid, providerContexts, mappingArtifact, aiTurn]);
 
   const parsedMapping = useMemo(() => {
     const claims = Array.isArray(mappingArtifact?.semantic?.claims)
@@ -822,7 +1026,7 @@ export const DecisionMapSheet = React.memo(() => {
         claims: claims.length,
         edges: edges.length,
       });
-      return { claims, edges };
+      return { claims, edges, source: "semantic" as const };
     }
 
     decisionMapSheetDbg("graphData source", {
@@ -830,7 +1034,7 @@ export const DecisionMapSheet = React.memo(() => {
       claims: 0,
       edges: 0,
     });
-    return adaptGraphTopology(graphTopology);
+    return { ...adaptGraphTopology(graphTopology), source: "traversal" as const };
   }, [parsedMapping, graphTopology]);
 
   const derivedMapperArtifact = useMemo(() => {
@@ -924,14 +1128,27 @@ export const DecisionMapSheet = React.memo(() => {
 
   const shape: ProblemStructure | null = structuralAnalysis?.shape || null;
 
+  const traversalAnalysis: TraversalAnalysis | null = useMemo(() => {
+    return normalizeTraversalAnalysisFromArtifact((mappingArtifact as any)?.traversalAnalysis);
+  }, [mappingArtifact]);
+
   const claimThemes = useMemo(() => {
     if (!semanticClaims || semanticClaims.length === 0) return [];
     return buildThemesFromClaims(semanticClaims);
   }, [semanticClaims]);
 
   const mappingText = useMemo(() => {
-    return mappingArtifact?.semantic?.narrative || parsedMapping.narrative || '';
-  }, [mappingArtifact?.semantic?.narrative, parsedMapping.narrative]);
+    const fromArtifact = (mappingArtifact as any)?.semantic?.narrative ?? (parsedMapping as any)?.narrative ?? '';
+    const raw = String(rawMappingText || '').trim();
+    if (raw && (/<map\b/i.test(raw) || /<narrative\b/i.test(raw))) {
+      try {
+        const parsed = parseSemanticMapperOutput(raw);
+        const narrative = typeof parsed?.narrative === 'string' ? parsed.narrative.trim() : '';
+        if (parsed?.success && narrative) return narrative;
+      } catch { }
+    }
+    return typeof fromArtifact === 'string' ? fromArtifact : String(fromArtifact || '');
+  }, [mappingArtifact, parsedMapping, rawMappingText]);
 
   const optionsText = useMemo(() => {
     return (parsedMapping as any)?.options ?? null;
@@ -987,6 +1204,20 @@ export const DecisionMapSheet = React.memo(() => {
     });
   }, []);
 
+  const selectClaimById = useCallback((claimIdRaw: string) => {
+    const claimId = String(claimIdRaw || "").trim();
+    if (!claimId) return;
+
+    const fromSemantic = Array.isArray(semanticClaims) ? semanticClaims.find((c: any) => String(c?.id || "") === claimId) : null;
+    const fromGraph = Array.isArray(graphData?.claims) ? graphData.claims.find((c: any) => String(c?.id || "") === claimId) : null;
+    const claim = fromSemantic || fromGraph || null;
+    const label = String(claim?.label || claimId);
+    const supporters = Array.isArray((claim as any)?.supporters) ? (claim as any).supporters : [];
+
+    setActiveTab("graph");
+    setSelectedNode({ id: claimId, label, supporters, theme: (claim as any)?.type || (claim as any)?.theme });
+  }, [graphData?.claims, semanticClaims]);
+
   const handleDetailOrbClick = useCallback((providerId: string) => {
     if (!aiTurn) return;
     setActiveSplitPanel({ turnId: aiTurn.id, providerId });
@@ -996,6 +1227,33 @@ export const DecisionMapSheet = React.memo(() => {
     if (!selectedNode) return '';
     return extractNarrativeExcerpt(mappingText, selectedNode.label);
   }, [selectedNode, mappingText]);
+
+  const selectedClaimIds = useMemo(() => {
+    return selectedNode ? [selectedNode.id] : [];
+  }, [selectedNode]);
+
+  const semanticConditionals = useMemo(() => {
+    return Array.isArray(mappingArtifact?.semantic?.conditionals) ? mappingArtifact.semantic.conditionals : [];
+  }, [mappingArtifact]);
+
+  const traversalGraph = useMemo(() => {
+    return (mappingArtifact as any)?.traversal?.graph || null;
+  }, [mappingArtifact]);
+
+  const traversalTiers = useMemo(() => {
+    const tiers = (traversalGraph as any)?.tiers;
+    return Array.isArray(tiers) ? tiers : [];
+  }, [traversalGraph]);
+
+  const forcingPoints = useMemo(() => {
+    const fps = (mappingArtifact as any)?.traversal?.forcingPoints;
+    return Array.isArray(fps) ? fps : [];
+  }, [mappingArtifact]);
+
+  const structuralValidation = useMemo(() => {
+    return (mappingArtifact as any)?.geometry?.structuralValidation || (mappingArtifact as any)?.structuralValidation || null;
+  }, [mappingArtifact]);
+
 
   const markdownComponents = useMemo(() => ({
     a: ({ href, children, ...props }: any) => {
@@ -1081,103 +1339,274 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, []);
 
-  const jsonSections = useMemo(() => {
-    const singularityOutput = (aiTurn as any)?.singularity?.output || singularityState.output || null;
-    const mapperArtifact =
-      derivedMapperArtifact ||
-      (parsedMapping as any)?.artifact ||
-      (graphData.claims.length > 0 || graphData.edges.length > 0
-        ? {
-          claims: graphData.claims,
-          edges: graphData.edges,
-          ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
-        }
-        : null);
+  const shadowStatements = useMemo(() => {
+    return Array.isArray(mappingArtifact?.shadow?.statements) ? mappingArtifact.shadow.statements : [];
+  }, [mappingArtifact]);
 
-    const shadowExtraction = mappingArtifact?.shadow?.statements ? { statements: mappingArtifact.shadow.statements } : null;
-    const shadowDelta = mappingArtifact?.shadow?.delta || null;
-    const preSemantic = mappingArtifact?.geometry?.preSemantic || null;
-    const substrate = mappingArtifact?.geometry?.substrate || null;
-    const completeness = (mapperArtifact as any)?.completeness || null;
+  const shadowParagraphs = useMemo(() => {
+    return Array.isArray(mappingArtifact?.shadow?.paragraphs) ? mappingArtifact.shadow.paragraphs : [];
+  }, [mappingArtifact]);
 
-    const narrative = mappingArtifact?.semantic?.narrative || (parsedMapping as any)?.narrative || null;
-    const singularityPrompt = (aiTurn as any)?.singularity?.prompt || null;
-    const ghosts = mappingArtifact?.semantic?.ghosts || (parsedMapping as any)?.ghosts || null;
-    const conditionals = mappingArtifact?.semantic?.conditionals || (parsedMapping as any)?.conditionals || null;
-    const determinants = (mappingArtifact as any)?.semantic?.determinants || (parsedMapping as any)?.determinants || null;
-    const embeddingStatus = mappingArtifact?.geometry?.embeddingStatus || null;
-    const artifactMeta = mappingArtifact?.meta || null;
+  const shadowDeltaForView = useMemo(() => {
+    const delta = (mappingArtifact as any)?.shadow?.delta;
+    if (!delta || typeof delta !== "object") return null;
+    return delta;
+  }, [mappingArtifact]);
 
-    return [
-      { key: 'shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: shadowExtraction },
-      { key: 'shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: shadowDelta },
-      { key: 'shadow_audit', label: 'Shadow Audit', kind: 'json' as const, value: mappingArtifact?.shadow?.audit ?? null },
+  const shadowUnreferencedIdSet = useMemo(() => {
+    const set = new Set<string>();
+    const delta = shadowDeltaForView;
+    const unref = delta?.unreferenced;
+    if (Array.isArray(unref)) {
+      for (const item of unref) {
+        const id = String(item?.statement?.id || "").trim();
+        if (id) set.add(id);
+      }
+    }
+    return set;
+  }, [shadowDeltaForView]);
 
-      { key: 'paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: paragraphProjection },
-      { key: 'substrate', label: 'Substrate', kind: 'json' as const, value: substrate },
-      { key: 'presemantic', label: 'Pre-Semantic', kind: 'json' as const, value: preSemantic },
+  const [evidenceViewMode, setEvidenceViewMode] = useState<"statements" | "paragraphs">("statements");
+  const [evidenceStanceFilter, setEvidenceStanceFilter] = useState<string>("all");
+  const [evidenceRefFilter, setEvidenceRefFilter] = useState<"all" | "referenced" | "unreferenced">("all");
+  const [evidenceModelFilter, setEvidenceModelFilter] = useState<number | "all">("all");
+  const [evidenceSignalFilters, setEvidenceSignalFilters] = useState<{ sequence: boolean; tension: boolean; conditional: boolean }>({
+    sequence: false,
+    tension: false,
+    conditional: false,
+  });
+  const [evidenceContestedOnly, setEvidenceContestedOnly] = useState(false);
+  const [evidenceCoverageOpen, setEvidenceCoverageOpen] = useState(false);
+  const [narrativeMode, setNarrativeMode] = useState<"formatted" | "raw">("formatted");
+  const [promptOpen, setPromptOpen] = useState(false);
 
-      { key: 'narrative', label: 'Narrative', kind: 'text' as const, value: narrative || '' },
-      { key: 'ghosts', label: 'Ghost Claims', kind: 'json' as const, value: ghosts },
-      { key: 'conditionals', label: 'Conditionals', kind: 'json' as const, value: conditionals },
-      { key: 'determinants', label: 'Determinants', kind: 'json' as const, value: determinants },
-      { key: 'embedding_status', label: 'Embedding Status', kind: 'text' as const, value: embeddingStatus || '' },
-      { key: 'artifact_meta', label: 'Artifact Meta', kind: 'json' as const, value: artifactMeta },
+  const evidenceModelIndices = useMemo(() => {
+    const set = new Set<number>();
+    for (const s of shadowStatements) {
+      if (typeof (s as any)?.modelIndex === "number") set.add((s as any).modelIndex);
+    }
+    for (const p of shadowParagraphs) {
+      if (typeof (p as any)?.modelIndex === "number") set.add((p as any).modelIndex);
+    }
+    return Array.from(set.values()).sort((a, b) => a - b);
+  }, [shadowStatements, shadowParagraphs]);
 
-      { key: 'raw_mapping', label: 'Raw Mapping Text', kind: 'text' as const, value: rawMappingText || '' },
-      { key: 'singularity_prompt', label: 'Semantic Prompt', kind: 'text' as const, value: singularityPrompt || '' },
+  const filteredShadowStatements = useMemo(() => {
+    if (!Array.isArray(shadowStatements)) return [];
+    return shadowStatements.filter((s: any) => {
+      const id = String(s?.id || "").trim();
+      const stance = String(s?.stance || "").toLowerCase();
+      if (evidenceStanceFilter !== "all" && stance !== evidenceStanceFilter) return false;
+      if (evidenceModelFilter !== "all") {
+        const mi = typeof s?.modelIndex === "number" ? s.modelIndex : null;
+        if (mi == null || mi !== evidenceModelFilter) return false;
+      }
+      const wantsAnySignal = evidenceSignalFilters.sequence || evidenceSignalFilters.tension || evidenceSignalFilters.conditional;
+      if (wantsAnySignal) {
+        const sig = s?.signals || {};
+        const matches =
+          (evidenceSignalFilters.sequence && !!sig.sequence) ||
+          (evidenceSignalFilters.tension && !!sig.tension) ||
+          (evidenceSignalFilters.conditional && !!sig.conditional);
+        if (!matches) return false;
+      }
+      if (evidenceRefFilter === "unreferenced") {
+        if (!id || !shadowUnreferencedIdSet.has(id)) return false;
+      } else if (evidenceRefFilter === "referenced") {
+        if (!id || shadowUnreferencedIdSet.has(id)) return false;
+      }
+      return true;
+    });
+  }, [shadowStatements, evidenceStanceFilter, evidenceRefFilter, shadowUnreferencedIdSet, evidenceModelFilter, evidenceSignalFilters]);
 
-      { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact },
-      { key: 'structural_analysis', label: 'Structural Analysis', kind: 'json' as const, value: structuralAnalysis },
-      { key: 'completeness', label: 'Completeness', kind: 'json' as const, value: completeness },
-      { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: mappingArtifact?.traversal?.graph || (mapperArtifact as any)?.traversalGraph || null },
-      { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: mappingArtifact?.traversal?.forcingPoints || (mapperArtifact as any)?.forcingPoints || null },
+  const filteredShadowParagraphs = useMemo(() => {
+    if (!Array.isArray(shadowParagraphs)) return [];
+    return shadowParagraphs.filter((p: any) => {
+      const stance = String(p?.dominantStance || "").toLowerCase();
+      if (evidenceStanceFilter !== "all" && stance !== evidenceStanceFilter) return false;
+      if (evidenceModelFilter !== "all") {
+        const mi = typeof p?.modelIndex === "number" ? p.modelIndex : null;
+        if (mi == null || mi !== evidenceModelFilter) return false;
+      }
+      if (evidenceContestedOnly && !p?.contested) return false;
+      if (evidenceRefFilter === "all") return true;
+      const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
+      if (ids.length === 0) return false;
+      let hasUnref = false;
+      let hasRef = false;
+      for (const raw of ids) {
+        const id = String(raw || "").trim();
+        if (!id) continue;
+        if (shadowUnreferencedIdSet.has(id)) hasUnref = true;
+        else hasRef = true;
+        if (hasUnref && hasRef) break;
+      }
+      if (evidenceRefFilter === "unreferenced") return hasUnref && !hasRef;
+      if (evidenceRefFilter === "referenced") return hasRef;
+      return true;
+    });
+  }, [shadowParagraphs, evidenceStanceFilter, evidenceRefFilter, shadowUnreferencedIdSet, evidenceModelFilter, evidenceContestedOnly]);
 
-      { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput },
-      { key: 'cognitive_artifact', label: 'Cognitive Artifact', kind: 'json' as const, value: mappingArtifact },
-    ];
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, mappingArtifact, rawMappingText, paragraphProjection, structuralAnalysis]);
+  const mappingArtifactJson = useMemo(() => {
+    try {
+      return mappingArtifact ? stringifyForDebug(mappingArtifact) : "";
+    } catch {
+      return "";
+    }
+  }, [mappingArtifact, stringifyForDebug]);
 
-  const [openJsonKeys, setOpenJsonKeys] = useState<Set<string>>(() => new Set());
+  const doesRawDifferFromNarrative = useMemo(() => {
+    const a = String(rawMappingText || "").trim();
+    const b = String(mappingText || "").trim();
+    if (!a || !b) return false;
+    return a !== b;
+  }, [rawMappingText, mappingText]);
 
   useEffect(() => {
-    if (!openState?.turnId) return;
-    setOpenJsonKeys(new Set());
-  }, [openState?.turnId]);
+    if (!doesRawDifferFromNarrative && narrativeMode === "raw") setNarrativeMode("formatted");
+  }, [doesRawDifferFromNarrative, narrativeMode]);
 
-  const jsonTextByKey = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of jsonSections) {
-      if (s.kind === 'text') {
-        const v = String(s.value || '');
-        map.set(s.key, v);
-      } else {
-        try {
-          map.set(s.key, s.value == null ? '' : stringifyForDebug(s.value));
-        } catch (err) {
-          console.error(`[DecisionMapSheet] Failed to stringify ${s.key}:`, err);
-
-          // Safe fallback
-          try {
-            map.set(s.key, JSON.stringify(s.value, (_k, v) => (typeof v === 'object' && v !== null ? (v === s.value ? v : '[Object]') : v)));
-          } catch {
-            map.set(s.key, String(s.value || ''));
-          }
-        }
+  const statementToClaimIds = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const c of semanticClaims || []) {
+      const ids = Array.isArray((c as any)?.sourceStatementIds) ? (c as any).sourceStatementIds : [];
+      if (!Array.isArray(ids) || ids.length === 0) continue;
+      for (const raw of ids) {
+        const sid = String(raw || "").trim();
+        if (!sid) continue;
+        const arr = map.get(sid);
+        if (arr) arr.push(String((c as any)?.id || ""));
+        else map.set(sid, [String((c as any)?.id || "")]);
       }
     }
     return map;
-  }, [jsonSections, stringifyForDebug]);
+  }, [semanticClaims]);
+
+  const claimById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const c of semanticClaims || []) {
+      const id = String((c as any)?.id || "").trim();
+      if (id) map.set(id, c);
+    }
+    return map;
+  }, [semanticClaims]);
+
+  function computeEvidenceStatsFromStatements(statements: any[], unrefSet: Set<string>) {
+    const byStance: Record<string, number> = {};
+    const byModel: Record<number, number> = {};
+    const bySignal = { sequence: 0, tension: 0, conditional: 0 };
+    let unreferenced = 0;
+    for (const s of statements || []) {
+      const stance = String(s?.stance || "unknown").toLowerCase();
+      byStance[stance] = (byStance[stance] || 0) + 1;
+      const mi = typeof s?.modelIndex === "number" ? s.modelIndex : null;
+      if (mi != null) byModel[mi] = (byModel[mi] || 0) + 1;
+      const id = String(s?.id || "").trim();
+      if (id && unrefSet.has(id)) unreferenced += 1;
+      const sig = s?.signals || {};
+      if (sig.sequence) bySignal.sequence += 1;
+      if (sig.tension) bySignal.tension += 1;
+      if (sig.conditional) bySignal.conditional += 1;
+    }
+    const total = (statements || []).length;
+    return { total, unreferenced, referenced: total - unreferenced, byStance, byModel, bySignal };
+  }
+
+  function computeEvidenceStatsFromParagraphs(paragraphs: any[], unrefSet: Set<string>) {
+    const byStance: Record<string, number> = {};
+    const byModel: Record<number, number> = {};
+    let contested = 0;
+    let unreferenced = 0;
+    for (const p of paragraphs || []) {
+      const stance = String(p?.dominantStance || "unknown").toLowerCase();
+      byStance[stance] = (byStance[stance] || 0) + 1;
+      const mi = typeof p?.modelIndex === "number" ? p.modelIndex : null;
+      if (mi != null) byModel[mi] = (byModel[mi] || 0) + 1;
+      if (p?.contested) contested += 1;
+      const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
+      let hasUnref = false;
+      let hasRef = false;
+      for (const raw of ids) {
+        const id = String(raw || "").trim();
+        if (!id) continue;
+        if (unrefSet.has(id)) hasUnref = true;
+        else hasRef = true;
+        if (hasUnref && hasRef) break;
+      }
+      if (hasUnref && !hasRef) unreferenced += 1;
+    }
+    const total = (paragraphs || []).length;
+    return { total, contested, unreferenced, referenced: total - unreferenced, byStance, byModel };
+  }
 
   const tabConfig = [
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
     { key: 'space' as const, label: 'Space', activeClass: 'decision-tab-active-space' },
-    { key: 'json' as const, label: 'JSON', activeClass: 'decision-tab-active-options' },
+    { key: 'evidence' as const, label: 'Evidence', activeClass: 'decision-tab-active-options' },
+    { key: 'traversal' as const, label: 'Traversal', activeClass: 'decision-tab-active-graph' },
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
+  const graphPanelHeight = Math.max(240, Math.floor(sheetHeightPx * 0.42));
+
+  const renderClaimPill = useCallback((claimId: string, label?: string) => {
+    const id = String(claimId || "").trim();
+    if (!id) return null;
+    const text = String(label || claimById.get(id)?.label || id);
+    return (
+      <button
+        key={id}
+        type="button"
+        className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors"
+        onClick={() => selectClaimById(id)}
+        title={text}
+      >
+        {text}
+      </button>
+    );
+  }, [claimById, selectClaimById]);
+
+  const sheetMeta = useMemo(() => {
+    const id = aiTurn?.id ? String(aiTurn.id) : "";
+    const idShort = id ? id.slice(0, 8) : "";
+    const createdAtRaw = (aiTurn as any)?.createdAt;
+    const createdAt = createdAtRaw ? new Date(createdAtRaw) : null;
+    const createdAtLabel = createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toLocaleString() : "";
+    const mapper = activeMappingPid ? String(activeMappingPid) : "";
+    const batchResponses = (aiTurn as any)?.batch?.responses;
+    const modelCount =
+      batchResponses && typeof batchResponses === "object"
+        ? Object.keys(batchResponses).length
+        : evidenceModelIndices.length;
+    const claimCount = Array.isArray(semanticClaims) ? semanticClaims.length : 0;
+    return { id, idShort, createdAtLabel, mapper, modelCount, claimCount };
+  }, [aiTurn, activeMappingPid, evidenceModelIndices.length, semanticClaims]);
+
+  const sheetData = useMemo(() => {
+    return {
+      aiTurn,
+      activeMappingPid,
+      mappingArtifact,
+      mappingArtifactJson,
+      rawMappingText,
+      mappingText,
+      optionsText,
+      graphData,
+      graphTopology,
+      semanticClaims,
+      shadowStatements,
+      shadowParagraphs,
+      shadowDeltaForView,
+      shadowUnreferencedIdSet,
+      paragraphProjection,
+      preSemanticRegions,
+      shape,
+      providerContexts,
+      traversalAnalysis,
+    };
+  }, [aiTurn, activeMappingPid, mappingArtifact, mappingArtifactJson, rawMappingText, mappingText, optionsText, graphData, graphTopology, semanticClaims, shadowStatements, shadowParagraphs, shadowDeltaForView, shadowUnreferencedIdSet, paragraphProjection, preSemanticRegions, shape, providerContexts, traversalAnalysis]);
 
   return (
     <AnimatePresence>
@@ -1248,6 +1677,38 @@ export const DecisionMapSheet = React.memo(() => {
                   buttonText="Copy Map"
                   className="mr-2"
                 />
+                <CopyButton
+                  text={sheetData.mappingArtifactJson}
+                  label="Copy mapping artifact JSON"
+                  variant="icon"
+                  disabled={!sheetData.mappingArtifactJson}
+                />
+                <button
+                  type="button"
+                  className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-highlight rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!sheetData.mappingArtifactJson}
+                  onClick={() => {
+                    let url: string | undefined;
+                    try {
+                      const text = sheetData.mappingArtifactJson || "";
+                      if (!text) throw new Error("No artifact data available");
+                      const blob = new Blob([text], { type: "application/json" });
+                      url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `mapping_artifact_${aiTurn?.id || "turn"}.json`;
+                      a.click();
+                      setToast({ id: Date.now(), message: "Exported successfully", type: "success" });
+                    } catch (err: any) {
+                      setToast({ id: Date.now(), message: `Export failed: ${err?.message || "unknown error"}`, type: "error" });
+                    } finally {
+                      if (url) URL.revokeObjectURL(url);
+                    }
+                  }}
+                  title="Export mapping artifact JSON"
+                >
+                  <span className="text-sm leading-none">⬇</span>
+                </button>
                 <button
                   onClick={() => setOpenState(null)}
                   className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
@@ -1259,56 +1720,574 @@ export const DecisionMapSheet = React.memo(() => {
               </div>
             </div>
 
+            {(sheetMeta.idShort || sheetMeta.createdAtLabel || sheetMeta.mapper) && (
+              <div className="px-6 py-2 border-b border-white/10 bg-black/10 flex items-center justify-between gap-3 text-[11px] text-text-muted">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {sheetMeta.idShort && <div>Turn: <span className="text-text-primary font-mono">{sheetMeta.idShort}</span></div>}
+                  {sheetMeta.createdAtLabel && <div>Created: <span className="text-text-primary">{sheetMeta.createdAtLabel}</span></div>}
+                  {sheetMeta.mapper && <div>Mapper: <span className="text-text-primary">{sheetMeta.mapper}</span></div>}
+                </div>
+                <div className="flex items-center gap-3">
+                  <div>Models: <span className="text-text-primary">{sheetMeta.modelCount}</span></div>
+                  <div>Claims: <span className="text-text-primary">{sheetMeta.claimCount}</span></div>
+                </div>
+              </div>
+            )}
+
             {/* Content */}
             <div className="flex-1 overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
               <AnimatePresence mode="wait">
-                {activeTab === 'graph' && !selectedNode && (
+                {activeTab === 'graph' && (
                   <m.div
                     key="graph"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    ref={containerRef}
-                    className="w-full h-full relative"
+                    className="w-full h-full flex flex-col"
                   >
-                    {graphTopology && (
-                      <div className="absolute top-4 right-4 z-50">
-                        <CopyButton
-                          text={formatGraphForMd(graphTopology)}
-                          label="Copy graph as list"
-                          variant="icon"
-                        />
-                      </div>
-                    )}
-                    <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
-                      <DecisionMapGraph
-                        claims={graphData.claims}
-                        edges={graphData.edges}
-                        citationSourceOrder={citationSourceOrder}
-                        width={dims.w}
-                        height={dims.h}
-                        onNodeClick={handleNodeClick}
-                      />
-                    </Suspense>
-                  </m.div>
-                )}
+                    <div className="px-6 pt-4 pb-3">
+                      <div className="flex flex-col lg:flex-row gap-3">
+                        <div className="flex-1 rounded-2xl overflow-hidden border border-border-subtle bg-surface flex flex-col" style={{ height: graphPanelHeight }}>
+                          <div className="px-4 py-2 border-b border-border-subtle flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-muted">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-6 h-[2px] bg-slate-400" />
+                              <span>Supports</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-6 h-[2px] bg-orange-400" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(251,146,60,1) 0 4px, rgba(0,0,0,0) 4px 7px)" }} />
+                              <span>Tradeoff</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-6 h-[2px] bg-red-400" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(248,113,113,1) 0 8px, rgba(0,0,0,0) 8px 14px)" }} />
+                              <span>Conflicts</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-6 h-[2px] bg-slate-900" />
+                              <span>Prerequisite</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-[12px] leading-none">👑</span>
+                              <span>Keystone</span>
+                              <span className="text-[12px] leading-none">⚡</span>
+                              <span>Dissent</span>
+                              <span className="text-[12px] leading-none">★</span>
+                              <span>Peak</span>
+                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-400 text-white text-[10px] font-bold leading-none">~</span>
+                              <span>Fragile</span>
+                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">!</span>
+                              <span>Anomaly</span>
+                            </div>
+                            {graphTopology && (
+                              <div className="ml-auto flex items-center gap-2">
+                                <CopyButton
+                                  text={formatGraphForMd(graphTopology)}
+                                  label="Copy graph as list"
+                                  variant="icon"
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div ref={containerRef} className="w-full flex-1">
+                            <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
+                              <DecisionMapGraph
+                                claims={graphData.claims}
+                                edges={graphData.edges}
+                                problemStructure={shape ?? undefined}
+                                enrichedClaims={structuralAnalysis?.claimsWithLeverage}
+                                citationSourceOrder={citationSourceOrder}
+                                width={dims.w}
+                                height={dims.h}
+                                onNodeClick={handleNodeClick}
+                                selectedClaimIds={selectedClaimIds}
+                              />
+                            </Suspense>
+                          </div>
+                        </div>
 
-                {activeTab === 'graph' && selectedNode && (
-                  <m.div
-                    key="detail"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="w-full h-full"
-                  >
-                    <DetailView
-                      node={selectedNode}
-                      narrativeExcerpt={narrativeExcerpt}
-                      citationSourceOrder={citationSourceOrder}
-                      onBack={() => setSelectedNode(null)}
-                      onOrbClick={handleDetailOrbClick}
-                      structural={structuralAnalysis}
-                    />
+                        <div
+                          className={clsx(
+                            "w-full rounded-2xl overflow-hidden border border-border-subtle bg-surface transition-[width] duration-200 ease-out",
+                            selectedNode ? "lg:w-[420px]" : "hidden lg:block lg:w-12"
+                          )}
+                          style={{ height: graphPanelHeight }}
+                        >
+                          {selectedNode ? (
+                            <>
+                              <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-text-primary truncate">Claim detail</div>
+                                  <div className="text-[11px] text-text-muted mt-0.5 truncate">
+                                    {selectedNode.label}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors flex-none"
+                                  onClick={() => setSelectedNode(null)}
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                              <div className="p-4 h-full overflow-y-auto custom-scrollbar">
+                                <DetailView
+                                  node={selectedNode}
+                                  narrativeExcerpt={narrativeExcerpt}
+                                  citationSourceOrder={citationSourceOrder}
+                                  onBack={() => setSelectedNode(null)}
+                                  onOrbClick={handleDetailOrbClick}
+                                  structural={structuralAnalysis}
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center bg-surface-highlight/10">
+                              <div
+                                className="text-[11px] font-semibold tracking-wide text-text-muted select-none"
+                                style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+                              >
+                                Claim
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-10 space-y-3">
+                      <details className="bg-surface border border-border-subtle rounded-xl overflow-hidden" open>
+                        <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-text-primary truncate">Structure</div>
+                            <div className="text-[11px] text-text-muted mt-0.5">
+                              Shape, landscape metrics, and top relationships
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-none">
+                            {shape?.primary && (
+                              <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-secondary">
+                                {shape.primary} · {Math.round((shape.confidence || 0) * 100)}%
+                              </span>
+                            )}
+                          </div>
+                        </summary>
+                        <div className="px-4 pb-4 pt-1 space-y-4">
+                          {!structuralAnalysis && (
+                            <div className="text-sm text-text-muted">No structural analysis available.</div>
+                          )}
+
+                          {structuralAnalysis && (
+                            <>
+                              <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Evidence</div>
+                                <div className="mt-2 space-y-1">
+                                  {(shape?.evidence || []).length === 0 ? (
+                                    <div className="text-xs text-text-muted">No shape evidence.</div>
+                                  ) : (
+                                    (shape?.evidence || []).slice(0, 8).map((e, idx) => (
+                                      <div key={idx} className="text-xs text-text-secondary">{e}</div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Landscape</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>Convergence: {(structuralAnalysis.landscape.convergenceRatio * 100).toFixed(0)}%</div>
+                                    <div>Dominant type: {String(structuralAnalysis.landscape.dominantType || "")}</div>
+                                    <div>Dominant role: {String(structuralAnalysis.landscape.dominantRole || "")}</div>
+                                    <div>Claims: {structuralAnalysis.landscape.claimCount}</div>
+                                    <div>Models: {structuralAnalysis.landscape.modelCount}</div>
+                                  </div>
+                                </div>
+
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Key pairs</div>
+                                  <div className="mt-2 space-y-3">
+                                    <div>
+                                      <div className="text-[11px] text-text-muted font-semibold">Conflicts</div>
+                                      {structuralAnalysis.patterns.conflicts.length === 0 ? (
+                                        <div className="text-xs text-text-muted mt-1">None</div>
+                                      ) : (
+                                        <div className="mt-2 space-y-2">
+                                          {structuralAnalysis.patterns.conflicts.slice(0, 6).map((c: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between gap-3">
+                                              <div className="min-w-0 flex flex-wrap items-center gap-2">
+                                                {renderClaimPill(c.claimA.id, c.claimA.label)}
+                                                <span className="text-xs text-text-muted">↔</span>
+                                                {renderClaimPill(c.claimB.id, c.claimB.label)}
+                                              </div>
+                                              <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted flex-none">
+                                                {c.dynamics}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div>
+                                      <div className="text-[11px] text-text-muted font-semibold">Tradeoffs</div>
+                                      {structuralAnalysis.patterns.tradeoffs.length === 0 ? (
+                                        <div className="text-xs text-text-muted mt-1">None</div>
+                                      ) : (
+                                        <div className="mt-2 space-y-2">
+                                          {structuralAnalysis.patterns.tradeoffs.slice(0, 6).map((t: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between gap-3">
+                                              <div className="min-w-0 flex flex-wrap items-center gap-2">
+                                                {renderClaimPill(t.claimA.id, t.claimA.label)}
+                                                <span className="text-xs text-text-muted">↔</span>
+                                                {renderClaimPill(t.claimB.id, t.claimB.label)}
+                                              </div>
+                                              <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted flex-none">
+                                                {t.symmetry === "both_singular"
+                                                  ? "both low"
+                                                  : t.symmetry === "both_consensus"
+                                                    ? "both high"
+                                                    : String(t.symmetry || "asymmetric")}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </details>
+
+                      <details className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                        <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-text-primary truncate">Gates</div>
+                            <div className="text-[11px] text-text-muted mt-0.5">
+                              Conditionals, traversal gates, and forcing points
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-none">
+                            <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted">
+                              {semanticConditionals.length} semantic · {traversalTiers.reduce((acc: number, t: any) => acc + (Array.isArray(t?.gates) ? t.gates.length : 0), 0)} traversal
+                            </span>
+                          </div>
+                        </summary>
+                        <div className="px-4 pb-4 pt-1 space-y-3">
+                          {traversalTiers.length > 0 ? (
+                            <div className="space-y-2">
+                              {traversalTiers.map((tier: any) => {
+                                const tierIndex = typeof tier?.tierIndex === "number" ? tier.tierIndex : null;
+                                const gates = Array.isArray(tier?.gates) ? tier.gates : [];
+                                if (gates.length === 0) return null;
+                                return (
+                                  <details
+                                    key={tierIndex == null ? Math.random().toString(36).slice(2) : String(tierIndex)}
+                                    className="bg-surface-highlight/10 border border-border-subtle rounded-lg overflow-hidden"
+                                    open={tierIndex === 0}
+                                  >
+                                    <summary className="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-semibold text-text-primary truncate">Tier {tierIndex ?? "?"}</div>
+                                        <div className="text-[11px] text-text-muted mt-0.5">{gates.length} gate(s)</div>
+                                      </div>
+                                    </summary>
+                                    <div className="px-3 pb-3 pt-1 space-y-2">
+                                      {gates.map((g: any) => {
+                                        const id = String(g?.id || "").trim() || Math.random().toString(36).slice(2);
+                                        const q = String(g?.question || g?.condition || "").trim() || "Conditional";
+                                        const blockedClaims = Array.isArray(g?.blockedClaims) ? g.blockedClaims.map((x: any) => String(x)).filter(Boolean) : [];
+                                        return (
+                                          <div key={id} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                            <div className="text-sm font-semibold text-text-primary">{q}</div>
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                              {blockedClaims.length === 0 ? (
+                                                <span className="text-xs text-text-muted">No claim references</span>
+                                              ) : (
+                                                blockedClaims.map((cid: string) => renderClaimPill(cid))
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </details>
+                                );
+                              })}
+                            </div>
+                          ) : semanticConditionals.length > 0 ? (
+                            <div className="space-y-2">
+                              {semanticConditionals.map((c: any, idx: number) => {
+                                const id = String(c?.id || "").trim() || `cond_${idx}`;
+                                const q = String(c?.question || "").trim() || "Conditional";
+                                const affected = Array.isArray(c?.affectedClaims) ? c.affectedClaims.map((x: any) => String(x)).filter(Boolean) : [];
+                                return (
+                                  <div key={id} className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                    <div className="text-sm font-semibold text-text-primary">{q}</div>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {affected.length === 0 ? (
+                                        <span className="text-xs text-text-muted">No affected claims</span>
+                                      ) : (
+                                        affected.map((cid: string) => renderClaimPill(cid))
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-text-muted">No gates available.</div>
+                          )}
+
+                          {forcingPoints.length > 0 && (
+                            <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                              <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Forcing points</div>
+                              <div className="mt-2 space-y-2">
+                                {forcingPoints.slice(0, 12).map((fp: any) => {
+                                  const id = String(fp?.id || "").trim() || Math.random().toString(36).slice(2);
+                                  const type = String(fp?.type || "");
+                                  const q = String(fp?.question || fp?.condition || "").trim() || "Forcing point";
+                                  const affected = Array.isArray(fp?.affectedClaims) ? fp.affectedClaims.map((x: any) => String(x)).filter(Boolean) : [];
+                                  return (
+                                    <div key={id} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                      <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-semibold text-text-primary truncate">{q}</div>
+                                        </div>
+                                        <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted flex-none">
+                                          {type || "unknown"}
+                                        </span>
+                                      </div>
+                                      {affected.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {affected.map((cid: string) => renderClaimPill(cid))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+
+                      <details className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                        <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-text-primary truncate">Validation</div>
+                            <div className="text-[11px] text-text-muted mt-0.5">
+                              Geometry prediction vs semantic reality
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-none">
+                            {structuralValidation?.summary && (
+                              <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted">
+                                {String(structuralValidation.summary)}
+                              </span>
+                            )}
+                          </div>
+                        </summary>
+                        <div className="px-4 pb-4 pt-1 space-y-3">
+                          {!structuralValidation && (
+                            <div className="text-sm text-text-muted">No structural validation available.</div>
+                          )}
+
+                          {structuralValidation && (
+                            <>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Core</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>
+                                      Shape: {structuralValidation.shapeMatch ? "✓" : "✗"} {String(structuralValidation.predictedShape)} → {String(structuralValidation.actualShape)}
+                                    </div>
+                                    <div>Tier alignment: {(Number(structuralValidation.tierAlignmentScore || 0) * 100).toFixed(0)}%</div>
+                                    <div>Fidelity: {(Number(structuralValidation.overallFidelity || 0) * 100).toFixed(0)}%</div>
+                                    <div>Confidence: {String(structuralValidation.confidence || "")}</div>
+                                  </div>
+                                </div>
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Conflicts</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>Precision: {(Number(structuralValidation.conflictPrecision || 0) * 100).toFixed(0)}%</div>
+                                    <div>Recall: {(Number(structuralValidation.conflictRecall || 0) * 100).toFixed(0)}%</div>
+                                  </div>
+                                  <div className="mt-2 text-[11px] text-text-muted">
+                                    P = how many predicted conflicts were captured (lower means extra conflict edges). R = how many predicted conflicts were found (lower means missed conflicts).
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Diagnostics</div>
+                                <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                  <div>
+                                    Expected claims: {Array.isArray(structuralValidation?.diagnostics?.expectedClaimCount) ? `${structuralValidation.diagnostics.expectedClaimCount[0]}–${structuralValidation.diagnostics.expectedClaimCount[1]}` : "n/a"}
+                                  </div>
+                                  <div>Expected conflicts: {Number(structuralValidation?.diagnostics?.expectedConflicts ?? 0)}</div>
+                                  <div>Actual conflict edges: {Number(structuralValidation?.diagnostics?.actualConflictEdges ?? 0)}</div>
+                                  <div>Peak claims: {Number(structuralValidation?.diagnostics?.actualPeakClaims ?? 0)} / {Number(structuralValidation?.diagnostics?.mappedPeakClaims ?? 0)}</div>
+                                </div>
+                              </div>
+
+                              <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Violations</div>
+                                <div className="mt-1 text-[11px] text-text-muted">
+                                  HIGH = strong mismatch · MEDIUM = suspect · LOW = informational
+                                </div>
+                                {(Array.isArray(structuralValidation.violations) ? structuralValidation.violations : []).length === 0 ? (
+                                  <div className="text-xs text-text-muted mt-2">None</div>
+                                ) : (
+                                  <div className="mt-2 space-y-2">
+                                    {(structuralValidation.violations || []).map((v: any, idx: number) => {
+                                      const sev = String(v?.severity || "low");
+                                      const badge =
+                                        sev === "high"
+                                          ? "bg-red-500/15 text-red-400 border-red-500/30"
+                                          : sev === "medium"
+                                            ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                                            : "bg-surface-highlight/10 text-text-muted border-border-subtle";
+                                      const claimIds = Array.isArray(v?.claimIds) ? v.claimIds.map((x: any) => String(x)).filter(Boolean) : [];
+                                      const regionIds = Array.isArray(v?.regionIds) ? v.regionIds.map((x: any) => String(x)).filter(Boolean) : [];
+
+                                      const predicted = v?.predicted;
+                                      const actual = v?.actual;
+
+                                      const predDesc =
+                                        typeof predicted === "string"
+                                          ? predicted
+                                          : String(predicted?.description || "").trim();
+                                      const predEvidence =
+                                        typeof predicted === "object" && predicted
+                                          ? String((predicted as any)?.evidence || "").trim()
+                                          : "";
+
+                                      const actualDesc =
+                                        typeof actual === "string"
+                                          ? actual
+                                          : String(actual?.description || "").trim();
+                                      const actualEvidence =
+                                        typeof actual === "object" && actual
+                                          ? String((actual as any)?.evidence || "").trim()
+                                          : "";
+
+                                      const predFallback =
+                                        !predDesc && !predEvidence && predicted ? stringifyForDebug(predicted) : "";
+                                      const actualFallback =
+                                        !actualDesc && !actualEvidence && actual ? stringifyForDebug(actual) : "";
+
+                                      const diag = structuralValidation?.diagnostics;
+                                      const expectedClaimRange = Array.isArray(diag?.expectedClaimCount) ? diag.expectedClaimCount : null;
+                                      const expectedConflicts = typeof diag?.expectedConflicts === "number" ? diag.expectedConflicts : null;
+                                      const actualConflictEdges = typeof diag?.actualConflictEdges === "number" ? diag.actualConflictEdges : null;
+                                      const mappedPeakClaims = typeof diag?.mappedPeakClaims === "number" ? diag.mappedPeakClaims : null;
+                                      const actualPeakClaims = typeof diag?.actualPeakClaims === "number" ? diag.actualPeakClaims : null;
+
+                                      const actualClaimCount =
+                                        (typeof (structuralAnalysis as any)?.claimsWithLeverage?.length === "number"
+                                          ? (structuralAnalysis as any).claimsWithLeverage.length
+                                          : Array.isArray(semanticClaims)
+                                            ? semanticClaims.length
+                                            : Array.isArray(graphData?.claims)
+                                              ? graphData.claims.length
+                                              : null);
+
+                                      const type = String(v?.type || "").trim();
+                                      const derived =
+                                        type === "claim_count_mismatch" && expectedClaimRange
+                                          ? {
+                                            pred: sev === "high"
+                                              ? `Expected at least ${expectedClaimRange[0]} claim(s)`
+                                              : `Expected at most ~${expectedClaimRange[1]} claim(s)`,
+                                            actual: actualClaimCount != null ? `Got ${actualClaimCount} claim(s)` : "",
+                                          }
+                                          : type === "missed_conflict" && expectedConflicts != null
+                                            ? {
+                                              pred: `Expected ${expectedConflicts} conflict(s)`,
+                                              actual: actualConflictEdges != null ? `Actual conflict edges: ${actualConflictEdges}` : "",
+                                            }
+                                            : type === "tier_mismatch"
+                                              ? {
+                                                pred: mappedPeakClaims != null ? `${mappedPeakClaims} peak region(s) should yield high-support claims` : "",
+                                                actual: actualPeakClaims != null ? `High-support claims found: ${actualPeakClaims}` : "",
+                                              }
+                                              : type === "shape_mismatch"
+                                                ? {
+                                                  pred: `Predicted: ${String(structuralValidation?.predictedShape || "")}`,
+                                                  actual: `Actual: ${String(structuralValidation?.actualShape || "")}`,
+                                                }
+                                                : type === "embedding_quality_suspect"
+                                                  ? {
+                                                    pred: `Topology predicted: ${String(structuralValidation?.predictedShape || "")}`,
+                                                    actual: `Semantics actual: ${String(structuralValidation?.actualShape || "")}`,
+                                                  }
+                                                  : null;
+
+                                      const predDescFinal = predDesc || derived?.pred || "";
+                                      const actualDescFinal = actualDesc || derived?.actual || "";
+
+                                      return (
+                                        <div key={idx} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                          <div className="flex items-center justify-between gap-3">
+                                            <div className="min-w-0">
+                                              <div className="text-sm font-semibold text-text-primary truncate">{String(v?.type || "violation")}</div>
+                                            </div>
+                                            <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold flex-none", badge)}>
+                                              {sev.toUpperCase()}
+                                            </span>
+                                          </div>
+                                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div className="text-xs text-text-secondary">
+                                              <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Predicted</div>
+                                              {predDescFinal ? (
+                                                <div className="mt-1">{predDescFinal}</div>
+                                              ) : (
+                                                <div className="mt-1 text-text-muted">No predicted detail provided.</div>
+                                              )}
+                                              {predEvidence ? (
+                                                <div className="mt-1 text-text-muted">{predEvidence}</div>
+                                              ) : predFallback ? (
+                                                <pre className="mt-2 text-[11px] leading-relaxed whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-lg p-2 text-text-muted">{predFallback}</pre>
+                                              ) : null}
+                                            </div>
+                                            <div className="text-xs text-text-secondary">
+                                              <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Actual</div>
+                                              {actualDescFinal ? (
+                                                <div className="mt-1">{actualDescFinal}</div>
+                                              ) : (
+                                                <div className="mt-1 text-text-muted">No actual detail provided.</div>
+                                              )}
+                                              {actualEvidence ? (
+                                                <div className="mt-1 text-text-muted">{actualEvidence}</div>
+                                              ) : actualFallback ? (
+                                                <pre className="mt-2 text-[11px] leading-relaxed whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-lg p-2 text-text-muted">{actualFallback}</pre>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                          {(claimIds.length > 0 || regionIds.length > 0) && (
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                              {claimIds.map((cid: string) => renderClaimPill(cid))}
+                                              {regionIds.map((rid: string) => (
+                                                <span key={rid} className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-muted">
+                                                  {rid}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </details>
+
+                    </div>
                   </m.div>
                 )}
 
@@ -1320,16 +2299,50 @@ export const DecisionMapSheet = React.memo(() => {
                     exit={{ opacity: 0 }}
                     className="p-6 h-full overflow-y-auto relative custom-scrollbar"
                   >
-                    {mappingText && (
+                    {doesRawDifferFromNarrative && (
+                      <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+                        <button
+                          type="button"
+                          className={clsx(
+                            "px-3 py-1.5 rounded-full text-xs border",
+                            narrativeMode === "formatted"
+                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                              : "bg-transparent border-border-subtle text-text-muted"
+                          )}
+                          onClick={() => setNarrativeMode("formatted")}
+                        >
+                          Formatted
+                        </button>
+                        <button
+                          type="button"
+                          className={clsx(
+                            "px-3 py-1.5 rounded-full text-xs border",
+                            narrativeMode === "raw"
+                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                              : "bg-transparent border-border-subtle text-text-muted"
+                          )}
+                          onClick={() => setNarrativeMode("raw")}
+                        >
+                          Raw
+                        </button>
+                      </div>
+                    )}
+                    {(narrativeMode === "formatted" ? mappingText : rawMappingText) && (
                       <div className="absolute top-4 right-4 z-10">
                         <CopyButton
-                          text={mappingText}
+                          text={narrativeMode === "formatted" ? mappingText : rawMappingText}
                           label="Copy narrative"
                           variant="icon"
                         />
                       </div>
                     )}
-                    {mappingText ? (
+                    {narrativeMode === "raw" ? (
+                      rawMappingText ? (
+                        <pre className="text-xs leading-relaxed whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4">{rawMappingText}</pre>
+                      ) : (
+                        <div className="text-text-muted text-sm text-center py-8">No raw mapping text available.</div>
+                      )
+                    ) : mappingText ? (
                       <div className="narrative-prose">
                         <MarkdownDisplay content={transformCitations(mappingText)} components={markdownComponents} />
                       </div>
@@ -1379,16 +2392,18 @@ export const DecisionMapSheet = React.memo(() => {
                     className="h-full overflow-hidden relative"
                   >
                     <ParagraphSpaceView
-                      graph={mappingArtifact?.geometry?.substrate || null}
-                      paragraphProjection={paragraphProjection}
-                        claims={semanticClaims}
-                      shadowStatements={mappingArtifact?.shadow?.statements || []}
-                      mutualEdges={mappingArtifact?.geometry?.substrate?.mutualEdges || null}
-                      strongEdges={mappingArtifact?.geometry?.substrate?.strongEdges || null}
-                        regions={preSemanticRegions}
-                        traversalState={aiTurn?.singularity?.traversalState || null}
+                      graph={sheetData.mappingArtifact?.geometry?.substrate || null}
+                      paragraphProjection={sheetData.paragraphProjection}
+                      claims={sheetData.semanticClaims}
+                      shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}
+                      mutualEdges={sheetData.mappingArtifact?.geometry?.substrate?.mutualEdges || null}
+                      strongEdges={sheetData.mappingArtifact?.geometry?.substrate?.strongEdges || null}
+                      regions={sheetData.preSemanticRegions}
+                      traversalState={sheetData.aiTurn?.singularity?.traversalState || null}
+                      preSemantic={(sheetData.mappingArtifact as any)?.geometry?.preSemantic || null}
+                      embeddingStatus={(sheetData.mappingArtifact as any)?.geometry?.embeddingStatus || null}
                       batchResponses={(() => {
-                        const responses = (aiTurn as any)?.batch?.responses || {};
+                        const responses = (sheetData.aiTurn as any)?.batch?.responses || {};
                         const entries = Object.entries(responses);
                         let fallbackIndex = 1;
                         return entries.map(([providerId, r]: any) => {
@@ -1397,134 +2412,674 @@ export const DecisionMapSheet = React.memo(() => {
                         });
                       })()}
                       completeness={null}
-                      shape={shape}
+                      shape={sheetData.shape}
                     />
                   </m.div>
                 )}
 
-                {activeTab === 'json' && (
+                {activeTab === 'traversal' && (
                   <m.div
-                    key="json"
+                    key="traversal"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative custom-scrollbar"
+                  >
+                    <div className="px-6 pt-6 pb-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-lg font-bold text-text-primary">Traversal Analysis</div>
+                          <div className="text-xs text-text-muted mt-1">
+                            Debug-only mechanical scan of conditionals and conflicts
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {(["conditions", "conflicts", "orphans"] as const).map((k) => {
+                            const active = traversalSubTab === k;
+                            const label = k === "conditions" ? "Conditions" : k === "conflicts" ? "Conflicts" : "Orphans";
+                            return (
+                              <button
+                                key={k}
+                                type="button"
+                                onClick={() => setTraversalSubTab(k)}
+                                className={clsx(
+                                  "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+                                  active
+                                    ? "bg-surface-raised border-border-strong text-text-primary"
+                                    : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
+                                )}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {!sheetData.traversalAnalysis && (
+                      <div className="px-6 pb-6">
+                        <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
+                          Traversal analysis not computed for this turn
+                        </div>
+                      </div>
+                    )}
+
+                    {sheetData.traversalAnalysis && traversalSubTab === "conditions" && (
+                      <div className="px-6 pb-10 space-y-3">
+                        {sheetData.traversalAnalysis.conditions.length === 0 ? (
+                          <div className="text-sm text-text-muted">No conditionals detected.</div>
+                        ) : (
+                          sheetData.traversalAnalysis.conditions.map((c, idx) => {
+                            const badge =
+                              c.status === "passing"
+                                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                : "bg-amber-500/15 text-amber-400 border-amber-500/30";
+                            return (
+                              <details
+                                key={c.id}
+                                open={idx === 0}
+                                className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+                              >
+                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-text-primary truncate">
+                                      {c.clause ? c.clause : "Conditional cluster"}
+                                    </div>
+                                    <div className="text-[11px] text-text-muted mt-0.5">
+                                      {c.claimIds.length} claim(s) · {c.statements.length} statement(s)
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-none">
+                                    <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badge)}>
+                                      {c.status === "passing" ? "PASSING" : "FILTERED OUT"}
+                                    </span>
+                                    <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted font-mono">
+                                      {c.strength.toFixed(2)}
+                                    </span>
+                                  </div>
+                                </summary>
+                                <div className="px-4 pb-4 pt-1 space-y-3">
+                                  {c.filterReason && (
+                                    <div className="text-[12px] text-text-muted">
+                                      Filter: {c.filterReason}
+                                    </div>
+                                  )}
+                                  <div className="space-y-1">
+                                    <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Claims</div>
+                                    <div className="flex flex-wrap gap-2">
+                                      {c.claimIds.map((cid) => (
+                                        <button
+                                          key={cid}
+                                          type="button"
+                                          className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors"
+                                          onClick={() => {
+                                            const label = (semanticClaims || []).find((x: any) => String(x?.id || "") === cid)?.label;
+                                            setActiveTab("graph");
+                                            setSelectedNode({ id: cid, label: String(label || cid), supporters: [] });
+                                          }}
+                                        >
+                                          {cid}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Statements</div>
+                                    <div className="space-y-2">
+                                      {c.statements.map((s) => (
+                                        <div key={s.id} className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                          <div className="flex items-center justify-between gap-3">
+                                            <div className="text-xs text-text-muted font-mono">
+                                              {s.id}
+                                              {typeof s.modelIndex === "number" ? ` · M${s.modelIndex}` : ""}
+                                              {s.stance ? ` · ${s.stance}` : ""}
+                                            </div>
+                                            {typeof s.confidence === "number" && (
+                                              <div className="text-xs text-text-muted font-mono">
+                                                {s.confidence.toFixed(2)}
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div className="text-sm text-text-primary mt-2 leading-relaxed">
+                                            "{s.text}"
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </details>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+
+                    {sheetData.traversalAnalysis && traversalSubTab === "conflicts" && (
+                      <div className="px-6 pb-10 space-y-3">
+                        {sheetData.traversalAnalysis.conflicts.length === 0 ? (
+                          <div className="text-sm text-text-muted">No conflicts detected.</div>
+                        ) : (
+                          sheetData.traversalAnalysis.conflicts.map((c, idx) => {
+                            const badge =
+                              c.status === "passing"
+                                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                : "bg-amber-500/15 text-amber-400 border-amber-500/30";
+                            return (
+                              <details
+                                key={c.id}
+                                open={idx === 0}
+                                className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+                              >
+                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-text-primary truncate">
+                                      {c.claimA.label} vs {c.claimB.label}
+                                    </div>
+                                    <div className="text-[11px] text-text-muted mt-0.5">
+                                      significance {c.significance.toFixed(2)} · threshold {c.threshold}
+                                    </div>
+                                  </div>
+                                  <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold flex-none", badge)}>
+                                    {c.status === "passing" ? "PASSING" : "FILTERED OUT"}
+                                  </span>
+                                </summary>
+                                <div className="px-4 pb-4 pt-1 space-y-2">
+                                  <div className="text-[12px] text-text-muted">
+                                    {c.status === "passing" ? "Pass:" : "Filter:"} {c.reason}
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {[c.claimA, c.claimB].map((cl) => (
+                                      <button
+                                        key={cl.id}
+                                        type="button"
+                                        className="text-left bg-surface-highlight/10 border border-border-subtle rounded-lg p-3 hover:bg-surface-highlight/20 transition-colors"
+                                        onClick={() => {
+                                          setActiveTab("graph");
+                                          setSelectedNode({ id: cl.id, label: cl.label, supporters: [] });
+                                        }}
+                                      >
+                                        <div className="text-xs text-text-muted font-mono">{cl.id}</div>
+                                        <div className="text-sm font-semibold text-text-primary mt-1">{cl.label}</div>
+                                        <div className="text-[11px] text-text-muted mt-1">supporters {cl.supportCount}</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </details>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+
+                    {sheetData.traversalAnalysis && traversalSubTab === "orphans" && (
+                      <div className="px-6 pb-10 space-y-3">
+                        {sheetData.traversalAnalysis.orphans.length === 0 ? (
+                          <div className="text-sm text-text-muted">No orphaned conditionals.</div>
+                        ) : (
+                          sheetData.traversalAnalysis.orphans.map((o) => (
+                            <div key={o.statement.id} className="bg-surface border border-border-subtle rounded-xl p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-xs text-text-muted font-mono">
+                                  {o.statement.id}
+                                  {typeof o.statement.modelIndex === "number" ? ` · M${o.statement.modelIndex}` : ""}
+                                  {o.statement.stance ? ` · ${o.statement.stance}` : ""}
+                                </div>
+                                <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">
+                                  ORPHAN
+                                </span>
+                              </div>
+                              {o.clause && (
+                                <div className="text-[12px] text-text-muted mt-2">
+                                  Extracted clause: {o.clause}
+                                </div>
+                              )}
+                              <div className="text-[12px] text-text-muted mt-1">
+                                Reason: {o.reason}
+                              </div>
+                              <div className="text-sm text-text-primary mt-3 leading-relaxed">
+                                "{o.statement.text}"
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </m.div>
+                )}
+
+                {activeTab === 'evidence' && (
+                  <m.div
+                    key="evidence"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     className="h-full overflow-y-auto relative custom-scrollbar p-6"
                   >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div>
-                          <div className="text-sm font-semibold">Raw Data</div>
-                          <div className="text-xs text-text-muted">Expand sections to view JSON/text</div>
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <ShadowAuditView
+                        audit={shadowDeltaForView?.audit}
+                        topUnreferenced={shadowDeltaForView?.unreferenced}
+                        processingTimeMs={shadowDeltaForView?.processingTimeMs}
+                      />
+                      <div className="text-right">
+                        <div className="text-[11px] text-text-muted">Evidence</div>
+                        <div className="text-[11px] text-text-muted">
+                          {evidenceViewMode === "statements"
+                            ? `${filteredShadowStatements.length.toLocaleString()} shown`
+                            : `${filteredShadowParagraphs.length.toLocaleString()} shown`}
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
-                          onClick={() => setOpenJsonKeys(new Set(jsonSections.map(s => s.key)))}
-                        >
-                          Expand All
-                        </button>
-                        <button
-                          type="button"
-                          className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
-                          onClick={() => setOpenJsonKeys(new Set())}
-                        >
-                          Collapse All
-                        </button>
-                        <CopyButton
-                          text={jsonTextByKey.get('cognitive_artifact') || ''}
-                          label="Copy cognitive artifact"
-                          buttonText="Copy All"
-                        />
-                        <button
-                          type="button"
-                          className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
-                          onClick={() => {
-                            let url: string | undefined;
-                            try {
-                              const text = jsonTextByKey.get('cognitive_artifact') || '';
-                              if (!text) throw new Error("No artifact data available");
-
-                              const blob = new Blob([text], { type: 'application/json' });
-                              url = URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `cognitive_artifact_${aiTurn?.id || 'turn'}.json`;
-                              a.click();
-
-                              setToast({ id: Date.now(), message: 'Exported successfully', type: 'success' });
-                            } catch (err: any) {
-                              console.error("[DecisionMapSheet] Export failed:", err);
-                              setToast({ id: Date.now(), message: `Export failed: ${err.message}`, type: 'error' });
-                            } finally {
-                              if (url) URL.revokeObjectURL(url);
-                            }
-                          }}
-                        >
-                          Export
-                        </button>
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      {jsonSections.map((s) => {
-                        const text = jsonTextByKey.get(s.key) || '';
-                        const hasValue = s.kind === 'text' ? text.trim().length > 0 : Boolean(s.value);
-                        const isOpen = openJsonKeys.has(s.key);
+                    <div className="mb-4 bg-surface border border-border-subtle rounded-xl p-3">
+                      {evidenceViewMode === "statements" ? (() => {
+                        const s = computeEvidenceStatsFromStatements(filteredShadowStatements, shadowUnreferencedIdSet);
                         return (
-                          <div key={s.key} className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
-                            <button
-                              type="button"
-                              className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/5"
-                              onClick={() => {
-                                setOpenJsonKeys((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(s.key)) next.delete(s.key);
-                                  else next.add(s.key);
-                                  return next;
-                                });
-                              }}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className="text-xs font-semibold text-text-primary">{s.label}</div>
-                                {!hasValue && (
-                                  <div className="text-[11px] text-text-muted">(empty)</div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="text-[11px] text-text-muted font-mono">
-                                  {text ? `${text.length.toLocaleString()} chars` : '—'}
-                                </div>
-                                <div className={clsx("text-text-muted", isOpen && "rotate-180")}>
-                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                  </svg>
-                                </div>
-                              </div>
-                            </button>
-                            {isOpen && (
-                              <div className="px-4 pb-4">
-                                <div className="flex items-center justify-end gap-2 mb-3">
-                                  <CopyButton text={text} label={`Copy ${s.label}`} variant="icon" />
-                                </div>
-                                {text ? (
-                                  <div className="max-h-[55vh] overflow-auto custom-scrollbar rounded-lg border border-border-subtle bg-black/20">
-                                    <pre className="text-[11px] leading-snug whitespace-pre min-w-max p-3">{text}</pre>
-                                  </div>
-                                ) : (
-                                  <div className="text-text-muted text-sm">No data available.</div>
-                                )}
-                              </div>
-                            )}
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Statements: {s.total.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Ref: {s.referenced.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Unref: {s.unreferenced.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">SEQ: {s.bySignal.sequence.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">TENS: {s.bySignal.tension.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">COND: {s.bySignal.conditional.toLocaleString()}</span>
                           </div>
                         );
-                      })}
+                      })() : (() => {
+                        const p = computeEvidenceStatsFromParagraphs(filteredShadowParagraphs, shadowUnreferencedIdSet);
+                        return (
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Paragraphs: {p.total.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Contested: {p.contested.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Ref: {p.referenced.toLocaleString()}</span>
+                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Unref: {p.unreferenced.toLocaleString()}</span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 mb-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className={clsx(
+                            "px-3 py-1.5 rounded-full text-xs border",
+                            evidenceViewMode === "statements"
+                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                              : "bg-transparent border-border-subtle text-text-muted"
+                          )}
+                          onClick={() => setEvidenceViewMode("statements")}
+                        >
+                          Statements
+                        </button>
+                        <button
+                          type="button"
+                          className={clsx(
+                            "px-3 py-1.5 rounded-full text-xs border",
+                            evidenceViewMode === "paragraphs"
+                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                              : "bg-transparent border-border-subtle text-text-muted"
+                          )}
+                          onClick={() => setEvidenceViewMode("paragraphs")}
+                        >
+                          Paragraphs
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {[
+                          { key: "all", label: "All" },
+                          { key: "prescriptive", label: "Prescriptive" },
+                          { key: "cautionary", label: "Cautionary" },
+                          { key: "prerequisite", label: "Prerequisites" },
+                          { key: "dependent", label: "Dependents" },
+                          { key: "assertive", label: "Assertive" },
+                          { key: "uncertain", label: "Uncertain" },
+                        ].map((f) => (
+                          <button
+                            key={f.key}
+                            type="button"
+                            className={clsx(
+                              "px-2.5 py-1 rounded-full text-[11px] border",
+                              evidenceStanceFilter === f.key
+                                ? "bg-white/10 border-brand-500 text-text-primary"
+                                : "bg-transparent border-border-subtle text-text-muted"
+                            )}
+                            onClick={() => setEvidenceStanceFilter(f.key)}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {[
+                          { key: "all" as const, label: "All" },
+                          { key: "referenced" as const, label: "Referenced" },
+                          { key: "unreferenced" as const, label: "Unreferenced" },
+                        ].map((f) => (
+                          <button
+                            key={f.key}
+                            type="button"
+                            className={clsx(
+                              "px-2.5 py-1 rounded-full text-[11px] border",
+                              evidenceRefFilter === f.key
+                                ? "bg-white/10 border-brand-500 text-text-primary"
+                                : "bg-transparent border-border-subtle text-text-muted"
+                            )}
+                            onClick={() => setEvidenceRefFilter(f.key)}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="bg-black/30 border border-white/10 rounded px-2 py-1 text-[11px] text-text-primary"
+                          value={evidenceModelFilter === "all" ? "all" : String(evidenceModelFilter)}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setEvidenceModelFilter(v === "all" ? "all" : Number(v));
+                          }}
+                          disabled={evidenceModelIndices.length === 0}
+                        >
+                          <option value="all">All models</option>
+                          {evidenceModelIndices.map((mi) => (
+                            <option key={mi} value={String(mi)}>Model {mi}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {evidenceViewMode === "statements" ? (
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                            <input
+                              type="checkbox"
+                              className="rounded"
+                              checked={evidenceSignalFilters.sequence}
+                              onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, sequence: e.target.checked }))}
+                            />
+                            SEQ
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                            <input
+                              type="checkbox"
+                              className="rounded"
+                              checked={evidenceSignalFilters.tension}
+                              onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, tension: e.target.checked }))}
+                            />
+                            TENS
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                            <input
+                              type="checkbox"
+                              className="rounded"
+                              checked={evidenceSignalFilters.conditional}
+                              onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, conditional: e.target.checked }))}
+                            />
+                            COND
+                          </label>
+                        </div>
+                      ) : (
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                          <input
+                            type="checkbox"
+                            className="rounded"
+                            checked={evidenceContestedOnly}
+                            onChange={(e) => setEvidenceContestedOnly(e.target.checked)}
+                          />
+                          Contested
+                        </label>
+                      )}
+                    </div>
+                    {evidenceViewMode === "statements" && (
+                      <div className="space-y-2">
+                        {filteredShadowStatements.length === 0 && (
+                          <div className="text-sm text-text-muted">No statements match the current filters.</div>
+                        )}
+                        {filteredShadowStatements.map((s: any) => {
+                          const id = String(s?.id || "");
+                          const stance = String(s?.stance || "");
+                          const modelIndex = typeof s?.modelIndex === "number" ? s.modelIndex : null;
+                          const isUnreferenced = id && shadowUnreferencedIdSet.has(id);
+                          const signals = s?.signals || {};
+                          const hasSequence = !!signals.sequence;
+                          const hasTension = !!signals.tension;
+                          const hasConditional = !!signals.conditional;
+                          const regionId = String(s?.geometricCoordinates?.regionId || "").trim();
+                          const linkedClaimIds = id ? (statementToClaimIds.get(id) || []) : [];
+                          const linkedClaims = linkedClaimIds.map((cid) => claimById.get(cid)).filter(Boolean);
+                          return (
+                            <div
+                              key={id || s?.text}
+                              className="p-3 rounded-xl bg-surface border border-border-subtle flex flex-col gap-2"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
+                                    {stance || "unknown"}
+                                  </span>
+                                  {isUnreferenced && (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-[10px] font-mono uppercase text-amber-400">
+                                      Unreferenced
+                                    </span>
+                                  )}
+                                  {modelIndex != null && (
+                                    <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
+                                      Model {modelIndex}
+                                    </span>
+                                  )}
+                                  {regionId && (
+                                    <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
+                                      Region {regionId}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 text-[10px] text-text-muted">
+                                  {hasSequence && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">SEQ</span>}
+                                  {hasTension && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">TENS</span>}
+                                  {hasConditional && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">COND</span>}
+                                </div>
+                              </div>
+                              <div className="text-sm text-text-primary leading-relaxed">
+                                {s?.text}
+                              </div>
+                              {linkedClaims.length > 0 && (
+                                <div className="pt-2 border-t border-white/5">
+                                  <div className="text-[10px] text-text-muted mb-1">Claims:</div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {linkedClaims.slice(0, 4).map((c: any) => (
+                                      <span key={String(c?.id)} className="px-2 py-1 rounded-full bg-amber-500/5 border border-amber-400/20 text-[10px] text-amber-300 truncate max-w-[260px]">
+                                        {String(c?.label || c?.id)}
+                                      </span>
+                                    ))}
+                                    {linkedClaims.length > 4 && (
+                                      <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle text-[10px] text-text-muted">
+                                        +{linkedClaims.length - 4} more
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {evidenceViewMode === "paragraphs" && (
+                      <div className="space-y-2">
+                        {filteredShadowParagraphs.length === 0 && (
+                          <div className="text-sm text-text-muted">No paragraphs match the current filters.</div>
+                        )}
+                        {filteredShadowParagraphs.map((p: any) => {
+                          const key = String(p?.id || `${p?.modelIndex}:${p?.paragraphIndex}`);
+                          const stance = String(p?.dominantStance || "");
+                          const contested = !!p?.contested;
+                          const byModel = typeof p?.modelIndex === "number" ? p.modelIndex : null;
+                          const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
+                          const linkedClaimIdSet = new Set<string>();
+                          for (const raw of ids) {
+                            const sid = String(raw || "").trim();
+                            if (!sid) continue;
+                            const cids = statementToClaimIds.get(sid) || [];
+                            for (const cid of cids) linkedClaimIdSet.add(cid);
+                          }
+                          const linkedClaims = Array.from(linkedClaimIdSet).map((cid) => claimById.get(cid)).filter(Boolean);
+                          let hasUnref = false;
+                          let hasRef = false;
+                          for (const raw of ids) {
+                            const id = String(raw || "").trim();
+                            if (!id) continue;
+                            if (shadowUnreferencedIdSet.has(id)) hasUnref = true;
+                            else hasRef = true;
+                            if (hasUnref && hasRef) break;
+                          }
+                          const paragraphClass =
+                            hasUnref && !hasRef
+                              ? "border-amber-500/60"
+                              : hasRef && !hasUnref
+                              ? "border-emerald-500/60"
+                              : "border-border-subtle";
+                          return (
+                            <div
+                              key={key}
+                              className={clsx(
+                                "p-3 rounded-xl bg-surface border flex flex-col gap-2",
+                                paragraphClass
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
+                                    {stance || "unknown"}
+                                  </span>
+                                  {contested && (
+                                    <span className="px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/40 text-[10px] font-mono uppercase text-rose-400">
+                                      Contested
+                                    </span>
+                                  )}
+                                  {byModel != null && (
+                                    <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
+                                      Model {byModel}
+                                    </span>
+                                  )}
+                                  {hasUnref && !hasRef && (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-[10px] font-mono uppercase text-amber-400">
+                                      All Unreferenced
+                                    </span>
+                                  )}
+                                  {hasRef && !hasUnref && (
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/40 text-[10px] font-mono uppercase text-emerald-400">
+                                      Referenced
+                                    </span>
+                                  )}
+                                  {hasRef && hasUnref && (
+                                    <span className="px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/40 text-[10px] font-mono uppercase text-sky-400">
+                                      Mixed
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-text-muted">
+                                  {ids.length.toLocaleString()} statements
+                                </div>
+                              </div>
+                              <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+                                {p?._fullParagraph}
+                              </div>
+                              {linkedClaims.length > 0 && (
+                                <div className="pt-2 border-t border-white/5">
+                                  <div className="text-[10px] text-text-muted mb-1">Claims:</div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {linkedClaims.slice(0, 4).map((c: any) => (
+                                      <span key={String(c?.id)} className="px-2 py-1 rounded-full bg-amber-500/5 border border-amber-400/20 text-[10px] text-amber-300 truncate max-w-[260px]">
+                                        {String(c?.label || c?.id)}
+                                      </span>
+                                    ))}
+                                    {linkedClaims.length > 4 && (
+                                      <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle text-[10px] text-text-muted">
+                                        +{linkedClaims.length - 4} more
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="mt-6">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-surface border border-border-subtle hover:bg-surface-highlight transition-colors"
+                        onClick={() => setEvidenceCoverageOpen((v) => !v)}
+                      >
+                        <div className="text-xs font-semibold text-text-primary">Coverage</div>
+                        <div className={clsx("text-text-muted", evidenceCoverageOpen && "rotate-180")}>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </button>
+                      {evidenceCoverageOpen && (
+                        <div className="mt-2 bg-black/20 border border-border-subtle rounded-xl p-4">
+                          <div className="text-[11px] text-text-muted">
+                            Unreferenced statements: {shadowUnreferencedIdSet.size.toLocaleString()}
+                          </div>
+                          {(() => {
+                            const highSignal = filteredShadowStatements.filter((s: any) => {
+                              const id = String(s?.id || "").trim();
+                              if (!id || !shadowUnreferencedIdSet.has(id)) return false;
+                              const sig = s?.signals || {};
+                              return !!sig.sequence || !!sig.tension || !!sig.conditional;
+                            });
+                            if (highSignal.length === 0) return null;
+                            return (
+                              <div className="mt-3">
+                                <div className="text-[11px] font-medium text-text-primary mb-2">High-signal unreferenced</div>
+                                <div className="space-y-2">
+                                  {highSignal.slice(0, 6).map((s: any) => (
+                                    <div key={String(s?.id || s?.text)} className="text-[11px] text-text-secondary">
+                                      <span className="font-mono text-text-muted mr-2">{String(s?.id || "")}</span>
+                                      {String(s?.text || "").slice(0, 220)}
+                                      {String(s?.text || "").length > 220 ? "\u2026" : ""}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </div>
                   </m.div>
                 )}
               </AnimatePresence>
             </div>
+
+            {aiTurn?.singularity?.prompt && (
+              <div className="border-t border-white/10 bg-black/10">
+                <button
+                  type="button"
+                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-white/5 transition-colors"
+                  onClick={() => setPromptOpen((v) => !v)}
+                >
+                  <div className="text-xs text-text-muted font-medium">Singularity prompt sent</div>
+                  <div className={clsx("text-text-muted", promptOpen && "rotate-180")}>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </button>
+                {promptOpen && (
+                  <div className="px-6 pb-5">
+                    <div className="flex items-center justify-end mb-2">
+                      <CopyButton text={String(aiTurn?.singularity?.prompt || "")} label="Copy singularity prompt" variant="icon" />
+                    </div>
+                    <pre className="text-[11px] leading-snug whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4">{String(aiTurn?.singularity?.prompt || "")}</pre>
+                  </div>
+                )}
+              </div>
+            )}
           </m.div>
         </LazyMotion>
       )}

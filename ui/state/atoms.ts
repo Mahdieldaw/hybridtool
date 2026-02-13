@@ -425,7 +425,7 @@ export const activeSplitPanelAtom = atom<{ turnId: string; providerId: string } 
 export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null);
 
 
-export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'json' } | null>(null);
+export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
 
 
@@ -541,7 +541,6 @@ export const pinnedSingularityProvidersAtom = atom<Record<string, string>>({});
  * Value is the turnId or null
  */
 export const hasAutoOpenedPaneAtom = atom<string | null>(null);
-
 
 
 

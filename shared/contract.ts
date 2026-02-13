@@ -70,7 +70,15 @@ export interface Claim {
   text: string;
   dimension?: string | null; // Optional legacy metadata
   supporters: number[];
-  type: 'factual' | 'prescriptive' | 'conditional' | 'contested' | 'speculative';
+  type:
+    | 'factual'
+    | 'prescriptive'
+    | 'cautionary'
+    | 'assertive'
+    | 'uncertain'
+    | 'conditional'
+    | 'contested'
+    | 'speculative';
   role: 'anchor' | 'branch' | 'challenger' | 'supplement';
   challenges: string | null;
   quote?: string;
@@ -81,7 +89,7 @@ export interface Claim {
 export interface Edge {
   from: string;
   to: string;
-  type: 'supports' | 'conflicts' | 'tradeoff';
+  type: 'supports' | 'conflicts' | 'tradeoff' | 'prerequisite';
 }
 
 export interface MapperClaim {
@@ -89,13 +97,20 @@ export interface MapperClaim {
   label: string;
   text: string;
   supporters: number[];
+  challenges?: string | null;
 }
 
 export type MapperEdge =
   | {
     from: string;
     to: string;
-    type: 'conflict';
+    type: 'conflicts';
+    question?: string | null;
+  }
+  | {
+    from: string;
+    to: string;
+    type: 'prerequisite';
     question?: string | null;
   };
 
@@ -126,9 +141,26 @@ export type Determinant =
 
 export interface UnifiedMapperOutput {
   claims: MapperClaim[];
+  conditions?: Array<{
+    id: string;
+    question: string;
+  }>;
   determinants?: Determinant[];
-  edges: MapperEdge[];
+  edges: Edge[];
   conditionals: ConditionalPruner[];
+}
+
+export interface ConditionMatch {
+  statementId: string;
+  modelIndex: number;
+  text: string;
+  similarity: number;
+}
+
+export interface ConditionProvenance {
+  conditionId: string;
+  question: string;
+  linkedStatements: ConditionMatch[];
 }
 
 export interface GraphEdge {
@@ -159,6 +191,7 @@ export interface PeakPairRelationship {
   conflicts: boolean;
   tradesOff: boolean;
   supports: boolean;
+  prerequisites: boolean;
 }
 
 export interface ShapeClassification {
@@ -167,24 +200,526 @@ export interface ShapeClassification {
   evidence: string[];
 }
 
-export type ProblemStructure = ShapeClassification;
+export interface ProblemStructure extends ShapeClassification {
+  patterns?: SecondaryPattern[];
+  peaks?: Array<{ id: string; label: string; supportRatio: number }>;
+  peakRelationship?: "conflicting" | "trading-off" | "supporting" | "independent" | "none";
+  peakPairRelations?: PeakPairRelationship[];
+  transferQuestion?: string;
+  data?: ShapeData;
+  signalStrength?: number;
+  floorAssumptions?: string[];
+  centralConflict?: string;
+  tradeoffs?: string[];
+}
+
+export type CompositeShape = ProblemStructure & {
+  patterns: SecondaryPattern[];
+  peaks: Array<{ id: string; label: string; supportRatio: number }>;
+  peakRelationship: NonNullable<ProblemStructure["peakRelationship"]>;
+};
 export type ClaimRole = 'anchor' | 'branch' | 'challenger' | 'supplement';
+
+export interface ConflictClaim {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  supportRatio: number;
+  role: ClaimRole;
+  isHighSupport: boolean;
+  challenges: string | null;
+}
+
+export interface ConflictInfo {
+  id: string;
+  claimA: ConflictClaim;
+  claimB: ConflictClaim;
+  axis: {
+    explicit: string | null;
+    inferred: string | null;
+    resolved: string;
+  };
+  combinedSupport: number;
+  supportDelta: number;
+  dynamics: 'symmetric' | 'asymmetric';
+  isBothHighSupport: boolean;
+  isHighVsLow: boolean;
+  involvesChallenger: boolean;
+  involvesAnchor: boolean;
+  involvesKeystone: boolean;
+  stakes: {
+    choosingA: string;
+    choosingB: string;
+  };
+  significance: number;
+  clusterId: string | null;
+}
+
+export interface ConflictCluster {
+  id: string;
+  axis: string;
+  targetId: string;
+  challengerIds: string[];
+  theme: string;
+}
+
+export interface SupportingClaim {
+  id: string;
+  label: string;
+  relationship: 'supports' | 'prerequisite' | 'aligned';
+}
+
+export type CentralConflict = CentralConflictIndividual | CentralConflictCluster;
+
+export interface CentralConflictIndividual {
+  type: 'individual';
+  axis: string;
+  positionA: {
+    claim: ConflictClaim;
+    supportingClaims: SupportingClaim[];
+    supportRationale: string;
+  };
+  positionB: {
+    claim: ConflictClaim;
+    supportingClaims: SupportingClaim[];
+    supportRationale: string;
+  };
+  dynamics: 'symmetric' | 'asymmetric';
+  stakes: {
+    choosingA: string;
+    choosingB: string;
+  };
+}
+
+export interface CentralConflictCluster {
+  type: 'cluster';
+  axis: string;
+  target: {
+    claim: ConflictClaim;
+    supportingClaims: SupportingClaim[];
+    supportRationale: string;
+  };
+  challengers: {
+    claims: ConflictClaim[];
+    commonTheme: string;
+    supportingClaims: SupportingClaim[];
+  };
+  dynamics: 'one_vs_many';
+  stakes: {
+    acceptingTarget: string;
+    acceptingChallengers: string;
+  };
+}
+
+export interface FloorClaim {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  supportRatio: number;
+  isContested: boolean;
+  contestedBy: string[];
+}
+
+export interface ChallengerInfo {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  challenges: string | null;
+  targetsClaim: string | null;
+}
+
+export interface ChainStep {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  supportRatio: number;
+  position: number;
+  enables: string[];
+  isWeakLink: boolean;
+  weakReason: string | null;
+}
+
+export interface TradeoffOption {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  supportRatio: number;
+}
+
+export interface DimensionCluster {
+  id: string;
+  theme: string;
+  claims: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+  }>;
+  cohesion: number;
+  avgSupport: number;
+}
+
+export interface SettledShapeData {
+  pattern: 'settled';
+  floor: FloorClaim[];
+  floorStrength: 'strong' | 'moderate' | 'weak';
+  challengers: ChallengerInfo[];
+  blindSpots: string[];
+  confidence: number;
+  strongestOutlier: {
+    claim: {
+      id: string;
+      label: string;
+      text: string;
+      supportCount: number;
+      supportRatio: number;
+    };
+    reason: 'leverage_inversion' | 'explicit_challenger' | 'minority_voice';
+    structuralRole: string;
+    whatItQuestions: string;
+  } | null;
+  floorAssumptions: string[];
+  transferQuestion: string;
+}
+
+export interface LinearShapeData {
+  pattern: 'linear';
+  chain: ChainStep[];
+  chainLength: number;
+  weakLinks: Array<{
+    step: ChainStep;
+    cascadeSize: number;
+  }>;
+  alternativeChains: ChainStep[][];
+  terminalClaim: ChainStep | null;
+  shortcuts: Array<{
+    from: ChainStep;
+    to: ChainStep;
+    skips: string[];
+    supportEvidence: string;
+  }>;
+  chainFragility: {
+    weakLinkCount: number;
+    totalSteps: number;
+    fragilityRatio: number;
+    mostVulnerableStep: { step: ChainStep; cascadeSize: number } | null;
+  };
+  transferQuestion: string;
+}
+
+export interface KeystoneShapeData {
+  pattern: 'keystone';
+  keystone: {
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    supportRatio: number;
+    dominance: number;
+    isFragile: boolean;
+  };
+  dependencies: Array<{
+    id: string;
+    label: string;
+    relationship: 'prerequisite' | 'supports';
+  }>;
+  cascadeSize: number;
+  challengers: ChallengerInfo[];
+  decoupledClaims: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    independenceReason: string;
+  }>;
+  cascadeConsequences: {
+    directlyAffected: number;
+    transitivelyAffected: number;
+    survives: number;
+  };
+  transferQuestion: string;
+}
+
+export interface ContestedShapeData {
+  pattern: 'contested';
+  centralConflict: CentralConflict;
+  secondaryConflicts: ConflictInfo[];
+  floor: {
+    exists: boolean;
+    claims: FloorClaim[];
+    strength: 'strong' | 'weak' | 'absent';
+    isContradictory: boolean;
+  };
+  fragilities: {
+    leverageInversions: LeverageInversionInfo[];
+    articulationPoints: string[];
+  };
+  collapsingQuestion: string | null;
+}
+
+export interface TradeoffShapeData {
+  pattern: 'tradeoff';
+  tradeoffs: Array<{
+    id: string;
+    optionA: TradeoffOption;
+    optionB: TradeoffOption;
+    symmetry: 'both_high' | 'both_low' | 'asymmetric';
+    governingFactor: string | null;
+  }>;
+  dominatedOptions: Array<{
+    dominated: string;
+    dominatedBy: string;
+    reason: string;
+  }>;
+  floor: FloorClaim[];
+}
+
+export interface DimensionalShapeData {
+  pattern: 'dimensional';
+  dimensions: DimensionCluster[];
+  interactions: Array<{
+    dimensionA: string;
+    dimensionB: string;
+    relationship: 'independent' | 'overlapping' | 'conflicting';
+  }>;
+  gaps: string[];
+  governingConditions: string[];
+  dominantDimension: DimensionCluster | null;
+  hiddenDimension: DimensionCluster | null;
+  dominantBlindSpots: string[];
+  transferQuestion: string;
+}
+
+export interface ExploratoryShapeData {
+  pattern: 'exploratory';
+  strongestSignals: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    reason: string;
+  }>;
+  looseClusters: DimensionCluster[];
+  isolatedClaims: Array<{
+    id: string;
+    label: string;
+    text: string;
+  }>;
+  clarifyingQuestions: string[];
+  signalStrength: number;
+  outerBoundary: {
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    distanceReason: string;
+  } | null;
+  sparsityReasons: string[];
+  transferQuestion: string;
+}
+
+export interface ContextualShapeData {
+  pattern: 'contextual';
+  governingCondition: string;
+  branches: Array<{
+    condition: string;
+    claims: FloorClaim[];
+  }>;
+  defaultPath: {
+    exists: boolean;
+    claims: FloorClaim[];
+  } | null;
+  missingContext: string[];
+}
+
+export type ShapeData =
+  | SettledShapeData
+  | LinearShapeData
+  | KeystoneShapeData
+  | ContestedShapeData
+  | TradeoffShapeData
+  | DimensionalShapeData
+  | ExploratoryShapeData
+  | ContextualShapeData;
 
 
 
 export type PrimaryShape = 'convergent' | 'forked' | 'parallel' | 'constrained' | 'sparse';
 
+export type SecondaryPatternType =
+  | 'challenged'
+  | 'keystone'
+  | 'chain'
+  | 'fragile'
+  | 'conditional'
+  | 'orphaned'
+  | 'dissent';
+
+export interface SecondaryPattern {
+  type: SecondaryPatternType;
+  severity: 'high' | 'medium' | 'low';
+  data:
+    | ChallengedPatternData
+    | KeystonePatternData
+    | ChainPatternData
+    | FragilePatternData
+    | ConditionalPatternData
+    | OrphanedPatternData
+    | DissentPatternData;
+}
+
+export interface ChallengedPatternData {
+  challenges: Array<{
+    challenger: { id: string; label: string; supportRatio: number };
+    target: { id: string; label: string; supportRatio: number };
+  }>;
+}
+
+export interface KeystonePatternData {
+  keystone: { id: string; label: string; supportRatio: number };
+  dependents: string[];
+  cascadeSize: number;
+}
+
+export interface ChainPatternData {
+  chain: string[];
+  length: number;
+  weakLinks: string[];
+}
+
+export interface FragilePatternData {
+  fragilities: Array<{
+    peak: { id: string; label: string };
+    weakFoundation: { id: string; label: string; supportRatio: number };
+  }>;
+}
+
+export interface ConditionalPatternData {
+  conditions: Array<{ id: string; label: string; branches: string[] }>;
+}
+
+export interface OrphanedPatternData {
+  orphans: Array<{ id: string; label: string; supportRatio: number; reason: string }>;
+}
+
+export interface DissentPatternData {
+  voices: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportRatio: number;
+    insightType: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
+    targets?: string[];
+    insightScore: number;
+  }>;
+  strongestVoice: {
+    id: string;
+    label: string;
+    text: string;
+    supportRatio: number;
+    whyItMatters: string;
+    insightType?: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
+  } | null;
+  suppressedDimensions: string[];
+}
+
+export interface PeakAnalysis {
+  peaks: EnrichedClaim[];
+  hills: EnrichedClaim[];
+  floor: EnrichedClaim[];
+  peakIds: string[];
+  peakConflicts: Edge[];
+  peakTradeoffs: Edge[];
+  peakSupports: Edge[];
+  peakUnconnected: boolean;
+}
+
+export interface CoreRatios {
+  concentration: number;
+  alignment: number | null;
+  tension: number;
+  fragmentation: number;
+  depth: number;
+}
+
+export interface GraphAnalysis {
+  componentCount: number;
+  components: string[][];
+  longestChain: string[];
+  chainCount: number;
+  hubClaim: string | null;
+  hubDominance: number;
+  articulationPoints: string[];
+  clusterCohesion: number;
+  localCoherence: number;
+}
+
 
 export interface EnrichedClaim extends Claim {
+  derivedType?: Claim['type'];
+  sourceStatementIds?: string[];
+  sourceStatements?: ShadowStatement[];
+  hasSequenceSignal?: boolean;
+  hasTensionSignal?: boolean;
+  hasConditionalSignal?: boolean;
+  geometricSignals?: {
+    backedByPeak: boolean;
+    backedByHill: boolean;
+    backedByFloor: boolean;
+    avgGeometricConfidence: number;
+    sourceRegionIds: string[];
+  };
   supportRatio: number;
+  leverage: number;
+  leverageFactors: {
+    supportWeight: number;
+    roleWeight: number;
+    connectivityWeight: number;
+    positionWeight: number;
+  };
+  keystoneScore: number;
+  evidenceGapScore: number;
+  supportSkew: number;
   inDegree: number;
   outDegree: number;
+  isChainRoot: boolean;
+  isChainTerminal: boolean;
+
   isHighSupport: boolean;
+  isLeverageInversion: boolean;
+  isKeystone: boolean;
+  isEvidenceGap: boolean;
+  isOutlier: boolean;
   isContested: boolean;
   isConditional: boolean;
   isChallenger: boolean;
   isIsolated: boolean;
+  chainDepth: number;
 }
+
+export interface LeverageInversionInfo {
+  claimId: string;
+  claimLabel: string;
+  strongClaim?: string;
+  supporterCount: number;
+  reason: string;
+  affectedClaims: string[];
+}
+export type LeverageInversion = LeverageInversionInfo;
+
+export interface CascadeRiskInfo {
+  sourceId: string;
+  sourceLabel: string;
+  dependentIds: string[];
+  dependentLabels: string[];
+  depth: number;
+}
+export type CascadeRisk = CascadeRiskInfo;
 
 
 
@@ -231,6 +766,7 @@ export interface MapperArtifact extends MapperOutput {
   forcingPoints?: ForcingPoint[];
   conditionals?: ConditionalPruner[];
   preSemantic?: PreSemanticInterpretation | null;
+  structuralValidation?: StructuralValidation | null;
 
   shadow?: {
     statements: ShadowStatement[];
@@ -831,6 +1367,7 @@ export interface CognitiveArtifact {
     embeddingStatus: "computed" | "failed";
     substrate: PipelineSubstrateGraph;
     preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
+    structuralValidation?: StructuralValidation | null;
   };
   semantic: {
     claims: Claim[];
@@ -1351,6 +1888,14 @@ export interface TradeoffPair {
   symmetry: "both_consensus" | "both_singular" | "asymmetric";
 }
 
+export interface ConvergencePoint {
+  targetId: string;
+  targetLabel: string;
+  sourceIds: string[];
+  sourceLabels: string[];
+  edgeType: "prerequisite" | "supports";
+}
+
 export type ShadowStance =
   | 'prescriptive'
   | 'cautionary'
@@ -1425,10 +1970,29 @@ export interface StructuralAnalysis {
   };
   claimsWithLeverage: EnrichedClaim[];
   patterns: {
+    leverageInversions: LeverageInversion[];
+    cascadeRisks: CascadeRisk[];
     conflicts: ConflictPair[];
+    conflictInfos?: ConflictInfo[];
+    conflictClusters?: ConflictCluster[];
     tradeoffs: TradeoffPair[];
+    convergencePoints: ConvergencePoint[];
+    isolatedClaims: string[];
   };
+  ghostAnalysis?: {
+    count: number;
+    mayExtendChallenger: boolean;
+    challengerIds: string[];
+  };
+  graph?: GraphAnalysis;
+  ratios?: CoreRatios;
   shape: ProblemStructure;
+  shadow?: {
+    audit: ShadowAudit;
+    unindexed: ShadowEntry[];
+    topUnindexed: ShadowEntry[];
+    processingTime: number;
+  };
 }
 
 export type ProviderConfigEntry = {

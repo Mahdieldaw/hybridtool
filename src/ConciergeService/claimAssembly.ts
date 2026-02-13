@@ -2,8 +2,8 @@
 // CLAIM ASSEMBLY - TRAVERSAL ANALYSIS LAYER
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { Stance, ShadowParagraph, ShadowStatement } from '../shadow';
-import type { EnrichedClaim, MapperClaim, MapperEdge } from '../../shared/contract';
+import { STANCE_PRIORITY, Stance, ShadowParagraph, ShadowStatement } from '../shadow';
+import type { EnrichedClaim, MapperClaim, Edge, ConditionProvenance, ConditionMatch } from '../../shared/contract';
 import type { Region, RegionProfile } from '../geometry/interpretation/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
@@ -14,6 +14,79 @@ import {
     SemanticMapperOutput
 } from './contract';
 
+/**
+ * Reconstruct provenance for conditions (questions) by matching them to statements.
+ * This is the condition-based analogue of reconstructProvenance for claims.
+ * 
+ * @param conditions - Array of condition objects with id and question text
+ * @param statements - All shadow statements extracted from models
+ * @param statementEmbeddings - Pre-computed statement embeddings (required)
+ * @returns Array of ConditionProvenance with linked statements for each condition
+ */
+export async function reconstructConditionProvenance(
+    conditions: Array<{ id: string; question: string }>,
+    statements: ShadowStatement[],
+    statementEmbeddings: Map<string, Float32Array> | null
+): Promise<ConditionProvenance[]> {
+    if (!statementEmbeddings || statementEmbeddings.size === 0) {
+        console.warn('[reconstructConditionProvenance] No statement embeddings provided, returning empty provenance');
+        return conditions.map(c => ({
+            conditionId: c.id,
+            question: c.question,
+            linkedStatements: []
+        }));
+    }
+
+    // Embed all condition questions
+    const conditionTexts = conditions.map(c => c.question);
+    const conditionEmbeddings = await generateTextEmbeddings(conditionTexts);
+
+    return conditions.map((condition, idx) => {
+        const conditionEmbedding = conditionEmbeddings.get(String(idx));
+
+        if (!conditionEmbedding) {
+            return {
+                conditionId: condition.id,
+                question: condition.question,
+                linkedStatements: []
+            };
+        }
+
+        // Match condition embedding against ALL statement embeddings (no model filtering)
+        const scoredStatements: ConditionMatch[] = [];
+
+        for (const stmt of statements) {
+            const stmtEmb = statementEmbeddings.get(stmt.id);
+            if (!stmtEmb) continue;
+
+            const similarity = cosineSimilarity(conditionEmbedding, stmtEmb);
+            if (similarity > 0.45) {
+                scoredStatements.push({
+                    statementId: stmt.id,
+                    modelIndex: stmt.modelIndex,
+                    text: stmt.text,
+                    similarity
+                });
+            }
+        }
+
+        // Sort by similarity (highest first), take top-12
+        scoredStatements.sort((a, b) => {
+            if (b.similarity !== a.similarity) return b.similarity - a.similarity;
+            return a.statementId.localeCompare(b.statementId);
+        });
+
+        const linkedStatements = scoredStatements.slice(0, 12);
+
+        return {
+            conditionId: condition.id,
+            question: condition.question,
+            linkedStatements
+        };
+    });
+}
+
+
 export async function reconstructProvenance(
     claims: MapperClaim[],
     statements: ShadowStatement[],
@@ -22,7 +95,7 @@ export async function reconstructProvenance(
     regions: Region[],
     regionProfiles: RegionProfile[],
     totalModelCount: number,
-    edges: MapperEdge[] = [],
+    _edges: Edge[] = [],
     statementEmbeddings: Map<string, Float32Array> | null = null
 ): Promise<EnrichedClaim[]> {
     const statementsById = new Map(statements.map(s => [s.id, s]));
@@ -46,53 +119,6 @@ export async function reconstructProvenance(
     }
 
     const regionProfileById = new Map(regionProfiles.map(r => [r.regionId, r]));
-
-    const rolesByClaimId = (() => {
-        const byId = new Map<string, EnrichedClaim['role']>();
-        for (const c of claims) byId.set(c.id, 'anchor');
-
-        const supportCountById = new Map<string, number>();
-        for (const c of claims) {
-            const supporters = Array.isArray(c.supporters) ? c.supporters : [];
-            supportCountById.set(c.id, supporters.length);
-        }
-
-        const seenPairs = new Set<string>();
-        for (const e of edges || []) {
-            if (!e || e.type !== 'conflict') continue;
-            const a = String(e.from || '');
-            const b = String(e.to || '');
-            if (!a || !b) continue;
-            const key = [a, b].sort().join('::');
-            if (seenPairs.has(key)) continue;
-            seenPairs.add(key);
-
-            const aCount = supportCountById.get(a) || 0;
-            const bCount = supportCountById.get(b) || 0;
-            const denom = Math.max(1, totalModelCount || 1);
-            const aRatio = aCount / denom;
-            const bRatio = bCount / denom;
-
-            const aIsHighSupport = aRatio >= 0.25;
-            const bIsHighSupport = bRatio >= 0.25;
-
-            const supportDeltaRatio = Math.abs(aRatio - bRatio);
-
-            if (supportDeltaRatio >= 0.15) {
-                const highId = aRatio >= bRatio ? a : b;
-                const lowId = aRatio >= bRatio ? b : a;
-                const highIsStable = (supportCountById.get(highId) || 0) / denom >= 0.25;
-                if (highIsStable) {
-                    byId.set(lowId, 'challenger');
-                }
-            } else {
-                if (aIsHighSupport && byId.get(a) !== 'challenger') byId.set(a, 'anchor');
-                if (bIsHighSupport && byId.get(b) !== 'challenger') byId.set(b, 'anchor');
-            }
-        }
-
-        return byId;
-    })();
 
     // Pre-build statement→paragraph lookup for statement-level matching
     const statementToParagraphId = new Map<string, string>();
@@ -202,6 +228,41 @@ export async function reconstructProvenance(
         const hasSequenceSignal = sourceStatements.some(s => s.signals.sequence);
         const hasTensionSignal = sourceStatements.some(s => s.signals.tension);
 
+        let derivedType: EnrichedClaim['type'] = 'assertive';
+        if (sourceStatements.length === 0) {
+            derivedType = 'assertive';
+        } else {
+            const conditionalTrueCount = sourceStatements.reduce(
+                (acc, s) => acc + (s.signals.conditional ? 1 : 0),
+                0
+            );
+            if (hasConditionalSignal && conditionalTrueCount > sourceStatements.length / 2) {
+                derivedType = 'conditional';
+            } else {
+                const stanceCounts = new Map<Stance, number>();
+                for (const s of sourceStatements) {
+                    stanceCounts.set(s.stance, (stanceCounts.get(s.stance) || 0) + 1);
+                }
+
+                let bestStance: Stance = 'assertive';
+                let bestCount = -1;
+                for (const stance of STANCE_PRIORITY) {
+                    const count = stanceCounts.get(stance) || 0;
+                    if (count > bestCount) {
+                        bestCount = count;
+                        bestStance = stance;
+                    }
+                }
+
+                if (bestStance === 'prescriptive') derivedType = 'prescriptive';
+                else if (bestStance === 'cautionary') derivedType = 'cautionary';
+                else if (bestStance === 'prerequisite' || bestStance === 'dependent') derivedType = 'conditional';
+                else if (bestStance === 'assertive') derivedType = 'assertive';
+                else if (bestStance === 'uncertain') derivedType = 'uncertain';
+                else derivedType = 'assertive';
+            }
+        }
+
         // Derive regions from source statements → paragraphs → regions
         const matchedRegionIds = new Set<string>();
         for (const sid of sourceStatementIds) {
@@ -228,17 +289,13 @@ export async function reconstructProvenance(
             sourceRegionIds,
         };
 
-        const claimTypeRaw = (claim as unknown as { type?: unknown }).type;
-        const type: EnrichedClaim['type'] =
-            claimTypeRaw === 'factual' ||
-                claimTypeRaw === 'prescriptive' ||
-                claimTypeRaw === 'conditional' ||
-                claimTypeRaw === 'contested' ||
-                claimTypeRaw === 'speculative'
-                ? claimTypeRaw
-                : 'speculative';
+        const type: EnrichedClaim['type'] = derivedType;
 
-        const role: EnrichedClaim['role'] = rolesByClaimId.get(claim.id) || 'anchor';
+        const role: EnrichedClaim['role'] = 'supplement';
+        const stanceSet = new Set(sourceStatements.map(s => s.stance));
+        const isContested =
+            (stanceSet.has('prescriptive') && stanceSet.has('cautionary')) ||
+            (stanceSet.has('assertive') && stanceSet.has('uncertain'));
 
         return {
             id: claim.id,
@@ -246,8 +303,9 @@ export async function reconstructProvenance(
             text: claim.text,
             supporters: Array.isArray(claim.supporters) ? claim.supporters : [],
             type,
+            derivedType,
             role,
-            challenges: null,
+            challenges: claim.challenges || null,
             support_count: Array.isArray(claim.supporters) ? claim.supporters.length : 0,
 
             sourceStatementIds,
@@ -277,9 +335,9 @@ export async function reconstructProvenance(
             isKeystone: false,
             isEvidenceGap: false,
             isOutlier: false,
-            isContested: type === 'contested',
+            isContested,
             isConditional: type === 'conditional',
-            isChallenger: role === 'challenger',
+            isChallenger: false,
             isIsolated: false,
             chainDepth: 0,
         };

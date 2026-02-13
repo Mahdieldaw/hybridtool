@@ -145,7 +145,7 @@ export function computeTargetedAnalysis(
 
     if (selectedIds.length > 0) {
         for (const e of graph.edges || []) {
-            if (e?.type !== 'conflict') continue;
+            if (e?.type !== 'conflicts') continue;
 
             const aSelected = selectedIds.includes(e.from);
             const bSelected = selectedIds.includes(e.to);

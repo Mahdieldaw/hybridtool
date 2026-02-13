@@ -635,6 +635,36 @@ export default function HistoryPanel() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => {
+                if (!isBatchMode) {
+                  handleToggleBatchMode();
+                  return;
+                }
+                const count = selectedIds ? selectedIds.size : 0;
+                if (count > 0) {
+                  handleConfirmBatchDelete();
+                } else {
+                  handleToggleBatchMode();
+                }
+              }}
+              className={`relative p-2 rounded-full transition-colors ${isBatchMode
+                ? "bg-intent-danger/15 text-text-secondary hover:bg-intent-danger/20"
+                : "hover:bg-surface-highlight text-text-secondary hover:text-primary-500"
+                }`}
+              title={
+                isBatchMode
+                  ? (selectedIds.size > 0 ? `Delete selected (${selectedIds.size})` : "Exit selection mode")
+                  : "Select chats to delete"
+              }
+            >
+              <TrashIcon className="w-5 h-5" />
+              {isBatchMode && selectedIds.size > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-intent-danger text-white text-[10px] font-semibold flex items-center justify-center">
+                  {selectedIds.size}
+                </span>
+              )}
+            </button>
+            <button
               onClick={handleNewChat}
               className="p-2 hover:bg-surface-highlight rounded-full transition-colors text-text-secondary hover:text-primary-500"
               title="New Chat"
@@ -653,34 +683,6 @@ export default function HistoryPanel() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-        </div>
-
-        {/* Batch Actions */}
-        <div className="px-4 pt-2 flex gap-2">
-          <button
-            onClick={() => {
-              if (!isBatchMode) {
-                handleToggleBatchMode();
-                return;
-              }
-              const count = selectedIds ? selectedIds.size : 0;
-              if (count > 0) {
-                handleConfirmBatchDelete();
-              } else {
-                // If none selected, exit batch mode
-                handleToggleBatchMode();
-              }
-            }}
-            className={`flex-1 flex items-center justify-center px-3 py-2 rounded-lg border cursor-pointer transition-all duration-200 text-sm ${isBatchMode
-              ? "bg-intent-danger/15 border-intent-danger/45 text-text-secondary hover:bg-intent-danger/20"
-              : "bg-surface-raised border-border-subtle text-text-secondary hover:bg-surface-highlight hover:border-border-strong"
-              }`}
-          >
-            <div className="flex items-center gap-2">
-              <TrashIcon className="w-4 h-4" />
-              <span>{isBatchMode ? (selectedIds.size > 0 ? `Delete (${selectedIds.size})` : "Delete") : "Select"}</span>
-            </div>
-          </button>
         </div>
 
         {/* List */}

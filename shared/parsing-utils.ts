@@ -1178,7 +1178,33 @@ export function parseSemanticMapperOutput(
     }
 
     const narrativeFromMap = typeof (parsedMap as any).narrative === 'string' ? String((parsedMap as any).narrative) : '';
-    const narrative = String((narrativeContent || narrativeFromMap || '')).trim();
+    const narrativeFromText = normalizedText
+        .replace(mapTagPattern, '')
+        .replace(narrativeTagPattern, (_m, inner) => String(inner || ''))
+        .trim();
+
+    let narrative = narrativeFromText;
+
+    const nfm = String(narrativeFromMap || '').trim();
+    if (nfm && (!narrative || !narrative.includes(nfm))) {
+        narrative = narrative ? `${nfm}\n\n${narrative}`.trim() : nfm;
+    }
+
+    if (!narrative) {
+        narrative = String((narrativeContent || '')).trim();
+    }
+
+    if (!narrative) {
+        const lastMapMatch = mapMatches.length > 0 ? mapMatches[mapMatches.length - 1] : null;
+        const mapStart = lastMapMatch && typeof (lastMapMatch as any).index === 'number' ? (lastMapMatch as any).index : -1;
+        const mapEnd = mapStart >= 0 ? mapStart + String(lastMapMatch?.[0] || '').length : -1;
+
+        if (mapStart >= 0 && mapEnd > mapStart) {
+            narrative = (normalizedText.slice(0, mapStart) + normalizedText.slice(mapEnd)).trim();
+        } else {
+            narrative = normalizedText.replace(mapTagPattern, '').trim();
+        }
+    }
 
     const claimIds = new Set<string>();
     for (let i = 0; i < claims.length; i++) {
@@ -1280,7 +1306,7 @@ export function parseSemanticMapperOutput(
                         derivedEdges.push({
                             from: claimIds[a],
                             to: claimIds[b],
-                            type: 'conflict',
+                            type: 'conflicts',
                             question,
                         });
                     }
@@ -1312,7 +1338,8 @@ export function parseSemanticMapperOutput(
 
         const from = String((e as any).from || '').trim();
         const to = String((e as any).to || '').trim();
-        const type = String((e as any).type || '').trim();
+        const rawType = String((e as any).type || '').trim();
+        const type = rawType.toLowerCase();
         const q = typeof (e as any).question === 'string' ? String((e as any).question).trim() : '';
 
         if (!from || !to) {
@@ -1320,22 +1347,27 @@ export function parseSemanticMapperOutput(
             continue;
         }
 
-        if (type === 'conflict' || type === 'conflicts') {
-            sanitizedEdges.push({ from, to, type: 'conflict', ...(q ? { question: q } : { question: null }) });
+        if (/^conflicts?$/.test(type)) {
+            sanitizedEdges.push({ from, to, type: 'conflicts', ...(q ? { question: q } : {}) });
             continue;
         }
 
-        if (type === 'tradeoff') {
-            sanitizedEdges.push({ from, to, type: 'conflict', question: null });
+        if (type === 'prerequisite' || type === 'prerequisites') {
+            sanitizedEdges.push({ from, to, type: 'prerequisite', ...(q ? { question: q } : {}) });
             continue;
         }
 
-        if (type === 'supports') {
-            warnings.push(`${ctx}.type is "supports"; dropped (supports are derived later)`);
+        if (type === 'tradeoff' || type === 'tradeoffs' || type === 'trade-off' || type === 'trade-offs') {
+            sanitizedEdges.push({ from, to, type: 'tradeoff' });
             continue;
         }
 
-        warnings.push(`${ctx}.type is unsupported ("${type}"); dropped`);
+        if (type === 'supports' || type === 'support') {
+            sanitizedEdges.push({ from, to, type: 'supports' });
+            continue;
+        }
+
+        warnings.push(`${ctx}.type is unsupported ("${rawType}"); dropped`);
     }
     finalEdges = sanitizedEdges;
 

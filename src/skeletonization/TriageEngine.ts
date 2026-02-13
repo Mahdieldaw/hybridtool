@@ -1,5 +1,6 @@
 import type { EnrichedClaim } from '../../shared/contract';
 import { generateTextEmbeddings } from '../clustering/embeddings';
+import { cosineSimilarity } from '../clustering/distance';
 import { detectCarriers } from './CarrierDetector';
 import { DEFAULT_THRESHOLDS } from './types';
 import type { CarrierThresholds, SkeletonizationInput, StatementFate, TriageResult } from './types';
@@ -106,6 +107,56 @@ export async function triageStatements(
       }
     }
   }
+
+  // ── CROSS-MODEL PARAPHRASE DETECTION ────────────────────────────────────
+  // For each pruning target (REMOVE or SKELETONIZE), find semantic paraphrases
+  // in other models' statements. If a paraphrase is found and unprotected,
+  // add it to the pruning set as well.
+  const pruningTargets = new Set<string>();
+  for (const [sid, fate] of statementFates.entries()) {
+    if (fate.action === 'REMOVE' || fate.action === 'SKELETONIZE') {
+      pruningTargets.add(sid);
+    }
+  }
+
+  const paraphraseThreshold = 0.85;
+  const paraphrasesFound: Array<{ original: string; paraphrase: string; similarity: number }> = [];
+
+  for (const targetSid of pruningTargets) {
+    const targetEmb = statementEmbeddings.get(targetSid);
+    if (!targetEmb) continue;
+
+    const targetStmt = statements.find(s => s.id === targetSid);
+    if (!targetStmt) continue;
+
+    for (const stmt of statements) {
+      if (stmt.id === targetSid) continue;
+      if (protectedStatementIds.has(stmt.id)) continue;
+      if (statementFates.has(stmt.id)) continue; // Already processed
+
+      const emb = statementEmbeddings.get(stmt.id);
+      if (!emb) continue;
+
+      const similarity = cosineSimilarity(targetEmb, emb);
+      if (similarity >= paraphraseThreshold) {
+        // Found a paraphrase — mark it for pruning
+        statementFates.set(stmt.id, {
+          statementId: stmt.id,
+          action: 'SKELETONIZE',
+          reason: `Paraphrase of pruned statement ${targetSid} (similarity: ${similarity.toFixed(2)})`,
+          triggerClaimId: statementFates.get(targetSid)?.triggerClaimId,
+          isSoleCarrier: false,
+        });
+        paraphrasesFound.push({ original: targetSid, paraphrase: stmt.id, similarity });
+      }
+    }
+  }
+
+  if (paraphrasesFound.length > 0) {
+    console.log(`[TriageEngine] Found ${paraphrasesFound.length} cross-model paraphrases for pruning`);
+  }
+
+
 
   for (const statement of statements) {
     if (!statementFates.has(statement.id)) {

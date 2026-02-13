@@ -52,6 +52,56 @@ describe('ConciergeService', () => {
         expect(Array.isArray(result.output?.conditionals) ? result.output?.conditionals.length : null).toBe(0);
     });
 
+    it('should treat trailing text after <map> as narrative when no narrative tag exists', () => {
+        const mapObj = {
+            claims: [
+                {
+                    id: 'c_0',
+                    label: 'do thing',
+                    text: 'Do the thing.',
+                    supporters: [1],
+                    role: 'anchor',
+                    challenges: null,
+                },
+            ],
+            edges: [],
+            conditionals: [],
+        };
+        const raw = `<map>${JSON.stringify(mapObj)}</map>\n\nThis is the narrative after the map.\nIt should be captured.`;
+
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        expect(String(result.narrative || '')).toContain('This is the narrative after the map.');
+        expect(String(result.narrative || '')).toContain('It should be captured.');
+        expect(String(result.narrative || '')).not.toContain('"claims"');
+    });
+
+    it('should include non-tag text in narrative even when <narrative> exists', () => {
+        const mapObj = {
+            claims: [
+                {
+                    id: 'c_0',
+                    label: 'do thing',
+                    text: 'Do the thing.',
+                    supporters: [1],
+                    role: 'anchor',
+                    challenges: null,
+                },
+            ],
+            edges: [],
+            conditionals: [],
+        };
+
+        const raw = `PREFACE LINE\n<map>${JSON.stringify(mapObj)}</map>\n<narrative>Inside narrative.</narrative>\nEPILOGUE LINE`;
+
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        expect(String(result.narrative || '')).toContain('Inside narrative.');
+        expect(String(result.narrative || '')).toContain('PREFACE LINE');
+        expect(String(result.narrative || '')).toContain('EPILOGUE LINE');
+        expect(String(result.narrative || '')).not.toContain('"claims"');
+    });
+
     it('should accept intrinsic determinants without questions', () => {
         const raw = JSON.stringify({
             claims: [{
@@ -75,7 +125,7 @@ describe('ConciergeService', () => {
         expect(result.success).toBe(true);
         expect(result.output?.edges?.length).toBe(1);
         const e0 = result.output?.edges?.[0];
-        expect(e0?.type).toBe('conflict');
+        expect(e0?.type).toBe('conflicts');
         expect(((e0 as any)?.question ?? null)).toBe('Which outcome is non-negotiable right now?');
     });
 
@@ -109,9 +159,9 @@ describe('ConciergeService', () => {
         expect(result.success).toBe(true);
         expect(result.output?.edges?.length).toBe(1);
         const e0 = result.output?.edges?.[0];
-        expect(e0?.type).toBe('conflict');
-        if (e0 && e0.type === 'conflict') {
-            expect(e0.question).toBe('Which matters more: speed or flexibility?');
+        expect(e0?.type).toBe('conflicts');
+        if (e0 && e0.type === 'conflicts') {
+            expect((e0 as any).question).toBe('Which matters more: speed or flexibility?');
         }
     });
 
@@ -187,13 +237,13 @@ describe('ConciergeService', () => {
     });
 
     it('should serialize shadow paragraphs without duplicating statement text', () => {
-        const paragraphs: any[] = [
-            { id: 'p_0', modelIndex: 1, paragraphIndex: 0, _fullParagraph: 'Alpha' },
-            { id: 'p_1', modelIndex: 2, paragraphIndex: 0, _fullParagraph: 'Beta' },
+        const responses: any[] = [
+            { modelIndex: 1, content: 'Alpha' },
+            { modelIndex: 2, content: 'Beta' },
         ];
 
-        const prompt = buildSemanticMapperPrompt('Q', paragraphs as any);
-        const match = prompt.match(/<model_outputs>\s*([\s\S]*?)\s*<\/model_outputs>/);
+        const prompt = buildSemanticMapperPrompt('Q', responses as any);
+        const match = prompt.match(/<responses>\s*([\s\S]*?)\s*<\/responses>/);
         expect(match).not.toBeNull();
         const block = String(match?.[1] || '');
         expect(block).toContain('[Model 1]');

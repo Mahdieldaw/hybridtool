@@ -186,7 +186,7 @@ function isValidMapperEdge(edge: any): edge is MapperEdge {
   const type = (edge as any).type;
   if (typeof from !== 'string' || !from.trim()) return false;
   if (typeof to !== 'string' || !to.trim()) return false;
-  if (type === 'conflict') {
+  if (type === 'conflicts') {
     const q = (edge as any).question;
     if (typeof q === 'undefined' || q === null) return true;
     return typeof q === 'string';
@@ -220,7 +220,7 @@ function normalizeEdges(input: any): { edges: MapperEdge[]; conflictBlocks: Map<
       if (seen.has(pk)) continue;
       seen.add(pk);
       const question = String(t?.question || '').trim() || undefined;
-      const e: any = { from: aId, to: bId, type: 'conflict', question } satisfies MapperEdge;
+      const e: any = { from: aId, to: bId, type: 'conflicts', question } satisfies MapperEdge;
       if (Array.isArray(t?.sourceStatementIds)) {
         e.sourceStatementIds = t.sourceStatementIds.map((s: any) => String(s)).filter(Boolean);
       }
@@ -244,7 +244,7 @@ function normalizeEdges(input: any): { edges: MapperEdge[]; conflictBlocks: Map<
       if (seen.has(pk)) continue;
       seen.add(pk);
       const question = String(c?.question || '').trim() || undefined;
-      edges.push({ from: fromId, to: toId, type: 'conflict', question } satisfies MapperEdge);
+      edges.push({ from: fromId, to: toId, type: 'conflicts', question } satisfies MapperEdge);
     }
   }
 
@@ -335,7 +335,7 @@ export function extractForcingPoints(
   const conflictPairs = new Set<string>();
 
   for (const edge of normalized.edges || []) {
-    if (edge.type !== 'conflict') continue;
+    if (edge.type !== 'conflicts') continue;
 
     const aId = edge.from;
     const bId = edge.to;

@@ -160,7 +160,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 <div className="flex justify-center">
                     <button
                         type="button"
-                        onClick={() => setDecisionMapOpen({ turnId: aiTurn.id, tab: 'json' })}
+                        onClick={() =>
+                            setDecisionMapOpen({
+                                turnId: aiTurn.id,
+                                tab: (mappingArtifact?.shadow?.statements?.length ? 'shadow' : 'json'),
+                            })
+                        }
                         className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
                         aria-label="Open debug pipeline artifacts for this turn"
                     >
@@ -208,24 +213,28 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
                 {/* Structural Summary (Ribbon + Glyph) */}
                 {isPipelineComplete && structuralAnalysis && (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-500">
-                        <MetricsRibbon
-                            artifact={mappingArtifact}
-                            analysis={structuralAnalysis}
-                            problemStructure={problemStructure}
-                        />
+                    <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 items-stretch animate-in fade-in slide-in-from-top-2 duration-500">
+                        <div className="min-w-0">
+                            <MetricsRibbon
+                                artifact={mappingArtifact}
+                                analysis={structuralAnalysis}
+                                problemStructure={problemStructure}
+                            />
+                        </div>
 
                         {problemStructure && (
-                            <div className="flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50">
+                            <div className="min-w-0 h-full flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50">
                                 <div className="flex flex-col items-center gap-2">
                                     <div className="text-[10px] uppercase tracking-widest text-text-muted font-bold">
                                         Structural Topology
                                     </div>
                                     <StructureGlyph
                                         pattern={problemStructure.primary}
+                                        secondaryPatterns={problemStructure.patterns}
                                         claimCount={mappingArtifact?.semantic?.claims?.length || 0}
-                                        width={320}
-                                        height={140}
+                                        width={260}
+                                        height={120}
+                                        onClick={() => setDecisionMapOpen({ turnId: aiTurn.id, tab: 'graph' })}
                                     />
                                     <div className="text-[11px] text-text-muted italic">
                                         {problemStructure.confidence > 0.7

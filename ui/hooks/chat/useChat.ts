@@ -373,6 +373,12 @@ export function useChat() {
               ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
               pipelineStatus: round.pipelineStatus || undefined,
             };
+            if (mappingRaw && Object.keys(mappingRaw).length > 0) {
+              (aiTurn as any).mappingResponses = mappingRaw;
+            }
+            if (singularityRaw && Object.keys(singularityRaw).length > 0) {
+              (aiTurn as any).singularityResponses = singularityRaw;
+            }
             newIds.push(aiTurn.id);
             newMap.set(aiTurn.id, aiTurn);
           }

@@ -37,7 +37,7 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
     const isLowConfidence = confidence ? confidence < 0.5 : false;
 
     return (
-        <div className="bg-surface-raised border border-border-subtle rounded-lg mb-4 px-4 py-3">
+        <div className="bg-surface-raised border border-border-subtle rounded-lg px-4 py-3 h-full">
             {/* Structure type + confidence */}
             <div className="flex items-center gap-3 mb-3">
                 {problemStructure && (
