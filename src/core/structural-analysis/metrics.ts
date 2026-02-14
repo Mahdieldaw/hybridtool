@@ -207,6 +207,36 @@ export const assignPercentileFlags = (
             ? cCascade.dependentIds.length / c.supporters.length
             : 0;
     });
+
+    const prereqChildren = new Map<string, string[]>();
+    for (const c of claims) prereqChildren.set(c.id, []);
+    for (const e of edges) {
+        if (e.type !== "prerequisite") continue;
+        if (!prereqChildren.has(e.from) || !prereqChildren.has(e.to)) continue;
+        prereqChildren.get(e.from)!.push(e.to);
+    }
+
+    const chainDepthById = new Map<string, number>();
+    const queue: string[] = [];
+    for (const c of claims) {
+        if (!c.isChainRoot) continue;
+        chainDepthById.set(c.id, 0);
+        queue.push(c.id);
+    }
+    while (queue.length > 0) {
+        const current = queue.shift()!;
+        const baseDepth = chainDepthById.get(current)!;
+        const next = prereqChildren.get(current) || [];
+        for (const child of next) {
+            const candidate = baseDepth + 1;
+            const existing = chainDepthById.get(child);
+            if (existing == null || candidate < existing) {
+                chainDepthById.set(child, candidate);
+                queue.push(child);
+            }
+        }
+    }
+    const unreachableChainDepth = Number.MAX_SAFE_INTEGER;
     return claims.map(claim => {
         const cascade = cascadeBySource.get(claim.id);
         const evidenceGapScore = cascade && claim.supporters.length > 0
@@ -238,7 +268,7 @@ export const assignPercentileFlags = (
         );
 
         const isIsolated = !connectedIds.has(claim.id);
-        const chainDepth = claim.isChainRoot ? 0 : (claim.isChainTerminal ? 1 : 0);
+        const chainDepth = chainDepthById.get(claim.id) ?? unreachableChainDepth;
 
         return {
             ...claim,

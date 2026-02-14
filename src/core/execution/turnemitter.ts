@@ -1,4 +1,5 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
+import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings';
 
 interface Statement {
   id: string;
@@ -161,6 +162,7 @@ interface SingularityOutput {
   prompt?: string;
   output?: string;
   text?: string;
+  timestamp?: number;
 }
 
 interface WorkflowControl {
@@ -225,6 +227,7 @@ interface AiTurn {
     prompt: string;
     output: string;
     traversalState?: TraversalState;
+    timestamp: number;
   };
   meta: {
     mapper: string | null;
@@ -503,16 +506,22 @@ export class TurnEmitter {
         }
       }
 
-      const singularityPhase = inferredSingularityOutput
-        ? {
-            prompt: (context as any)?.singularityPromptUsed ?? inferredSingularityOutput?.prompt ?? '',
-            output:
-              inferredSingularityOutput?.output ??
-              inferredSingularityOutput?.text ??
-              '',
-            traversalState: context?.traversalState,
-          }
-        : undefined;
+      const promptUsed = (context as any)?.singularityPromptUsed;
+      const singularityPhase =
+        inferredSingularityOutput || (typeof promptUsed === 'string' && promptUsed.length > 0)
+          ? {
+              prompt: promptUsed ?? inferredSingularityOutput?.prompt ?? '',
+              output:
+                inferredSingularityOutput?.output ??
+                inferredSingularityOutput?.text ??
+                '',
+              traversalState: context?.traversalState,
+              timestamp:
+                (typeof (inferredSingularityOutput as any)?.timestamp === 'number'
+                  ? (inferredSingularityOutput as any).timestamp
+                  : timestamp),
+            }
+          : undefined;
       const aiTurn: AiTurn = {
         id: aiTurnId,
         type: 'ai',
@@ -560,6 +569,12 @@ export class TurnEmitter {
         user: userTurn,
         ai: aiTurn,
       };
+
+      if (aiTurn.pipelineStatus === 'complete') {
+        cleanupPendingEmbeddingsBuffers().catch((err) => {
+          console.warn('[TurnEmitter] Failed to cleanup embeddings buffers:', err);
+        });
+      }
     } catch (error) {
       console.error('[TurnEmitter] Failed to emit TURN_FINALIZED:', error);
     }

@@ -35,12 +35,16 @@ const logger = {
 };
 
 export class StreamingManager {
-  private port: Port;
+  port: Port;
   private streamStates: Map<string, StreamState>;
 
-  constructor(port: Port) {
-    this.port = port;
+  constructor(port: Port | null | undefined) {
+    this.port = port && typeof port.postMessage === 'function' ? port : { postMessage: () => { } };
     this.streamStates = new Map<string, StreamState>();
+  }
+
+  setPort(port: Port | null | undefined) {
+    this.port = port && typeof port.postMessage === 'function' ? port : { postMessage: () => { } };
   }
 
   makeDelta(

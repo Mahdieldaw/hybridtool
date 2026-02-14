@@ -29,8 +29,13 @@ export const analyzePeaks = (
 ): PeakAnalysis => {
     const peaks = claims.filter(c => isPeakClaim(c));
     const hills = claims.filter(c =>
-        c.supportRatio > HILL_THRESHOLD &&
-        c.supportRatio <= PEAK_THRESHOLD
+        (
+            c.supportRatio > HILL_THRESHOLD &&
+            c.supportRatio <= PEAK_THRESHOLD
+        ) || (
+            c.supportRatio > PEAK_THRESHOLD &&
+            c.supporters.length < MIN_PEAK_SUPPORTERS
+        )
     );
     const floor = claims.filter(c => c.supportRatio <= HILL_THRESHOLD);
 

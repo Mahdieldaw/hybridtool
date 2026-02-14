@@ -642,7 +642,12 @@ export default function HistoryPanel() {
                 }
                 const count = selectedIds ? selectedIds.size : 0;
                 if (count > 0) {
-                  handleConfirmBatchDelete();
+                  const confirmed = window.confirm(
+                    `Delete ${count} selected chat${count === 1 ? "" : "s"}? This cannot be undone.`
+                  );
+                  if (confirmed) {
+                    void handleConfirmBatchDelete();
+                  }
                 } else {
                   handleToggleBatchMode();
                 }

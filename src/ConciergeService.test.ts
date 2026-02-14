@@ -204,6 +204,66 @@ describe('ConciergeService', () => {
         }
     });
 
+    it('should treat challenges edges as conflicts for traversal', () => {
+        const raw = JSON.stringify({
+            claims: [{
+                id: 'claim_11',
+                label: 'Add caching',
+                text: 'Cache results to reduce repeated computation.',
+                supporters: [1],
+                role: 'challenger',
+                challenges: 'claim_2',
+            }, {
+                id: 'claim_2',
+                label: 'Avoid caching',
+                text: 'Caching adds complexity and staleness risk.',
+                supporters: [2],
+                role: 'anchor',
+                challenges: null,
+            }],
+            edges: [{
+                from: 'claim_11',
+                to: 'claim_2',
+                type: 'challenges',
+            }],
+        });
+
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        expect(result.output?.edges?.length).toBe(1);
+        const e0 = result.output?.edges?.[0] as any;
+        expect(e0?.type).toBe('conflicts');
+        expect(e0?.from).toBe('claim_11');
+        expect(e0?.to).toBe('claim_2');
+    });
+
+    it('should derive conflicts edge from claim.challenges when edges are missing', () => {
+        const raw = JSON.stringify({
+            claims: [{
+                id: 'claim_11',
+                label: 'Add caching',
+                text: 'Cache results to reduce repeated computation.',
+                supporters: [1],
+                role: 'challenger',
+                challenges: 'claim_2',
+            }, {
+                id: 'claim_2',
+                label: 'Avoid caching',
+                text: 'Caching adds complexity and staleness risk.',
+                supporters: [2],
+                role: 'anchor',
+                challenges: null,
+            }],
+        });
+
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        expect(result.output?.edges?.length).toBe(1);
+        const e0 = result.output?.edges?.[0] as any;
+        expect(e0?.type).toBe('conflicts');
+        expect([e0?.from, e0?.to].sort()).toEqual(['claim_11', 'claim_2'].sort());
+    });
+
     it('should accept extrinsic determinants with yes/no semantics', () => {
         const raw = JSON.stringify({
             claims: [{

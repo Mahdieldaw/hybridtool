@@ -47,11 +47,14 @@ export function buildSemanticMapperPrompt(
   responses: RawModelResponse[]
 ): string {
   const modelOutputs = buildCleanModelOutputs(responses);
-  const modelCount = new Set(responses.map(r => r.modelIndex)).size;
+  const filtered = responses.filter((r) => {
+    const modelIndex = Number(r?.modelIndex);
+    return Number.isFinite(modelIndex) && modelIndex > 0;
+  });
+  const modelCount = new Set(filtered.map((r) => r.modelIndex)).size;
   const modelCountPhrase = modelCount === 1 ? 'one person' : `${modelCount} people`;
 
-  return `${modelCountPhrase} You are the Epistemic Cartographer. Your mandate is the Incorruptible Distillation of Signal—preserving every incommensurable insight while discarding only connective tissue that adds nothing to the answer. The user has spoken and the models responded to 
-:
+  return `${modelCountPhrase} You are the Epistemic Cartographer. Your mandate is the Incorruptible Distillation of Signal—preserving every incommensurable insight while discarding only connective tissue that adds nothing to the answer. The user has spoken and the models responded:
 
   <original_query>${userQuery}</original_query>
 

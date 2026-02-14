@@ -7,7 +7,7 @@
 // Key features:
 // - Accepts shadowStatements to build embedding text from unclipped sources
 // - Rehydrates Float32Array from JSON-serialized number[][]
-// - Renormalizes embeddings after truncation for determinism
+// - Renormalizes embeddings after pooling for determinism
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
@@ -39,7 +39,6 @@ async function ensureOffscreen(): Promise<void> {
 
 /**
  * Normalize embedding vector (L2 norm).
- * Critical for determinism after truncation.
  */
 function normalizeEmbedding(vec: Float32Array): Float32Array {
     let norm = 0;
@@ -57,11 +56,126 @@ function normalizeEmbedding(vec: Float32Array): Float32Array {
     return vec;
 }
 
+function openEmbeddingsDb(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+        try {
+            const req = indexedDB.open("htos-embeddings", 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains("buffers")) {
+                    db.createObjectStore("buffers");
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+const pendingEmbeddingsKeys = new Set<string>();
+
+async function getEmbeddingsBuffer(key: string): Promise<ArrayBuffer> {
+    const db = await openEmbeddingsDb();
+    try {
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction("buffers", "readonly");
+            tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+            const store = tx.objectStore("buffers");
+            const getReq = store.get(key);
+            getReq.onerror = () => reject(getReq.error || new Error("IndexedDB get failed"));
+            getReq.onsuccess = () => {
+                const val = getReq.result;
+                const buf = val && typeof val === "object" && "buffer" in val ? (val as any).buffer : null;
+                if (!(buf instanceof ArrayBuffer)) {
+                    reject(new Error(`Missing embeddings buffer for key ${key}`));
+                    return;
+                }
+                resolve(buf);
+            };
+        });
+    } finally {
+        try { db.close(); } catch (_) { }
+    }
+}
+
+export async function cleanupPendingEmbeddingsBuffers(): Promise<void> {
+    const keys = Array.from(pendingEmbeddingsKeys);
+    if (keys.length === 0) return;
+
+    const db = await openEmbeddingsDb();
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction("buffers", "readwrite");
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+            const store = tx.objectStore("buffers");
+            for (const key of keys) {
+                store.delete(key);
+            }
+        });
+        pendingEmbeddingsKeys.clear();
+    } finally {
+        try { db.close(); } catch (_) { }
+    }
+}
+
+async function decodeEmbeddingsResultAsync(
+    result: any,
+    ids: string[],
+    expectedDims: number,
+    label: string
+): Promise<Map<string, Float32Array>> {
+    const dims = Number(result?.dimensions) || expectedDims;
+    if (dims !== expectedDims) {
+        throw new Error(`Embedding dimension mismatch: expected ${expectedDims}, got ${dims}`);
+    }
+
+    const key = result?.embeddingsKey;
+    if (typeof key === "string" && key.length > 0) {
+        pendingEmbeddingsKeys.add(key);
+        const buf = await getEmbeddingsBuffer(key);
+        const floats = new Float32Array(buf);
+        const count = Number(result?.count) || ids.length;
+        const needed = count * dims;
+        if (floats.length < needed) {
+            throw new Error(`Malformed embeddings buffer: expected ${needed} floats, got ${floats.length}`);
+        }
+
+        const embeddings = new Map<string, Float32Array>();
+        for (let i = 0; i < ids.length; i++) {
+            const start = i * dims;
+            const end = start + dims;
+            const view = floats.subarray(start, end);
+            embeddings.set(ids[i], normalizeEmbedding(view) as Float32Array<ArrayBuffer>);
+        }
+        return embeddings;
+    }
+
+    const embeddings = new Map<string, Float32Array>();
+    for (let i = 0; i < ids.length; i++) {
+        const rawEntry = result?.embeddings?.[i];
+        if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
+            throw new Error(`Missing or malformed embedding for ${label} ${ids[i]}`);
+        }
+
+        const rawData = rawEntry as number[];
+        if (rawData.length !== expectedDims) {
+            throw new Error(`Embedding dimension mismatch for ${label} ${ids[i]}: expected ${expectedDims}, got ${rawData.length}`);
+        }
+
+        const emb = new Float32Array(rawData);
+        embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
+    }
+    return embeddings;
+}
+
 /**
  * Request embeddings from offscreen worker.
  * 
  * Builds text from original ShadowStatement texts (unclipped),
- * rehydrates Float32Array, and renormalizes after truncation.
+ * rehydrates Float32Array, and renormalizes after pooling.
  */
 export async function generateEmbeddings(
     paragraphs: ShadowParagraph[],
@@ -88,6 +202,8 @@ export async function generateEmbeddings(
                     texts,
                     dimensions: config.embeddingDimensions,
                     modelId: config.modelId,
+                    binary: true,
+                    yieldBetweenBatches: texts.length > 64,
                 },
             },
             (response) => {
@@ -101,35 +217,25 @@ export async function generateEmbeddings(
                     return;
                 }
 
-                // Rehydrate Float32Array and renormalize
-                const embeddings = new Map<string, Float32Array>();
-                for (let i = 0; i < ids.length; i++) {
-                    // Defensive check: ensure embedding entry exists and is valid array
-                    const rawEntry = response.result.embeddings?.[i];
-                    if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
-                        reject(new Error(`Missing or malformed embedding for paragraph ${ids[i]}`));
-                        return;
-                    }
-
-                    const rawData = rawEntry as number[];
-
-                    // Truncate if needed (MRL - Matryoshka Representation Learning)
-                    const truncatedData = rawData.length > config.embeddingDimensions
-                        ? rawData.slice(0, config.embeddingDimensions)
-                        : rawData;
-
-                    const emb = new Float32Array(truncatedData);
-
-                    // Renormalize after truncation (critical for determinism)
-                    // Type assertion needed for TS 5.x Float32Array<ArrayBuffer> compatibility
-                    embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
+                const expectedDims = config.embeddingDimensions;
+                const actualDims = Number(response.result?.dimensions) || expectedDims;
+                if (actualDims !== expectedDims) {
+                    reject(new Error(`Embedding dimension mismatch: expected ${expectedDims}, got ${actualDims}`));
+                    return;
                 }
 
-                resolve({
-                    embeddings,
-                    dimensions: config.embeddingDimensions,
-                    timeMs: response.result.timeMs,
-                });
+                (async () => {
+                    try {
+                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'paragraph');
+                        resolve({
+                            embeddings,
+                            dimensions: expectedDims,
+                            timeMs: response.result.timeMs,
+                        });
+                    } catch (e) {
+                        reject(e instanceof Error ? e : new Error(String(e)));
+                    }
+                })();
             }
         );
     });
@@ -151,6 +257,8 @@ export async function generateTextEmbeddings(
                     texts,
                     dimensions: config.embeddingDimensions,
                     modelId: config.modelId,
+                    binary: true,
+                    yieldBetweenBatches: texts.length > 64,
                 },
             },
             (response) => {
@@ -164,24 +272,20 @@ export async function generateTextEmbeddings(
                     return;
                 }
 
-                const embeddings = new Map<string, Float32Array>();
-                for (let i = 0; i < ids.length; i++) {
-                    const rawEntry = response.result.embeddings?.[i];
-                    if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
-                        reject(new Error(`Missing or malformed embedding for text ${ids[i]}`));
-                        return;
-                    }
-
-                    const rawData = rawEntry as number[];
-                    const truncatedData = rawData.length > config.embeddingDimensions
-                        ? rawData.slice(0, config.embeddingDimensions)
-                        : rawData;
-
-                    const emb = new Float32Array(truncatedData);
-                    embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
+                const expectedDims = config.embeddingDimensions;
+                const actualDims = Number(response.result?.dimensions) || expectedDims;
+                if (actualDims !== expectedDims) {
+                    reject(new Error(`Embedding dimension mismatch: expected ${expectedDims}, got ${actualDims}`));
+                    return;
                 }
 
-                resolve(embeddings);
+                (async () => {
+                    try {
+                        resolve(await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'text'));
+                    } catch (e) {
+                        reject(e instanceof Error ? e : new Error(String(e)));
+                    }
+                })();
             }
         );
     });
@@ -215,6 +319,8 @@ export async function generateStatementEmbeddings(
                     texts,
                     dimensions: config.embeddingDimensions,
                     modelId: config.modelId,
+                    binary: true,
+                    yieldBetweenBatches: texts.length > 64,
                 },
             },
             (response) => {
@@ -228,29 +334,26 @@ export async function generateStatementEmbeddings(
                     return;
                 }
 
-                const embeddings = new Map<string, Float32Array>();
-                for (let i = 0; i < ids.length; i++) {
-                    const rawEntry = response.result.embeddings?.[i];
-                    if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
-                        reject(new Error(`Missing or malformed embedding for statement ${ids[i]}`));
-                        return;
-                    }
-
-                    const rawData = rawEntry as number[];
-                    const truncatedData = rawData.length > config.embeddingDimensions
-                        ? rawData.slice(0, config.embeddingDimensions)
-                        : rawData;
-
-                    const emb = new Float32Array(truncatedData);
-                    embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
+                const expectedDims = config.embeddingDimensions;
+                const actualDims = Number(response.result?.dimensions) || expectedDims;
+                if (actualDims !== expectedDims) {
+                    reject(new Error(`Embedding dimension mismatch: expected ${expectedDims}, got ${actualDims}`));
+                    return;
                 }
 
-                resolve({
-                    embeddings,
-                    dimensions: config.embeddingDimensions,
-                    statementCount: ids.length,
-                    timeMs: performance.now() - startTime,
-                });
+                (async () => {
+                    try {
+                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'statement');
+                        resolve({
+                            embeddings,
+                            dimensions: expectedDims,
+                            statementCount: ids.length,
+                            timeMs: performance.now() - startTime,
+                        });
+                    } catch (e) {
+                        reject(e instanceof Error ? e : new Error(String(e)));
+                    }
+                })();
             }
         );
     });

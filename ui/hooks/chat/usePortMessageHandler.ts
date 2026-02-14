@@ -341,6 +341,43 @@ export function usePortMessageHandler(enabled: boolean = true) {
                   ...(incoming?.singularity ? { singularity: incoming.singularity } : {}),
                 } as AiTurnWithUI);
               } else {
+                const existingSingularity = (existingAi as any)?.singularity;
+                const incomingSingularity = incoming?.singularity;
+                const existingSingularityTs = Number(existingSingularity?.timestamp) || 0;
+                const incomingSingularityTs = Number(incomingSingularity?.timestamp) || 0;
+                const mergedSingularityTs =
+                  Math.max(existingSingularityTs, incomingSingularityTs) || Date.now();
+                const mergedSingularity =
+                  existingSingularity || incomingSingularity
+                    ? {
+                        ...(existingSingularity || {}),
+                        ...(incomingSingularity || {}),
+                        prompt:
+                          incomingSingularityTs > existingSingularityTs
+                            ? incomingSingularity?.prompt ||
+                              existingSingularity?.prompt ||
+                              ""
+                            : existingSingularity?.prompt ||
+                              incomingSingularity?.prompt ||
+                              "",
+                        output:
+                          incomingSingularityTs >= existingSingularityTs
+                            ? incomingSingularity?.output ||
+                              existingSingularity?.output ||
+                              ""
+                            : existingSingularity?.output ||
+                              incomingSingularity?.output ||
+                              "",
+                        timestamp:
+                          mergedSingularityTs,
+                        traversalState:
+                          incomingSingularityTs >= existingSingularityTs
+                            ? incomingSingularity?.traversalState ||
+                              existingSingularity?.traversalState
+                            : existingSingularity?.traversalState ||
+                              incomingSingularity?.traversalState,
+                      }
+                    : undefined;
                 const mergedAi: AiTurnWithUI = {
                   ...existingAi,
                   ...(turn.ai as AiTurnWithUI),
@@ -355,7 +392,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
                     ? { responses: normalizedBatch, timestamp: Date.now() }
                     : existingAi.batch,
                   mapping: incoming?.mapping || existingAi.mapping,
-                  singularity: incoming?.singularity || existingAi.singularity,
+                  singularity: mergedSingularity,
                 };
                 draft.set(aiTurnId, mergedAi);
               }
@@ -879,7 +916,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
               ...(singularityOutput
                 ? {
                   singularity: {
-                    prompt: "",
+                    prompt: aiTurn.singularity?.prompt || "",
                     output: String((singularityOutput as any)?.text || ""),
                     timestamp: Date.now(),
                   },

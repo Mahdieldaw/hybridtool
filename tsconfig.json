@@ -59,7 +59,7 @@
     "comparison",
     "ui/components/legacy structural ui patterns",
     "src/core/structural-analysis/legacy structural analysis",
-    "src/core/structural-analysis/newold]",
+    "src/core/structural-analysis/newold",
     "node_modules"
   ]
 }

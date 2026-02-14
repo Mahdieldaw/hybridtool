@@ -220,6 +220,10 @@ export class ConnectionHandler {
           prompt: inferredSingularityOutput.prompt || "",
           output: inferredSingularityOutput.output || inferredSingularityOutput.text || "",
           traversalState: aiTurn.traversalState,
+          timestamp:
+            Number(inferredSingularityOutput.timestamp) ||
+            Number(aiTurn?.singularity?.timestamp) ||
+            Date.now(),
         }
         : undefined;
 
@@ -644,7 +648,7 @@ export class ConnectionHandler {
       console.error("[ConnectionHandler] Workflow failed:", error);
       try {
         const msg = error instanceof Error ? error.message : String(error);
-        this.port.postMessage({
+        this.port?.postMessage({
           type: "WORKFLOW_STEP_UPDATE",
           sessionId: executeRequest?.sessionId || "unknown",
           stepId: "handler-error",
@@ -654,7 +658,7 @@ export class ConnectionHandler {
           isRecompute: executeRequest?.type === "recompute",
           sourceTurnId: executeRequest?.sourceTurnId,
         });
-        this.port.postMessage({
+        this.port?.postMessage({
           type: "WORKFLOW_COMPLETE",
           sessionId: executeRequest?.sessionId || "unknown",
           error: msg,

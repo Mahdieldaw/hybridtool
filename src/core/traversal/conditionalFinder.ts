@@ -74,16 +74,16 @@ const CLAUSE_PATTERNS: Array<{
   pattern: RegExp;
   clauseGroup: number;
 }> = [
-  { pattern: /^if\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
-  { pattern: /^when\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
-  { pattern: /^unless\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
-  { pattern: /^assuming\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
-  { pattern: /^provided\s+that\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
-  { pattern: /^only\s+if\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
-  { pattern: /[,;]\s*if\s+(.+?)\s*[,;.]\s*/i, clauseGroup: 1 },
-  { pattern: /depends\s+on\s+(?:whether\s+)?(.+?)\s*[,;.]/i, clauseGroup: 1 },
-  { pattern: /^for\s+(.+?(?:users?|teams?|projects?|companies|organizations?))\s*[,;]\s*/i, clauseGroup: 1 },
-];
+    { pattern: /^if\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
+    { pattern: /^when\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
+    { pattern: /^unless\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
+    { pattern: /^assuming\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
+    { pattern: /^provided\s+that\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
+    { pattern: /^only\s+if\s+(.+?)\s*[,;]\s*/i, clauseGroup: 1 },
+    { pattern: /[,;]\s*if\s+(.+?)\s*[,;.]\s*/i, clauseGroup: 1 },
+    { pattern: /depends\s+on\s+(?:whether\s+)?(.+?)\s*[,;.]/i, clauseGroup: 1 },
+    { pattern: /^for\s+(.+?(?:users?|teams?|projects?|companies|organizations?))\s*[,;]\s*/i, clauseGroup: 1 },
+  ];
 
 function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -129,7 +129,10 @@ function formatQuestion(clause: string): string {
 
   if (lower.startsWith('you ')) {
     if (lower.startsWith('you are ') || lower.startsWith("you're ")) {
-      return `Are ${trimmed}?`;
+      const predicate = lower.startsWith('you are ')
+        ? trimmed.substring('you are '.length).trim()
+        : trimmed.substring("you're ".length).trim();
+      return `Are you ${predicate}?`;
     }
     return `Do ${trimmed}?`;
   }

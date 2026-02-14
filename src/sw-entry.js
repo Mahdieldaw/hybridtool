@@ -725,9 +725,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           await OffscreenController.init();
 
           const response = await new Promise((resolve) => {
+            let settled = false;
+            const timeoutMs = Number.isFinite(message?.payload?.timeoutMs)
+              ? message.payload.timeoutMs
+              : 45000;
+            const timeoutId = setTimeout(() => {
+              settled = true;
+              resolve({ success: false, error: "Offscreen request timed out" });
+            }, Math.max(1, timeoutMs));
+
             chrome.runtime.sendMessage(
               { ...message, __fromUnified: true },
               (r) => {
+                if (settled) return;
+                clearTimeout(timeoutId);
                 if (chrome.runtime.lastError) {
                   resolve({ success: false, error: chrome.runtime.lastError.message });
                 } else {

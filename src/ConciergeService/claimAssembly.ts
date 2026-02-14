@@ -305,7 +305,7 @@ export async function reconstructProvenance(
             type,
             derivedType,
             role,
-            challenges: claim.challenges || null,
+            challenges: claim.challenges ?? null,
             support_count: Array.isArray(claim.supporters) ? claim.supporters.length : 0,
 
             sourceStatementIds,

@@ -153,8 +153,13 @@ export function formatGraphForMd(topology: GraphTopology): string {
     return lines.join('\n');
 }
 
-export function formatProviderResponseForMd(response: ProviderResponse, providerName: string): string {
-    const text = response.text || "*Empty response*";
+export function formatProviderResponseForMd(
+    response: ProviderResponse | Partial<ProviderResponse> | null | undefined,
+    providerName: string
+): string {
+    const text = response && typeof response === 'object' && typeof (response as any).text === 'string' && (response as any).text.trim().length > 0
+        ? String((response as any).text)
+        : "*Empty response*";
     return `**${providerName}**:\n\n${text}\n\n`;
 }
 

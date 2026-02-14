@@ -718,10 +718,13 @@ export class CognitivePipelineHandler {
               : getSourceData(aiTurn);
 
             if (Array.isArray(sourceData) && sourceData.length > 0) {
+              let statements = mappingArtifact?.shadow?.statements || [];
+              let paragraphs = mappingArtifact?.shadow?.paragraphs || [];
+
               chewedSubstrate = await buildChewedSubstrate({
-                statements: mappingArtifact?.shadow?.statements || [],
-                paragraphs: mappingArtifact?.shadow?.paragraphs || [],
-                claims: mappingArtifact?.semantic?.claims || [],
+                statements: Array.isArray(statements) ? statements : [],
+                paragraphs: Array.isArray(paragraphs) ? paragraphs : [],
+                claims: mappingArtifact?.semantic?.claims || mappingArtifact?.claims || [],
                 traversalState: normalizeTraversalState(payload.traversalState),
                 sourceData,
               });
@@ -995,6 +998,16 @@ export class CognitivePipelineHandler {
             },
           },
         });
+
+        const finalStatus = finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus;
+        if (finalStatus === 'complete') {
+          try {
+            const { cleanupPendingEmbeddingsBuffers } = await import('../../clustering/embeddings');
+            await cleanupPendingEmbeddingsBuffers();
+          } catch (e) {
+            console.warn('[CognitiveHandler] Failed to cleanup embeddings buffers:', e);
+          }
+        }
 
       } finally {
         this._inflightContinuations.delete(inflightKey);

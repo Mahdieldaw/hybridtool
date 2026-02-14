@@ -48,8 +48,8 @@ export const DEFAULT_CONFIG: ClusteringConfig = {
     maxMemberTextChars: 700,
 
     // Embedding
-    embeddingDimensions: 256,
-    modelId: 'all-MiniLM-L6-v2',
+    embeddingDimensions: 768,
+    modelId: 'bge-base-en-v1.5',
 
     // Minimum input
     minParagraphsForClustering: 3,
@@ -59,7 +59,6 @@ export const CONFIG_PRESETS = {
     highPrecision: {
         ...DEFAULT_CONFIG,
         similarityThreshold: 0.88,
-        embeddingDimensions: 384,
     } as ClusteringConfig,
 
     balanced: DEFAULT_CONFIG,
@@ -71,6 +70,5 @@ export const CONFIG_PRESETS = {
 
     fast: {
         ...DEFAULT_CONFIG,
-        embeddingDimensions: 128,
     } as ClusteringConfig,
 } as const;

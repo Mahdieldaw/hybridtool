@@ -223,7 +223,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             .sort();
 
         const parts: string[] = [];
-        [...ordered, ...extras].forEach((pid) => {
+        [...ordered, ...extras].filter((pid) => !!normalized[pid]).forEach((pid) => {
             const resp = normalized[pid];
             const providerName =
                 LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === pid)?.name || pid;

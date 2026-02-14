@@ -412,7 +412,8 @@ export const buildConstrainedData = (
     };
 };
 
-function mode<T>(arr: T[]): T {
+function mode<T>(arr: T[]): T | undefined {
+    if (arr.length === 0) return undefined;
     const counts = new Map<T, number>();
     arr.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
     const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
@@ -429,6 +430,7 @@ function inferDimensionTheme(claims: EnrichedClaim[]): string {
         contested: "Debates",
         speculative: "Possibilities"
     };
+    if (!dominantType) return `Cluster (${claims.length} claims)`;
     return typeThemes[dominantType] || `Cluster (${claims.length} claims)`;
 }
 
@@ -442,12 +444,21 @@ export const buildParallelData = (
         .filter((comp: string[]) => comp.length >= 2)
         .map((componentIds: string[], idx: number) => {
             const componentClaims = claims.filter(c => componentIds.includes(c.id));
-            const avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length;
             const internalEdges = edges.filter(e =>
                 componentIds.includes(e.from) && componentIds.includes(e.to)
             ).length;
-            const possibleEdges = componentClaims.length * (componentClaims.length - 1);
-            const cohesion = possibleEdges > 0 ? internalEdges / possibleEdges : 0;
+            let avgSupport = 0;
+            let possibleEdges = 0;
+            let cohesion = 0;
+            if (componentClaims.length === 0) {
+                avgSupport = 0;
+                possibleEdges = 0;
+                cohesion = 0;
+            } else {
+                avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length;
+                possibleEdges = componentClaims.length * (componentClaims.length - 1);
+                cohesion = possibleEdges > 0 ? internalEdges / possibleEdges : 0;
+            }
             return {
                 id: `dim_${idx}`,
                 theme: inferDimensionTheme(componentClaims),
@@ -552,7 +563,10 @@ export const buildSparseData = (
         .filter(comp => comp.length >= 2 && comp.length <= 4)
         .map((componentIds, idx) => {
             const componentClaims = claims.filter(c => componentIds.includes(c.id));
-            const avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length;
+            const avgSupport = componentClaims.length
+                ? componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length
+                : 0;
+            const cohesion = 0;
             return {
                 id: `cluster_${idx}`,
                 theme: `Cluster ${idx + 1}`,
@@ -562,7 +576,7 @@ export const buildSparseData = (
                     text: c.text,
                     supportCount: c.supporters.length
                 })),
-                cohesion: 0,
+                cohesion,
                 avgSupport
             };
         });
@@ -725,7 +739,7 @@ export const buildChainPatternData = (
                 ? `Only 1 supporter - cascade affects ${cascade?.dependentIds.length || 0} claims`
                 : null
         };
-    }).filter((step: ChainStep | null): step is ChainStep => step !== null)
+    }).filter((step: ChainStep | null): step is ChainStep => step !== null);
     const weakLinks = chain
         .filter(step => step.isWeakLink)
         .map(step => {

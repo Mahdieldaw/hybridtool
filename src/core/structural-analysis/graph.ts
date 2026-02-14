@@ -53,7 +53,7 @@ export const computeLongestChain = (claimIds: string[], edges: Edge[]): string[]
 
         let best: string[] = [];
         children.forEach(child => {
-            if (!visited.has(child)) {
+            if (!newVisited.has(child)) {
                 const candidate = findChain(child, newVisited);
                 if (candidate.length > best.length) best = candidate;
             }
@@ -177,17 +177,22 @@ export const analyzeGraph = (claimIds: string[], edges: Edge[], claims: Enriched
     for (const component of components) {
         if (component.length < 2) continue;
 
-        const componentClaims = claims.filter(c => component.includes(c.id));
+        const componentSet = new Set(component);
+        const componentSize = componentSet.size;
+
+        const componentClaims = claims.filter(c => componentSet.has(c.id));
         const componentEdges = edges.filter(e =>
-            component.includes(e.from) && component.includes(e.to)
+            componentSet.has(e.from) && componentSet.has(e.to)
         );
 
-        const possibleEdges = component.length * (component.length - 1);
+        const possibleEdges = componentSize * (componentSize - 1);
         const coherence = possibleEdges > 0 ? componentEdges.length / possibleEdges : 0;
-        const avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / component.length;
+        const avgSupport = componentClaims.length > 0
+            ? componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length
+            : 0;
 
-        totalCoherence += coherence * avgSupport * component.length;
-        weightedClaims += component.length;
+        totalCoherence += coherence * avgSupport * componentSize;
+        weightedClaims += componentSize;
     }
 
     const localCoherence = weightedClaims > 0 ? totalCoherence / weightedClaims : 0;

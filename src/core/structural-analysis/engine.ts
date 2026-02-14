@@ -311,22 +311,27 @@ export const computeFullAnalysis = (
     }
 } => {
     const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
-    const shadowExtraction = executeShadowExtraction(batchResponses);
-    const claims = primaryArtifact?.semantic?.claims || [];
-    const referencedIds = extractReferencedIds(claims);
-    const shadowDelta = executeShadowDelta(
-        shadowExtraction,
-        referencedIds,
-        userQuery
-    );
-    const MAX_SHADOW_TOP = 5;
-    return {
-        ...baseAnalysis,
-        shadow: {
-            audit: shadowDelta.audit,
-            unindexed: shadowDelta.unreferenced,
-            topUnindexed: shadowDelta.unreferenced.slice(0, MAX_SHADOW_TOP),
-            processingTime: shadowExtraction.meta.processingTimeMs + shadowDelta.processingTimeMs
-        }
-    };
+    try {
+        const shadowExtraction = executeShadowExtraction(batchResponses);
+        const claims = primaryArtifact?.semantic?.claims || [];
+        const referencedIds = extractReferencedIds(claims);
+        const shadowDelta = executeShadowDelta(
+            shadowExtraction,
+            referencedIds,
+            userQuery
+        );
+        const MAX_SHADOW_TOP = 5;
+        return {
+            ...baseAnalysis,
+            shadow: {
+                audit: shadowDelta.audit,
+                unindexed: shadowDelta.unreferenced,
+                topUnindexed: shadowDelta.unreferenced.slice(0, MAX_SHADOW_TOP),
+                processingTime: shadowExtraction.meta.processingTimeMs + shadowDelta.processingTimeMs
+            }
+        };
+    } catch (err) {
+        console.error("[StructuralAnalysis] shadow analysis failed:", err);
+        return baseAnalysis;
+    }
 };

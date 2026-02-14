@@ -59,6 +59,24 @@ export class WorkflowEngine {
     };
   }
 
+  _safePostMessage(message) {
+    const port = this.port;
+    if (!port || typeof port.postMessage !== "function") return false;
+    try {
+      port.postMessage(message);
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("disconnected port") || msg.includes("Attempting to use a disconnected port object")) {
+        this.port = null;
+        try {
+          this.streamingManager?.setPort?.(null);
+        } catch (_) { }
+      }
+      return false;
+    }
+  }
+
   async execute(request, resolvedContext) {
     this.currentRequest = request;
     const { context, steps } = request;
@@ -112,7 +130,7 @@ export class WorkflowEngine {
 
         if (haltReason) {
           if (haltReason === "awaiting_traversal") {
-            this.port.postMessage({
+            this._safePostMessage({
               type: "WORKFLOW_COMPLETE",
               sessionId: context.sessionId,
               workflowId: request.workflowId,
@@ -205,7 +223,7 @@ export class WorkflowEngine {
         }
       }
       if (!finalized) {
-        this.port.postMessage({
+        this._safePostMessage({
           type: "WORKFLOW_COMPLETE",
           sessionId: context.sessionId,
           workflowId: request.workflowId,
@@ -393,7 +411,7 @@ export class WorkflowEngine {
 
     await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
 
-    this.port.postMessage({
+    this._safePostMessage({
       type: "WORKFLOW_COMPLETE",
       sessionId: context.sessionId,
       workflowId: request.workflowId,
@@ -465,7 +483,7 @@ export class WorkflowEngine {
   }
 
   _emitStepUpdate(step, context, result, resolvedContext, status) {
-    this.port.postMessage({
+    this._safePostMessage({
       type: "WORKFLOW_STEP_UPDATE",
       sessionId: context.sessionId,
       stepId: step.stepId,
@@ -507,6 +525,7 @@ export class WorkflowEngine {
         prompt: singularity?.prompt || "",
         output: singularity?.output || singularity?.text || "",
         traversalState: context.traversalState,
+        timestamp: Number(singularity?.timestamp) || Date.now(),
       }
       : undefined;
 
@@ -554,7 +573,7 @@ export class WorkflowEngine {
       }
     }
 
-    this.port.postMessage({
+    this._safePostMessage({
       type: "WORKFLOW_COMPLETE",
       sessionId: context.sessionId,
       workflowId: request.workflowId,

@@ -60,6 +60,61 @@ type TraversalAnalysisStatement = {
   text: string;
 };
 
+type TraversalAsymmetryType = "contextual" | "normative" | "epistemic" | "mixed";
+
+type TraversalAsymmetrySide = "A" | "B" | "neither";
+
+type TraversalAsymmetryStatement = {
+  id: string;
+  text: string;
+  stance: string;
+  modelIndex: number;
+  bucket: "situational" | "grounded";
+};
+
+type TraversalAsymmetryItem = {
+  conflictId: string;
+  claimAId: string;
+  claimALabel: string;
+  claimATotalStatements: number;
+  claimAPrescriptiveCount: number;
+  claimACautionaryCount: number;
+  claimAPrerequisiteCount: number;
+  claimADependentCount: number;
+  claimAAssertiveCount: number;
+  claimAUncertainCount: number;
+  claimASituationalCount: number;
+  claimAGroundedCount: number;
+  claimASituationalRatio: number;
+  claimAStatements: TraversalAsymmetryStatement[];
+  claimBId: string;
+  claimBLabel: string;
+  claimBTotalStatements: number;
+  claimBPrescriptiveCount: number;
+  claimBCautionaryCount: number;
+  claimBPrerequisiteCount: number;
+  claimBDependentCount: number;
+  claimBAssertiveCount: number;
+  claimBUncertainCount: number;
+  claimBSituationalCount: number;
+  claimBGroundedCount: number;
+  claimBSituationalRatio: number;
+  claimBStatements: TraversalAsymmetryStatement[];
+  asymmetryType: TraversalAsymmetryType;
+  asymmetryScore: number;
+  situationalSide: TraversalAsymmetrySide;
+  reason: string;
+  significance: number;
+};
+
+type TraversalAsymmetrySummary = {
+  totalConflicts: number;
+  contextualCount: number;
+  normativeCount: number;
+  epistemicCount: number;
+  mixedCount: number;
+};
+
 type TraversalAnalysisCondition = {
   id: string;
   clause: string | null;
@@ -90,6 +145,8 @@ type TraversalAnalysis = {
   conditions: TraversalAnalysisCondition[];
   conflicts: TraversalAnalysisConflict[];
   orphans: TraversalAnalysisOrphan[];
+  asymmetry: TraversalAsymmetryItem[];
+  asymmetrySummary: TraversalAsymmetrySummary | null;
 };
 
 /**
@@ -349,10 +406,18 @@ function normalizeTraversalAnalysisFromArtifact(value: any): TraversalAnalysis |
 
   if (Array.isArray((value as any).conditions) && Array.isArray((value as any).conflicts) && Array.isArray((value as any).orphans)) {
     const v = value as any;
+    const asymmetry: TraversalAsymmetryItem[] = Array.isArray(v.asymmetry)
+      ? v.asymmetry
+      : Array.isArray(v.conflictAsymmetry)
+        ? v.conflictAsymmetry
+        : [];
+    const summaryCandidate = v.asymmetrySummary || v.conflictAsymmetrySummary || null;
     return {
       conditions: Array.isArray(v.conditions) ? v.conditions : [],
       conflicts: Array.isArray(v.conflicts) ? v.conflicts : [],
       orphans: Array.isArray(v.orphans) ? v.orphans : [],
+      asymmetry,
+      asymmetrySummary: summaryCandidate && typeof summaryCandidate === "object" ? (summaryCandidate as any) : null,
     };
   }
 
@@ -447,7 +512,95 @@ function normalizeTraversalAnalysisFromArtifact(value: any): TraversalAnalysis |
     }).filter((o: TraversalAnalysisOrphan) => !!o.statement.id)
     : [];
 
-  return { conditions, conflicts, orphans };
+  const asymmetry: TraversalAsymmetryItem[] = Array.isArray(mech?.conflictAsymmetry)
+    ? (mech.conflictAsymmetry as any[])
+      .map((it: any) => ({
+        conflictId: String(it?.conflictId || "").trim(),
+        claimAId: String(it?.claimAId || "").trim(),
+        claimALabel: String(it?.claimALabel || it?.claimAId || "").trim(),
+        claimATotalStatements: typeof it?.claimATotalStatements === "number" ? it.claimATotalStatements : 0,
+        claimAPrescriptiveCount: typeof it?.claimAPrescriptiveCount === "number" ? it.claimAPrescriptiveCount : 0,
+        claimACautionaryCount: typeof it?.claimACautionaryCount === "number" ? it.claimACautionaryCount : 0,
+        claimAPrerequisiteCount: typeof it?.claimAPrerequisiteCount === "number" ? it.claimAPrerequisiteCount : 0,
+        claimADependentCount: typeof it?.claimADependentCount === "number" ? it.claimADependentCount : 0,
+        claimAAssertiveCount: typeof it?.claimAAssertiveCount === "number" ? it.claimAAssertiveCount : 0,
+        claimAUncertainCount: typeof it?.claimAUncertainCount === "number" ? it.claimAUncertainCount : 0,
+        claimASituationalCount: typeof it?.claimASituationalCount === "number" ? it.claimASituationalCount : 0,
+        claimAGroundedCount: typeof it?.claimAGroundedCount === "number" ? it.claimAGroundedCount : 0,
+        claimASituationalRatio: typeof it?.claimASituationalRatio === "number" ? it.claimASituationalRatio : 0,
+        claimAStatements: Array.isArray(it?.claimAStatements)
+          ? it.claimAStatements.map((s: any) => ({
+            id: String(s?.id || "").trim(),
+            text: String(s?.text || "").trim(),
+            stance: String(s?.stance || "unknown"),
+            modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : -1,
+            bucket: s?.bucket === "situational" ? "situational" : "grounded",
+          })).filter((s: any) => !!s.id)
+          : [],
+        claimBId: String(it?.claimBId || "").trim(),
+        claimBLabel: String(it?.claimBLabel || it?.claimBId || "").trim(),
+        claimBTotalStatements: typeof it?.claimBTotalStatements === "number" ? it.claimBTotalStatements : 0,
+        claimBPrescriptiveCount: typeof it?.claimBPrescriptiveCount === "number" ? it.claimBPrescriptiveCount : 0,
+        claimBCautionaryCount: typeof it?.claimBCautionaryCount === "number" ? it.claimBCautionaryCount : 0,
+        claimBPrerequisiteCount: typeof it?.claimBPrerequisiteCount === "number" ? it.claimBPrerequisiteCount : 0,
+        claimBDependentCount: typeof it?.claimBDependentCount === "number" ? it.claimBDependentCount : 0,
+        claimBAssertiveCount: typeof it?.claimBAssertiveCount === "number" ? it.claimBAssertiveCount : 0,
+        claimBUncertainCount: typeof it?.claimBUncertainCount === "number" ? it.claimBUncertainCount : 0,
+        claimBSituationalCount: typeof it?.claimBSituationalCount === "number" ? it.claimBSituationalCount : 0,
+        claimBGroundedCount: typeof it?.claimBGroundedCount === "number" ? it.claimBGroundedCount : 0,
+        claimBSituationalRatio: typeof it?.claimBSituationalRatio === "number" ? it.claimBSituationalRatio : 0,
+        claimBStatements: Array.isArray(it?.claimBStatements)
+          ? it.claimBStatements.map((s: any) => ({
+            id: String(s?.id || "").trim(),
+            text: String(s?.text || "").trim(),
+            stance: String(s?.stance || "unknown"),
+            modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : -1,
+            bucket: s?.bucket === "situational" ? "situational" : "grounded",
+          })).filter((s: any) => !!s.id)
+          : [],
+        asymmetryType: it?.asymmetryType === "contextual" || it?.asymmetryType === "normative" || it?.asymmetryType === "epistemic" || it?.asymmetryType === "mixed"
+          ? it.asymmetryType
+          : "mixed",
+        asymmetryScore: typeof it?.asymmetryScore === "number" ? it.asymmetryScore : 0,
+        situationalSide: it?.situationalSide === "A" || it?.situationalSide === "B" || it?.situationalSide === "neither"
+          ? it.situationalSide
+          : "neither",
+        reason: String(it?.reason || "").trim(),
+        significance: typeof it?.significance === "number" ? it.significance : 0,
+      }))
+      .filter((it: any) => !!it.conflictId && !!it.claimAId && !!it.claimBId)
+    : [];
+
+  asymmetry.sort((a, b) => (b.asymmetryScore || 0) - (a.asymmetryScore || 0));
+
+  const summaryFromArtifact =
+    mech?.conflictAsymmetrySummary && typeof mech.conflictAsymmetrySummary === "object"
+      ? (mech.conflictAsymmetrySummary as any)
+      : null;
+
+  const summary: TraversalAsymmetrySummary | null = summaryFromArtifact
+    ? {
+      totalConflicts: typeof summaryFromArtifact?.totalConflicts === "number" ? summaryFromArtifact.totalConflicts : asymmetry.length,
+      contextualCount: typeof summaryFromArtifact?.contextualCount === "number" ? summaryFromArtifact.contextualCount : 0,
+      normativeCount: typeof summaryFromArtifact?.normativeCount === "number" ? summaryFromArtifact.normativeCount : 0,
+      epistemicCount: typeof summaryFromArtifact?.epistemicCount === "number" ? summaryFromArtifact.epistemicCount : 0,
+      mixedCount: typeof summaryFromArtifact?.mixedCount === "number" ? summaryFromArtifact.mixedCount : 0,
+    }
+    : (asymmetry.length > 0
+      ? asymmetry.reduce<TraversalAsymmetrySummary>(
+        (acc, it) => {
+          acc.totalConflicts += 1;
+          if (it.asymmetryType === "contextual") acc.contextualCount += 1;
+          else if (it.asymmetryType === "normative") acc.normativeCount += 1;
+          else if (it.asymmetryType === "epistemic") acc.epistemicCount += 1;
+          else acc.mixedCount += 1;
+          return acc;
+        },
+        { totalConflicts: 0, contextualCount: 0, normativeCount: 0, epistemicCount: 0, mixedCount: 0 }
+      )
+      : null);
+
+  return { conditions, conflicts, orphans, asymmetry, asymmetrySummary: summary };
 }
 
 // ============================================================================
@@ -863,7 +1016,7 @@ export const DecisionMapSheet = React.memo(() => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
-  const [traversalSubTab, setTraversalSubTab] = useState<"conditions" | "conflicts" | "orphans">("conditions");
+  const [traversalSubTab, setTraversalSubTab] = useState<"conditions" | "conflicts" | "asymmetry" | "orphans" | "mechanical">("conditions");
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -1130,6 +1283,10 @@ export const DecisionMapSheet = React.memo(() => {
 
   const traversalAnalysis: TraversalAnalysis | null = useMemo(() => {
     return normalizeTraversalAnalysisFromArtifact((mappingArtifact as any)?.traversalAnalysis);
+  }, [mappingArtifact]);
+
+  const mechanicalGating = useMemo(() => {
+    return (mappingArtifact as any)?.mechanicalGating ?? null;
   }, [mappingArtifact]);
 
   const claimThemes = useMemo(() => {
@@ -1605,8 +1762,9 @@ export const DecisionMapSheet = React.memo(() => {
       shape,
       providerContexts,
       traversalAnalysis,
+      mechanicalGating,
     };
-  }, [aiTurn, activeMappingPid, mappingArtifact, mappingArtifactJson, rawMappingText, mappingText, optionsText, graphData, graphTopology, semanticClaims, shadowStatements, shadowParagraphs, shadowDeltaForView, shadowUnreferencedIdSet, paragraphProjection, preSemanticRegions, shape, providerContexts, traversalAnalysis]);
+  }, [aiTurn, activeMappingPid, mappingArtifact, mappingArtifactJson, rawMappingText, mappingText, optionsText, graphData, graphTopology, semanticClaims, shadowStatements, shadowParagraphs, shadowDeltaForView, shadowUnreferencedIdSet, paragraphProjection, preSemanticRegions, shape, providerContexts, traversalAnalysis, mechanicalGating]);
 
   return (
     <AnimatePresence>
@@ -1977,13 +2135,13 @@ export const DecisionMapSheet = React.memo(() => {
                         <div className="px-4 pb-4 pt-1 space-y-3">
                           {traversalTiers.length > 0 ? (
                             <div className="space-y-2">
-                              {traversalTiers.map((tier: any) => {
+                              {traversalTiers.map((tier: any, idx: number) => {
                                 const tierIndex = typeof tier?.tierIndex === "number" ? tier.tierIndex : null;
                                 const gates = Array.isArray(tier?.gates) ? tier.gates : [];
                                 if (gates.length === 0) return null;
                                 return (
                                   <details
-                                    key={tierIndex == null ? Math.random().toString(36).slice(2) : String(tierIndex)}
+                                    key={String(tierIndex ?? idx)}
                                     className="bg-surface-highlight/10 border border-border-subtle rounded-lg overflow-hidden"
                                     open={tierIndex === 0}
                                   >
@@ -2434,9 +2592,18 @@ export const DecisionMapSheet = React.memo(() => {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {(["conditions", "conflicts", "orphans"] as const).map((k) => {
+                          {(["conditions", "conflicts", "asymmetry", "orphans", "mechanical"] as const).map((k) => {
                             const active = traversalSubTab === k;
-                            const label = k === "conditions" ? "Conditions" : k === "conflicts" ? "Conflicts" : "Orphans";
+                            const label =
+                              k === "conditions"
+                                ? "Conditions"
+                                : k === "conflicts"
+                                  ? "Conflicts"
+                                  : k === "asymmetry"
+                                    ? "Asymmetry"
+                                    : k === "orphans"
+                                      ? "Orphans"
+                                      : "Mechanical";
                             return (
                               <button
                                 key={k}
@@ -2614,6 +2781,294 @@ export const DecisionMapSheet = React.memo(() => {
                       </div>
                     )}
 
+                    {sheetData.traversalAnalysis && traversalSubTab === "asymmetry" && (
+                      <div className="px-6 pb-10 space-y-4">
+                        {(() => {
+                          const items = Array.isArray(sheetData.traversalAnalysis?.asymmetry)
+                            ? sheetData.traversalAnalysis.asymmetry.slice().sort((a, b) => (b.asymmetryScore || 0) - (a.asymmetryScore || 0))
+                            : [];
+                          const summary = sheetData.traversalAnalysis?.asymmetrySummary || (items.length > 0
+                            ? items.reduce<TraversalAsymmetrySummary>(
+                              (acc, it) => {
+                                acc.totalConflicts += 1;
+                                if (it.asymmetryType === "contextual") acc.contextualCount += 1;
+                                else if (it.asymmetryType === "normative") acc.normativeCount += 1;
+                                else if (it.asymmetryType === "epistemic") acc.epistemicCount += 1;
+                                else acc.mixedCount += 1;
+                                return acc;
+                              },
+                              { totalConflicts: 0, contextualCount: 0, normativeCount: 0, epistemicCount: 0, mixedCount: 0 }
+                            )
+                            : null);
+
+                          const badgeForType = (t: TraversalAsymmetryType) => {
+                            if (t === "contextual") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+                            if (t === "normative") return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+                            if (t === "epistemic") return "bg-sky-500/15 text-sky-300 border-sky-500/30";
+                            return "bg-zinc-500/15 text-zinc-300 border-zinc-500/30";
+                          };
+
+                          const formatPct = (x: number) => `${Math.round(clamp01(x) * 100)}%`;
+
+                          const stanceBadge = (stance: string) => {
+                            const s = String(stance || "unknown").toLowerCase();
+                            const cls =
+                              s === "prescriptive" ? "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" :
+                                s === "prerequisite" ? "bg-violet-500/15 text-violet-300 border-violet-500/30" :
+                                  s === "dependent" ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" :
+                                    s === "uncertain" ? "bg-amber-500/15 text-amber-300 border-amber-500/30" :
+                                      s === "assertive" ? "bg-sky-500/15 text-sky-300 border-sky-500/30" :
+                                        s === "cautionary" ? "bg-rose-500/15 text-rose-300 border-rose-500/30" :
+                                          "bg-zinc-500/15 text-zinc-300 border-zinc-500/30";
+                            return (
+                              <span className={clsx("text-[10px] px-2 py-0.5 rounded-full border font-semibold", cls)}>
+                                {s.toUpperCase()}
+                              </span>
+                            );
+                          };
+
+                          const stanceBar = (situationalRatio: number) => {
+                            const situ = clamp01(situationalRatio);
+                            const grounded = clamp01(1 - situ);
+                            return (
+                              <div className="h-2 w-full rounded-full overflow-hidden bg-surface-highlight/20 border border-border-subtle flex">
+                                <div className="h-full bg-fuchsia-500/60" style={{ width: `${Math.round(situ * 100)}%` }} />
+                                <div className="h-full bg-sky-500/60" style={{ width: `${Math.round(grounded * 100)}%` }} />
+                              </div>
+                            );
+                          };
+
+                          return (
+                            <>
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                                  <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">
+                                    Total: {summary ? summary.totalConflicts : items.length}
+                                  </span>
+                                  <span className={clsx("px-2 py-1 rounded-full border font-semibold", badgeForType("contextual"))}>
+                                    Contextual: {summary ? summary.contextualCount : 0}
+                                  </span>
+                                  <span className={clsx("px-2 py-1 rounded-full border font-semibold", badgeForType("normative"))}>
+                                    Normative: {summary ? summary.normativeCount : 0}
+                                  </span>
+                                  <span className={clsx("px-2 py-1 rounded-full border font-semibold", badgeForType("epistemic"))}>
+                                    Epistemic: {summary ? summary.epistemicCount : 0}
+                                  </span>
+                                  <span className={clsx("px-2 py-1 rounded-full border font-semibold", badgeForType("mixed"))}>
+                                    Mixed: {summary ? summary.mixedCount : 0}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {items.length === 0 ? (
+                                <div className="text-sm text-text-muted">No asymmetry data available for this turn.</div>
+                              ) : (
+                                <div className="space-y-3">
+                                  {items.map((c, idx) => {
+                                    const badge = badgeForType(c.asymmetryType);
+                                    const situA = Array.isArray(c.claimAStatements) ? c.claimAStatements.filter((s) => s.bucket === "situational") : [];
+                                    const groundA = Array.isArray(c.claimAStatements) ? c.claimAStatements.filter((s) => s.bucket === "grounded") : [];
+                                    const situB = Array.isArray(c.claimBStatements) ? c.claimBStatements.filter((s) => s.bucket === "situational") : [];
+                                    const groundB = Array.isArray(c.claimBStatements) ? c.claimBStatements.filter((s) => s.bucket === "grounded") : [];
+
+                                    return (
+                                      <details
+                                        key={c.conflictId}
+                                        open={idx === 0}
+                                        className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+                                      >
+                                        <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <div className="text-sm font-semibold text-text-primary truncate">
+                                                {c.conflictId}
+                                              </div>
+                                              <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badge)}>
+                                                {c.asymmetryType.toUpperCase()}
+                                              </span>
+                                            </div>
+                                            <div className="text-[11px] text-text-muted mt-0.5">
+                                              asymmetry {c.asymmetryScore.toFixed(2)} · significance {c.significance.toFixed(2)}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2 flex-none">
+                                            <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted font-mono">
+                                              {c.situationalSide === "A" ? "A situational" : c.situationalSide === "B" ? "B situational" : "no tilt"}
+                                            </span>
+                                          </div>
+                                        </summary>
+
+                                        <div className="px-4 pb-4 pt-2 space-y-4">
+                                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                            <div className="bg-surface-highlight/10 border border-border-subtle rounded-xl p-4">
+                                              <button
+                                                type="button"
+                                                className="text-left w-full"
+                                                onClick={() => selectClaimById(c.claimAId)}
+                                              >
+                                                <div className="text-xs text-text-muted font-mono">{c.claimAId}</div>
+                                                <div className="text-sm font-semibold text-text-primary mt-1">{c.claimALabel}</div>
+                                              </button>
+
+                                              <div className="mt-3 space-y-2">
+                                                <div className="flex items-center justify-between gap-3">
+                                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Situational vs grounded</div>
+                                                  <div className="text-[11px] text-text-muted font-mono">{formatPct(c.claimASituationalRatio)}</div>
+                                                </div>
+                                                {stanceBar(c.claimASituationalRatio)}
+                                              </div>
+
+                                              <div className="mt-3 text-[11px] text-text-muted grid grid-cols-2 gap-x-3 gap-y-1">
+                                                <div>prescriptive {c.claimAPrescriptiveCount}</div>
+                                                <div>cautionary {c.claimACautionaryCount}</div>
+                                                <div>prerequisite {c.claimAPrerequisiteCount}</div>
+                                                <div>dependent {c.claimADependentCount}</div>
+                                                <div>assertive {c.claimAAssertiveCount}</div>
+                                                <div>uncertain {c.claimAUncertainCount}</div>
+                                              </div>
+
+                                              <div className="mt-4 space-y-3">
+                                                <div>
+                                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Situational</div>
+                                                  <div className="mt-2 space-y-2">
+                                                    {situA.length === 0 ? (
+                                                      <div className="text-xs text-text-muted">None</div>
+                                                    ) : (
+                                                      situA.map((s) => (
+                                                        <div key={s.id} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                                          <div className="flex items-center justify-between gap-2">
+                                                            <div className="text-xs text-text-muted font-mono">
+                                                              {s.id}{typeof s.modelIndex === "number" && s.modelIndex > 0 ? ` · M${s.modelIndex}` : ""}
+                                                            </div>
+                                                            {stanceBadge(s.stance)}
+                                                          </div>
+                                                          <div className="text-sm text-text-primary mt-2 leading-relaxed">
+                                                            "{s.text}"
+                                                          </div>
+                                                        </div>
+                                                      ))
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                <div>
+                                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Grounded</div>
+                                                  <div className="mt-2 space-y-2">
+                                                    {groundA.length === 0 ? (
+                                                      <div className="text-xs text-text-muted">None</div>
+                                                    ) : (
+                                                      groundA.map((s) => (
+                                                        <div key={s.id} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                                          <div className="flex items-center justify-between gap-2">
+                                                            <div className="text-xs text-text-muted font-mono">
+                                                              {s.id}{typeof s.modelIndex === "number" && s.modelIndex > 0 ? ` · M${s.modelIndex}` : ""}
+                                                            </div>
+                                                            {stanceBadge(s.stance)}
+                                                          </div>
+                                                          <div className="text-sm text-text-primary mt-2 leading-relaxed">
+                                                            "{s.text}"
+                                                          </div>
+                                                        </div>
+                                                      ))
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+
+                                            <div className="bg-surface-highlight/10 border border-border-subtle rounded-xl p-4">
+                                              <button
+                                                type="button"
+                                                className="text-left w-full"
+                                                onClick={() => selectClaimById(c.claimBId)}
+                                              >
+                                                <div className="text-xs text-text-muted font-mono">{c.claimBId}</div>
+                                                <div className="text-sm font-semibold text-text-primary mt-1">{c.claimBLabel}</div>
+                                              </button>
+
+                                              <div className="mt-3 space-y-2">
+                                                <div className="flex items-center justify-between gap-3">
+                                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Situational vs grounded</div>
+                                                  <div className="text-[11px] text-text-muted font-mono">{formatPct(c.claimBSituationalRatio)}</div>
+                                                </div>
+                                                {stanceBar(c.claimBSituationalRatio)}
+                                              </div>
+
+                                              <div className="mt-3 text-[11px] text-text-muted grid grid-cols-2 gap-x-3 gap-y-1">
+                                                <div>prescriptive {c.claimBPrescriptiveCount}</div>
+                                                <div>cautionary {c.claimBCautionaryCount}</div>
+                                                <div>prerequisite {c.claimBPrerequisiteCount}</div>
+                                                <div>dependent {c.claimBDependentCount}</div>
+                                                <div>assertive {c.claimBAssertiveCount}</div>
+                                                <div>uncertain {c.claimBUncertainCount}</div>
+                                              </div>
+
+                                              <div className="mt-4 space-y-3">
+                                                <div>
+                                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Situational</div>
+                                                  <div className="mt-2 space-y-2">
+                                                    {situB.length === 0 ? (
+                                                      <div className="text-xs text-text-muted">None</div>
+                                                    ) : (
+                                                      situB.map((s) => (
+                                                        <div key={s.id} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                                          <div className="flex items-center justify-between gap-2">
+                                                            <div className="text-xs text-text-muted font-mono">
+                                                              {s.id}{typeof s.modelIndex === "number" && s.modelIndex > 0 ? ` · M${s.modelIndex}` : ""}
+                                                            </div>
+                                                            {stanceBadge(s.stance)}
+                                                          </div>
+                                                          <div className="text-sm text-text-primary mt-2 leading-relaxed">
+                                                            "{s.text}"
+                                                          </div>
+                                                        </div>
+                                                      ))
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                <div>
+                                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Grounded</div>
+                                                  <div className="mt-2 space-y-2">
+                                                    {groundB.length === 0 ? (
+                                                      <div className="text-xs text-text-muted">None</div>
+                                                    ) : (
+                                                      groundB.map((s) => (
+                                                        <div key={s.id} className="bg-surface border border-border-subtle rounded-lg p-3">
+                                                          <div className="flex items-center justify-between gap-2">
+                                                            <div className="text-xs text-text-muted font-mono">
+                                                              {s.id}{typeof s.modelIndex === "number" && s.modelIndex > 0 ? ` · M${s.modelIndex}` : ""}
+                                                            </div>
+                                                            {stanceBadge(s.stance)}
+                                                          </div>
+                                                          <div className="text-sm text-text-primary mt-2 leading-relaxed">
+                                                            "{s.text}"
+                                                          </div>
+                                                        </div>
+                                                      ))
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </div>
+
+                                          <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                            <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Reason</div>
+                                            <div className="mt-2 text-sm text-text-primary">{c.reason || "—"}</div>
+                                          </div>
+                                        </div>
+                                      </details>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+
                     {sheetData.traversalAnalysis && traversalSubTab === "orphans" && (
                       <div className="px-6 pb-10 space-y-3">
                         {sheetData.traversalAnalysis.orphans.length === 0 ? (
@@ -2645,6 +3100,112 @@ export const DecisionMapSheet = React.memo(() => {
                             </div>
                           ))
                         )}
+                      </div>
+                    )}
+
+                    {traversalSubTab === "mechanical" && (
+                      <div className="px-6 pb-10 space-y-3">
+                        {!sheetData.mechanicalGating ? (
+                          <div className="text-sm text-text-muted">No mechanical gating debug available.</div>
+                        ) : (() => {
+                          const mg = sheetData.mechanicalGating as any;
+                          const gates = Array.isArray(mg?.gates) ? mg.gates : [];
+                          const err = typeof mg?.error === "string" ? mg.error : null;
+                          return (
+                            <div className="space-y-3">
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-text-primary">Mechanical gating</div>
+                                    <div className="text-[11px] text-text-muted mt-0.5">
+                                      {err ? "derivation failed (fallback used)" : "derived gates computed"}
+                                    </div>
+                                  </div>
+                                  <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted font-semibold">
+                                    {gates.length} gates
+                                  </span>
+                                </div>
+                                {err && (
+                                  <div className="mt-3 text-sm text-text-muted">
+                                    Error: {err}
+                                  </div>
+                                )}
+                              </div>
+
+                              <details className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                  <div className="text-sm font-semibold text-text-primary">Derived gates</div>
+                                  <div className="text-[11px] text-text-muted">{gates.length}</div>
+                                </summary>
+                                <div className="px-4 pb-4 pt-1 space-y-2">
+                                  {gates.length === 0 ? (
+                                    <div className="text-sm text-text-muted">No derived gates.</div>
+                                  ) : (
+                                    gates.map((g: any, idx: number) => (
+                                      <details
+                                        key={String(g?.id || idx)}
+                                        open={idx === 0}
+                                        className="bg-surface-highlight/10 border border-border-subtle rounded-xl overflow-hidden"
+                                      >
+                                        <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="text-sm font-semibold text-text-primary truncate">
+                                              {String(g?.question || g?.id || "Gate")}
+                                            </div>
+                                            <div className="text-[11px] text-text-muted mt-0.5">
+                                              {Array.isArray(g?.affectedClaims) ? g.affectedClaims.length : 0} claim(s) · {Array.isArray(g?.sourceStatementIds) ? g.sourceStatementIds.length : 0} statement(s)
+                                            </div>
+                                          </div>
+                                          <div className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted font-mono">
+                                            {String(g?.id || "")}
+                                          </div>
+                                        </summary>
+                                        <div className="px-4 pb-4 pt-1 space-y-3">
+                                          <div className="text-sm text-text-primary">
+                                            {typeof g?.condition === "string" ? g.condition : ""}
+                                          </div>
+                                          {Array.isArray(g?.affectedClaims) && g.affectedClaims.length > 0 && (
+                                            <div className="space-y-1">
+                                              <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Affected claims</div>
+                                              <div className="flex flex-wrap gap-2">
+                                                {g.affectedClaims.map((a: any) => {
+                                                  const cid = String(a?.claimId ?? a ?? "").trim();
+                                                  if (!cid) return null;
+                                                  return (
+                                                    <button
+                                                      key={cid}
+                                                      type="button"
+                                                      className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors"
+                                                      onClick={() => selectClaimById(cid)}
+                                                    >
+                                                      {cid}
+                                                    </button>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </details>
+                                    ))
+                                  )}
+                                </div>
+                              </details>
+
+                              <details className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                  <div className="text-sm font-semibold text-text-primary">Raw mechanicalGating</div>
+                                  <div className="text-[11px] text-text-muted font-mono">JSON</div>
+                                </summary>
+                                <div className="px-4 pb-4 pt-1">
+                                  <pre className="text-xs text-text-muted whitespace-pre-wrap break-words">
+                                    {stringifyForDebug(mg)}
+                                  </pre>
+                                </div>
+                              </details>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </m.div>

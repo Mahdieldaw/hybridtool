@@ -164,7 +164,9 @@ export function conflictDeriver(input: ConflictDeriverInput): ConflictDeriverOut
 
   const articulationSet = new Set<string>(articulationPoints.map((x) => String(x)));
   const statementsById = new Map<string, ShadowStatement>(
-    (Array.isArray(statements) ? statements : []).map((s: any) => [String(s?.id || ''), s])
+    (Array.isArray(statements) ? statements : [])
+      .filter((s: any) => typeof s?.id === 'string' && s.id.trim().length > 0)
+      .map((s: any) => [String(s.id), s])
   );
   const claimById = new Map<string, EnrichedClaim>((Array.isArray(claims) ? claims : []).map((c) => [String(c.id), c]));
 
@@ -222,7 +224,12 @@ export function conflictDeriver(input: ConflictDeriverInput): ConflictDeriverOut
       if (!gate) continue;
       const affected = Array.isArray(gate.affectedClaims) ? gate.affectedClaims : [];
       if (affected.length === 0) continue;
-      const affectedSet = new Set<string>(affected.map((a: any) => String(a?.claimId || '').trim()).filter(Boolean));
+      const affectedSet = new Set<string>(
+        affected
+          .map((a: any) => (typeof a === 'string' ? a : a?.claimId))
+          .map((id: any) => String(id || '').trim())
+          .filter(Boolean)
+      );
       const blocksA = affectedSet.has(claimA.id);
       const blocksB = affectedSet.has(claimB.id);
       if (!blocksA && !blocksB) continue;
@@ -299,4 +306,3 @@ export function conflictDeriver(input: ConflictDeriverInput): ConflictDeriverOut
     filteredOutReasons,
   };
 }
-

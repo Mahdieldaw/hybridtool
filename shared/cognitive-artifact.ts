@@ -77,6 +77,7 @@ export function buildCognitiveArtifact(
         },
     },
     traversalAnalysis: mapper?.traversalAnalysis ?? undefined,
+    mechanicalGating: mapper?.mechanicalGating ?? undefined,
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
       query: mapper?.query ?? undefined,

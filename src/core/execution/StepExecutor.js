@@ -452,6 +452,8 @@ export class StepExecutor {
     const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
     const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
     const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
+    const { computeStructuralAnalysis } = await import('../PromptMethods');
+    const { deriveConditionalGates } = await import('../traversal/deriveConditionalGates');
 
     // 2. Shadow Extraction (Mechanical)
     // Map sourceData to expected format (modelIndex, content)
@@ -830,7 +832,8 @@ export class StepExecutor {
                   : [];
 
                 const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-                const unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+                let unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+                let mechanicalGating = null;
 
                 let enrichedClaims = [];
 
@@ -853,6 +856,52 @@ export class StepExecutor {
                   unifiedEdges,
                   statementEmbeddingResult?.embeddings || null
                 );
+
+                try {
+                  const tempForStructure = buildCognitiveArtifact({
+                    id: `artifact-${Date.now()}`,
+                    query: payload.originalPrompt,
+                    turn: context.turn || 0,
+                    timestamp: new Date().toISOString(),
+                    model_count: citationOrder.length,
+                    claims: enrichedClaims,
+                    edges: unifiedEdges,
+                    conditionals: [],
+                    ghosts: null,
+                    narrative: String(parseResult.narrative || '').trim(),
+                  }, {
+                    shadow: { extraction: shadowResult || null, delta: null },
+                    paragraphProjection: paragraphResult || null,
+                    substrate: { graph: substrateGraph },
+                    preSemantic: preSemanticInterpretation || null,
+                  });
+
+                  const structuralAnalysis = computeStructuralAnalysis(tempForStructure);
+
+                  const derivedGates = await deriveConditionalGates({
+                    claims: enrichedClaims,
+                    statements: shadowResult.statements,
+                    edges: unifiedEdges,
+                    statementEmbeddings: statementEmbeddingResult?.embeddings || null,
+                    paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
+                    paragraphs: paragraphResult.paragraphs,
+                    structuralAnalysis,
+                  });
+
+                  mechanicalGating = derivedGates;
+                  unifiedConditionals = derivedGates.gates.map((g) => ({
+                    id: g.id,
+                    question: g.question,
+                    condition: g.condition,
+                    affectedClaims: g.affectedClaims,
+                    sourceStatementIds: g.sourceStatementIds,
+                  }));
+                } catch (err) {
+                  mechanicalGating = { error: getErrorMessage(err) };
+                  console.warn('[StepExecutor] Gate derivation failed; falling back to mapper conditionals', {
+                    error: getErrorMessage(err),
+                  });
+                }
 
 
                 let completeness = null;
@@ -1161,9 +1210,11 @@ export class StepExecutor {
                   const ghosts = null;
                   let traversalAnalysis = null;
 
+                  let draftMapperArtifact = null;
+                  let tempCognitiveForTraversal = null;
                   try {
                     const { buildMechanicalTraversal } = await import('../traversal/buildMechanicalTraversal');
-                    const draftMapperArtifact = {
+                    draftMapperArtifact = {
                       id: `artifact-${Date.now()}`,
                       query: payload.originalPrompt,
                       turn: context.turn || 0,
@@ -1176,7 +1227,7 @@ export class StepExecutor {
                       conditionals: unifiedConditionals,
                     };
 
-                    const tempCognitiveForTraversal = buildCognitiveArtifact(draftMapperArtifact, {
+                    tempCognitiveForTraversal = buildCognitiveArtifact(draftMapperArtifact, {
                       shadow: {
                         extraction: shadowResult || null,
                         delta: shadowDelta || null,
@@ -1191,7 +1242,24 @@ export class StepExecutor {
                     traversalAnalysis = await buildMechanicalTraversal(tempCognitiveForTraversal, {
                       statementEmbeddings: statementEmbeddingResult?.embeddings || null,
                     });
-                  } catch (_) {
+                  } catch (err) {
+                    const warn =
+                      this?.logger && typeof this.logger.warn === 'function'
+                        ? this.logger.warn.bind(this.logger)
+                        : typeof processLogger !== 'undefined' &&
+                            processLogger &&
+                            typeof processLogger.warn === 'function'
+                          ? processLogger.warn.bind(processLogger)
+                          : console.warn.bind(console);
+
+                    warn('[StepExecutor] buildMechanicalTraversal/tempCognitiveForTraversal failed; continuing without traversalAnalysis', {
+                      originalPrompt: payload?.originalPrompt,
+                      citationCount: Array.isArray(citationOrder) ? citationOrder.length : 0,
+                      draftArtifactId: draftMapperArtifact?.id,
+                      tempCognitiveId: tempCognitiveForTraversal?.id,
+                      error: err,
+                      stack: err?.stack,
+                    });
                     traversalAnalysis = null;
                   }
 
@@ -1212,6 +1280,7 @@ export class StepExecutor {
                     traversalGraph,
                     forcingPoints,
                     traversalAnalysis,
+                    mechanicalGating,
                     preSemantic: preSemanticInterpretation || null,
                     ...(completeness ? { completeness } : {}),
                     ...(alignmentResult ? { alignment: alignmentResult } : {}),
@@ -1231,7 +1300,6 @@ export class StepExecutor {
 
                   try {
                     if (preSemanticInterpretation && mapperArtifact) {
-                      const { computeStructuralAnalysis } = await import('../PromptMethods');
                       const { validateStructuralMapping } = await import('../../geometry/interpretation');
                       // Convert to cognitive shape for structural analysis
                       const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);

@@ -186,25 +186,19 @@ export function StatementClusteringDebugOverlay() {
   const effectiveConfig = useMemo<ClusteringConfig>(() => {
     const base = CONFIG_PRESETS[preset] || DEFAULT_CONFIG;
     const parsedSimilarityThreshold = Number(similarityThresholdText);
-    const parsedEmbeddingDimensions = Number(embeddingDimensionsText);
     return {
       ...base,
       similarityThreshold: clamp01(
         Number.isFinite(parsedSimilarityThreshold) ? parsedSimilarityThreshold : base.similarityThreshold,
       ),
-      embeddingDimensions: Math.max(
-        8,
-        Math.floor(
-          Number.isFinite(parsedEmbeddingDimensions) ? parsedEmbeddingDimensions : base.embeddingDimensions,
-        ),
-      ),
+      embeddingDimensions: base.embeddingDimensions,
       modelId: String(modelId || base.modelId),
       minParagraphsForClustering: Math.max(
         1,
         Math.floor(Number.isFinite(minItems) ? minItems : base.minParagraphsForClustering),
       ),
     };
-  }, [embeddingDimensionsText, minItems, modelId, preset, similarityThresholdText]);
+  }, [minItems, modelId, preset, similarityThresholdText]);
 
   const statementById = useMemo(() => {
     const map = new Map<string, ShadowStatement>();
@@ -419,7 +413,8 @@ export function StatementClusteringDebugOverlay() {
                     Embedding dims
                     <input
                       value={embeddingDimensionsText}
-                      onChange={(e) => setEmbeddingDimensionsText(e.target.value)}
+                      readOnly
+                      disabled
                       className="bg-chip border border-border-subtle rounded px-2 py-1 text-xs text-text-primary font-mono"
                       inputMode="numeric"
                     />
@@ -624,4 +619,3 @@ export function StatementClusteringDebugOverlay() {
     </>
   );
 }
-
