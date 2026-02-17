@@ -113,6 +113,7 @@ export {
 // Functions - ShadowExtractor
 export {
     extractShadowStatements,
+    enrichShadowExtraction,
     filterByStance,
     filterByModel,
     filterBySignals,

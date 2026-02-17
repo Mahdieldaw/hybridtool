@@ -3,7 +3,7 @@ import { computeStructuralAnalysis } from '../PromptMethods';
 import { conditionalFinder, type ConditionalFinderOutput } from './conditionalFinder';
 import { conflictDeriver, type ConflictDeriverOutput } from './conflictDeriver';
 
-type Stance = 'prescriptive' | 'cautionary' | 'prerequisite' | 'dependent' | 'assertive' | 'uncertain';
+type Stance = 'prescriptive' | 'cautionary' | 'prerequisite' | 'dependent' | 'assertive' | 'uncertain' | 'unclassified';
 
 export type ConflictAsymmetryType = 'contextual' | 'normative' | 'epistemic' | 'mixed';
 
@@ -160,9 +160,11 @@ function clipText(text: unknown, maxChars: number): string {
 }
 
 function stanceBucket(stanceRaw: unknown): 'situational' | 'grounded' {
-  const stance = String(stanceRaw || '').toLowerCase();
+  const stance = String(stanceRaw || '').toLowerCase().trim();
+  if (!stance || stance === 'unknown') return 'situational';
   if (stance === 'prescriptive' || stance === 'prerequisite' || stance === 'dependent' || stance === 'uncertain') return 'situational';
-  return 'grounded';
+  if (stance === 'cautionary' || stance === 'assertive') return 'grounded';
+  return 'situational';
 }
 
 function analyzeConflictStanceAsymmetry(
@@ -199,6 +201,7 @@ function analyzeConflictStanceAsymmetry(
       dependent: 0,
       assertive: 0,
       uncertain: 0,
+      unclassified: 0,
     };
     for (const st of sList) {
       const stance = String((st as any)?.stance || '').toLowerCase() as Stance;
@@ -503,7 +506,7 @@ function conditionalsFromPruners(
     meta: {
       totalConditionalClaims: conditions.length,
       gatesProduced: conditions.length,
-      conditionalStatementsInClaims: 0,
+      conditionalStatementsInClaims: usedSourceStatementIds.size,
       conditionalStatementsTotal,
       processingTimeMs: nowMs() - start,
     },

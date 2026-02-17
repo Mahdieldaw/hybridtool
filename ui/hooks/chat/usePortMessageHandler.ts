@@ -353,7 +353,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
                         ...(existingSingularity || {}),
                         ...(incomingSingularity || {}),
                         prompt:
-                          incomingSingularityTs > existingSingularityTs
+                          incomingSingularityTs >= existingSingularityTs
                             ? incomingSingularity?.prompt ||
                               existingSingularity?.prompt ||
                               ""

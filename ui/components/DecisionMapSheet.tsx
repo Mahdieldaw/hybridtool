@@ -15,6 +15,7 @@ import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
 import { ParagraphSpaceView } from "./ParagraphSpaceView";
 import { ShadowAuditView } from "./cognitive/ShadowAuditView";
+import { DecisionMapObservabilityRow } from "./DecisionMapObservabilityRow";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -148,6 +149,29 @@ type TraversalAnalysis = {
   asymmetry: TraversalAsymmetryItem[];
   asymmetrySummary: TraversalAsymmetrySummary | null;
 };
+
+type QueryRelevanceRow = {
+  id: string;
+  tier: "high" | "medium" | "low";
+  composite: number | null;
+  querySim: number | null;
+  novelty: number | null;
+  subConsensus: number | null;
+  stance: string | null;
+  modelIndex: number | null;
+  confidence: number | null;
+  text: string;
+};
+
+type QueryRelevanceSortKey =
+  | "id"
+  | "tier"
+  | "composite"
+  | "querySim"
+  | "novelty"
+  | "subConsensus"
+  | "stance"
+  | "modelIndex";
 
 /**
  * Build themes from claims - supports BOTH role-based AND type-based grouping
@@ -771,7 +795,7 @@ const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, on
 // ============================================================================
 
 interface DetailViewProps {
-  node: { id: string; label: string; supporters: (string | number)[]; theme?: string };
+  node: { id: string; label: string; supporters: (string | number)[]; theme?: string; convergenceConfidence?: number };
   narrativeExcerpt: string;
   citationSourceOrder?: Record<number, string>;
   onBack: () => void;
@@ -873,6 +897,12 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
 
         {node.theme && (
           <span className="text-sm text-text-muted mt-2">{node.theme}</span>
+        )}
+
+        {typeof node.convergenceConfidence === "number" && (
+          <span className="mt-3 text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted">
+            Convergence {(Number(node.convergenceConfidence || 0) * 100).toFixed(0)}%
+          </span>
         )}
       </div>
 
@@ -1011,8 +1041,8 @@ export const DecisionMapSheet = React.memo(() => {
 
   const setToast = useSetAtom(toastAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'evidence' | 'traversal'>('graph');
-  const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'query' | 'evidence' | 'traversal'>('graph');
+  const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string; convergenceConfidence?: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
@@ -1027,9 +1057,11 @@ export const DecisionMapSheet = React.memo(() => {
   useEffect(() => {
     if (openState) {
       const raw = String(openState.tab || 'graph');
-      const mapped: 'graph' | 'narrative' | 'options' | 'space' | 'evidence' | 'traversal' =
+      const mapped: 'graph' | 'narrative' | 'options' | 'space' | 'query' | 'evidence' | 'traversal' =
         raw === 'shadow' || raw === 'evidence' || raw === 'json'
           ? 'evidence'
+          : raw === 'query' || raw === 'queryRelevance'
+            ? 'query'
           : raw === 'traversal'
             ? 'traversal'
             : raw === 'graph' || raw === 'narrative' || raw === 'options' || raw === 'space'
@@ -1167,6 +1199,16 @@ export const DecisionMapSheet = React.memo(() => {
   }, [mappingArtifact, parsedMapping.topology]);
 
   const graphData = useMemo(() => {
+    const artifactClaims = Array.isArray(mappingArtifact?.semantic?.claims) ? mappingArtifact!.semantic!.claims : null;
+    const artifactEdges = Array.isArray(mappingArtifact?.semantic?.edges) ? mappingArtifact!.semantic!.edges : null;
+    if ((artifactClaims && artifactClaims.length > 0) || (artifactEdges && artifactEdges.length > 0)) {
+      return {
+        claims: artifactClaims || [],
+        edges: artifactEdges || [],
+        source: "artifact" as const,
+      };
+    }
+
     const claimsFromMap = Array.isArray(parsedMapping.map?.claims) ? parsedMapping.map!.claims : null;
     const edgesFromMap = Array.isArray(parsedMapping.map?.edges) ? parsedMapping.map!.edges : null;
 
@@ -1188,7 +1230,7 @@ export const DecisionMapSheet = React.memo(() => {
       edges: 0,
     });
     return { ...adaptGraphTopology(graphTopology), source: "traversal" as const };
-  }, [parsedMapping, graphTopology]);
+  }, [mappingArtifact, parsedMapping, graphTopology]);
 
   const derivedMapperArtifact = useMemo(() => {
     if (!mappingArtifact) return null;
@@ -1353,13 +1395,24 @@ export const DecisionMapSheet = React.memo(() => {
   }, [aiTurn, setActiveSplitPanel]);
 
   const handleNodeClick = useCallback((node: any) => {
+    const fromSemantic = Array.isArray(semanticClaims)
+      ? semanticClaims.find((c: any) => String(c?.id || "") === String(node?.id || ""))
+      : null;
+    const convergenceConfidence =
+      typeof (fromSemantic as any)?.convergenceConfidence === "number"
+        ? (fromSemantic as any).convergenceConfidence
+        : typeof node?.convergenceConfidence === "number"
+          ? node.convergenceConfidence
+          : undefined;
+
     setSelectedNode({
       id: node.id,
       label: node.label,
       supporters: node.supporters || [],
-      theme: node.type || node.theme
+      theme: node.type || node.theme,
+      convergenceConfidence,
     });
-  }, []);
+  }, [semanticClaims]);
 
   const selectClaimById = useCallback((claimIdRaw: string) => {
     const claimId = String(claimIdRaw || "").trim();
@@ -1370,9 +1423,11 @@ export const DecisionMapSheet = React.memo(() => {
     const claim = fromSemantic || fromGraph || null;
     const label = String(claim?.label || claimId);
     const supporters = Array.isArray((claim as any)?.supporters) ? (claim as any).supporters : [];
+    const convergenceConfidence =
+      typeof (claim as any)?.convergenceConfidence === "number" ? (claim as any).convergenceConfidence : undefined;
 
     setActiveTab("graph");
-    setSelectedNode({ id: claimId, label, supporters, theme: (claim as any)?.type || (claim as any)?.theme });
+    setSelectedNode({ id: claimId, label, supporters, theme: (claim as any)?.type || (claim as any)?.theme, convergenceConfidence });
   }, [graphData?.claims, semanticClaims]);
 
   const handleDetailOrbClick = useCallback((providerId: string) => {
@@ -1409,6 +1464,10 @@ export const DecisionMapSheet = React.memo(() => {
 
   const structuralValidation = useMemo(() => {
     return (mappingArtifact as any)?.geometry?.structuralValidation || (mappingArtifact as any)?.structuralValidation || null;
+  }, [mappingArtifact]);
+
+  const convergence = useMemo(() => {
+    return (mappingArtifact as any)?.geometry?.convergence || (mappingArtifact as any)?.convergence || null;
   }, [mappingArtifact]);
 
 
@@ -1536,6 +1595,10 @@ export const DecisionMapSheet = React.memo(() => {
   const [evidenceCoverageOpen, setEvidenceCoverageOpen] = useState(false);
   const [narrativeMode, setNarrativeMode] = useState<"formatted" | "raw">("formatted");
   const [promptOpen, setPromptOpen] = useState(false);
+  const [queryRelevanceSearch, setQueryRelevanceSearch] = useState("");
+  const [queryRelevanceTier, setQueryRelevanceTier] = useState<"all" | "high" | "medium" | "low">("all");
+  const [queryRelevanceSortKey, setQueryRelevanceSortKey] = useState<QueryRelevanceSortKey>("composite");
+  const [queryRelevanceSortDir, setQueryRelevanceSortDir] = useState<"asc" | "desc">("desc");
 
   const evidenceModelIndices = useMemo(() => {
     const set = new Set<number>();
@@ -1547,6 +1610,126 @@ export const DecisionMapSheet = React.memo(() => {
     }
     return Array.from(set.values()).sort((a, b) => a - b);
   }, [shadowStatements, shadowParagraphs]);
+
+  const queryRelevanceRows = useMemo<QueryRelevanceRow[]>(() => {
+    const relevance = (mappingArtifact as any)?.geometry?.query?.relevance;
+    const statementScores = relevance?.statementScores && typeof relevance.statementScores === "object" ? relevance.statementScores : null;
+    const tiers = relevance?.tiers && typeof relevance.tiers === "object" ? relevance.tiers : null;
+    const tierById = new Map<string, "high" | "medium" | "low">();
+    if (tiers?.high && Array.isArray(tiers.high)) for (const id of tiers.high) tierById.set(String(id), "high");
+    if (tiers?.medium && Array.isArray(tiers.medium)) for (const id of tiers.medium) tierById.set(String(id), "medium");
+    if (tiers?.low && Array.isArray(tiers.low)) for (const id of tiers.low) tierById.set(String(id), "low");
+
+    const q = queryRelevanceSearch.trim().toLowerCase();
+
+    const rows: QueryRelevanceRow[] = (shadowStatements || []).map((s: any) => {
+      const id = String(s?.id || "").trim();
+      const score = id && statementScores ? statementScores[id] : null;
+      const tier = id ? (tierById.get(id) || "low") : "low";
+      return {
+        id,
+        tier,
+        composite: typeof score?.compositeRelevance === "number" ? score.compositeRelevance : null,
+        querySim: typeof score?.querySimilarity === "number" ? score.querySimilarity : null,
+        novelty: typeof score?.novelty === "number" ? score.novelty : null,
+        subConsensus: typeof score?.subConsensusCorroboration === "number" ? score.subConsensusCorroboration : null,
+        stance: s?.stance != null ? String(s.stance) : null,
+        modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : null,
+        confidence: typeof s?.confidence === "number" ? s.confidence : null,
+        text: String(s?.text || ""),
+      };
+    });
+
+    const filtered: QueryRelevanceRow[] = rows.filter((r) => {
+      if (!r.id) return false;
+      if (queryRelevanceTier !== "all" && r.tier !== queryRelevanceTier) return false;
+      if (!q) return true;
+      return r.id.toLowerCase().includes(q) || r.text.toLowerCase().includes(q);
+    });
+
+    const tierRank: Record<QueryRelevanceRow["tier"], number> = { high: 3, medium: 2, low: 1 };
+    const dir = queryRelevanceSortDir === "asc" ? 1 : -1;
+
+    filtered.sort((a, b) => {
+      const key = queryRelevanceSortKey;
+      if (key === "id") return dir * a.id.localeCompare(b.id);
+      if (key === "tier") {
+        const d = (tierRank[a.tier] - tierRank[b.tier]) * dir;
+        if (d !== 0) return d;
+        return a.id.localeCompare(b.id);
+      }
+      if (key === "stance") {
+        const sa = (a.stance || "").toLowerCase();
+        const sb = (b.stance || "").toLowerCase();
+        const d = dir * sa.localeCompare(sb);
+        if (d !== 0) return d;
+        return a.id.localeCompare(b.id);
+      }
+
+      const va =
+        key === "composite"
+          ? a.composite
+          : key === "querySim"
+            ? a.querySim
+            : key === "novelty"
+              ? a.novelty
+              : key === "subConsensus"
+                ? a.subConsensus
+                : key === "modelIndex"
+                  ? a.modelIndex
+                  : null;
+      const vb =
+        key === "composite"
+          ? b.composite
+          : key === "querySim"
+            ? b.querySim
+            : key === "novelty"
+              ? b.novelty
+              : key === "subConsensus"
+                ? b.subConsensus
+                : key === "modelIndex"
+                  ? b.modelIndex
+                  : null;
+
+      const na = typeof va === "number" ? va : -Infinity;
+      const nb = typeof vb === "number" ? vb : -Infinity;
+      if (na !== nb) return (na - nb) * dir;
+      return a.id.localeCompare(b.id);
+    });
+
+    return filtered;
+  }, [mappingArtifact, shadowStatements, queryRelevanceSearch, queryRelevanceTier, queryRelevanceSortKey, queryRelevanceSortDir]);
+
+  const queryRelevanceScores = useMemo(() => {
+    return queryRelevanceRows.map((r) => ({
+      id: r.id,
+      tier: r.tier,
+      composite: r.composite,
+      querySim: r.querySim,
+      novelty: r.novelty,
+      subConsensus: r.subConsensus,
+    }));
+  }, [queryRelevanceRows]);
+
+  const queryRelevanceScoresCsv = useMemo(() => {
+    const header = ["id", "tier", "composite", "querySim", "novelty", "subConsensus"].join(",");
+    const lines = queryRelevanceScores.map((r) => {
+      const cells = [
+        r.id,
+        r.tier,
+        typeof r.composite === "number" ? String(r.composite) : "",
+        typeof r.querySim === "number" ? String(r.querySim) : "",
+        typeof r.novelty === "number" ? String(r.novelty) : "",
+        typeof r.subConsensus === "number" ? String(r.subConsensus) : "",
+      ];
+      return cells.join(",");
+    });
+    return [header, ...lines].join("\n");
+  }, [queryRelevanceScores]);
+
+  const queryRelevanceScoresJson = useMemo(() => {
+    return JSON.stringify(queryRelevanceScores, null, 2);
+  }, [queryRelevanceScores]);
 
   const filteredShadowStatements = useMemo(() => {
     if (!Array.isArray(shadowStatements)) return [];
@@ -1701,6 +1884,7 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
     { key: 'space' as const, label: 'Space', activeClass: 'decision-tab-active-space' },
+    { key: 'query' as const, label: 'Query', activeClass: 'decision-tab-active-options' },
     { key: 'evidence' as const, label: 'Evidence', activeClass: 'decision-tab-active-options' },
     { key: 'traversal' as const, label: 'Traversal', activeClass: 'decision-tab-active-graph' },
   ];
@@ -1877,6 +2061,8 @@ export const DecisionMapSheet = React.memo(() => {
                 </button>
               </div>
             </div>
+
+            <DecisionMapObservabilityRow artifact={sheetData.mappingArtifact} />
 
             {(sheetMeta.idShort || sheetMeta.createdAtLabel || sheetMeta.mapper) && (
               <div className="px-6 py-2 border-b border-white/10 bg-black/10 flex items-center justify-between gap-3 text-[11px] text-text-muted">
@@ -2445,6 +2631,103 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       </details>
 
+                      <details className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                        <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-text-primary truncate">Convergence</div>
+                            <div className="text-[11px] text-text-muted mt-0.5">
+                              Mechanical artifacts vs semantic mapping agreement
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-none">
+                            {typeof convergence?.relationshipConvergence?.agreementRatio === "number" && (
+                              <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted">
+                                Agreement {(Number(convergence.relationshipConvergence.agreementRatio || 0) * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                        </summary>
+                        <div className="px-4 pb-4 pt-1 space-y-3">
+                          {!convergence && (
+                            <div className="text-sm text-text-muted">No convergence report available.</div>
+                          )}
+
+                          {convergence && (
+                            <>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Coverage</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>
+                                      Expected claims: {Array.isArray(convergence?.coverageConvergence?.expectedClaimCount)
+                                        ? `${convergence.coverageConvergence.expectedClaimCount[0]}–${convergence.coverageConvergence.expectedClaimCount[1]}`
+                                        : "n/a"}
+                                    </div>
+                                    <div>Mapper claims: {Number(convergence?.coverageConvergence?.mapperClaimCount ?? 0)}</div>
+                                    <div>
+                                      Within range: {typeof convergence?.coverageConvergence?.withinExpectedRange === "boolean"
+                                        ? (convergence.coverageConvergence.withinExpectedRange ? "✓" : "✗")
+                                        : "n/a"}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Relationships</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>Comparable: {Number(convergence?.relationshipConvergence?.comparableEdges ?? 0)}</div>
+                                    <div>Matched: {Number(convergence?.relationshipConvergence?.matchedEdges ?? 0)}</div>
+                                    <div>
+                                      Agreement: {typeof convergence?.relationshipConvergence?.agreementRatio === "number"
+                                        ? `${(Number(convergence.relationshipConvergence.agreementRatio || 0) * 100).toFixed(0)}%`
+                                        : "n/a"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Mechanical conflicts</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>Predicted: {Number(convergence?.mechanicalConflictConvergence?.mechanicalConflicts ?? 0)}</div>
+                                    <div>Confirmed: {Number(convergence?.mechanicalConflictConvergence?.confirmedByMapper ?? 0)}</div>
+                                    <div>
+                                      Confirmation: {typeof convergence?.mechanicalConflictConvergence?.confirmationRatio === "number"
+                                        ? `${(Number(convergence.mechanicalConflictConvergence.confirmationRatio || 0) * 100).toFixed(0)}%`
+                                        : "n/a"}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                  <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Confidence</div>
+                                  <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                    <div>
+                                      Claims avg: {typeof convergence?.confidenceSummaries?.claims?.avg === "number"
+                                        ? `${(Number(convergence.confidenceSummaries.claims.avg || 0) * 100).toFixed(0)}%`
+                                        : "n/a"} · High: {Number(convergence?.confidenceSummaries?.claims?.highCount ?? 0)} / {Number(convergence?.confidenceSummaries?.claims?.total ?? 0)}
+                                    </div>
+                                    <div>
+                                      Edges avg: {typeof convergence?.confidenceSummaries?.edges?.avg === "number"
+                                        ? `${(Number(convergence.confidenceSummaries.edges.avg || 0) * 100).toFixed(0)}%`
+                                        : "n/a"} · High: {Number(convergence?.confidenceSummaries?.edges?.highCount ?? 0)} / {Number(convergence?.confidenceSummaries?.edges?.total ?? 0)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Inputs</div>
+                                <div className="mt-2 text-xs text-text-secondary space-y-1">
+                                  <div>Pre-semantic: {convergence?.inputs?.hasPreSemantic ? "yes" : "no"}</div>
+                                  <div>Inter-region signals: {Number(convergence?.inputs?.interRegionSignals ?? 0)}</div>
+                                  <div>Statement embeddings: {convergence?.inputs?.hasStatementEmbeddings ? "yes" : "no"}</div>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </details>
+
                     </div>
                   </m.div>
                 )}
@@ -2554,6 +2837,7 @@ export const DecisionMapSheet = React.memo(() => {
                       paragraphProjection={sheetData.paragraphProjection}
                       claims={sheetData.semanticClaims}
                       shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}
+                      queryRelevance={(sheetData.mappingArtifact as any)?.geometry?.query?.relevance || null}
                       mutualEdges={sheetData.mappingArtifact?.geometry?.substrate?.mutualEdges || null}
                       strongEdges={sheetData.mappingArtifact?.geometry?.substrate?.strongEdges || null}
                       regions={sheetData.preSemanticRegions}
@@ -3206,6 +3490,199 @@ export const DecisionMapSheet = React.memo(() => {
                             </div>
                           );
                         })()}
+                      </div>
+                    )}
+                  </m.div>
+                )}
+
+                {activeTab === 'query' && (
+                  <m.div
+                    key="query"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-lg font-bold text-text-primary">Query relevance</div>
+                        <div className="text-xs text-text-muted mt-1">
+                          Statement-level scores against the current prompt query
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[11px] text-text-muted">Statements</div>
+                        <div className="text-[11px] text-text-muted">{queryRelevanceRows.length.toLocaleString()} shown</div>
+                      </div>
+                    </div>
+
+                    <div className="mb-4 flex flex-wrap items-center gap-3">
+                      <input
+                        value={queryRelevanceSearch}
+                        onChange={(e) => setQueryRelevanceSearch(e.target.value)}
+                        placeholder="Search id or text…"
+                        className="w-full md:w-[360px] bg-black/30 border border-white/10 rounded px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
+                      />
+                      <div className="flex items-center gap-2">
+                        {(["all", "high", "medium", "low"] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            className={clsx(
+                              "px-2.5 py-1 rounded-full text-[11px] border",
+                              queryRelevanceTier === t
+                                ? "bg-white/10 border-brand-500 text-text-primary"
+                                : "bg-transparent border-border-subtle text-text-muted"
+                            )}
+                            onClick={() => setQueryRelevanceTier(t)}
+                          >
+                            {t === "all" ? "All tiers" : t}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex-1" />
+
+                      <div className="flex items-center gap-2">
+                        <CopyButton
+                          text={queryRelevanceScoresCsv}
+                          buttonText="Copy scores (CSV)"
+                          variant="pill"
+                          disabled={queryRelevanceRows.length === 0}
+                        />
+                        <CopyButton
+                          text={queryRelevanceScoresJson}
+                          buttonText="Copy scores (JSON)"
+                          variant="pill"
+                          disabled={queryRelevanceRows.length === 0}
+                        />
+                      </div>
+                    </div>
+
+                    {queryRelevanceRows.length === 0 ? (
+                      <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
+                        No query relevance scores found for this turn.
+                      </div>
+                    ) : (
+                      <div className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                        <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-border-subtle text-[10px] uppercase tracking-wider text-text-muted font-semibold">
+                          <button
+                            type="button"
+                            className={clsx("col-span-2 text-left", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "id";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
+                            }}
+                          >
+                            Statement
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-left", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "tier";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                            }}
+                          >
+                            Tier
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "composite";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                            }}
+                          >
+                            Composite
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "querySim";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                            }}
+                          >
+                            Query
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "novelty";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                            }}
+                          >
+                            Novelty
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "subConsensus";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                            }}
+                          >
+                            Subcons
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-left", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "stance";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
+                            }}
+                          >
+                            Stance
+                          </button>
+                          <button
+                            type="button"
+                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                            onClick={() => {
+                              const nextKey: QueryRelevanceSortKey = "modelIndex";
+                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
+                            }}
+                          >
+                            Model
+                          </button>
+                          <div className="col-span-3">Text</div>
+                        </div>
+                        <div className="divide-y divide-border-subtle">
+                          {queryRelevanceRows.map((r) => (
+                            <div key={r.id} className="grid grid-cols-12 gap-2 px-4 py-3 text-xs">
+                              <div className="col-span-2 font-mono text-[11px] text-text-secondary break-all">{r.id}</div>
+                              <div className="col-span-1 text-[11px] text-text-muted">{r.tier}</div>
+                              <div className="col-span-1 text-right tabular-nums text-text-primary">
+                                {typeof r.composite === "number" ? r.composite.toFixed(3) : "—"}
+                              </div>
+                              <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                {typeof r.querySim === "number" ? r.querySim.toFixed(3) : "—"}
+                              </div>
+                              <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                {typeof r.novelty === "number" ? r.novelty.toFixed(3) : "—"}
+                              </div>
+                              <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                {typeof r.subConsensus === "number" ? r.subConsensus.toFixed(0) : "—"}
+                              </div>
+                              <div className="col-span-1 text-[11px] text-text-muted">{r.stance || "—"}</div>
+                              <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                {typeof r.modelIndex === "number" ? r.modelIndex : "—"}
+                              </div>
+                              <div className="col-span-3 text-text-primary whitespace-pre-wrap break-words">
+                                {r.text || "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </m.div>

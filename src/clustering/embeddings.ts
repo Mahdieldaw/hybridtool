@@ -12,8 +12,12 @@
 
 import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
 import type { ShadowStatement } from '../shadow/ShadowExtractor';
+import type { Stance } from '../shadow/StatementTypes';
 import type { EmbeddingResult, StatementEmbeddingResult } from './types';
 import { ClusteringConfig, DEFAULT_CONFIG } from './config';
+import { cosineSimilarity } from './distance';
+
+export type StanceLabel = Exclude<Stance, 'unclassified'>;
 
 /**
  * Ensure offscreen document exists for embedding inference.
@@ -56,18 +60,65 @@ function normalizeEmbedding(vec: Float32Array): Float32Array {
     return vec;
 }
 
+export function stripInlineMarkdown(text: string): string {
+    let out = text;
+
+    out = out.replace(/`{1,3}([^`]+?)`{1,3}/g, '$1');
+
+    for (let i = 0; i < 3; i++) {
+        const prev = out;
+        out = out.replace(/(\*\*|__)([^\n]+?)\1/g, '$2');
+        out = out.replace(/(\*|_)([^\n]+?)\1/g, (match, marker: string, inner: string, offset: number, full: string) => {
+            const before = offset > 0 ? full[offset - 1] : '';
+            const afterIndex = offset + match.length;
+            const after = afterIndex < full.length ? full[afterIndex] : '';
+            const beforeOk = before === '' || /[\s([{"'.,;:!?]/.test(before);
+            const afterOk = after === '' || /[\s)\]}'".,;:!?]/.test(after);
+            if (!beforeOk || !afterOk) return match;
+            if (inner.trim().length === 0) return match;
+            if (marker === '_' && /[A-Za-z0-9]$/.test(before) && /^[A-Za-z0-9]/.test(after)) return match;
+            return inner;
+        });
+        if (out === prev) break;
+    }
+
+    return out.replace(/\s{2,}/g, ' ').trim();
+}
+
 function openEmbeddingsDb(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         try {
             const req = indexedDB.open("htos-embeddings", 1);
+            let settled = false;
+            const timeoutMs = 8000;
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                reject(new Error(`IndexedDB open timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
+
+            const finalizeResolve = (db: IDBDatabase) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(db);
+            };
+            const finalizeReject = (err: unknown) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                reject(err instanceof Error ? err : new Error(String(err)));
+            };
+
             req.onupgradeneeded = () => {
                 const db = req.result;
                 if (!db.objectStoreNames.contains("buffers")) {
                     db.createObjectStore("buffers");
                 }
             };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+            req.onblocked = () => finalizeReject(new Error("IndexedDB open blocked by other connection"));
+            req.onsuccess = () => finalizeResolve(req.result);
+            req.onerror = () => finalizeReject(req.error || new Error("IndexedDB open failed"));
         } catch (e) {
             reject(e);
         }
@@ -137,10 +188,16 @@ async function decodeEmbeddingsResultAsync(
         pendingEmbeddingsKeys.add(key);
         const buf = await getEmbeddingsBuffer(key);
         const floats = new Float32Array(buf);
-        const count = Number(result?.count) || ids.length;
+        const responseCount = Number(result?.count);
+        if (Number.isFinite(responseCount) && responseCount !== ids.length) {
+            throw new Error(
+                `Embedding response count mismatch: count=${responseCount} ids=${ids.length} dims=${dims} floats=${floats.length}. Refusing to decode embeddingsKey=${key} to avoid misaligned embeddings; normalizeEmbedding(view) is applied per-row.`
+            );
+        }
+        const count = ids.length;
         const needed = count * dims;
         if (floats.length < needed) {
-            throw new Error(`Malformed embeddings buffer: expected ${needed} floats, got ${floats.length}`);
+            throw new Error(`Malformed embeddings buffer: count=${count} ids=${ids.length} dims=${dims} expectedFloats=${needed} gotFloats=${floats.length} embeddingsKey=${key}`);
         }
 
         const embeddings = new Map<string, Float32Array>();
@@ -308,7 +365,7 @@ export async function generateStatementEmbeddings(
     await ensureOffscreen();
 
     const startTime = performance.now();
-    const texts = statements.map(s => s.text);
+    const texts = statements.map(s => stripInlineMarkdown(s.text));
     const ids = statements.map(s => s.id);
 
     return new Promise((resolve, reject) => {
@@ -471,4 +528,438 @@ export async function getEmbeddingStatus(): Promise<{
             }
         );
     });
+}
+
+export type SignalLabel = 'tension' | 'conditional' | 'sequence';
+export type RelationshipLabel = 'conflict' | 'support' | 'tradeoff';
+
+export type LabelVariantEmbeddings = [Float32Array, Float32Array, Float32Array];
+
+export type LabelEmbeddings = {
+    stances: Record<StanceLabel, LabelVariantEmbeddings>;
+    signals: Record<SignalLabel, LabelVariantEmbeddings>;
+    relationships: Record<RelationshipLabel, LabelVariantEmbeddings>;
+    meta: {
+        modelId: string;
+        dimensions: number;
+        createdAtMs: number;
+        validation: {
+            severity: 'ok' | 'warn' | 'critical';
+            ok: boolean;
+            violations: Array<{ category: 'stance' | 'signal' | 'relationship' | 'cross_taxonomy'; a: string; b: string; cosine: number }>;
+            lowestStancePairs: Array<{ a: string; b: string; cosine: number }>;
+            distributions: {
+                stancePairs: {
+                    count: number;
+                    min: number;
+                    p10: number;
+                    p50: number;
+                    p90: number;
+                    p95: number;
+                    max: number;
+                    mean: number;
+                    buckets: Array<{ start: number; end: number; count: number }>;
+                };
+                signalPairs: {
+                    count: number;
+                    min: number;
+                    p10: number;
+                    p50: number;
+                    p90: number;
+                    p95: number;
+                    max: number;
+                    mean: number;
+                    buckets: Array<{ start: number; end: number; count: number }>;
+                };
+                relationshipPairs: {
+                    count: number;
+                    min: number;
+                    p10: number;
+                    p50: number;
+                    p90: number;
+                    p95: number;
+                    max: number;
+                    mean: number;
+                    buckets: Array<{ start: number; end: number; count: number }>;
+                };
+                crossTaxonomyPairs: {
+                    count: number;
+                    min: number;
+                    p10: number;
+                    p50: number;
+                    p90: number;
+                    p95: number;
+                    max: number;
+                    mean: number;
+                    buckets: Array<{ start: number; end: number; count: number }>;
+                };
+            };
+            polarityRanks: {
+                prescriptiveCautionary: number;
+                assertiveUncertain: number;
+            };
+        };
+    };
+};
+
+const STANCE_LABEL_VARIANTS: Record<StanceLabel, [string, string, string]> = {
+    prescriptive: [
+        'A recommendation, instruction, or directive telling someone what to do, what approach to take, or what to implement',
+        'A statement that advises an action: it tells the reader to choose, use, adopt, build, or implement something specific',
+        'Guidance that proposes a concrete course of action, best practice, or implementation step to follow',
+    ],
+    cautionary: [
+        'A warning about risks, pitfalls, or failure modes — it warns, cautions, or advises against something',
+        'A statement urging caution: avoid this approach, watch out for this problem, or be aware of this danger',
+        'A statement highlighting what could go wrong, what to be wary of, or what downsides accompany a choice',
+    ],
+    prerequisite: [
+        'A statement about something that must be in place first — a requirement, dependency, or precondition before proceeding',
+        'A statement that points backward to a necessary precondition: something must already be true or completed before the next step',
+        'A requirement or foundation that must exist before an action can be taken — necessary groundwork or prior setup',
+    ],
+    dependent: [
+        'A statement about what comes next, what follows from a prior step, or what becomes possible after something else is complete',
+        'A statement that points forward: once a prior step is done, this next action, phase, or outcome becomes available',
+        'A follow-on step, subsequent phase, or downstream consequence that depends on earlier work being finished',
+    ],
+    assertive: [
+        'A factual statement, observation, or description of how something works, what something is, or what a situation looks like',
+        'A confident, direct claim about reality — it states what is true, explains a mechanism, or describes current behavior without hedging',
+        'A declarative statement presenting information as fact: it explains, defines, or describes rather than recommending or warning',
+    ],
+    uncertain: [
+        'A hedged or qualified statement expressing that something might or might not apply, that outcomes are variable, or that it depends on circumstances',
+        'A statement that uses caveats, hedging, or qualifiers — words like might, perhaps, generally, it depends, or in some cases',
+        'A qualified claim that avoids committing to a definitive position, noting that results may vary or that the answer is context-dependent',
+    ],
+};
+
+const SIGNAL_LABEL_VARIANTS: Record<SignalLabel, [string, string, string]> = {
+    tension: [
+        'A statement that presents a tradeoff, a contrasting consideration, or acknowledges that two valid concerns pull in different directions',
+        'A passage that weighs pros against cons, notes a downside to an otherwise positive recommendation, or balances competing priorities',
+        'A statement containing internal opposition — it acknowledges merit on both sides of a choice, or qualifies a recommendation with however or but',
+    ],
+    conditional: [
+        "A statement whose applicability depends on a specific situation, context, or assumption about the user's environment",
+        "Advice that applies only when certain facts about the user's situation hold — such as team size, budget, timeline, platform, or regulatory environment",
+        'A recommendation qualified by if, when, or unless — it works in some contexts but not others, and the statement says or implies which',
+    ],
+    sequence: [
+        'A statement about ordering, steps, phases, or temporal dependency between actions or events',
+        'A passage describing what should happen in what order — first do this, then do that, or one thing must precede another',
+        'A statement establishing a workflow, timeline, or progression where the order of steps matters',
+    ],
+};
+
+const RELATIONSHIP_LABEL_VARIANTS: Record<RelationshipLabel, [string, string, string]> = {
+    conflict: [
+        'Two recommendations that contradict each other — they propose incompatible solutions, and following both is impossible',
+        'Two passages where accepting one requires rejecting the other — they make claims that cannot coexist',
+        'Mutually exclusive positions — implementing one approach rules out the other because they address the same problem in incompatible ways',
+    ],
+    support: [
+        'Two passages that agree, reinforce the same point, or provide complementary evidence for the same conclusion',
+        'Two statements that are aligned — they recommend the same approach, describe the same reality, or build on each other',
+        'Passages that corroborate each other, offering the same recommendation from different angles or with different supporting evidence',
+    ],
+    tradeoff: [
+        'Two approaches that are both valid but in tension — choosing one means accepting downsides that the other avoids',
+        'Two viable paths where gains in one area come at a cost in another — neither is wrong, but they optimize for different priorities',
+        'A pair of recommendations that each solve the same problem but with different strengths and weaknesses, requiring a preference to decide',
+    ],
+};
+
+let _labelEmbeddings: LabelEmbeddings | null = null;
+let _labelEmbeddingsInFlight: Promise<LabelEmbeddings> | null = null;
+
+function freezeLabelEmbeddings(obj: LabelEmbeddings): LabelEmbeddings {
+    const safeFreeze = <T extends object>(v: T): T => {
+        try {
+            return Object.freeze(v);
+        } catch {
+            return v;
+        }
+    };
+    for (const vs of Object.values(obj.stances)) {
+        for (const v of vs) safeFreeze(v as unknown as object);
+        safeFreeze(vs);
+    }
+    for (const vs of Object.values(obj.signals)) {
+        for (const v of vs) safeFreeze(v as unknown as object);
+        safeFreeze(vs);
+    }
+    for (const vs of Object.values(obj.relationships)) {
+        for (const v of vs) safeFreeze(v as unknown as object);
+        safeFreeze(vs);
+    }
+    safeFreeze(obj.stances);
+    safeFreeze(obj.signals);
+    safeFreeze(obj.relationships);
+    safeFreeze(obj.meta.validation.violations);
+    safeFreeze(obj.meta.validation.lowestStancePairs);
+    safeFreeze(obj.meta.validation.distributions.stancePairs.buckets);
+    safeFreeze(obj.meta.validation.distributions.signalPairs.buckets);
+    safeFreeze(obj.meta.validation.distributions.relationshipPairs.buckets);
+    safeFreeze(obj.meta.validation.distributions.crossTaxonomyPairs.buckets);
+    safeFreeze(obj.meta.validation.distributions.stancePairs);
+    safeFreeze(obj.meta.validation.distributions.signalPairs);
+    safeFreeze(obj.meta.validation.distributions.relationshipPairs);
+    safeFreeze(obj.meta.validation.distributions.crossTaxonomyPairs);
+    safeFreeze(obj.meta.validation.distributions);
+    safeFreeze(obj.meta.validation.polarityRanks);
+    safeFreeze(obj.meta.validation);
+    safeFreeze(obj.meta);
+    return safeFreeze(obj);
+}
+
+function validateSeparation(
+    stances: Record<StanceLabel, LabelVariantEmbeddings>,
+    signals: Record<SignalLabel, LabelVariantEmbeddings>,
+    relationships: Record<RelationshipLabel, LabelVariantEmbeddings>
+): LabelEmbeddings['meta']['validation'] {
+    const violations: LabelEmbeddings['meta']['validation']['violations'] = [];
+
+    const maxCrossVariantCosine = (a: LabelVariantEmbeddings, b: LabelVariantEmbeddings): number => {
+        let best = -Infinity;
+        for (let i = 0; i < a.length; i++) {
+            for (let j = 0; j < b.length; j++) {
+                const c = cosineSimilarity(a[i], b[j]);
+                if (c > best) best = c;
+            }
+        }
+        return best;
+    };
+
+    const summarizeCosines = (values: number[]) => {
+        const sorted = [...values].filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+        const count = sorted.length;
+        const pick = (p: number): number => {
+            if (count === 0) return 0;
+            const idx = Math.min(count - 1, Math.max(0, Math.round((count - 1) * p)));
+            return sorted[idx];
+        };
+        let mean = 0;
+        for (const v of sorted) mean += v;
+        mean = count > 0 ? mean / count : 0;
+        const bucketCount = 10;
+        const buckets: Array<{ start: number; end: number; count: number }> = [];
+        for (let i = 0; i < bucketCount; i++) {
+            buckets.push({ start: i / bucketCount, end: (i + 1) / bucketCount, count: 0 });
+        }
+        for (const v of sorted) {
+            const idx = Math.min(bucketCount - 1, Math.max(0, Math.floor(v * bucketCount)));
+            buckets[idx].count += 1;
+        }
+        return {
+            count,
+            min: count ? sorted[0] : 0,
+            p10: pick(0.1),
+            p50: pick(0.5),
+            p90: pick(0.9),
+            p95: pick(0.95),
+            max: count ? sorted[count - 1] : 0,
+            mean,
+            buckets,
+        };
+    };
+
+    const stanceKeys = Object.keys(stances) as StanceLabel[];
+    const stancePairs: Array<{ a: string; b: string; cosine: number }> = [];
+    for (let i = 0; i < stanceKeys.length; i++) {
+        for (let j = i + 1; j < stanceKeys.length; j++) {
+            const a = stanceKeys[i];
+            const b = stanceKeys[j];
+            const cosine = maxCrossVariantCosine(stances[a], stances[b]);
+            stancePairs.push({ a, b, cosine });
+            if (cosine >= 0.6) violations.push({ category: 'stance', a, b, cosine });
+        }
+    }
+    const stanceSorted = [...stancePairs].sort((x, y) => x.cosine - y.cosine);
+    const lowestStancePairs = stanceSorted.slice(0, 5);
+    const findRank = (x: string, y: string): number => {
+        const idx = stanceSorted.findIndex(p => (p.a === x && p.b === y) || (p.a === y && p.b === x));
+        return idx >= 0 ? idx + 1 : stanceSorted.length + 1;
+    };
+    const polarityRanks = {
+        prescriptiveCautionary: findRank('prescriptive', 'cautionary'),
+        assertiveUncertain: findRank('assertive', 'uncertain'),
+    };
+
+    const signalKeys = Object.keys(signals) as SignalLabel[];
+    const signalCosines: number[] = [];
+    for (let i = 0; i < signalKeys.length; i++) {
+        for (let j = i + 1; j < signalKeys.length; j++) {
+            const a = signalKeys[i];
+            const b = signalKeys[j];
+            const cosine = maxCrossVariantCosine(signals[a], signals[b]);
+            signalCosines.push(cosine);
+            if (cosine >= 0.6) violations.push({ category: 'signal', a, b, cosine });
+        }
+    }
+
+    const relKeys = Object.keys(relationships) as RelationshipLabel[];
+    const relationshipCosines: number[] = [];
+    for (let i = 0; i < relKeys.length; i++) {
+        for (let j = i + 1; j < relKeys.length; j++) {
+            const a = relKeys[i];
+            const b = relKeys[j];
+            const cosine = maxCrossVariantCosine(relationships[a], relationships[b]);
+            relationshipCosines.push(cosine);
+            if (cosine >= 0.6) violations.push({ category: 'relationship', a, b, cosine });
+        }
+    }
+
+    const crossTaxonomyCosines: number[] = [];
+    for (const s of stanceKeys) {
+        for (const g of signalKeys) {
+            const cosine = maxCrossVariantCosine(stances[s], signals[g]);
+            crossTaxonomyCosines.push(cosine);
+            if (cosine >= 0.7) violations.push({ category: 'cross_taxonomy', a: s, b: g, cosine });
+        }
+    }
+
+    const ok = violations.length === 0;
+    const highestViolation = violations.reduce((acc, v) => Math.max(acc, v.cosine), -Infinity);
+    const severity =
+        ok
+            ? 'ok'
+            : violations.some((v) => v.category === 'cross_taxonomy') || (Number.isFinite(highestViolation) && highestViolation >= 0.85)
+                ? 'critical'
+                : 'warn';
+
+    return {
+        severity,
+        ok,
+        violations,
+        lowestStancePairs,
+        distributions: {
+            stancePairs: summarizeCosines(stancePairs.map((p) => p.cosine)),
+            signalPairs: summarizeCosines(signalCosines),
+            relationshipPairs: summarizeCosines(relationshipCosines),
+            crossTaxonomyPairs: summarizeCosines(crossTaxonomyCosines),
+        },
+        polarityRanks
+    };
+}
+
+export async function initializeLabelEmbeddings(config: ClusteringConfig = DEFAULT_CONFIG): Promise<LabelEmbeddings> {
+    if (_labelEmbeddings) return _labelEmbeddings;
+    if (_labelEmbeddingsInFlight) return _labelEmbeddingsInFlight;
+
+    _labelEmbeddingsInFlight = (async () => {
+        const stanceKeys = Object.keys(STANCE_LABEL_VARIANTS) as StanceLabel[];
+        const signalKeys = Object.keys(SIGNAL_LABEL_VARIANTS) as SignalLabel[];
+        const relationshipKeys = Object.keys(RELATIONSHIP_LABEL_VARIANTS) as RelationshipLabel[];
+
+        const texts: string[] = [];
+        const stanceIndex: Record<StanceLabel, number[]> = {} as Record<StanceLabel, number[]>;
+        for (const s of stanceKeys) {
+            stanceIndex[s] = [];
+            const variants = STANCE_LABEL_VARIANTS[s];
+            for (const t of variants) {
+                stanceIndex[s].push(texts.length);
+                texts.push(t);
+            }
+        }
+
+        const signalIndex: Record<SignalLabel, number[]> = {} as Record<SignalLabel, number[]>;
+        for (const g of signalKeys) {
+            signalIndex[g] = [];
+            const variants = SIGNAL_LABEL_VARIANTS[g];
+            for (const t of variants) {
+                signalIndex[g].push(texts.length);
+                texts.push(t);
+            }
+        }
+
+        const relationshipIndex: Record<RelationshipLabel, number[]> = {} as Record<RelationshipLabel, number[]>;
+        for (const r of relationshipKeys) {
+            relationshipIndex[r] = [];
+            const variants = RELATIONSHIP_LABEL_VARIANTS[r];
+            for (const t of variants) {
+                relationshipIndex[r].push(texts.length);
+                texts.push(t);
+            }
+        }
+
+        const embedded = await generateTextEmbeddings(texts, config);
+        const dimensions = config.embeddingDimensions;
+
+        const stances = {} as Record<StanceLabel, LabelVariantEmbeddings>;
+        for (const s of stanceKeys) {
+            const vectors: Float32Array[] = [];
+            for (const idx of stanceIndex[s]) {
+                const v = embedded.get(String(idx));
+                if (v) vectors.push(v);
+            }
+            const out: LabelVariantEmbeddings = [
+                vectors[0] ? normalizeEmbedding(new Float32Array(vectors[0])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+                vectors[1] ? normalizeEmbedding(new Float32Array(vectors[1])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+                vectors[2] ? normalizeEmbedding(new Float32Array(vectors[2])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+            ];
+            stances[s] = out;
+        }
+
+        const signals = {} as Record<SignalLabel, LabelVariantEmbeddings>;
+        for (const g of signalKeys) {
+            const idxs = signalIndex[g];
+            const vectors: Float32Array[] = [];
+            for (const idx of idxs) {
+                const v = embedded.get(String(idx));
+                if (v) vectors.push(v);
+            }
+            const out: LabelVariantEmbeddings = [
+                vectors[0] ? normalizeEmbedding(new Float32Array(vectors[0])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+                vectors[1] ? normalizeEmbedding(new Float32Array(vectors[1])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+                vectors[2] ? normalizeEmbedding(new Float32Array(vectors[2])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+            ];
+            signals[g] = out;
+        }
+
+        const relationships = {} as Record<RelationshipLabel, LabelVariantEmbeddings>;
+        for (const r of relationshipKeys) {
+            const idxs = relationshipIndex[r];
+            const vectors: Float32Array[] = [];
+            for (const idx of idxs) {
+                const v = embedded.get(String(idx));
+                if (v) vectors.push(v);
+            }
+            const out: LabelVariantEmbeddings = [
+                vectors[0] ? normalizeEmbedding(new Float32Array(vectors[0])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+                vectors[1] ? normalizeEmbedding(new Float32Array(vectors[1])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+                vectors[2] ? normalizeEmbedding(new Float32Array(vectors[2])) as Float32Array<ArrayBuffer> : normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>,
+            ];
+            relationships[r] = out;
+        }
+
+        const validation = validateSeparation(stances, signals, relationships);
+        if (!validation.ok) {
+            console.warn('[LabelEmbeddings] Validation failed', validation.violations);
+        }
+
+        const modelId = config.modelId || 'bge-base-en-v1.5';
+        const built: LabelEmbeddings = freezeLabelEmbeddings({
+            stances,
+            signals,
+            relationships,
+            meta: {
+                modelId,
+                dimensions,
+                createdAtMs: typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now(),
+                validation,
+            },
+        });
+
+        _labelEmbeddings = built;
+        _labelEmbeddingsInFlight = null;
+        return built;
+    })();
+
+    return _labelEmbeddingsInFlight;
+}
+
+export function getCachedLabelEmbeddings(): LabelEmbeddings | null {
+    return _labelEmbeddings;
 }

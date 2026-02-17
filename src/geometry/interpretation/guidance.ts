@@ -20,16 +20,27 @@ export function buildMapperGeometricHints(
     substrate: GeometricSubstrate,
     regions: Region[],
     profiles: RegionProfile[],
-    oppositions: OppositionPair[]
+    oppositions: OppositionPair[],
+    hardMergeThreshold?: number
 ): MapperGeometricHints {
     const peaks = profiles.filter(p => p.tier === 'peak');
     const hills = profiles.filter(p => p.tier === 'hill');
 
     const predictedShape = buildShapePrediction(peaks, hills, oppositions, substrate);
 
-    const minClaims = Math.max(1, peaks.length);
-    const contestedRegions = profiles.filter(p => p.purity.contestedRatio > 0.3).length;
-    const maxClaims = peaks.length + hills.length + contestedRegions;
+    const paragraphIds = substrate.nodes.map(n => n.paragraphId);
+    const mergeThreshold = typeof hardMergeThreshold === 'number' ? hardMergeThreshold : 0.75;
+    const componentSizes = computeComponentSizesAtThreshold(paragraphIds, substrate.graphs.mutual.edges, mergeThreshold);
+
+    const positionGroupsWithMass = componentSizes.filter(size => size >= 2).length;
+    const singletonPositions = componentSizes.filter(size => size === 1).length;
+    const totalPositionGroups = positionGroupsWithMass + singletonPositions;
+
+    const minClaims = Math.max(2, positionGroupsWithMass);
+    const maxClaims = Math.max(
+        minClaims,
+        Math.min(totalPositionGroups, positionGroupsWithMass + Math.ceil(singletonPositions / 2))
+    );
 
     const expectedConflicts = Math.ceil(oppositions.length / 2);
 
@@ -57,6 +68,63 @@ export function buildMapperGeometricHints(
             oppositionCount: oppositions.length,
         },
     };
+}
+
+function computeComponentSizesAtThreshold(
+    nodeIds: string[],
+    edges: Array<{ source: string; target: string; similarity: number }>,
+    threshold: number
+): number[] {
+    if (nodeIds.length === 0) return [];
+
+    const parent = new Map<string, string>();
+    const size = new Map<string, number>();
+
+    for (const id of nodeIds) {
+        parent.set(id, id);
+        size.set(id, 1);
+    }
+
+    const find = (id: string): string => {
+        const p = parent.get(id);
+        if (!p) return id;
+        if (p === id) return id;
+        const root = find(p);
+        parent.set(id, root);
+        return root;
+    };
+
+    const union = (a: string, b: string) => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra === rb) return;
+        const sa = size.get(ra) ?? 1;
+        const sb = size.get(rb) ?? 1;
+        if (sa >= sb) {
+            parent.set(rb, ra);
+            size.set(ra, sa + sb);
+            size.delete(rb);
+        } else {
+            parent.set(ra, rb);
+            size.set(rb, sa + sb);
+            size.delete(ra);
+        }
+    };
+
+    const nodeSet = new Set(nodeIds);
+    for (const edge of edges) {
+        if (edge.similarity < threshold) continue;
+        if (!nodeSet.has(edge.source) || !nodeSet.has(edge.target)) continue;
+        union(edge.source, edge.target);
+    }
+
+    const rootCounts = new Map<string, number>();
+    for (const id of nodeIds) {
+        const r = find(id);
+        rootCounts.set(r, (rootCounts.get(r) ?? 0) + 1);
+    }
+
+    return Array.from(rootCounts.values());
 }
 
 function buildShapePrediction(

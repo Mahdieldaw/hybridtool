@@ -53,12 +53,14 @@ export class CognitivePipelineHandler {
       // ══════════════════════════════════════════════════════════════════
       // TRAVERSAL GATING CHECK (Pipeline Pause)
       // ══════════════════════════════════════════════════════════════════
-      const hasTraversal = !!mappingArtifact?.traversal?.graph;
+      const hasTraversalGraph = !!mappingArtifact?.traversal?.graph;
       const hasForcingPoints =
         Array.isArray(mappingArtifact?.traversal?.forcingPoints) && mappingArtifact.traversal.forcingPoints.length > 0;
+      const hasPartitions =
+        Array.isArray(mappingArtifact?.semantic?.partitions) && mappingArtifact.semantic.partitions.length > 0;
       const isTraversalContinuation = request?.isTraversalContinuation || context?.isTraversalContinuation;
 
-      if (hasTraversal && hasForcingPoints && !isTraversalContinuation) {
+      if ((hasTraversalGraph || hasPartitions) && (hasForcingPoints || hasPartitions) && !isTraversalContinuation) {
         console.log("[CognitiveHandler] Traversal detected with conflicts. Pausing pipeline for user input.");
 
         // 1. Update Turn Status
@@ -661,6 +663,7 @@ export class CognitivePipelineHandler {
           throw new Error(`Mapping artifact missing for turn ${aiTurnId}.`);
         }
         let chewedSubstrate = null;
+        let traversalMetrics = null;
         if (payload?.isTraversalContinuation && payload?.traversalState) {
           try {
             const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
@@ -720,12 +723,40 @@ export class CognitivePipelineHandler {
             if (Array.isArray(sourceData) && sourceData.length > 0) {
               let statements = mappingArtifact?.shadow?.statements || [];
               let paragraphs = mappingArtifact?.shadow?.paragraphs || [];
+              const normalizedTraversalState = normalizeTraversalState(payload.traversalState);
+              const partitions = Array.isArray(mappingArtifact?.semantic?.partitions) ? mappingArtifact.semantic.partitions : [];
+              const emittedPartitionIds = new Set(partitions.map(p => String(p?.id || '').trim()).filter(Boolean));
+              const answeredPartitionIds = new Set();
+              const unsurePartitionIds = new Set();
+              const answerEntries = normalizedTraversalState?.partitionAnswers && typeof normalizedTraversalState.partitionAnswers === 'object'
+                ? Object.entries(normalizedTraversalState.partitionAnswers)
+                : [];
+              for (const [pidRaw, ans] of answerEntries) {
+                const pid = String(pidRaw || '').trim();
+                if (!pid || !emittedPartitionIds.has(pid)) continue;
+                const choice = ans?.choice;
+                if (choice === 'A' || choice === 'B') answeredPartitionIds.add(pid);
+                else if (choice === 'unsure') unsurePartitionIds.add(pid);
+              }
+              const prunedClaimCount = normalizedTraversalState?.claimStatuses instanceof Map
+                ? Array.from(normalizedTraversalState.claimStatuses.values()).filter(v => v === 'pruned').length
+                : 0;
+              traversalMetrics = {
+                partitionsEmitted: partitions.length,
+                partitionsAnswered: answeredPartitionIds.size,
+                partitionsUnsure: unsurePartitionIds.size,
+                partitionAnswerKeys: answerEntries.length,
+                prunedClaimCount,
+                partitionFallbackUsed: !!mappingArtifact?.fallbacks?.partitionFallbackUsed,
+                partitionFallbackReason: mappingArtifact?.fallbacks?.partitionFallbackReason || null,
+              };
 
               chewedSubstrate = await buildChewedSubstrate({
                 statements: Array.isArray(statements) ? statements : [],
                 paragraphs: Array.isArray(paragraphs) ? paragraphs : [],
                 claims: mappingArtifact?.semantic?.claims || mappingArtifact?.claims || [],
-                traversalState: normalizeTraversalState(payload.traversalState),
+                partitions: mappingArtifact?.semantic?.partitions || [],
+                traversalState: normalizedTraversalState,
                 sourceData,
               });
 
@@ -741,12 +772,16 @@ export class CognitivePipelineHandler {
               });
 
               try {
+                if (traversalMetrics && chewedSubstrate?.summary) {
+                  traversalMetrics = { ...traversalMetrics, chewedSubstrateSummary: chewedSubstrate.summary };
+                }
                 this.port.postMessage({
                   type: 'CHEWED_SUBSTRATE_DEBUG',
                   sessionId: effectiveSessionId,
                   aiTurnId,
                   stage: 'chewed_substrate_built',
                   hasSubstrate: !!chewedSubstrate,
+                  traversalMetrics,
                   outputsCount: chewedSubstrate?.outputs?.length,
                   nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
                     ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
@@ -765,6 +800,7 @@ export class CognitivePipelineHandler {
                   sessionId: effectiveSessionId,
                   aiTurnId,
                   stage: 'no_source_data',
+                  traversalMetrics,
                 });
               } catch (_) { }
             }
@@ -778,6 +814,7 @@ export class CognitivePipelineHandler {
                 aiTurnId,
                 stage: 'chewed_substrate_error',
                 error: String(e?.message || e),
+                traversalMetrics,
               });
             } catch (_) { }
             chewedSubstrate = null;
@@ -819,6 +856,7 @@ export class CognitivePipelineHandler {
             useThinking: payload.useThinking || false,
             isTraversalContinuation: payload.isTraversalContinuation,
             chewedSubstrate,
+            traversalMetrics,
             conciergePromptSeed: frozenSingularityPromptSeed || null,
           },
         };

@@ -52,6 +52,7 @@ export function reconstructSubstrate(
 
     const reconstructedParagraphs: ReconstructedParagraph[] = [];
     let protectedCount = 0;
+    let untriagedCount = 0;
     let skeletonizedCount = 0;
     let removedCount = 0;
 
@@ -69,14 +70,15 @@ export function reconstructSubstrate(
         const originalText = statement.text;
 
         let resultText = '';
-        if (action === 'PROTECTED') resultText = originalText;
+        if (action === 'PROTECTED' || action === 'UNTRIAGED') resultText = originalText;
         else if (action === 'SKELETONIZE') resultText = skeletonize(originalText);
 
         totalChars += originalText.length;
 
-        if (action === 'PROTECTED') {
+        if (action === 'PROTECTED' || action === 'UNTRIAGED') {
           intactChars += originalText.length;
-          protectedCount++;
+          if (action === 'UNTRIAGED') untriagedCount++;
+          else protectedCount++;
         } else if (action === 'SKELETONIZE') {
           intactChars += resultText.length * 0.3;
           skeletonizedCount++;
@@ -136,6 +138,7 @@ export function reconstructSubstrate(
         originalCharCount: source.text.length,
         finalCharCount: outputText.length,
         protectedStatementCount: protectedCount,
+        untriagedStatementCount: untriagedCount,
         skeletonizedStatementCount: skeletonizedCount,
         removedStatementCount: removedCount,
         isPassthrough,
@@ -156,10 +159,12 @@ export function reconstructSubstrate(
       survivingClaimCount,
       prunedClaimCount,
       protectedStatementCount: triageResult.meta.protectedCount,
+      untriagedStatementCount: triageResult.meta.untriagedCount,
       skeletonizedStatementCount: triageResult.meta.skeletonizedCount,
       removedStatementCount: triageResult.meta.removedCount,
     },
     pathSteps: traversalState.pathSteps,
+    partitionAnswers: traversalState.partitionAnswers,
     meta: {
       triageTimeMs: triageResult.meta.processingTimeMs - embeddingTimeMs,
       reconstructionTimeMs,
@@ -184,6 +189,14 @@ export function formatSubstrateForPrompt(substrate: ChewedSubstrate): string {
   if (substrate.pathSteps.length > 0) {
     parts.push('User constraints applied:');
     for (const step of substrate.pathSteps) parts.push(`  ${step}`);
+    parts.push('');
+  }
+
+  const partitionAnswers = substrate.partitionAnswers || {};
+  const answered = Object.entries(partitionAnswers).filter(([, v]) => v?.choice === 'A' || v?.choice === 'B');
+  if (answered.length > 0) {
+    parts.push('User partition answers:');
+    for (const [pid, ans] of answered) parts.push(`  ${pid}: ${ans.choice}`);
     parts.push('');
   }
 

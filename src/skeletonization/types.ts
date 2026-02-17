@@ -1,7 +1,7 @@
 import type { ShadowStatement, ShadowParagraph } from '../shadow';
-import type { EnrichedClaim } from '../../shared/contract';
+import type { EnrichedClaim, MapperPartition } from '../../shared/contract';
 
-export type StatementAction = 'PROTECTED' | 'SKELETONIZE' | 'REMOVE';
+export type StatementAction = 'PROTECTED' | 'UNTRIAGED' | 'SKELETONIZE' | 'REMOVE';
 
 export interface StatementFate {
   statementId: string;
@@ -33,6 +33,7 @@ export interface TriageResult {
   meta: {
     totalStatements: number;
     protectedCount: number;
+    untriagedCount?: number;
     skeletonizedCount: number;
     removedCount: number;
     processingTimeMs: number;
@@ -48,6 +49,7 @@ export interface ReconstructedOutput {
     originalCharCount: number;
     finalCharCount: number;
     protectedStatementCount: number;
+    untriagedStatementCount?: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
     isPassthrough?: boolean;
@@ -73,10 +75,12 @@ export interface ChewedSubstrate {
     survivingClaimCount: number;
     prunedClaimCount: number;
     protectedStatementCount: number;
+    untriagedStatementCount?: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
   };
   pathSteps: string[];
+  partitionAnswers?: Record<string, PartitionAnswer>;
   meta: {
     triageTimeMs: number;
     reconstructionTimeMs: number;
@@ -85,15 +89,27 @@ export interface ChewedSubstrate {
   };
 }
 
+export type PartitionChoice = 'A' | 'B' | 'unsure';
+
+export interface PartitionAnswer {
+  choice: PartitionChoice;
+  userInput?: string;
+}
+
+export type ConditionalGateAnswer = 'yes' | 'no' | 'unsure';
+
 export interface NormalizedTraversalState {
   claimStatuses: Map<string, 'active' | 'pruned'>;
   pathSteps: string[];
+  partitionAnswers: Record<string, PartitionAnswer>;
+  conditionalGateAnswers?: Record<string, ConditionalGateAnswer>;
 }
 
 export interface SkeletonizationInput {
   statements: ShadowStatement[];
   paragraphs: ShadowParagraph[];
   claims: EnrichedClaim[];
+  partitions?: MapperPartition[];
   traversalState: NormalizedTraversalState;
   sourceData: Array<{
     providerId: string;

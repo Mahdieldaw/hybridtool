@@ -136,10 +136,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
     const hasTraversalGraph = !!mappingArtifact?.traversal?.graph && !!effectiveSessionId;
+    const hasPartitions =
+        Array.isArray(mappingArtifact?.semantic?.partitions) && mappingArtifact.semantic.partitions.length > 0;
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
     const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
-    const canShowTraversal = hasTraversalGraph;
+    const canShowTraversal = (hasTraversalGraph || hasPartitions) && !!effectiveSessionId;
     const canShowResponse = isPipelineComplete && (hasSingularityText || singularityState.isLoading || singularityState.isError);
 
     const currentView: 'loading' | 'traverse' | 'response' = useMemo(() => {
@@ -262,9 +264,15 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             ) : currentView === 'traverse' && canShowTraversal ? (
                 <div className="animate-in fade-in duration-500">
                     <TraversalGraphView
-                        traversalGraph={mappingArtifact!.traversal!.graph!}
+                        traversalGraph={
+                            mappingArtifact?.traversal?.graph ?? {
+                                claims: mappingArtifact?.semantic?.claims || [],
+                                conditionals: mappingArtifact?.semantic?.conditionals || [],
+                            }
+                        }
                         conditionals={mappingArtifact!.semantic?.conditionals || []}
                         claims={mappingArtifact!.semantic?.claims || []}
+                        partitions={mappingArtifact!.semantic?.partitions || []}
                         originalQuery={mappingArtifact!.meta?.query || ''}
                         aiTurnId={aiTurn.id}
                         completedTraversalState={aiTurn.singularity?.traversalState}

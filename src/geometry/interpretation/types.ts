@@ -55,6 +55,7 @@ export interface RegionProfile {
     geometry: {
         internalDensity: number;
         isolation: number;
+        nearestCarrierSimilarity: number;
         avgInternalSimilarity: number;
     };
     predicted: {
@@ -68,6 +69,17 @@ export interface OppositionPair {
     similarity: number;
     stanceConflict: boolean;
     reason: string;
+}
+
+export type InterRegionRelationship = 'conflict' | 'support' | 'tradeoff' | 'independent';
+
+export interface InterRegionSignal {
+    regionA: string;
+    regionB: string;
+    similarity: number;
+    relationship: InterRegionRelationship;
+    confidence: number;
+    reasons: string[];
 }
 
 export interface ShapePrediction {
@@ -105,6 +117,7 @@ export interface PreSemanticInterpretation {
     regionization: RegionizationResult;
     regionProfiles: RegionProfile[];
     oppositions: OppositionPair[];
+    interRegionSignals: InterRegionSignal[];
     hints: MapperGeometricHints;
 }
 

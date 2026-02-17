@@ -13,6 +13,7 @@ export function buildCognitiveArtifact(
   const traversalGraph = mapper?.traversalGraph;
 
   return {
+    paragraphClustering: mapper?.paragraphClustering ?? undefined,
     shadow: {
       statements:
         pipeline?.shadow?.extraction?.statements ??
@@ -24,6 +25,7 @@ export function buildCognitiveArtifact(
     },
     geometry: {
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',
+      labels: pipeline?.labels ?? undefined,
       substrate: {
         nodes: substrateGraph?.nodes ?? [],
         edges: substrateGraph?.edges ?? [],
@@ -31,6 +33,14 @@ export function buildCognitiveArtifact(
         strongEdges: substrateGraph?.strongEdges ?? [],
         softThreshold: substrateGraph?.softThreshold,
       },
+      query: pipeline?.query
+        ? {
+          ...pipeline.query,
+          condensedStatementIds: Array.isArray(pipeline.query.condensedStatementIds)
+            ? pipeline.query.condensedStatementIds
+            : [],
+        }
+        : undefined,
       preSemantic: pipeline?.preSemantic
         ? {
           ...pipeline.preSemantic,
@@ -43,6 +53,7 @@ export function buildCognitiveArtifact(
         }
         : undefined,
       structuralValidation: mapper?.structuralValidation ?? undefined,
+      convergence: mapper?.convergence ?? undefined,
       alignment: mapper?.alignment ?? undefined,
     },
     semantic: {
@@ -51,9 +62,11 @@ export function buildCognitiveArtifact(
       conditionals: mapper?.conditionals ?? [],
       narrative: mapper?.narrative,
       ghosts: Array.isArray(mapper?.ghosts) ? mapper.ghosts : undefined,
+      partitions: Array.isArray(mapper?.partitions) ? mapper.partitions : undefined,
     },
     traversal: {
       forcingPoints: mapper?.forcingPoints ?? [],
+      traversalQuestions: Array.isArray(mapper?.traversalQuestions) ? mapper.traversalQuestions : undefined,
       graph: traversalGraph
         ? {
           claims: traversalGraph.claims ?? [],
@@ -78,6 +91,8 @@ export function buildCognitiveArtifact(
     },
     traversalAnalysis: mapper?.traversalAnalysis ?? undefined,
     mechanicalGating: mapper?.mechanicalGating ?? undefined,
+    observability: pipeline?.observability ?? undefined,
+    fallbacks: pipeline?.fallbacks ?? undefined,
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
       query: mapper?.query ?? undefined,

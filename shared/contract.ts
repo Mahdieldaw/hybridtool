@@ -84,12 +84,14 @@ export interface Claim {
   quote?: string;
   support_count?: number;
   sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
+  convergenceConfidence?: number;
 }
 
 export interface Edge {
   from: string;
   to: string;
   type: 'supports' | 'conflicts' | 'tradeoff' | 'prerequisite';
+  convergenceConfidence?: number;
 }
 
 export interface MapperClaim {
@@ -120,6 +122,34 @@ export interface ConditionalPruner {
   affectedClaims: string[];
 }
 
+export type MapperPartitionSource = 'focal' | 'emergent';
+export type MapperPartitionDefaultSide = 'A' | 'B' | 'unknown';
+
+export interface MapperPartition {
+  id: string;
+  source: MapperPartitionSource;
+  focalStatementId: string | null;
+  triggeringFocalIds: string[];
+  hingeQuestion: string;
+  defaultSide: MapperPartitionDefaultSide;
+  sideAStatementIds: string[];
+  sideBStatementIds: string[];
+  sideAAdvocacyStatementIds?: string[] | null;
+  sideBAdvocacyStatementIds?: string[] | null;
+  advocacyMeta?: {
+    candidatePool: 'condensed' | 'full';
+    similarityThreshold: number;
+    similarityMargin: number;
+    maxPerSide: number;
+    sideAAdded: number;
+    sideBAdded: number;
+    skippedNoEmbeddings: number;
+  } | null;
+  impactScore?: number | null;
+  confidence?: number | null;
+  notes?: string[] | null;
+}
+
 export type Determinant =
   | {
     type: 'intrinsic';
@@ -148,6 +178,8 @@ export interface UnifiedMapperOutput {
   determinants?: Determinant[];
   edges: Edge[];
   conditionals: ConditionalPruner[];
+  partitions?: MapperPartition[];
+  emergentForks?: MapperPartition[];
 }
 
 export interface ConditionMatch {
@@ -760,6 +792,7 @@ export interface MapperArtifact extends MapperOutput {
   fullAnalysis?: StructuralAnalysis;
   narrative?: string;
   anchors?: Array<{ label: string; id: string; position: number }>;
+  partitions?: MapperPartition[];
 
   // Traversal Layer (Interactive Decision Graph)
   traversalGraph?: SerializedTraversalGraph;
@@ -767,6 +800,7 @@ export interface MapperArtifact extends MapperOutput {
   conditionals?: ConditionalPruner[];
   preSemantic?: PreSemanticInterpretation | null;
   structuralValidation?: StructuralValidation | null;
+  convergence?: ConvergenceReport | null;
 
   shadow?: {
     statements: ShadowStatement[];
@@ -914,6 +948,54 @@ export interface ConflictForcingPoint {
 
 export type UnifiedForcingPoint = ConditionalForcingPoint | ConflictForcingPoint;
 export type ForcingPoint = UnifiedForcingPoint | SerializedForcingPoint;
+
+// ── Unified Traversal Question ──
+
+export type TraversalQuestionType = 'partition' | 'conditional';
+export type TraversalQuestionStatus = 'pending' | 'answered' | 'auto_resolved' | 'blocked';
+
+export interface TraversalQuestion {
+  id: string;
+  type: TraversalQuestionType;
+  question: string;
+  condition: string;
+  priority: number;
+  blockedBy: string[];
+  status: TraversalQuestionStatus;
+  sourceRegionIds: string[];
+  affectedStatementIds: string[];
+  anchorTerms: string[];
+  confidence: number;
+
+  // Partition-specific fields (only populated when type === 'partition')
+  partitionId?: string;
+  sideAStatementIds?: string[];
+  sideBStatementIds?: string[];
+  hingeQuestion?: string;
+  defaultSide?: MapperPartitionDefaultSide;
+
+  // Conditional gate-specific fields (only populated when type === 'conditional')
+  gateId?: string;
+  exclusivityRatio?: number;
+  conditionalRatio?: number;
+
+  // Resolution
+  answer?: 'A' | 'B' | 'yes' | 'no' | 'unsure' | string;
+  autoResolvedReason?: string;
+}
+
+export interface TraversalQuestionMergeResult {
+  questions: TraversalQuestion[];
+  meta: {
+    partitionCount: number;
+    conditionalCount: number;
+    totalBeforeCap: number;
+    totalAfterCap: number;
+    autoResolvedCount: number;
+    blockedCount: number;
+    processingTimeMs: number;
+  };
+}
 
 export type PipelineStatus = 'in_progress' | 'awaiting_traversal' | 'complete' | 'error';
 
@@ -1179,6 +1261,17 @@ export interface PipelineOppositionPair {
   reason: string;
 }
 
+export type PipelineInterRegionRelationship = 'conflict' | 'support' | 'tradeoff' | 'independent';
+
+export interface PipelineInterRegionSignal {
+  regionA: string;
+  regionB: string;
+  similarity: number;
+  relationship: PipelineInterRegionRelationship;
+  confidence: number;
+  reasons: string[];
+}
+
 export interface PipelineShapePrediction {
   predicted: PrimaryShape;
   confidence: number;
@@ -1214,7 +1307,36 @@ export interface PreSemanticInterpretation {
   regionization: PipelineRegionizationResult;
   regionProfiles: PipelineRegionProfile[];
   oppositions: PipelineOppositionPair[];
+  interRegionSignals?: PipelineInterRegionSignal[];
   hints: PipelineMapperGeometricHints;
+}
+
+export interface ConvergenceReport {
+  computedAt: string;
+  coverageConvergence: {
+    expectedClaimCount: [number, number] | null;
+    mapperClaimCount: number;
+    withinExpectedRange: boolean | null;
+  };
+  mechanicalConflictConvergence: {
+    mechanicalConflicts: number;
+    confirmedByMapper: number;
+    confirmationRatio: number | null;
+  };
+  relationshipConvergence: {
+    comparableEdges: number;
+    matchedEdges: number;
+    agreementRatio: number | null;
+  };
+  confidenceSummaries: {
+    claims: { avg: number | null; highCount: number; total: number };
+    edges: { avg: number | null; highCount: number; total: number };
+  };
+  inputs: {
+    hasPreSemantic: boolean;
+    interRegionSignals: number;
+    hasStatementEmbeddings: boolean;
+  };
 }
 
 export interface StructuralViolation {
@@ -1354,6 +1476,14 @@ export interface PipelineArtifacts {
     semanticMapperPrompt?: string;
     rawMappingText?: string;
   } | null;
+  routing?: {
+    result?: any;
+  } | null;
+  regionGates?: {
+    gates?: any[];
+    debug?: any;
+  } | null;
+  questionMerge?: TraversalQuestionMergeResult | null;
 }
 
 export interface CognitiveArtifact {
@@ -1368,6 +1498,7 @@ export interface CognitiveArtifact {
     substrate: PipelineSubstrateGraph;
     preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
     structuralValidation?: StructuralValidation | null;
+    convergence?: ConvergenceReport | null;
   };
   semantic: {
     claims: Claim[];
@@ -1375,9 +1506,11 @@ export interface CognitiveArtifact {
     conditionals: ConditionalPruner[];
     narrative?: string;
     ghosts?: string[];
+    partitions?: MapperPartition[];
   };
   traversal: {
     forcingPoints: ForcingPoint[];
+    traversalQuestions?: TraversalQuestion[];
     graph: SerializedTraversalGraph;
   };
   meta?: {
@@ -1497,6 +1630,7 @@ export interface InitializeRequest {
   singularity?: ProviderKey;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
+  workflowControl?: Record<string, unknown>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
 }
 
@@ -1514,6 +1648,7 @@ export interface ExtendRequest {
   singularity?: ProviderKey;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
+  workflowControl?: Record<string, unknown>;
   clientUserTurnId?: string;
   /** When true, batch providers run automatically even after turn 1 */
   batchAutoRunEnabled?: boolean;
@@ -1530,6 +1665,7 @@ export interface RecomputeRequest {
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
+  workflowControl?: Record<string, unknown>;
   /** Type of concierge prompt used (e.g. starter_1, explorer_1) */
   frozenSingularityPromptType?: string;
   /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
@@ -1583,6 +1719,7 @@ export interface WorkflowContext {
   sessionId: string;
   threadId: string;
   targetUserTurnId: string;
+  workflowControl?: Record<string, unknown>;
 }
 
 export interface WorkflowRequest {
@@ -1902,7 +2039,8 @@ export type ShadowStance =
   | 'prerequisite'
   | 'dependent'
   | 'assertive'
-  | 'uncertain';
+  | 'uncertain'
+  | 'unclassified';
 
 export interface ShadowAudit {
   shadowStatementCount: number;

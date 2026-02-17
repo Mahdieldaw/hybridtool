@@ -84,6 +84,7 @@ export function computeShadowDelta(
         dependent: { total: 0, unreferenced: 0 },
         assertive: { total: 0, unreferenced: 0 },
         uncertain: { total: 0, unreferenced: 0 },
+        unclassified: { total: 0, unreferenced: 0 },
     };
 
     const unreferenced: UnreferencedStatement[] = [];
@@ -339,4 +340,3 @@ export function extractReferencedIds(
 
     return ids;
 }
-

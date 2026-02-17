@@ -29,7 +29,8 @@ export const ALL_STANCES: Stance[] = (Object.keys({
     prerequisite: 1,
     dependent: 1,
     assertive: 1,
-    uncertain: 1
+    uncertain: 1,
+    unclassified: 1
 } as Record<Stance, number>) as Stance[]);
 
 export const EXCLUSION_RULES: ExclusionRule[] = [

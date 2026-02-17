@@ -40,7 +40,7 @@ promptmeth/
 # Documentation
 scripts/
 docs/
-*.md    
+  
 *.txt
 *.d.ts
 
@@ -57,3 +57,4 @@ coderabbit
 Grok-Api-js/*
 comparison/*
 index.css
+ui/styles/index.css

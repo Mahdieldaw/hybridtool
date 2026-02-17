@@ -403,12 +403,27 @@ export class StepExecutor {
     const { streamingManager } = options;
     const artifactProcessor = new ArtifactProcessor();
     const payload = step.payload;
-    const sourceData = await this._resolveSourceData(
+    const rawSourceData = await this._resolveSourceData(
       payload,
       context,
       stepResults,
       options
     );
+
+    const sourceData = (() => {
+      const items = Array.isArray(rawSourceData) ? rawSourceData : [];
+      const out = [];
+      const seen = new Set();
+      for (const s of items) {
+        const providerId = String(s?.providerId || '').trim();
+        const text = String(s?.text ?? s?.content ?? '').trim();
+        if (!providerId || !text) continue;
+        if (seen.has(providerId)) continue;
+        seen.add(providerId);
+        out.push({ providerId, text });
+      }
+      return out;
+    })();
 
     if (sourceData.length < 2) {
       throw new Error(
@@ -424,15 +439,39 @@ export class StepExecutor {
     const providerOrder = Array.isArray(payload.providerOrder)
       ? payload.providerOrder
       : sourceData.map((s) => s.providerId);
-    const citationOrder = providerOrder.filter((pid) =>
-      sourceData.some((s) => s.providerId === pid),
-    );
+    const normalizedProviderOrder = providerOrder
+      .map((pid) => String(pid || '').trim())
+      .filter(Boolean);
+    const uniqueProviderOrder = [];
+    const providerSeen = new Set();
+    for (const pid of normalizedProviderOrder) {
+      if (providerSeen.has(pid)) continue;
+      providerSeen.add(pid);
+      uniqueProviderOrder.push(pid);
+    }
 
-    const indexedSourceData = sourceData.map((s, idx) => {
-      const modelIndex = citationOrder.findIndex((pid) => pid === s.providerId) + 1;
+    const sourceProviderIds = sourceData.map((s) => s.providerId);
+    const sourceProviderIdSet = new Set(sourceProviderIds);
+
+    const citationOrder = uniqueProviderOrder.filter((pid) =>
+      sourceProviderIdSet.has(pid),
+    );
+    for (const pid of sourceProviderIds) {
+      if (!sourceProviderIdSet.has(pid)) continue;
+      if (citationOrder.includes(pid)) continue;
+      citationOrder.push(pid);
+    }
+
+    const indexedSourceData = sourceData.map((s) => {
+      const modelIndex = citationOrder.indexOf(s.providerId) + 1;
+      if (modelIndex < 1) {
+        throw new Error(
+          `[StepExecutor] Invariant violated: providerId ${s.providerId} missing from citationOrder`,
+        );
+      }
       return {
         providerId: s.providerId,
-        modelIndex: modelIndex > 0 ? modelIndex : idx + 1,
+        modelIndex,
         text: s.text,
       };
     });
@@ -444,16 +483,36 @@ export class StepExecutor {
     // 1. Import new modules dynamically
     // Import shadow module once at function scope so callbacks can use its exports without awaiting
     const shadowModule = await import('../../shadow');
-    const { extractShadowStatements, computeShadowDelta, getTopUnreferenced } = shadowModule;
-    const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+    const { extractShadowStatements, enrichShadowExtraction, computeShadowDelta, getTopUnreferenced } = shadowModule;
+    const { buildSemanticMapperPrompt, parseSemanticMapperOutput, dedupeMapperPartitions, validateMapperPartitions, expandPartitionAdvocacySets } = await import('../../ConciergeService/semanticMapper');
     const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
     const { extractForcingPoints } = await import('../../utils/cognitive/traversalEngine');
     const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
     const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
     const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
     const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
+    const { computeQueryRelevance, toJsonSafeQueryRelevance } = await import('../../geometry/queryRelevance');
     const { computeStructuralAnalysis } = await import('../PromptMethods');
     const { deriveConditionalGates } = await import('../traversal/deriveConditionalGates');
+
+    const nowMs = () =>
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+
+    const observability = {
+      startedAtMs: nowMs(),
+      stages: {},
+      fallbacks: {
+        embeddingBackendFailure: false,
+        labelValidationSeverity: 'unknown',
+        classificationFallbackUsed: false,
+        partitionFallbackUsed: false,
+        partitionFallbackReason: null,
+      },
+    };
+
+    const DISRUPTION_FIRST_MAPPER = !!context?.workflowControl?.DISRUPTION_FIRST_MAPPER;
 
     // 2. Shadow Extraction (Mechanical)
     // Map sourceData to expected format (modelIndex, content)
@@ -463,17 +522,33 @@ export class StepExecutor {
     });
 
     console.log(`[StepExecutor] Extracting shadow statements from ${shadowInput.length} models...`);
-    const shadowResult = extractShadowStatements(shadowInput);
-    console.log(`[StepExecutor] Extracted ${shadowResult.statements.length} shadow statements.`);
+    const shadowStage = { startedAtMs: nowMs() };
+    const shadowPass1 = extractShadowStatements(shadowInput);
+    let shadowResult = shadowPass1;
+    shadowStage.timeMs = nowMs() - shadowStage.startedAtMs;
+    shadowStage.counts = {
+      models: shadowInput.length,
+      statements: Array.isArray(shadowPass1?.statements) ? shadowPass1.statements.length : 0,
+    };
+    observability.stages.shadowExtraction = shadowStage;
+    console.log(`[StepExecutor] Extracted ${shadowPass1.statements.length} shadow statements.`);
 
-    // ════════════════════════════════════════════════════════════════════════
-    // 2.5 PARAGRAPH PROJECTION (sync, fast)
-    // ════════════════════════════════════════════════════════════════════════
-    const { projectParagraphs } = shadowModule;
-    const paragraphResult = projectParagraphs(shadowResult.statements);
-    console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
-      `(${paragraphResult.meta.contestedCount} contested, ` +
-      `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
+    let paragraphResult = {
+      paragraphs: [],
+      meta: { totalParagraphs: 0, byModel: {}, contestedCount: 0, processingTimeMs: 0 },
+    };
+
+    const pipelineArtifacts = {
+      shadow: { extraction: shadowResult || null, delta: null },
+      paragraphProjection: null,
+      substrate: { graph: null },
+      query: { embeddingDimensions: null, relevance: null, condensedStatementIds: null, condensed: null },
+      preSemantic: null,
+      observability,
+      fallbacks: observability.fallbacks,
+      labels: null,
+      embeddings: null,
+    };
 
     // ════════════════════════════════════════════════════════════════════════
     // 2.6 CLUSTERING (async, may fail gracefully)
@@ -481,6 +556,11 @@ export class StepExecutor {
     let clusteringResult = null;
     let embeddingResult = null;
     let statementEmbeddingResult = null;
+    let labelEmbeddings = null;
+    let queryEmbedding = null;
+    let queryRelevance = null;
+    let condensedStatementIds = null;
+    let condensedEvidenceMeta = null;
     let paragraphClusteringSummary = null;
     let substrateSummary = null;
     let substrateGraph = null;
@@ -489,25 +569,185 @@ export class StepExecutor {
     let preSemanticInterpretation = null;
     let substrate = null;
     let enrichmentResult = null;
-    if (paragraphResult.paragraphs.length > 0) {
-      try {
-        const clusteringModule = await import('../../clustering');
-        const { generateStatementEmbeddings, poolToParagraphEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
-        const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
-        const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+    let disruptionScores = null;
+    let disruptionWorklist = null;
+    let routingResult = null;
+    let regionGateResult = null;
+    let traversalQuestionMerge = null;
+    let clusteringModule = null;
+    let geometryParagraphResult = null;
+    let geometryStatements = null;
 
-        // Statement-level embeddings → pooled paragraph representations
+    if (Array.isArray(shadowPass1?.statements) && shadowPass1.statements.length > 0) {
+      try {
+        clusteringModule = await import('../../clustering');
+        const { generateStatementEmbeddings, DEFAULT_CONFIG } = clusteringModule;
+
+        const statementEmbStage = { startedAtMs: nowMs() };
         statementEmbeddingResult = await generateStatementEmbeddings(
-          shadowResult.statements,
+          shadowPass1.statements,
           DEFAULT_CONFIG
         );
+        statementEmbStage.timeMs = nowMs() - statementEmbStage.startedAtMs;
+        statementEmbStage.counts = {
+          statements: shadowPass1.statements.length,
+          embedded: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
+        };
+        observability.stages.statementEmbeddings = statementEmbStage;
+      } catch (embeddingError) {
+        console.warn('[StepExecutor] Statement embedding generation failed, continuing without embeddings:', getErrorMessage(embeddingError));
+        observability.fallbacks.embeddingBackendFailure = true;
+        observability.stages.statementEmbeddingsFailure = {
+          startedAtMs: nowMs(),
+          timeMs: 0,
+          error: getErrorMessage(embeddingError),
+        };
+        statementEmbeddingResult = null;
+        clusteringModule = null;
+      }
+    } else {
+      observability.stages.statementEmbeddingsSkipped = {
+        startedAtMs: nowMs(),
+        timeMs: 0,
+        reason: 'no_statements',
+      };
+    }
 
+    if (statementEmbeddingResult?.embeddings) {
+      try {
+        if (!clusteringModule) {
+          clusteringModule = await import('../../clustering');
+        }
+        const { initializeLabelEmbeddings, DEFAULT_CONFIG } = clusteringModule;
+        const labelStage = { startedAtMs: nowMs() };
+        labelEmbeddings = await initializeLabelEmbeddings(DEFAULT_CONFIG);
+        labelStage.timeMs = nowMs() - labelStage.startedAtMs;
+        labelStage.meta = {
+          modelId: labelEmbeddings?.meta?.modelId || null,
+          dimensions: typeof labelEmbeddings?.meta?.dimensions === 'number' ? labelEmbeddings.meta.dimensions : null,
+          severity: labelEmbeddings?.meta?.validation?.severity || (labelEmbeddings?.meta?.validation?.ok ? 'ok' : 'warn'),
+          violationCount: Array.isArray(labelEmbeddings?.meta?.validation?.violations)
+            ? labelEmbeddings.meta.validation.violations.length
+            : 0,
+        };
+        observability.stages.labelEmbeddings = labelStage;
+        if (labelEmbeddings?.meta?.validation?.severity) {
+          observability.fallbacks.labelValidationSeverity = labelEmbeddings.meta.validation.severity;
+        } else if (labelEmbeddings?.meta?.validation?.ok) {
+          observability.fallbacks.labelValidationSeverity = 'ok';
+        } else {
+          observability.fallbacks.labelValidationSeverity = 'warn';
+        }
+        pipelineArtifacts.labels = {
+          modelId: labelEmbeddings?.meta?.modelId || null,
+          dimensions: typeof labelEmbeddings?.meta?.dimensions === 'number' ? labelEmbeddings.meta.dimensions : null,
+          validation: labelEmbeddings?.meta?.validation || null,
+        };
+      } catch (labelError) {
+        labelEmbeddings = null;
+        observability.stages.labelEmbeddingsFailure = {
+          startedAtMs: nowMs(),
+          timeMs: 0,
+          error: getErrorMessage(labelError),
+        };
+      }
+    }
+
+    const enrichmentStage = { startedAtMs: nowMs() };
+    shadowResult = enrichShadowExtraction(shadowPass1, {
+      statementEmbeddings: statementEmbeddingResult?.embeddings || null,
+      labelEmbeddings,
+      transitionLogging: {
+        enabled: WORKFLOW_DEBUG,
+        maxStatementSamples: 20,
+      },
+    });
+    enrichmentStage.timeMs = nowMs() - enrichmentStage.startedAtMs;
+    enrichmentStage.counts = {
+      statementsIn: Array.isArray(shadowPass1?.statements) ? shadowPass1.statements.length : 0,
+      statementsOut: Array.isArray(shadowResult?.statements) ? shadowResult.statements.length : 0,
+      excluded: typeof shadowResult?.meta?.candidatesExcluded === 'number' ? shadowResult.meta.candidatesExcluded : 0,
+    };
+    if (shadowResult?.meta?.classification) {
+      enrichmentStage.classification = shadowResult.meta.classification;
+      if (shadowResult.meta.classification.fallbackUsed) {
+        observability.fallbacks.classificationFallbackUsed = true;
+      }
+    }
+    observability.stages.shadowEnrichment = enrichmentStage;
+
+    const { projectParagraphs } = shadowModule;
+    const paragraphStage = { startedAtMs: nowMs() };
+    paragraphResult = projectParagraphs(shadowResult.statements);
+    paragraphStage.timeMs = nowMs() - paragraphStage.startedAtMs;
+    paragraphStage.counts = {
+      paragraphs: Array.isArray(paragraphResult?.paragraphs) ? paragraphResult.paragraphs.length : 0,
+      contested: typeof paragraphResult?.meta?.contestedCount === 'number' ? paragraphResult.meta.contestedCount : 0,
+    };
+    observability.stages.paragraphProjection = paragraphStage;
+    geometryParagraphResult = paragraphResult;
+    geometryStatements = shadowResult.statements;
+    console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
+      `(${paragraphResult.meta.contestedCount} contested, ` +
+      `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
+
+    pipelineArtifacts.shadow.extraction = shadowResult || null;
+    pipelineArtifacts.paragraphProjection = paragraphResult || null;
+
+    if (paragraphResult.paragraphs.length > 0 && statementEmbeddingResult?.embeddings) {
+      try {
+        if (!clusteringModule) {
+          clusteringModule = await import('../../clustering');
+        }
+
+        const { generateTextEmbeddings, stripInlineMarkdown, poolToParagraphEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
+        const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
+        const { buildPreSemanticInterpretation, computeDisruptionScores, buildDisruptionWorklist, constructJury } = await import('../../geometry/interpretation');
+
+        const rawQuery =
+          (payload && typeof payload.originalPrompt === 'string' && payload.originalPrompt) ||
+          (context && typeof context.userMessage === 'string' && context.userMessage) ||
+          '';
+        const cleanedQuery = stripInlineMarkdown(String(rawQuery || ''));
+        const queryStage = { startedAtMs: nowMs() };
+        const queryEmbeddingBatch = await generateTextEmbeddings([cleanedQuery], DEFAULT_CONFIG);
+        queryEmbedding = queryEmbeddingBatch.get('0') || null;
+        queryStage.timeMs = nowMs() - queryStage.startedAtMs;
+        queryStage.meta = {
+          hasEmbedding: !!queryEmbedding,
+          dimensions: queryEmbedding ? queryEmbedding.length : null,
+        };
+        observability.stages.queryEmbedding = queryStage;
+        if (!queryEmbedding) {
+          throw new Error('[StepExecutor] Query embedding missing');
+        }
+        if (queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
+          throw new Error(
+            `[StepExecutor] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${queryEmbedding.length}`
+          );
+        }
+
+        const poolingStage = { startedAtMs: nowMs() };
         const pooledParagraphEmbeddings = poolToParagraphEmbeddings(
           paragraphResult.paragraphs,
           shadowResult.statements,
           statementEmbeddingResult.embeddings,
           DEFAULT_CONFIG.embeddingDimensions
         );
+        poolingStage.timeMs = nowMs() - poolingStage.startedAtMs;
+        poolingStage.counts = {
+          paragraphs: Array.isArray(paragraphResult?.paragraphs) ? paragraphResult.paragraphs.length : 0,
+          statementEmbeddings: statementEmbeddingResult?.embeddings instanceof Map ? statementEmbeddingResult.embeddings.size : 0,
+          paragraphEmbeddings: pooledParagraphEmbeddings instanceof Map ? pooledParagraphEmbeddings.size : 0,
+        };
+        observability.stages.paragraphPooling = poolingStage;
+
+        const firstParagraphEmbedding = pooledParagraphEmbeddings.values().next().value;
+        if (firstParagraphEmbedding && firstParagraphEmbedding.length !== queryEmbedding.length) {
+          throw new Error(
+            `[StepExecutor] Query/paragraph embedding dimension mismatch: query=${queryEmbedding.length}, paragraph=${firstParagraphEmbedding.length}`
+          );
+        }
 
         embeddingResult = {
           embeddings: pooledParagraphEmbeddings,
@@ -524,11 +764,25 @@ export class StepExecutor {
           }
         } catch (_) { }
 
+        geometryParagraphResult = paragraphResult;
+        geometryStatements = shadowResult.statements;
+        let geometryParagraphEmbeddings = pooledParagraphEmbeddings;
+
+        const substrateStage = { startedAtMs: nowMs() };
         substrate = buildGeometricSubstrate(
-          paragraphResult.paragraphs,
-          embeddingResult.embeddings,
+          geometryParagraphResult.paragraphs,
+          geometryParagraphEmbeddings,
           embeddingBackend
         );
+        substrateStage.timeMs = nowMs() - substrateStage.startedAtMs;
+        substrateStage.meta = { embeddingBackend };
+        observability.stages.substrate = substrateStage;
+        pipelineArtifacts.embeddings = {
+          backend: embeddingBackend,
+          statementCount: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
+          paragraphCount: geometryParagraphEmbeddings instanceof Map ? geometryParagraphEmbeddings.size : null,
+          dimensions: DEFAULT_CONFIG.embeddingDimensions,
+        };
 
         try {
           substrateDegenerate = isDegenerate(substrate);
@@ -595,13 +849,20 @@ export class StepExecutor {
         }
 
         if (paragraphResult.paragraphs.length >= 3) {
+          const clusterStage = { startedAtMs: nowMs() };
           clusteringResult = buildClusters(
-            paragraphResult.paragraphs,
-            shadowResult.statements,
-            embeddingResult.embeddings,
+            geometryParagraphResult.paragraphs,
+            geometryStatements,
+            geometryParagraphEmbeddings,
             DEFAULT_CONFIG,
             substrate.graphs.mutual
           );
+          clusterStage.timeMs = nowMs() - clusterStage.startedAtMs;
+          clusterStage.counts = {
+            clusters: Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters.length : 0,
+            paragraphs: Array.isArray(geometryParagraphResult?.paragraphs) ? geometryParagraphResult.paragraphs.length : 0,
+          };
+          observability.stages.clustering = clusterStage;
 
           clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
           clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
@@ -627,17 +888,251 @@ export class StepExecutor {
         }
 
         try {
+          const preSemanticStage = { startedAtMs: nowMs() };
           if (!substrateDegenerate && typeof buildPreSemanticInterpretation === 'function') {
             preSemanticInterpretation = buildPreSemanticInterpretation(
               substrate,
-              paragraphResult.paragraphs,
-              Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined
+              geometryParagraphResult.paragraphs,
+              Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined,
+              geometryParagraphEmbeddings
             );
           } else {
             preSemanticInterpretation = null;
           }
+          preSemanticStage.timeMs = nowMs() - preSemanticStage.startedAtMs;
+          preSemanticStage.meta = {
+            hasPreSemantic: !!preSemanticInterpretation,
+            degenerate: !!substrateDegenerate,
+          };
+          observability.stages.preSemantic = preSemanticStage;
         } catch (_) {
           preSemanticInterpretation = null;
+        }
+
+        try {
+          if (queryEmbedding && substrate && !substrateDegenerate) {
+            const relevanceStage = { startedAtMs: nowMs() };
+            queryRelevance = computeQueryRelevance({
+              queryEmbedding,
+              statements: shadowResult.statements,
+              statementEmbeddings: statementEmbeddingResult?.embeddings || null,
+              paragraphEmbeddings: geometryParagraphEmbeddings || null,
+              paragraphs: geometryParagraphResult.paragraphs,
+              substrate,
+              regionization: preSemanticInterpretation?.regionization || null,
+              regionProfiles: preSemanticInterpretation?.regionProfiles || null,
+            });
+            relevanceStage.timeMs = nowMs() - relevanceStage.startedAtMs;
+            relevanceStage.meta = {
+              ok: !!queryRelevance,
+              ...(queryRelevance?.meta ? { queryRelevanceMeta: queryRelevance.meta } : {}),
+            };
+            observability.stages.queryRelevance = relevanceStage;
+          } else {
+            queryRelevance = null;
+          }
+        } catch (err) {
+          queryRelevance = null;
+          console.warn('[StepExecutor] Query relevance scoring failed:', getErrorMessage(err));
+        }
+
+        try {
+          const condensedStage = { startedAtMs: nowMs() };
+          condensedStatementIds = null;
+          condensedEvidenceMeta = DISRUPTION_FIRST_MAPPER
+            ? { enabled: false, reason: 'ranking_only' }
+            : { enabled: false };
+          condensedStage.timeMs = nowMs() - condensedStage.startedAtMs;
+          condensedStage.meta = condensedEvidenceMeta;
+          observability.stages.condensedEvidence = condensedStage;
+        } catch (err) {
+          condensedStatementIds = null;
+          condensedEvidenceMeta = DISRUPTION_FIRST_MAPPER
+            ? { enabled: false, reason: 'ranking_only', error: getErrorMessage(err) }
+            : { enabled: false, error: getErrorMessage(err) };
+          observability.stages.condensedEvidence = {
+            startedAtMs: nowMs(),
+            timeMs: 0,
+            error: getErrorMessage(err),
+          };
+        }
+
+        try {
+          const condensedGeometryStage = { startedAtMs: nowMs() };
+          condensedGeometryStage.timeMs = nowMs() - condensedGeometryStage.startedAtMs;
+          condensedGeometryStage.meta = {
+            applied: false,
+          };
+          observability.stages.condensedGeometry = condensedGeometryStage;
+        } catch (err) {
+          observability.stages.condensedGeometry = {
+            startedAtMs: nowMs(),
+            timeMs: 0,
+            error: getErrorMessage(err),
+          };
+        }
+
+        pipelineArtifacts.query.embeddingDimensions = queryEmbedding ? queryEmbedding.length : null;
+        pipelineArtifacts.query.relevance = queryRelevance ? toJsonSafeQueryRelevance(queryRelevance) : null;
+        pipelineArtifacts.query.condensedStatementIds = condensedStatementIds;
+        pipelineArtifacts.query.condensed = condensedEvidenceMeta;
+        pipelineArtifacts.preSemantic = preSemanticInterpretation || null;
+
+        try {
+          const disruptionStage = { startedAtMs: nowMs() };
+          if (
+            DISRUPTION_FIRST_MAPPER &&
+            preSemanticInterpretation &&
+            queryRelevance &&
+            Array.isArray(geometryStatements) &&
+            Array.isArray(geometryParagraphResult?.paragraphs)
+          ) {
+            disruptionScores = computeDisruptionScores({
+              statements: geometryStatements,
+              paragraphs: geometryParagraphResult.paragraphs,
+              preSemantic: preSemanticInterpretation,
+              queryRelevance,
+            });
+            disruptionWorklist = buildDisruptionWorklist({
+              ranked: disruptionScores.ranked,
+              limit: 10,
+            });
+
+            let juryWorklistEntries = null;
+            let juryMeta = null;
+            try {
+              const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+                ? preSemanticInterpretation.regionization.regions
+                : [];
+              if (typeof constructJury === 'function' && substrate && regions.length > 0) {
+                juryWorklistEntries = disruptionWorklist.worklist.map((focal) => {
+                  const juryResult = constructJury({
+                    focal,
+                    regions,
+                    substrate,
+                    condensedStatements: geometryStatements,
+                    statementEmbeddings: statementEmbeddingResult?.embeddings || null,
+                    queryRelevance,
+                    maxJurySize: 8,
+                  });
+                  return {
+                    focal,
+                    jury: juryResult?.jury ?? [],
+                    juryMeta: juryResult?.meta ?? null,
+                  };
+                });
+                juryMeta = {
+                  entries: juryWorklistEntries.length,
+                  avgJurySize:
+                    juryWorklistEntries.length > 0
+                      ? juryWorklistEntries.reduce((acc, e) => acc + (Array.isArray(e?.jury) ? e.jury.length : 0), 0) / juryWorklistEntries.length
+                      : 0,
+                };
+              }
+            } catch (_) {
+              juryWorklistEntries = null;
+              juryMeta = { error: true };
+            }
+
+            pipelineArtifacts.preSemantic = {
+              ...preSemanticInterpretation,
+              disruption: {
+                scores: {
+                  meta: disruptionScores.meta,
+                  top: disruptionScores.ranked.slice(0, 50),
+                },
+                worklist: disruptionWorklist.worklist,
+                worklistMeta: disruptionWorklist.meta,
+                worklistEntries: juryWorklistEntries,
+                juryMeta,
+              },
+            };
+            preSemanticInterpretation = pipelineArtifacts.preSemantic;
+          }
+
+          disruptionStage.timeMs = nowMs() - disruptionStage.startedAtMs;
+          disruptionStage.meta = {
+            enabled: DISRUPTION_FIRST_MAPPER,
+            scored: typeof disruptionScores?.meta?.scoredCount === 'number' ? disruptionScores.meta.scoredCount : 0,
+            selected: typeof disruptionWorklist?.meta?.selectedCount === 'number' ? disruptionWorklist.meta.selectedCount : 0,
+          };
+          observability.stages.disruptionScoring = disruptionStage;
+        } catch (err) {
+          disruptionScores = null;
+          disruptionWorklist = null;
+          observability.stages.disruptionScoring = {
+            startedAtMs: nowMs(),
+            timeMs: 0,
+            error: getErrorMessage(err),
+          };
+        }
+
+        // ── Routing + Region Gates ──
+        try {
+          const routingStage = { startedAtMs: nowMs() };
+          if (
+            DISRUPTION_FIRST_MAPPER &&
+            preSemanticInterpretation &&
+            disruptionScores
+          ) {
+            const { routeRegions, deriveRegionConditionalGates } = await import('../../geometry/interpretation');
+
+            routingResult = routeRegions({
+              preSemantic: preSemanticInterpretation,
+              disruptionScores,
+            });
+
+            // Derive region-based conditional gates from gate candidates
+            if (routingResult.gateCandidates.length > 0) {
+              const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+                ? preSemanticInterpretation.regionization.regions
+                : [];
+              const profiles = Array.isArray(preSemanticInterpretation?.regionProfiles)
+                ? preSemanticInterpretation.regionProfiles
+                : [];
+              regionGateResult = deriveRegionConditionalGates({
+                gateCandidates: routingResult.gateCandidates,
+                regions,
+                profiles,
+                substrate,
+                statements: geometryStatements || [],
+                paragraphEmbeddings: geometryParagraphEmbeddings || null,
+              });
+            } else {
+              regionGateResult = { gates: [], debug: { processingTimeMs: 0, candidateRegions: 0, regionsEvaluated: 0, gatesProduced: 0, gatesDeduped: 0, perRegion: [] } };
+            }
+
+            // Store routing + gates on preSemantic artifacts
+            pipelineArtifacts.preSemantic = {
+              ...pipelineArtifacts.preSemantic,
+              routing: {
+                result: routingResult,
+              },
+              regionGates: {
+                gates: regionGateResult.gates,
+                debug: regionGateResult.debug,
+              },
+            };
+            preSemanticInterpretation = pipelineArtifacts.preSemantic;
+          }
+
+          routingStage.timeMs = nowMs() - routingStage.startedAtMs;
+          routingStage.meta = {
+            enabled: DISRUPTION_FIRST_MAPPER && !!preSemanticInterpretation && !!disruptionScores,
+            partitionCandidates: routingResult?.meta?.partitionCount ?? 0,
+            gateCandidates: routingResult?.meta?.gateCount ?? 0,
+            unrouted: routingResult?.meta?.unroutedCount ?? 0,
+            gatesProduced: regionGateResult?.gates?.length ?? 0,
+          };
+          observability.stages.routing = routingStage;
+        } catch (err) {
+          routingResult = null;
+          regionGateResult = null;
+          observability.stages.routing = {
+            startedAtMs: nowMs(),
+            timeMs: 0,
+            error: getErrorMessage(err),
+          };
         }
 
         try {
@@ -702,30 +1197,48 @@ export class StepExecutor {
         } catch (_) {
           substrateGraph = null;
         }
+        pipelineArtifacts.substrate.graph = substrateGraph;
 
         try {
           const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
             ? preSemanticInterpretation.regionization.regions
             : [];
           if (substrate && regions.length > 0) {
+            const enrichmentStage = { startedAtMs: nowMs() };
             enrichmentResult = enrichStatementsWithGeometry(
-              shadowResult.statements,
-              paragraphResult.paragraphs,
+              geometryStatements,
+              geometryParagraphResult.paragraphs,
               substrate,
               regions
             );
+            enrichmentStage.timeMs = nowMs() - enrichmentStage.startedAtMs;
+            enrichmentStage.counts = {
+              statements: Array.isArray(geometryStatements) ? geometryStatements.length : 0,
+              unenriched: typeof enrichmentResult?.unenrichedCount === 'number' ? enrichmentResult.unenrichedCount : 0,
+            };
+            observability.stages.enrichment = enrichmentStage;
             if (enrichmentResult?.unenrichedCount > 0) {
               console.warn(
-                `[Enrichment] ${enrichmentResult.unenrichedCount}/${shadowResult.statements.length} statements could not be enriched`,
+                `[Enrichment] ${enrichmentResult.unenrichedCount}/${geometryStatements.length} statements could not be enriched`,
                 enrichmentResult.failures.slice(0, 5)
               );
             }
           } else {
             enrichmentResult = null;
+            observability.stages.enrichment = {
+              startedAtMs: nowMs(),
+              timeMs: 0,
+              skipped: true,
+            };
           }
         } catch (err) {
           enrichmentResult = null;
           console.warn('[Enrichment] Failed:', getErrorMessage(err));
+          observability.stages.enrichment = {
+            startedAtMs: nowMs(),
+            timeMs: 0,
+            error: getErrorMessage(err),
+          };
         }
 
         if (clusteringResult) {
@@ -754,17 +1267,60 @@ export class StepExecutor {
       } catch (clusteringError) {
         // Per design: skip clustering entirely on failure, continue without
         console.warn('[StepExecutor] Clustering failed, continuing without clusters:', getErrorMessage(clusteringError));
+        observability.fallbacks.embeddingBackendFailure = true;
+        observability.stages.clusteringFailure = {
+          startedAtMs: nowMs(),
+          timeMs: 0,
+          error: getErrorMessage(clusteringError),
+        };
         clusteringResult = null;
       }
     } else {
-      console.log('[StepExecutor] Skipping embeddings/geometry (no paragraphs)');
+      const reason = paragraphResult.paragraphs.length === 0
+        ? 'no_paragraphs'
+        : 'statement_embeddings_unavailable';
+      console.log(`[StepExecutor] Skipping embeddings/geometry (${reason})`);
+      observability.stages.embeddingsSkipped = {
+        startedAtMs: nowMs(),
+        timeMs: 0,
+        reason,
+      };
+
+      if (DISRUPTION_FIRST_MAPPER) {
+        condensedStatementIds = [];
+        condensedEvidenceMeta = { enabled: true, skipped: true, reason };
+        pipelineArtifacts.query.condensedStatementIds = condensedStatementIds;
+        pipelineArtifacts.query.condensed = condensedEvidenceMeta;
+        observability.stages.condensedEvidence = {
+          startedAtMs: nowMs(),
+          timeMs: 0,
+          meta: condensedEvidenceMeta,
+        };
+      }
     }
 
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
+    const promptStage = { startedAtMs: nowMs() };
+    const disruptionFirstWorklistEntries =
+      DISRUPTION_FIRST_MAPPER &&
+      Array.isArray(pipelineArtifacts?.preSemantic?.disruption?.worklistEntries) &&
+      pipelineArtifacts.preSemantic.disruption.worklistEntries.length > 0
+        ? pipelineArtifacts.preSemantic.disruption.worklistEntries
+        : null;
+
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
+      indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text })),
+      disruptionFirstWorklistEntries
+        ? { disruptionFirst: { worklistEntries: disruptionFirstWorklistEntries, shadowStatements: shadowResult.statements } }
+        : undefined
     );
+    promptStage.timeMs = nowMs() - promptStage.startedAtMs;
+    promptStage.counts = {
+      inputModels: indexedSourceData.length,
+      promptChars: typeof mappingPrompt === 'string' ? mappingPrompt.length : 0,
+    };
+    observability.stages.semanticMapperPrompt = promptStage;
 
     const promptLength = mappingPrompt.length;
     console.log(`[StepExecutor] Semantic Mapper prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
@@ -796,6 +1352,14 @@ export class StepExecutor {
             let finalResult = results.get(payload.mappingProvider);
             const providerError = errors?.get?.(payload.mappingProvider);
 
+            try {
+              observability.stages.semanticMapperCall = {
+                startedAtMs: promptStage.startedAtMs,
+                timeMs: nowMs() - promptStage.startedAtMs,
+                meta: { providerId: payload.mappingProvider },
+              };
+            } catch (_) { }
+
             if ((!finalResult || !finalResult.text) && providerError) {
               const recovered = streamingManager.getRecoveredText(
                 context.sessionId, step.stepId, payload.mappingProvider
@@ -811,7 +1375,6 @@ export class StepExecutor {
             }
 
             let mapperArtifact = null;
-            let pipelineArtifacts = null;
             const rawText = finalResult?.text || "";
             let shadowDelta = null;
             let topUnindexed = null;
@@ -820,9 +1383,132 @@ export class StepExecutor {
 
             if (finalResult?.text) {
               // 4. Parse (New Parser)
-              const parseResult = parseSemanticMapperOutput(rawText);
+              const parseStage = { startedAtMs: nowMs() };
+              const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
+              parseStage.timeMs = nowMs() - parseStage.startedAtMs;
+              parseStage.meta = {
+                ok: !!parseResult?.success,
+                errorCount: Array.isArray(parseResult?.errors) ? parseResult.errors.length : 0,
+              };
+              observability.stages.semanticMapperParse = parseStage;
 
               if (parseResult.success && parseResult.output) {
+                let mapperPartitions = null;
+                try {
+                  const partitionsStage = { startedAtMs: nowMs() };
+                  const focal = Array.isArray(parseResult.output.partitions) ? parseResult.output.partitions : [];
+                  const emergent = Array.isArray(parseResult.output.emergentForks) ? parseResult.output.emergentForks : [];
+                  const combined = [...focal, ...emergent];
+                  const deduped = typeof dedupeMapperPartitions === 'function' ? dedupeMapperPartitions(combined) : { partitions: combined, meta: { input: combined.length, output: combined.length, merged: 0 } };
+                  const validation = typeof validateMapperPartitions === 'function'
+                    ? validateMapperPartitions(deduped.partitions, shadowResult.statements)
+                    : { validated: deduped.partitions, suppressed: [], meta: { input: deduped.partitions.length, validated: deduped.partitions.length, suppressed: 0, minConfidence: 0 } };
+
+                  const advocacyStage = { startedAtMs: nowMs() };
+                  const advocacyCandidates = Array.isArray(geometryStatements) && geometryStatements.length > 0 ? geometryStatements : shadowResult.statements;
+                  const isCondensedCandidatePool =
+                    Array.isArray(condensedStatementIds) &&
+                    Array.isArray(geometryStatements) &&
+                    geometryStatements.length > 0 &&
+                    geometryStatements.length < shadowResult.statements.length;
+                  const advocacyOptions = {
+                    candidatePool: isCondensedCandidatePool ? 'condensed' : 'full',
+                  };
+
+                  const expandedValidated = typeof expandPartitionAdvocacySets === 'function'
+                    ? expandPartitionAdvocacySets(
+                      validation.validated,
+                      advocacyCandidates,
+                      statementEmbeddingResult?.embeddings || null,
+                      advocacyOptions
+                    )
+                    : { partitions: validation.validated, meta: { input: validation.validated.length, expanded: validation.validated.length } };
+                  const expandedSuppressed = typeof expandPartitionAdvocacySets === 'function'
+                    ? expandPartitionAdvocacySets(
+                      validation.suppressed,
+                      advocacyCandidates,
+                      statementEmbeddingResult?.embeddings || null,
+                      advocacyOptions
+                    )
+                    : { partitions: validation.suppressed, meta: { input: validation.suppressed.length, expanded: validation.suppressed.length } };
+
+                  advocacyStage.timeMs = nowMs() - advocacyStage.startedAtMs;
+                  advocacyStage.counts = {
+                    candidates: Array.isArray(advocacyCandidates) ? advocacyCandidates.length : 0,
+                    validated: Array.isArray(expandedValidated?.partitions) ? expandedValidated.partitions.length : 0,
+                    suppressed: Array.isArray(expandedSuppressed?.partitions) ? expandedSuppressed.partitions.length : 0,
+                  };
+                  observability.stages.advocacyExpansion = advocacyStage;
+
+                  const validatedPartitions = Array.isArray(expandedValidated?.partitions) ? expandedValidated.partitions : [];
+                  const validatedConfidences = validatedPartitions
+                    .map((p) => (typeof p?.confidence === 'number' ? p.confidence : null))
+                    .filter((x) => typeof x === 'number');
+                  const avgConfidence =
+                    validatedConfidences.length > 0
+                      ? validatedConfidences.reduce((s, x) => s + x, 0) / validatedConfidences.length
+                      : null;
+                  const maxConfidence = validatedConfidences.length > 0 ? Math.max(...validatedConfidences) : null;
+
+                  const shouldPartitionFallback =
+                    validatedPartitions.length === 0 ||
+                    (avgConfidence != null && avgConfidence < 0.5) ||
+                    (maxConfidence != null && maxConfidence < 0.55);
+
+                  const partitionFallbackReason =
+                    validatedPartitions.length === 0
+                      ? 'no_validated_partitions'
+                      : avgConfidence != null && avgConfidence < 0.5
+                        ? 'avg_confidence_below_threshold'
+                        : maxConfidence != null && maxConfidence < 0.55
+                          ? 'max_confidence_below_threshold'
+                          : null;
+
+                  partitionsStage.timeMs = nowMs() - partitionsStage.startedAtMs;
+                  partitionsStage.counts = {
+                    focal: focal.length,
+                    emergent: emergent.length,
+                    combined: combined.length,
+                    deduped: Array.isArray(deduped?.partitions) ? deduped.partitions.length : 0,
+                    validated: validatedPartitions.length,
+                    suppressed: Array.isArray(expandedSuppressed?.partitions) ? expandedSuppressed.partitions.length : 0,
+                  };
+                  partitionsStage.confidence = {
+                    avgValidated: avgConfidence,
+                    maxValidated: maxConfidence,
+                    minConfidenceThreshold: validation?.meta?.minConfidence,
+                  };
+                  partitionsStage.fallback = { used: shouldPartitionFallback, reason: partitionFallbackReason };
+                  observability.stages.partitions = partitionsStage;
+                  observability.fallbacks.partitionFallbackUsed = shouldPartitionFallback;
+                  observability.fallbacks.partitionFallbackReason = shouldPartitionFallback ? partitionFallbackReason : null;
+
+                  mapperPartitions = {
+                    focal,
+                    emergent,
+                    deduped: deduped.partitions,
+                    validated: validatedPartitions,
+                    suppressed: expandedSuppressed.partitions,
+                    meta: deduped.meta,
+                    validation: validation.meta,
+                    advocacy: expandedValidated.meta,
+                    orderingPolicy: 'append',
+                    emit: !shouldPartitionFallback,
+                    fallback: shouldPartitionFallback ? { used: true, reason: partitionFallbackReason } : { used: false, reason: null },
+                  };
+                  if (pipelineArtifacts?.preSemantic?.disruption) {
+                    pipelineArtifacts.preSemantic = {
+                      ...pipelineArtifacts.preSemantic,
+                      disruption: {
+                        ...pipelineArtifacts.preSemantic.disruption,
+                        mapperPartitions,
+                      },
+                    };
+                  }
+                } catch (_) {
+                  mapperPartitions = null;
+                }
+
                 // 5. Assembly & Traversal (Mechanical)
                 const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
                   ? preSemanticInterpretation.regionization.regions
@@ -845,6 +1531,7 @@ export class StepExecutor {
                   challenges: c?.challenges || null,
                 }));
 
+                const provenanceStage = { startedAtMs: nowMs() };
                 enrichedClaims = await reconstructProvenance(
                   mapperClaimsForProvenance,
                   shadowResult.statements,
@@ -856,8 +1543,15 @@ export class StepExecutor {
                   unifiedEdges,
                   statementEmbeddingResult?.embeddings || null
                 );
+                provenanceStage.timeMs = nowMs() - provenanceStage.startedAtMs;
+                provenanceStage.counts = {
+                  claims: Array.isArray(enrichedClaims) ? enrichedClaims.length : 0,
+                  statements: Array.isArray(shadowResult?.statements) ? shadowResult.statements.length : 0,
+                };
+                observability.stages.provenance = provenanceStage;
 
                 try {
+                  const gatesStage = { startedAtMs: nowMs() };
                   const tempForStructure = buildCognitiveArtifact({
                     id: `artifact-${Date.now()}`,
                     query: payload.originalPrompt,
@@ -869,12 +1563,7 @@ export class StepExecutor {
                     conditionals: [],
                     ghosts: null,
                     narrative: String(parseResult.narrative || '').trim(),
-                  }, {
-                    shadow: { extraction: shadowResult || null, delta: null },
-                    paragraphProjection: paragraphResult || null,
-                    substrate: { graph: substrateGraph },
-                    preSemantic: preSemanticInterpretation || null,
-                  });
+                  }, pipelineArtifacts);
 
                   const structuralAnalysis = computeStructuralAnalysis(tempForStructure);
 
@@ -883,9 +1572,10 @@ export class StepExecutor {
                     statements: shadowResult.statements,
                     edges: unifiedEdges,
                     statementEmbeddings: statementEmbeddingResult?.embeddings || null,
-                    paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
+                    paragraphEmbeddings: embeddingResult?.embeddings || null,
                     paragraphs: paragraphResult.paragraphs,
                     structuralAnalysis,
+                    queryRelevance: pipelineArtifacts?.query?.relevance || null,
                   });
 
                   mechanicalGating = derivedGates;
@@ -896,29 +1586,37 @@ export class StepExecutor {
                     affectedClaims: g.affectedClaims,
                     sourceStatementIds: g.sourceStatementIds,
                   }));
+                  gatesStage.timeMs = nowMs() - gatesStage.startedAtMs;
+                  gatesStage.counts = { gates: Array.isArray(unifiedConditionals) ? unifiedConditionals.length : 0 };
+                  observability.stages.gates = gatesStage;
                 } catch (err) {
                   mechanicalGating = { error: getErrorMessage(err) };
                   console.warn('[StepExecutor] Gate derivation failed; falling back to mapper conditionals', {
                     error: getErrorMessage(err),
                   });
+                  observability.stages.gates = {
+                    startedAtMs: nowMs(),
+                    timeMs: 0,
+                    error: getErrorMessage(err),
+                  };
                 }
 
 
                 let completeness = null;
                 try {
                   if (substrate && Array.isArray(regions) && regions.length > 0) {
-                    const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims);
+                    const statementFates = buildStatementFates(geometryStatements || shadowResult.statements, enrichedClaims);
                     const unattendedRegions = findUnattendedRegions(
                       substrate,
-                      paragraphResult.paragraphs,
+                      (geometryParagraphResult || paragraphResult).paragraphs,
                       enrichedClaims,
                       regions,
-                      shadowResult.statements
+                      geometryStatements || shadowResult.statements
                     );
                     const completenessReport = buildCompletenessReport(
                       statementFates,
                       unattendedRegions,
-                      shadowResult.statements,
+                      geometryStatements || shadowResult.statements,
                       regions.length
                     );
                     completeness = {
@@ -1150,6 +1848,7 @@ export class StepExecutor {
 
                 try {
                   // Shadow Delta
+                  const shadowDeltaStage = { startedAtMs: nowMs() };
                   referencedIds = new Set(
                     enrichedClaims
                       .map((c) => (Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : []))
@@ -1157,6 +1856,18 @@ export class StepExecutor {
                   );
                   shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
                   topUnindexed = getTopUnreferenced(shadowDelta, 10);
+                  pipelineArtifacts.shadow.delta = shadowDelta || null;
+                  try {
+                    pipelineArtifacts.shadow.topUnreferenced = Array.isArray(topUnindexed) ? topUnindexed : null;
+                    pipelineArtifacts.shadow.referencedIds =
+                      referencedIds instanceof Set ? Array.from(referencedIds) : null;
+                  } catch (_) { }
+                  shadowDeltaStage.timeMs = nowMs() - shadowDeltaStage.startedAtMs;
+                  shadowDeltaStage.counts = {
+                    referencedStatements: referencedIds instanceof Set ? referencedIds.size : 0,
+                    topUnreferenced: Array.isArray(topUnindexed) ? topUnindexed.length : 0,
+                  };
+                  observability.stages.shadowDelta = shadowDeltaStage;
 
                   const EDGE_SUPPORTS = 'supports';
                   const EDGE_CONFLICTS = 'conflicts';
@@ -1213,6 +1924,7 @@ export class StepExecutor {
                   let draftMapperArtifact = null;
                   let tempCognitiveForTraversal = null;
                   try {
+                    const traversalStage = { startedAtMs: nowMs() };
                     const { buildMechanicalTraversal } = await import('../traversal/buildMechanicalTraversal');
                     draftMapperArtifact = {
                       id: `artifact-${Date.now()}`,
@@ -1227,21 +1939,13 @@ export class StepExecutor {
                       conditionals: unifiedConditionals,
                     };
 
-                    tempCognitiveForTraversal = buildCognitiveArtifact(draftMapperArtifact, {
-                      shadow: {
-                        extraction: shadowResult || null,
-                        delta: shadowDelta || null,
-                      },
-                      paragraphProjection: paragraphResult || null,
-                      substrate: {
-                        graph: substrateGraph,
-                      },
-                      preSemantic: preSemanticInterpretation || null,
-                    });
+                    tempCognitiveForTraversal = buildCognitiveArtifact(draftMapperArtifact, pipelineArtifacts);
 
                     traversalAnalysis = await buildMechanicalTraversal(tempCognitiveForTraversal, {
                       statementEmbeddings: statementEmbeddingResult?.embeddings || null,
                     });
+                    traversalStage.timeMs = nowMs() - traversalStage.startedAtMs;
+                    observability.stages.traversalAnalysis = traversalStage;
                   } catch (err) {
                     const warn =
                       this?.logger && typeof this.logger.warn === 'function'
@@ -1261,6 +1965,11 @@ export class StepExecutor {
                       stack: err?.stack,
                     });
                     traversalAnalysis = null;
+                    observability.stages.traversalAnalysis = {
+                      startedAtMs: nowMs(),
+                      timeMs: 0,
+                      error: getErrorMessage(err),
+                    };
                   }
 
                   mapperArtifact = {
@@ -1296,7 +2005,115 @@ export class StepExecutor {
                     ...(paragraphResult?.meta ? { paragraphProjection: paragraphResult.meta } : {}),
                     ...(paragraphClusteringSummary ? { paragraphClustering: paragraphClusteringSummary } : {}),
                     ...(substrateSummary ? { substrate: substrateSummary } : {}),
+                    ...(mapperPartitions && mapperPartitions.emit && Array.isArray(mapperPartitions?.validated) ? { partitions: mapperPartitions.validated } : {}),
                   };
+
+                  // ── Question Merge ──
+                  try {
+                    const questionMergeStage = { startedAtMs: nowMs() };
+                    const emittedPartitions =
+                      mapperPartitions && mapperPartitions.emit && Array.isArray(mapperPartitions?.validated)
+                        ? mapperPartitions.validated
+                        : [];
+                    const emittedGates =
+                      regionGateResult && Array.isArray(regionGateResult?.gates)
+                        ? regionGateResult.gates
+                        : [];
+
+                    if (emittedPartitions.length > 0 || emittedGates.length > 0) {
+                      const { mergeTraversalQuestions } = await import('../traversal/questionMerge');
+
+                      // Build region centroids from paragraph embeddings
+                      const regionCentroids = new Map();
+                      const currentRegions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+                        ? preSemanticInterpretation.regionization.regions
+                        : [];
+                      const currentEmbeddings = geometryParagraphEmbeddings || null;
+                      if (currentEmbeddings && currentEmbeddings.size > 0) {
+                        for (const r of currentRegions) {
+                          let dims = 0;
+                          for (const pid of r.nodeIds || []) {
+                            const emb = currentEmbeddings.get(String(pid));
+                            if (emb && emb.length > 0) { dims = emb.length; break; }
+                          }
+                          if (dims > 0) {
+                            const acc = new Float32Array(dims);
+                            let count = 0;
+                            for (const pid of r.nodeIds || []) {
+                              const emb = currentEmbeddings.get(String(pid));
+                              if (!emb || emb.length !== dims) continue;
+                              for (let i = 0; i < dims; i++) acc[i] += emb[i];
+                              count++;
+                            }
+                            if (count > 0) {
+                              for (let i = 0; i < dims; i++) acc[i] /= count;
+                              let norm = 0;
+                              for (let i = 0; i < dims; i++) norm += acc[i] * acc[i];
+                              norm = Math.sqrt(norm);
+                              if (norm > 0) for (let i = 0; i < dims; i++) acc[i] /= norm;
+                              regionCentroids.set(r.id, acc);
+                            }
+                          }
+                        }
+                      }
+
+                      // Build partition-to-region mapping from routing result
+                      const partitionRegionMapping = new Map();
+                      if (routingResult) {
+                        for (const rc of routingResult.partitionCandidates || []) {
+                          // Map each partition to the regions that were routed as partition candidates
+                          // Simple heuristic: partition maps to all partition-candidate regions
+                          for (const p of emittedPartitions) {
+                            const existing = partitionRegionMapping.get(p.id) || [];
+                            if (!existing.includes(rc.regionId)) existing.push(rc.regionId);
+                            partitionRegionMapping.set(p.id, existing);
+                          }
+                        }
+                      }
+
+                      traversalQuestionMerge = mergeTraversalQuestions({
+                        partitions: emittedPartitions,
+                        regionGates: emittedGates,
+                        regionCentroids,
+                        prunedStatementIds: new Set(),
+                        partitionRegionMapping,
+                      });
+
+                      // Store on preSemantic artifacts
+                      if (pipelineArtifacts?.preSemantic) {
+                        pipelineArtifacts.preSemantic = {
+                          ...pipelineArtifacts.preSemantic,
+                          questionMerge: {
+                            questions: traversalQuestionMerge.questions,
+                            meta: traversalQuestionMerge.meta,
+                          },
+                        };
+                        preSemanticInterpretation = pipelineArtifacts.preSemantic;
+                      }
+
+                      // Attach to mapper artifact
+                      if (mapperArtifact) {
+                        mapperArtifact.traversalQuestions = traversalQuestionMerge.questions;
+                      }
+                    }
+
+                    questionMergeStage.timeMs = nowMs() - questionMergeStage.startedAtMs;
+                    questionMergeStage.meta = {
+                      partitions: emittedPartitions.length,
+                      gates: emittedGates.length,
+                      merged: traversalQuestionMerge?.questions?.length ?? 0,
+                      autoResolved: traversalQuestionMerge?.meta?.autoResolvedCount ?? 0,
+                      blocked: traversalQuestionMerge?.meta?.blockedCount ?? 0,
+                    };
+                    observability.stages.questionMerge = questionMergeStage;
+                  } catch (mergeErr) {
+                    traversalQuestionMerge = null;
+                    observability.stages.questionMerge = {
+                      startedAtMs: nowMs(),
+                      timeMs: 0,
+                      error: getErrorMessage(mergeErr),
+                    };
+                  }
 
                   try {
                     if (preSemanticInterpretation && mapperArtifact) {
@@ -1312,6 +2129,299 @@ export class StepExecutor {
 
                   if (mapperArtifact) {
                     mapperArtifact.structuralValidation = structuralValidation;
+                    try {
+                      const pre = preSemanticInterpretation || null;
+                      const signals = Array.isArray(pre?.interRegionSignals) ? pre.interRegionSignals : [];
+                      const regionProfiles = Array.isArray(pre?.regionProfiles) ? pre.regionProfiles : [];
+                      const regionProfileById = new Map(regionProfiles.map((p) => [String(p.regionId), p]));
+
+                      const hintsExpectedClaimCount =
+                        pre?.hints && Array.isArray(pre.hints.expectedClaimCount) && pre.hints.expectedClaimCount.length === 2
+                          ? pre.hints.expectedClaimCount
+                          : null;
+
+                      const statementEmbeddings =
+                        statementEmbeddingResult?.embeddings && typeof statementEmbeddingResult.embeddings.get === 'function'
+                          ? statementEmbeddingResult.embeddings
+                          : null;
+
+                      const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+                      const clamp01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x);
+                      const hashSeed = (str) => {
+                        let h = 2166136261;
+                        for (let i = 0; i < str.length; i++) {
+                          h ^= str.charCodeAt(i);
+                          h = Math.imul(h, 16777619);
+                        }
+                        return h >>> 0;
+                      };
+                      const cosineSim = (a, b) => {
+                        if (!a || !b || typeof a.length !== 'number' || typeof b.length !== 'number') return 0;
+                        const n = Math.min(a.length, b.length);
+                        let dot = 0;
+                        let na = 0;
+                        let nb = 0;
+                        for (let i = 0; i < n; i++) {
+                          const av = a[i] || 0;
+                          const bv = b[i] || 0;
+                          dot += av * bv;
+                          na += av * av;
+                          nb += bv * bv;
+                        }
+                        if (na <= 0 || nb <= 0) return 0;
+                        return dot / (Math.sqrt(na) * Math.sqrt(nb));
+                      };
+                      const tierRank = (t) => (t === 'peak' ? 3 : t === 'hill' ? 2 : 1);
+
+                      const claims = Array.isArray(mapperArtifact.claims) ? mapperArtifact.claims : [];
+                      const edges = Array.isArray(mapperArtifact.edges) ? mapperArtifact.edges : [];
+
+                      const dominantRegionByClaimId = new Map();
+                      for (const c of claims) {
+                        const claimId = String(c?.id || '').trim();
+                        if (!claimId) continue;
+                        const sourceRegionIds = Array.isArray(c?.geometricSignals?.sourceRegionIds)
+                          ? c.geometricSignals.sourceRegionIds.map((x) => String(x)).filter(Boolean)
+                          : [];
+                        let best = null;
+                        for (const rid of sourceRegionIds) {
+                          const p = regionProfileById.get(rid);
+                          const tier = p?.tier || 'floor';
+                          const conf = typeof p?.tierConfidence === 'number' ? p.tierConfidence : 0;
+                          const candidate = { regionId: rid, tier, tierConfidence: conf };
+                          if (!best) {
+                            best = candidate;
+                            continue;
+                          }
+                          const r1 = tierRank(candidate.tier);
+                          const r2 = tierRank(best.tier);
+                          if (r1 > r2 || (r1 === r2 && candidate.tierConfidence > best.tierConfidence)) {
+                            best = candidate;
+                          }
+                        }
+                        dominantRegionByClaimId.set(claimId, best);
+                      }
+
+                      const signalByPairKey = new Map();
+                      for (const s of signals) {
+                        const a = String(s?.regionA || '').trim();
+                        const b = String(s?.regionB || '').trim();
+                        if (!a || !b || a === b) continue;
+                        const k = pairKey(a, b);
+                        const prev = signalByPairKey.get(k);
+                        if (!prev || (typeof s?.confidence === 'number' ? s.confidence : 0) > (typeof prev?.confidence === 'number' ? prev.confidence : 0)) {
+                          signalByPairKey.set(k, s);
+                        }
+                      }
+
+                      const edgeTypeToRelationship = (t) => {
+                        const s = String(t || '').trim();
+                        if (s === 'conflicts') return 'conflict';
+                        if (s === 'supports') return 'support';
+                        if (s === 'tradeoff') return 'tradeoff';
+                        return null;
+                      };
+
+                      const regionPairHasMapperConflict = new Set();
+                      let comparableEdges = 0;
+                      let matchedEdges = 0;
+                      const confirmedClaims = new Set();
+
+                      for (const e of edges) {
+                        const rel = edgeTypeToRelationship(e?.type);
+                        if (!rel) continue;
+                        const from = String(e?.from || '').trim();
+                        const to = String(e?.to || '').trim();
+                        if (!from || !to) continue;
+                        const ra = dominantRegionByClaimId.get(from)?.regionId || null;
+                        const rb = dominantRegionByClaimId.get(to)?.regionId || null;
+                        if (!ra || !rb || ra === rb) continue;
+                        const k = pairKey(ra, rb);
+                        const signal = signalByPairKey.get(k);
+                        if (!signal) continue;
+                        comparableEdges++;
+                        const ok = String(signal.relationship || '').trim() === rel;
+                        if (ok) {
+                          matchedEdges++;
+                          confirmedClaims.add(from);
+                          confirmedClaims.add(to);
+                          if (rel === 'conflict') regionPairHasMapperConflict.add(k);
+                        }
+                      }
+
+                      const meanPairwiseSimilarity = (vecs, seedStr) => {
+                        const n = vecs.length;
+                        if (n < 2) return null;
+                        const totalPairs = (n * (n - 1)) / 2;
+                        const maxPairs = 60;
+                        const pairsToSample = Math.min(maxPairs, totalPairs);
+                        let sum = 0;
+                        let count = 0;
+                        if (totalPairs <= maxPairs) {
+                          for (let i = 0; i < n; i++) {
+                            for (let j = i + 1; j < n; j++) {
+                              sum += cosineSim(vecs[i], vecs[j]);
+                              count++;
+                            }
+                          }
+                        } else {
+                          let seed = hashSeed(seedStr);
+                          for (let k = 0; k < pairsToSample; k++) {
+                            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+                            const i = seed % n;
+                            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+                            let j = seed % n;
+                            if (j === i) j = (j + 1) % n;
+                            const a = i < j ? i : j;
+                            const b = i < j ? j : i;
+                            sum += cosineSim(vecs[a], vecs[b]);
+                            count++;
+                          }
+                        }
+                        return count > 0 ? sum / count : null;
+                      };
+
+                      const claimConfidenceById = new Map();
+                      const claimCoherenceMeanById = new Map();
+
+                      for (const c of claims) {
+                        const claimId = String(c?.id || '').trim();
+                        if (!claimId) continue;
+                        const dom = dominantRegionByClaimId.get(claimId) || null;
+                        const tier = String(dom?.tier || '').trim();
+                        const tierComponent = tier === 'peak' || tier === 'hill' ? 0.33 : 0;
+                        const relationshipComponent = confirmedClaims.has(claimId) ? 0.33 : 0;
+
+                        let coherenceMean = null;
+                        if (statementEmbeddings) {
+                          const sids = Array.isArray(c?.sourceStatementIds)
+                            ? c.sourceStatementIds.map((x) => String(x)).filter(Boolean)
+                            : [];
+                          const vecs = [];
+                          for (const sid of sids) {
+                            const v = statementEmbeddings.get(sid);
+                            if (v) vecs.push(v);
+                          }
+                          coherenceMean = meanPairwiseSimilarity(vecs, `${claimId}:${vecs.length}`);
+                        }
+                        claimCoherenceMeanById.set(claimId, coherenceMean);
+                        const coherenceComponent = typeof coherenceMean === 'number' && coherenceMean >= 0.5 ? 0.33 : 0;
+                        const confidence = clamp01(tierComponent + relationshipComponent + coherenceComponent);
+                        claimConfidenceById.set(claimId, confidence);
+                        c.convergenceConfidence = confidence;
+                      }
+
+                      const oppositeStances = new Set([
+                        'prescriptive|cautionary',
+                        'cautionary|prescriptive',
+                        'assertive|uncertain',
+                        'uncertain|assertive',
+                      ]);
+
+                      const hasOpposingStanceDynamics = (ra, rb) => {
+                        const pa = regionProfileById.get(ra);
+                        const pb = regionProfileById.get(rb);
+                        if (!pa || !pb) return false;
+                        const a = String(pa?.purity?.dominantStance || '').trim();
+                        const b = String(pb?.purity?.dominantStance || '').trim();
+                        const contested =
+                          (typeof pa?.purity?.contestedRatio === 'number' ? pa.purity.contestedRatio : 0) > 0.3 ||
+                          (typeof pb?.purity?.contestedRatio === 'number' ? pb.purity.contestedRatio : 0) > 0.3;
+                        const variety =
+                          (typeof pa?.purity?.stanceVariety === 'number' ? pa.purity.stanceVariety : 0) >= 3 ||
+                          (typeof pb?.purity?.stanceVariety === 'number' ? pb.purity.stanceVariety : 0) >= 3;
+                        return oppositeStances.has(`${a}|${b}`) || contested || variety;
+                      };
+
+                      for (const e of edges) {
+                        const rel = edgeTypeToRelationship(e?.type);
+                        if (!rel) continue;
+                        const from = String(e?.from || '').trim();
+                        const to = String(e?.to || '').trim();
+                        if (!from || !to) continue;
+                        const ra = dominantRegionByClaimId.get(from)?.regionId || null;
+                        const rb = dominantRegionByClaimId.get(to)?.regionId || null;
+                        if (!ra || !rb || ra === rb) {
+                          e.convergenceConfidence = 0;
+                          continue;
+                        }
+                        const k = pairKey(ra, rb);
+                        const signal = signalByPairKey.get(k);
+                        let score = 0;
+                        const hasCompatible = !!signal && String(signal.relationship || '').trim() === rel;
+                        if (hasCompatible) score += 0.5;
+                        if ((rel === 'conflict' || rel === 'tradeoff') && hasOpposingStanceDynamics(ra, rb)) score += 0.25;
+                        const fromOk = (claimConfidenceById.get(from) ?? 0) >= 0.5;
+                        const toOk = (claimConfidenceById.get(to) ?? 0) >= 0.5;
+                        if (fromOk && toOk) score += 0.25;
+                        e.convergenceConfidence = clamp01(score);
+                      }
+
+                      const mechanicalConflicts = signals.filter((s) => String(s?.relationship || '').trim() === 'conflict');
+                      let mechanicalConflictsConfirmed = 0;
+                      for (const s of mechanicalConflicts) {
+                        const a = String(s?.regionA || '').trim();
+                        const b = String(s?.regionB || '').trim();
+                        if (!a || !b || a === b) continue;
+                        if (regionPairHasMapperConflict.has(pairKey(a, b))) mechanicalConflictsConfirmed++;
+                      }
+
+                      const coverageWithinExpected =
+                        hintsExpectedClaimCount
+                          ? claims.length >= (hintsExpectedClaimCount[0] ?? 0) && claims.length <= (hintsExpectedClaimCount[1] ?? Infinity)
+                          : null;
+
+                      const comparableAgreementRatio = comparableEdges > 0 ? matchedEdges / comparableEdges : null;
+                      const conflictConfirmationRatio =
+                        mechanicalConflicts.length > 0 ? mechanicalConflictsConfirmed / mechanicalConflicts.length : null;
+
+                      const claimScores = claims
+                        .map((c) => (typeof c?.convergenceConfidence === 'number' ? c.convergenceConfidence : null))
+                        .filter((x) => typeof x === 'number');
+                      const edgeScores = edges
+                        .map((e) => (typeof e?.convergenceConfidence === 'number' ? e.convergenceConfidence : null))
+                        .filter((x) => typeof x === 'number');
+
+                      const avg = (arr) => (arr.length > 0 ? arr.reduce((s, x) => s + x, 0) / arr.length : null);
+
+                      mapperArtifact.convergence = {
+                        computedAt: new Date().toISOString(),
+                        coverageConvergence: {
+                          expectedClaimCount: hintsExpectedClaimCount,
+                          mapperClaimCount: claims.length,
+                          withinExpectedRange: coverageWithinExpected,
+                        },
+                        mechanicalConflictConvergence: {
+                          mechanicalConflicts: mechanicalConflicts.length,
+                          confirmedByMapper: mechanicalConflictsConfirmed,
+                          confirmationRatio: conflictConfirmationRatio,
+                        },
+                        relationshipConvergence: {
+                          comparableEdges,
+                          matchedEdges,
+                          agreementRatio: comparableAgreementRatio,
+                        },
+                        confidenceSummaries: {
+                          claims: {
+                            avg: avg(claimScores),
+                            highCount: claimScores.filter((x) => x >= 0.5).length,
+                            total: claims.length,
+                          },
+                          edges: {
+                            avg: avg(edgeScores),
+                            highCount: edgeScores.filter((x) => x >= 0.5).length,
+                            total: edges.length,
+                          },
+                        },
+                        inputs: {
+                          hasPreSemantic: !!pre,
+                          interRegionSignals: signals.length,
+                          hasStatementEmbeddings: !!statementEmbeddings,
+                        },
+                      };
+                    } catch (_) {
+                      mapperArtifact.convergence = null;
+                    }
                   }
 
                   console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${semanticEdges.length} edges`);
@@ -1379,18 +2489,12 @@ export class StepExecutor {
               },
             };
 
-            // Build cognitive artifact directly with only the fields it actually uses
-            const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
-              shadow: {
-                extraction: shadowResult || null,
-                delta: shadowDelta || null,
-              },
-              paragraphProjection: paragraphResult || null,
-              substrate: {
-                graph: substrateGraph,
-              },
-              preSemantic: preSemanticInterpretation || null,
-            });
+            try {
+              observability.completedAtMs = nowMs();
+              observability.totalTimeMs = observability.completedAtMs - observability.startedAtMs;
+            } catch (_) { }
+
+            const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
 
             try {
               if (finalResultWithMeta?.meta) {
@@ -1415,6 +2519,15 @@ export class StepExecutor {
   }
   async _resolveSourceData(payload, context, previousResults, options) {
     const { sessionManager } = options;
+    if (Array.isArray(payload?.sourceData) && payload.sourceData.length > 0) {
+      return payload.sourceData
+        .map((s) => {
+          const providerId = String(s?.providerId || '').trim();
+          const text = String(s?.text ?? s?.content ?? '').trim();
+          return { providerId, text };
+        })
+        .filter((s) => s.providerId && s.text);
+    }
     if (payload.sourceHistorical) {
       // Historical source
       const { turnId, responseType } = payload.sourceHistorical;
@@ -1860,6 +2973,8 @@ export class StepExecutor {
         prompt: singularityPrompt,
         leakageDetected,
         leakageViolations,
+        traversal: payload?.traversalMetrics || null,
+        chewedSubstrateSummary: payload?.chewedSubstrate?.summary || null,
         parsed: {
           signal,
           rawText,

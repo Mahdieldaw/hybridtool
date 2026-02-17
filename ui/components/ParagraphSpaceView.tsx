@@ -16,6 +16,7 @@ interface Props {
   paragraphProjection?: PipelineParagraphProjectionResult | null | undefined;
   claims: Claim[] | null | undefined;
   shadowStatements: PipelineShadowStatement[] | null | undefined;
+  queryRelevance?: any;
   mutualEdges?: PipelineSubstrateEdge[] | null | undefined;
   strongEdges?: PipelineSubstrateEdge[] | null | undefined;
   regions?: Array<Pick<PipelineRegion, "id" | "kind" | "nodeIds">> | null | undefined;
@@ -129,6 +130,7 @@ export function ParagraphSpaceView({
   paragraphProjection,
   claims,
   shadowStatements,
+  queryRelevance,
   mutualEdges,
   strongEdges,
   regions,
@@ -141,6 +143,7 @@ export function ParagraphSpaceView({
   /* state */
   const [mode, setMode] = useState<"pre" | "post">("pre");
   const [sourceFilter, setSourceFilter] = useState<"all" | "referenced" | "orphan">("all");
+  const [queryFilter, setQueryFilter] = useState<"all" | "query">("all");
   const [modelFilter, setModelFilter] = useState<number | "all">("all");
   const [regionFilter, setRegionFilter] = useState<string | "all">("all");
   const [deltaOnly, setDeltaOnly] = useState(false);
@@ -189,6 +192,20 @@ export function ParagraphSpaceView({
     }
     return set;
   }, [claims, statementToParagraphId]);
+
+  const queryRelevantParagraphIds = useMemo(() => {
+    const set = new Set<string>();
+    const tiers = queryRelevance?.tiers;
+    if (!tiers || typeof tiers !== "object") return set;
+    const ids: string[] = [];
+    if (Array.isArray(tiers.high)) ids.push(...tiers.high.map((x: any) => String(x)));
+    if (Array.isArray(tiers.medium)) ids.push(...tiers.medium.map((x: any) => String(x)));
+    for (const sid of ids) {
+      const pid = statementToParagraphId.get(String(sid));
+      if (pid) set.add(pid);
+    }
+    return set;
+  }, [queryRelevance, statementToParagraphId]);
 
   /** Reverse map: paragraphId → claimIds that reference it */
   const paragraphToClaimIds = useMemo(() => {
@@ -439,6 +456,7 @@ export function ParagraphSpaceView({
       if (modelFilter !== "all") {
         if (p.modelIndex !== modelFilter) continue;
       }
+      if (queryFilter === "query" && queryRelevantParagraphIds.size > 0 && !queryRelevantParagraphIds.has(pid)) continue;
       if (sourceFilter === "referenced" && !referencedParagraphIds.has(pid)) continue;
       if (sourceFilter === "orphan" && referencedParagraphIds.has(pid)) continue;
       if (deltaOnly && mode === "post" && hasTraversal) {
@@ -448,7 +466,7 @@ export function ParagraphSpaceView({
       set.add(pid);
     }
     return set;
-  }, [paragraphs, modelFilter, sourceFilter, referencedParagraphIds, deltaOnly, mode, hasTraversal, deltaParagraphIds]);
+  }, [paragraphs, modelFilter, queryFilter, queryRelevantParagraphIds, sourceFilter, referencedParagraphIds, deltaOnly, mode, hasTraversal, deltaParagraphIds]);
 
   /* ── viewBox & scale ─────────────────────────────────────────── */
 
@@ -603,6 +621,18 @@ export function ParagraphSpaceView({
                 <option value="all">All</option>
                 <option value="referenced">Referenced</option>
                 <option value="orphan">Orphan</option>
+              </select>
+              <select
+                className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary"
+                value={queryFilter}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "all" || v === "query") setQueryFilter(v);
+                }}
+                disabled={queryRelevantParagraphIds.size === 0}
+              >
+                <option value="all">All evidence</option>
+                <option value="query">Query-relevant</option>
               </select>
               <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={modelFilter} onChange={(e) => { const v = e.target.value; setModelFilter(v === "all" ? "all" : Number(v)); }}>
                 <option value="all">All models</option>

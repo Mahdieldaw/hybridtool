@@ -262,7 +262,78 @@ function openEmbeddingsDb() {
     });
 }
 
+const EMBEDDINGS_BUFFERS_TTL_MS = 20 * 60 * 1000;
+const EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+let lastEmbeddingsBuffersCleanupAt = 0;
+let embeddingsBuffersCleanupIntervalId = null;
+
+async function deleteBufferById(id) {
+    const db = await openEmbeddingsDb();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction("buffers", "readwrite");
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+            tx.objectStore("buffers").delete(id);
+        });
+    } finally {
+        try { db.close(); } catch (_) { }
+    }
+}
+
+async function cleanupEmbeddingsBuffersTTL(opts = {}) {
+    const ttlMs = Number.isFinite(opts.ttlMs) ? opts.ttlMs : EMBEDDINGS_BUFFERS_TTL_MS;
+    if (!(ttlMs > 0)) return 0;
+
+    const db = await openEmbeddingsDb();
+    try {
+        const now = Date.now();
+        let deleted = 0;
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction("buffers", "readwrite");
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+            const store = tx.objectStore("buffers");
+            const req = store.openCursor();
+            req.onerror = () => reject(req.error || new Error("IndexedDB cursor failed"));
+            req.onsuccess = () => {
+                const cursor = req.result;
+                if (!cursor) return;
+                const val = cursor.value;
+                const createdAt =
+                    val && typeof val === "object" && Number.isFinite(val.createdAt)
+                        ? Number(val.createdAt)
+                        : null;
+                if (createdAt != null && now - createdAt > ttlMs) {
+                    try {
+                        cursor.delete();
+                        deleted++;
+                    } catch (_) { }
+                }
+                cursor.continue();
+            };
+        });
+        return deleted;
+    } finally {
+        try { db.close(); } catch (_) { }
+    }
+}
+
+function startEmbeddingsBuffersCleanupLoop() {
+    if (embeddingsBuffersCleanupIntervalId != null) return;
+    embeddingsBuffersCleanupIntervalId = setInterval(() => {
+        cleanupEmbeddingsBuffersTTL().catch(() => { });
+    }, EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS);
+}
+
 async function putEmbeddingsBuffer(buffer) {
+    startEmbeddingsBuffersCleanupLoop();
+    const now = Date.now();
+    if (now - lastEmbeddingsBuffersCleanupAt > EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS) {
+        lastEmbeddingsBuffersCleanupAt = now;
+        cleanupEmbeddingsBuffersTTL().catch(() => { });
+    }
+
     const db = await openEmbeddingsDb();
     try {
         const id =

@@ -35,8 +35,6 @@ import {
     executeShadowExtraction,
     executeShadowDelta,
     extractReferencedIds,
-    ShadowAudit,
-    UnindexedStatement
 } from "../../shadow";
 
 type ConditionalAffectedClaims = Array<{ affectedClaims: string[] }>;
@@ -302,14 +300,7 @@ export const computeFullAnalysis = (
     batchResponses: Array<{ modelIndex: number; content: string }>,
     primaryArtifact: CognitiveArtifact,
     userQuery: string
-): StructuralAnalysis & {
-    shadow?: {
-        audit: ShadowAudit;
-        unindexed: UnindexedStatement[];
-        topUnindexed: UnindexedStatement[];
-        processingTime: number;
-    }
-} => {
+): StructuralAnalysis => {
     const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
     try {
         const shadowExtraction = executeShadowExtraction(batchResponses);

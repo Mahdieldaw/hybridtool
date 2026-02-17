@@ -34,9 +34,13 @@ export { hierarchicalCluster } from './hac';
 export {
     generateEmbeddings,
     generateStatementEmbeddings,
+    generateTextEmbeddings,
     poolToParagraphEmbeddings,
     preloadModel,
     getEmbeddingStatus,
+    stripInlineMarkdown,
+    initializeLabelEmbeddings,
+    getCachedLabelEmbeddings,
 } from './embeddings';
 export { buildClusters, toClusterableItems } from './engine';
 

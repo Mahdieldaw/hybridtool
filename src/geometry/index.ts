@@ -44,6 +44,8 @@ export type {
     RegionizationResult,
     RegionProfile,
     OppositionPair,
+    InterRegionRelationship,
+    InterRegionSignal,
     ShapePrediction,
     MapperGeometricHints,
     PreSemanticInterpretation,
@@ -68,7 +70,10 @@ export { buildClaimVectors, computeAlignment } from './alignment';
 export { deriveLens } from './interpretation/lens';
 export { buildRegions } from './interpretation/regions';
 export { profileRegions } from './interpretation/profiles';
-export { detectOppositions } from './interpretation/opposition';
+export { detectOppositions, detectInterRegionSignals } from './interpretation/opposition';
 export { buildMapperGeometricHints } from './interpretation/guidance';
 export { validateStructuralMapping } from './interpretation/validation';
 export { buildPreSemanticInterpretation } from './interpretation';
+
+export type { QueryRelevanceResult, QueryRelevanceStatementScore } from './queryRelevance';
+export { computeQueryRelevance, toJsonSafeQueryRelevance } from './queryRelevance';

@@ -270,6 +270,7 @@ export class WorkflowCompiler {
         context.type === "recompute" ? context.sourceTurnId : "",
       sessionCreated,
       userMessage,
+      ...(request?.workflowControl ? { workflowControl: request.workflowControl } : {}),
     };
   }
 

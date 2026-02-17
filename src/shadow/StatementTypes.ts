@@ -25,7 +25,8 @@ export type Stance =
     | 'prerequisite'  // Before X, first Y, requires Z
     | 'dependent'     // After X, once Y, then Z
     | 'assertive'     // X is Y, does Z, provides W
-    | 'uncertain';    // Might X, unclear Y, depends on Z
+    | 'uncertain'     // Might X, unclear Y, depends on Z
+    | 'unclassified'; // Embedding score below threshold / no reliable classification
 
 // Priority order: higher priority wins when multiple patterns match
 // Rationale: Structural relationships (order) > Actions > Facts
@@ -36,6 +37,7 @@ export const STANCE_PRIORITY: Stance[] = [
     'prescriptive',   // 3 - Action recommendations
     'uncertain',      // 2 - Hedges and caveats
     'assertive',      // 1 - Default factual
+    'unclassified',
 ];
 
 // Pattern definitions for each stance
@@ -154,6 +156,7 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\bcontains?\b/i,
         /\bsupports?\b/i,
     ],
+    unclassified: [],
 };
 
 // Signal patterns - detect relationships independent of stance
