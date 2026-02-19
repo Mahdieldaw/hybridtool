@@ -633,31 +633,6 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
             .filter((e: any) => e.from && e.to)
         : [];
 
-    if (normalizedClaims.length > 0) {
-        const claimIdSet = new Set(normalizedClaims.map((c) => c.id));
-        const conflictPairKey = (a: string, b: string) => {
-            const x = String(a || '').trim();
-            const y = String(b || '').trim();
-            return x < y ? `${x}__${y}` : `${y}__${x}`;
-        };
-
-        const existingConflictPairs = new Set<string>();
-        for (const e of normalizedEdges) {
-            if (e.type !== 'conflicts') continue;
-            existingConflictPairs.add(conflictPairKey(e.from, e.to));
-        }
-
-        for (const c of normalizedClaims) {
-            const target = typeof (c as any).challenges === 'string' ? String((c as any).challenges).trim() : '';
-            if (!target || target === c.id) continue;
-            if (!claimIdSet.has(target)) continue;
-            const pk = conflictPairKey(c.id, target);
-            if (existingConflictPairs.has(pk)) continue;
-            existingConflictPairs.add(pk);
-            normalizedEdges.push({ from: c.id, to: target, type: 'conflicts' });
-        }
-    }
-
     const normalizedGhosts: string[] | null =
         (map as any).ghosts == null
             ? null
@@ -1351,40 +1326,6 @@ export function parseSemanticMapperOutput(
 
         finalEdges = [...finalEdges, ...derivedEdges];
         finalConditionals = [...finalConditionals, ...derivedConditionals];
-    }
-
-    if (claims.length > 0) {
-        const conflictPairKey = (a: string, b: string) => {
-            const x = String(a || '').trim();
-            const y = String(b || '').trim();
-            return x < y ? `${x}__${y}` : `${y}__${x}`;
-        };
-
-        const existingConflictPairs = new Set<string>();
-        for (const e of finalEdges) {
-            if (!e || typeof e !== 'object') continue;
-            const from = String((e as any).from || '').trim();
-            const to = String((e as any).to || '').trim();
-            const type = String((e as any).type || '').toLowerCase();
-            if (!from || !to) continue;
-            if (!/^(conflicts?|conflict|challenges?)$/.test(type)) continue;
-            existingConflictPairs.add(conflictPairKey(from, to));
-        }
-
-        for (let i = 0; i < claims.length; i++) {
-            const c = claims[i];
-            if (!c || typeof c !== 'object') continue;
-
-            const from = String((c as any).id || '').trim();
-            const target = typeof (c as any).challenges === 'string' ? String((c as any).challenges).trim() : '';
-            if (!from || !target || target === from) continue;
-            if (!claimIds.has(target)) continue;
-
-            const pk = conflictPairKey(from, target);
-            if (existingConflictPairs.has(pk)) continue;
-            existingConflictPairs.add(pk);
-            finalEdges.push({ from, to: target, type: 'challenges' });
-        }
     }
 
     const sanitizedEdges: any[] = [];

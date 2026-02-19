@@ -164,7 +164,6 @@ export function reconstructSubstrate(
       removedStatementCount: triageResult.meta.removedCount,
     },
     pathSteps: traversalState.pathSteps,
-    partitionAnswers: traversalState.partitionAnswers,
     meta: {
       triageTimeMs: triageResult.meta.processingTimeMs - embeddingTimeMs,
       reconstructionTimeMs,
@@ -189,14 +188,6 @@ export function formatSubstrateForPrompt(substrate: ChewedSubstrate): string {
   if (substrate.pathSteps.length > 0) {
     parts.push('User constraints applied:');
     for (const step of substrate.pathSteps) parts.push(`  ${step}`);
-    parts.push('');
-  }
-
-  const partitionAnswers = substrate.partitionAnswers || {};
-  const answered = Object.entries(partitionAnswers).filter(([, v]) => v?.choice === 'A' || v?.choice === 'B');
-  if (answered.length > 0) {
-    parts.push('User partition answers:');
-    for (const [pid, ans] of answered) parts.push(`  ${pid}: ${ans.choice}`);
     parts.push('');
   }
 

@@ -29,7 +29,9 @@ export function buildMapperGeometricHints(
     const predictedShape = buildShapePrediction(peaks, hills, oppositions, substrate);
 
     const paragraphIds = substrate.nodes.map(n => n.paragraphId);
-    const mergeThreshold = typeof hardMergeThreshold === 'number' ? hardMergeThreshold : 0.75;
+    const mergeThreshold = typeof hardMergeThreshold === 'number' && !Number.isNaN(hardMergeThreshold)
+        ? hardMergeThreshold
+        : 0.75;
     const componentSizes = computeComponentSizesAtThreshold(paragraphIds, substrate.graphs.mutual.edges, mergeThreshold);
 
     const positionGroupsWithMass = componentSizes.filter(size => size >= 2).length;
@@ -58,7 +60,7 @@ export function buildMapperGeometricHints(
 
     return {
         predictedShape,
-        expectedClaimCount: [minClaims, Math.max(minClaims, maxClaims)],
+        expectedClaimCount: [minClaims, maxClaims],
         expectedConflicts,
         expectedDissent,
         attentionRegions,

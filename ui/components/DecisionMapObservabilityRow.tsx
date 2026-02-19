@@ -8,6 +8,7 @@ type ObservabilityCategoryKey =
   | "embedding"
   | "geometry"
   | "interpretation"
+  | "disruption"
   | "routing"
   | "mapping"
   | "traversal"
@@ -95,9 +96,9 @@ function SummaryCardsRow({ cards }: { cards: SummaryCard[] }) {
   if (!cards || cards.length === 0) return null;
   return (
     <div className="flex gap-2 overflow-x-auto custom-scrollbar py-1">
-      {cards.map((c) => (
+      {cards.map((c, i) => (
         <div
-          key={c.label}
+          key={`${c.label}-${i}`}
           className={clsx(
             "flex-none rounded-lg border px-3 py-2 min-w-[150px]",
             badgeClass(c.emphasis || "neutral")
@@ -189,7 +190,7 @@ function DataTable<Row extends { id?: string }>({
             </thead>
             <tbody className="divide-y divide-border-subtle">
               {sorted.map((r, idx) => (
-                <tr key={(r as any).id ? String((r as any).id) : String(idx)} className="hover:bg-white/5">
+                <tr key={r.id ?? String(idx)} className="hover:bg-white/5">
                   {columns.map((c) => (
                     <td key={c.key} className={clsx("px-3 py-2 align-top text-text-secondary", c.className)}>
                       {c.cell(r)}
@@ -206,9 +207,18 @@ function DataTable<Row extends { id?: string }>({
 }
 
 function getArtifact(artifact: unknown): any | null {
-  const a: any = artifact as any;
-  if (!a || typeof a !== "object") return null;
-  return a;
+  if (!artifact) return null;
+  if (typeof artifact === "object") return artifact as any;
+  if (typeof artifact !== "string") return null;
+  const raw = artifact.trim();
+  if (!raw) return null;
+  if (!(raw.startsWith("{") || raw.startsWith("["))) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function computeClaimMetrics(artifact: any): {
@@ -229,8 +239,11 @@ function computeClaimMetrics(artifact: any): {
   let structural: any | null = null;
   try {
     structural = computeStructuralAnalysis(artifact);
-  } catch {
+  } catch (err) {
     structural = null;
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[DecisionMap] structuralAnalysis failed:", err);
+    }
   }
   return { claimById, statementClaimRefs, structural };
 }
@@ -642,6 +655,8 @@ function buildInterpretationView(artifact: any) {
   const regions = safeArr<any>(regionization?.regions);
   const profiles = safeArr<any>(pre?.regionProfiles);
   const signals = safeArr<any>(pre?.interRegionSignals);
+  const convergence = artifact?.structural?.convergence ?? artifact?.convergence ?? null;
+  const partitionConv = convergence?.partitionMechanicalConvergence ?? null;
 
   const cards: SummaryCard[] = [
     { label: "Regions", value: formatInt(regions.length), emphasis: regions.length > 0 ? "good" : "warn" },
@@ -650,6 +665,54 @@ function buildInterpretationView(artifact: any) {
     { label: "Regime", value: safeStr(pre?.lens?.regime).trim() || "—" },
     { label: "Shape", value: safeStr(pre?.lens?.shape).trim() || safeStr(pre?.hint).trim() || "—" },
   ];
+
+  if (convergence && typeof convergence === "object") {
+    const conflictRatio = safeNum(convergence?.mechanicalConflictConvergence?.confirmationRatio);
+    const agreementRatio = safeNum(convergence?.relationshipConvergence?.agreementRatio);
+    cards.push({
+      label: "Conv conflict",
+      value: formatPct(conflictRatio, 0),
+      emphasis: conflictRatio == null ? "neutral" : conflictRatio >= 0.6 ? "good" : conflictRatio >= 0.35 ? "warn" : "bad",
+    });
+    cards.push({
+      label: "Conv edges",
+      value: formatPct(agreementRatio, 0),
+      emphasis: agreementRatio == null ? "neutral" : agreementRatio >= 0.6 ? "good" : agreementRatio >= 0.35 ? "warn" : "bad",
+    });
+  }
+
+  if (partitionConv && typeof partitionConv === "object") {
+    const oppCov = safeNum(partitionConv?.oppositionCoverageRatio);
+    const mechSupport = safeNum(partitionConv?.mechanicalSupportRatio);
+    const sideSep = safeNum(partitionConv?.sideSeparatedRatio);
+
+    const oppPred = safeNum(partitionConv?.oppositionsPredicted);
+    const oppCovered = safeNum(partitionConv?.oppositionsCoveredByPartitions);
+    const partTotal = safeNum(partitionConv?.partitions);
+    const partSupported = safeNum(partitionConv?.partitionsWithMechanicalSupport);
+
+    cards.push({
+      label: "Opp covered",
+      value:
+        oppCov == null
+          ? "—"
+          : `${formatPct(oppCov, 0)}${oppCovered != null && oppPred != null ? ` (${formatInt(oppCovered)}/${formatInt(oppPred)})` : ""}`,
+      emphasis: oppCov == null ? "neutral" : oppCov >= 0.6 ? "good" : oppCov >= 0.35 ? "warn" : "bad",
+    });
+    cards.push({
+      label: "Part support",
+      value:
+        mechSupport == null
+          ? "—"
+          : `${formatPct(mechSupport, 0)}${partSupported != null && partTotal != null ? ` (${formatInt(partSupported)}/${formatInt(partTotal)})` : ""}`,
+      emphasis: mechSupport == null ? "neutral" : mechSupport >= 0.6 ? "good" : mechSupport >= 0.35 ? "warn" : "bad",
+    });
+    cards.push({
+      label: "Side split",
+      value: formatPct(sideSep, 0),
+      emphasis: sideSep == null ? "neutral" : sideSep >= 0.6 ? "good" : sideSep >= 0.35 ? "warn" : "bad",
+    });
+  }
 
   const nodesByRegion = new Map<string, number>();
   for (const r of regions) {
@@ -730,7 +793,50 @@ function buildInterpretationView(artifact: any) {
     rows: signalRows,
   };
 
-  return { cards, tables: [profileTable, signalTable] };
+  const tables: Array<TableSpec<any>> = [];
+
+  if (partitionConv && Array.isArray(partitionConv?.perPartition)) {
+    const rows = safeArr<any>(partitionConv.perPartition).map((p: any, idx: number) => {
+      return {
+        id: safeStr(p?.id).trim() || `partition_${idx}`,
+        dominantA: safeStr(p?.dominantRegionA).trim() || "—",
+        dominantB: safeStr(p?.dominantRegionB).trim() || "—",
+        purityA: safeNum(p?.purityA),
+        purityB: safeNum(p?.purityB),
+        focalRegion: safeStr(p?.focalRegionId).trim() || "—",
+        focalOpp: !!p?.focalHasOpposition,
+        pairOpp: !!p?.pairIsOpposition,
+        sideSep: !!p?.hasSideSeparation,
+        mechSupport: !!p?.hasMechanicalSupport,
+        strong: !!p?.hasStrongSupport,
+      };
+    });
+
+    const table: TableSpec<any> = {
+      title: "Convergence (Partitions vs Mechanical)",
+      defaultSortKey: "strong",
+      defaultSortDir: "desc",
+      emptyMessage: "No partition convergence rows found on convergence.partitionMechanicalConvergence.perPartition.",
+      columns: [
+        { key: "id", header: "Partition", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.id, sortValue: (r) => r.id || null },
+        { key: "dominantA", header: "Dom A", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.dominantA, sortValue: (r) => r.dominantA || null },
+        { key: "dominantB", header: "Dom B", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.dominantB, sortValue: (r) => r.dominantB || null },
+        { key: "purityA", header: "Pur A", className: "whitespace-nowrap", cell: (r) => formatPct(r.purityA, 0), sortValue: (r) => r.purityA ?? null },
+        { key: "purityB", header: "Pur B", className: "whitespace-nowrap", cell: (r) => formatPct(r.purityB, 0), sortValue: (r) => r.purityB ?? null },
+        { key: "focalRegion", header: "Focal", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.focalRegion, sortValue: (r) => r.focalRegion || null },
+        { key: "sideSep", header: "Split", className: "whitespace-nowrap", cell: (r) => (r.sideSep ? "yes" : "—"), sortValue: (r) => (r.sideSep ? 1 : 0) },
+        { key: "focalOpp", header: "Focal opp", className: "whitespace-nowrap", cell: (r) => (r.focalOpp ? "yes" : "—"), sortValue: (r) => (r.focalOpp ? 1 : 0) },
+        { key: "pairOpp", header: "Opp pair", className: "whitespace-nowrap", cell: (r) => (r.pairOpp ? "yes" : "—"), sortValue: (r) => (r.pairOpp ? 1 : 0) },
+        { key: "mechSupport", header: "Support", className: "whitespace-nowrap", cell: (r) => (r.mechSupport ? "yes" : "—"), sortValue: (r) => (r.mechSupport ? 1 : 0) },
+        { key: "strong", header: "Strong", className: "whitespace-nowrap", cell: (r) => (r.strong ? "yes" : "—"), sortValue: (r) => (r.strong ? 1 : 0) },
+      ],
+      rows,
+    };
+    tables.push(table);
+  }
+
+  tables.push(profileTable, signalTable);
+  return { cards, tables };
 }
 
 function buildRoutingView(artifact: any) {
@@ -748,20 +854,20 @@ function buildRoutingView(artifact: any) {
   const unroutedCount = routing?.meta?.unroutedCount ?? 0;
   const totalRegions = routing?.meta?.totalRegions ?? 0;
 
-  cards.push({ label: "Total Regions", value: totalRegions, emphasis: "neutral" });
+  cards.push({ label: "Total Regions", value: formatInt(totalRegions), emphasis: "neutral" });
   cards.push({
     label: "Partition Candidates",
-    value: partitionCount,
+    value: formatInt(partitionCount),
     emphasis: partitionCount > 0 ? "good" : "neutral",
   });
   cards.push({
     label: "Gate Candidates",
-    value: gateCount,
+    value: formatInt(gateCount),
     emphasis: gateCount > 0 ? "good" : "neutral",
   });
   cards.push({
     label: "Unrouted",
-    value: unroutedCount,
+    value: formatInt(unroutedCount),
     emphasis: unroutedCount > totalRegions * 0.7 ? "warn" : "neutral",
   });
 
@@ -769,7 +875,7 @@ function buildRoutingView(artifact: any) {
   const gatesProduced = safeArr<any>(regionGates?.gates).length;
   cards.push({
     label: "Gates Produced",
-    value: gatesProduced,
+    value: formatInt(gatesProduced),
     emphasis: gatesProduced > 0 ? "good" : "neutral",
   });
 
@@ -777,12 +883,12 @@ function buildRoutingView(artifact: any) {
   const mergedCount = questionMerge?.meta?.totalAfterCap ?? traversalQuestions.length;
   const autoResolved = questionMerge?.meta?.autoResolvedCount ?? 0;
   const blocked = questionMerge?.meta?.blockedCount ?? 0;
-  cards.push({ label: "Merged Questions", value: mergedCount, emphasis: mergedCount > 0 ? "good" : "neutral" });
+  cards.push({ label: "Merged Questions", value: formatInt(mergedCount), emphasis: mergedCount > 0 ? "good" : "neutral" });
   if (autoResolved > 0) {
-    cards.push({ label: "Auto-Resolved", value: autoResolved, emphasis: "warn" });
+    cards.push({ label: "Auto-Resolved", value: formatInt(autoResolved), emphasis: "warn" });
   }
   if (blocked > 0) {
-    cards.push({ label: "Blocked", value: blocked, emphasis: "warn" });
+    cards.push({ label: "Blocked", value: formatInt(blocked), emphasis: "warn" });
   }
 
   // Routing table
@@ -1062,12 +1168,84 @@ function buildTraversalView(artifact: any) {
   const debugPerClaim = safeArr<any>(mechanical?.debug?.perClaim);
   const traversalAnalysis = normalizeTraversalAnalysis(artifact?.traversalAnalysis);
 
+  const semanticClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims ?? traversalGraph?.claims);
+  const shadowStatements = safeArr<any>(artifact?.shadow?.statements);
+  const shadowStatementById = new Map<string, any>();
+  for (const st of shadowStatements) {
+    const id = safeStr(st?.id).trim();
+    if (id) shadowStatementById.set(id, st);
+  }
+
   const cards: SummaryCard[] = [
     { label: "Forcing", value: formatInt(forcingPoints.length) },
     { label: "Tensions", value: formatInt(tensions.length) },
     { label: "Gates", value: formatInt(derivedGates.length), emphasis: derivedGates.length > 0 ? "warn" : "neutral" },
     { label: "Gate cands", value: formatInt(debugPerClaim.length) },
   ];
+
+  const claimTypeRows = semanticClaims.map((c: any, idx: number) => {
+    const id = safeStr(c?.id).trim() || `claim_${idx}`;
+    const label = safeStr(c?.label).trim() || id;
+    const type = safeStr(c?.type).trim() || "—";
+    const derivedType = safeStr(c?.derivedType).trim() || "—";
+    const supporterCount = safeArr<any>(c?.supporters).length;
+    const hasConditionalSignal = !!c?.hasConditionalSignal;
+    const sourceIds = safeArr<any>(c?.sourceStatementIds).map((x) => safeStr(x).trim()).filter(Boolean);
+    let conditionalCount = 0;
+    for (const sid of sourceIds) {
+      const st = shadowStatementById.get(sid);
+      if (st?.signals?.conditional) conditionalCount += 1;
+    }
+    const totalSourceStatements = sourceIds.length;
+    const conditionalRatio = totalSourceStatements > 0 ? conditionalCount / totalSourceStatements : 0;
+
+    return {
+      id,
+      label,
+      type,
+      derivedType,
+      supporterCount,
+      hasConditionalSignal,
+      conditionalCount,
+      totalSourceStatements,
+      conditionalRatio,
+    };
+  });
+
+  const claimTypesTable: TableSpec<any> = {
+    title: "Claim classification",
+    defaultSortKey: "conditionalRatio",
+    defaultSortDir: "desc",
+    emptyMessage: "No claims found on artifact.semantic.claims.",
+    columns: [
+      { key: "label", header: "Claim", className: "min-w-[320px]", cell: (r) => <span className="text-text-primary">{r.label || "—"}</span>, sortValue: (r) => r.label || null },
+      {
+        key: "type",
+        header: "Type",
+        className: "whitespace-nowrap",
+        cell: (r) => (
+          <span
+            className={clsx(
+              "px-2 py-0.5 rounded-md border text-[11px] font-semibold",
+              r.type === "conditional"
+                ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                : "bg-white/5 text-text-secondary border-border-subtle"
+            )}
+          >
+            {r.type || "—"}
+          </span>
+        ),
+        sortValue: (r) => r.type || null,
+      },
+      { key: "derivedType", header: "Derived", className: "whitespace-nowrap", cell: (r) => r.derivedType || "—", sortValue: (r) => r.derivedType || null },
+      { key: "supporterCount", header: "Support", className: "whitespace-nowrap", cell: (r) => formatInt(r.supporterCount), sortValue: (r) => r.supporterCount ?? null },
+      { key: "hasConditionalSignal", header: "Has sig", className: "whitespace-nowrap", cell: (r) => (r.hasConditionalSignal ? "yes" : "—"), sortValue: (r) => (r.hasConditionalSignal ? 1 : 0) },
+      { key: "conditionalCount", header: "Cond stmts", className: "whitespace-nowrap", cell: (r) => formatInt(r.conditionalCount), sortValue: (r) => r.conditionalCount ?? null },
+      { key: "totalSourceStatements", header: "Total stmts", className: "whitespace-nowrap", cell: (r) => formatInt(r.totalSourceStatements), sortValue: (r) => r.totalSourceStatements ?? null },
+      { key: "conditionalRatio", header: "Cond%", className: "whitespace-nowrap", cell: (r) => formatPct(r.conditionalRatio, 0), sortValue: (r) => r.conditionalRatio ?? null },
+    ],
+    rows: claimTypeRows,
+  };
 
   const gateRows = debugPerClaim.map((g: any, idx: number) => {
     const claimId = safeStr(g?.claimId).trim();
@@ -1146,7 +1324,7 @@ function buildTraversalView(artifact: any) {
     rows: conflictRows,
   };
 
-  return { cards, tables: [gateTable, conflictTable] };
+  return { cards, tables: [claimTypesTable, gateTable, conflictTable] };
 }
 
 function buildQueryView(artifact: any) {
@@ -1178,6 +1356,12 @@ function buildQueryView(artifact: any) {
     { label: "Low", value: formatInt(tierCounts.low) },
     { label: "Mode", value: safeStr(meta?.subConsensusMode).trim() || "—" },
     { label: "Region sig", value: meta?.regionSignalsUsed ? "yes" : "—", emphasis: meta?.regionSignalsUsed ? "good" : "neutral" },
+    { label: "Comp min", value: formatNum(safeNum(meta?.distribution?.min), 3) },
+    { label: "Comp p25", value: formatNum(safeNum(meta?.distribution?.p25), 3) },
+    { label: "Comp p50", value: formatNum(safeNum(meta?.distribution?.p50), 3) },
+    { label: "Comp mean", value: formatNum(safeNum(meta?.distribution?.mean), 3) },
+    { label: "Comp p75", value: formatNum(safeNum(meta?.distribution?.p75), 3) },
+    { label: "Comp max", value: formatNum(safeNum(meta?.distribution?.max), 3) },
   ];
 
   const tierById = new Map<string, "high" | "medium" | "low">();
@@ -1241,6 +1425,111 @@ function buildQueryView(artifact: any) {
         ),
         sortValue: (r) => r.id || null,
       },
+    ],
+    rows,
+  };
+
+  return { cards, tables: [table] };
+}
+
+function buildDisruptionView(artifact: any) {
+  const preSemantic = artifact?.geometry?.preSemantic ?? artifact?.preSemantic ?? artifact?.pipelineArtifacts?.preSemantic ?? null;
+  const disruption =
+    preSemantic?.disruption ??
+    artifact?.preSemantic?.disruption ??
+    artifact?.pipelineArtifacts?.preSemantic?.disruption ??
+    null;
+
+  const top = safeArr<any>(disruption?.scores?.top);
+  const meta = disruption?.scores?.meta || null;
+
+  const statements = safeArr<any>(artifact?.shadow?.statements);
+  const statementById = new Map<string, any>();
+  for (const st of statements) {
+    const id = safeStr(st?.id).trim();
+    if (id) statementById.set(id, st);
+  }
+
+  const paragraphs = safeArr<any>(artifact?.shadow?.paragraphs);
+  const paragraphByStatementId = new Map<string, any>();
+  for (const p of paragraphs) {
+    const ids = safeArr<any>(p?.statementIds).map((x) => safeStr(x).trim()).filter(Boolean);
+    for (const sid of ids) {
+      if (!paragraphByStatementId.has(sid)) paragraphByStatementId.set(sid, p);
+    }
+  }
+
+  const compositeVals = top.map((t) => safeNum(t?.composite)).filter((x): x is number => typeof x === "number");
+  const meanComposite = compositeVals.length > 0 ? compositeVals.reduce((acc, x) => acc + x, 0) / compositeVals.length : null;
+  const maxComposite = compositeVals.length > 0 ? Math.max(...compositeVals) : null;
+
+  const regionCounts = new Map<string, number>();
+  for (const t of top) {
+    const rid = safeStr(t?.regionId).trim();
+    if (!rid) continue;
+    regionCounts.set(rid, (regionCounts.get(rid) || 0) + 1);
+  }
+  const topRegions = [...regionCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 3)
+    .map(([rid, ct]) => `${rid} (${ct})`)
+    .join(", ");
+
+  const scoredCount = safeNum(meta?.scoredCount) ?? top.length;
+  const cards: SummaryCard[] = [
+    { label: "Scored", value: formatInt(scoredCount), emphasis: scoredCount > 0 ? "good" : "warn" },
+    { label: "Mean comp", value: formatNum(meanComposite, 3) },
+    { label: "Max comp", value: formatNum(maxComposite, 3) },
+    { label: "Top regions", value: topRegions || "—", emphasis: topRegions ? "good" : "neutral" },
+  ];
+
+  const rows = top.map((t: any, idx: number) => {
+    const statementId = safeStr(t?.statementId).trim() || `stmt_${idx}`;
+    const st = statementById.get(statementId) || null;
+    const paragraphFromMap = paragraphByStatementId.get(statementId) || null;
+    const fullParagraph = safeStr(paragraphFromMap?._fullParagraph).trim();
+    const breakdown = t?.breakdown || {};
+    return {
+      id: statementId,
+      statementId,
+      text: safeStr(st?.text).trim(),
+      paragraphId: safeStr(t?.paragraphId).trim() || safeStr(paragraphFromMap?.id).trim() || null,
+      fullParagraph,
+      uniqueness: safeNum(breakdown?.uniqueness),
+      nearestCarrierSimilarity: safeNum(breakdown?.nearestCarrierSimilarity),
+      stanceWeight: safeNum(breakdown?.stanceWeight),
+      modelDiversity: safeNum(breakdown?.modelDiversity),
+      disruptionRaw: safeNum(breakdown?.disruptionRaw),
+      composite: safeNum(t?.composite) ?? safeNum(breakdown?.composite),
+    };
+  });
+
+  const table: TableSpec<any> = {
+    title: "Disruption scores (top)",
+    defaultSortKey: "composite",
+    defaultSortDir: "desc",
+    emptyMessage: "No disruption scores found on artifact.geometry.preSemantic.disruption.scores.top.",
+    columns: [
+      {
+        key: "statement",
+        header: "Statement",
+        className: "min-w-[420px] max-w-[520px]",
+        cell: (r) => (
+          <span
+            className="text-text-primary block max-w-[520px] truncate"
+            title={`${`Stmt: ${r.statementId || "—"}${r.paragraphId ? ` · Para: ${r.paragraphId}` : ""}`}\n\n${r.fullParagraph || r.text || ""}`.trim()}
+          >
+            {r.text || r.statementId || "—"}
+          </span>
+        ),
+        sortValue: (r) => r.text || r.statementId || null,
+      },
+      { key: "uniqueness", header: "Uniq", className: "whitespace-nowrap", cell: (r) => formatNum(r.uniqueness, 3), sortValue: (r) => r.uniqueness ?? null },
+      { key: "nearestCarrierSimilarity", header: "Near", className: "whitespace-nowrap", cell: (r) => formatNum(r.nearestCarrierSimilarity, 3), sortValue: (r) => r.nearestCarrierSimilarity ?? null },
+      { key: "stanceWeight", header: "Stance", className: "whitespace-nowrap", cell: (r) => formatNum(r.stanceWeight, 3), sortValue: (r) => r.stanceWeight ?? null },
+      { key: "modelDiversity", header: "Div", className: "whitespace-nowrap", cell: (r) => formatNum(r.modelDiversity, 3), sortValue: (r) => r.modelDiversity ?? null },
+      { key: "disruptionRaw", header: "Raw", className: "whitespace-nowrap", cell: (r) => formatNum(r.disruptionRaw, 3), sortValue: (r) => r.disruptionRaw ?? null },
+      { key: "composite", header: "Comp", className: "whitespace-nowrap", cell: (r) => formatNum(r.composite, 3), sortValue: (r) => r.composite ?? null },
     ],
     rows,
   };
@@ -1331,6 +1620,7 @@ export const DecisionMapObservabilityRow: React.FC<DecisionMapObservabilityRowPr
       { key: "embedding", label: "Embedding", description: "Label embedding validation and near-collisions" },
       { key: "geometry", label: "Geometry", description: "Substrate node stats and connectivity" },
       { key: "interpretation", label: "Regions", description: "Region profiles and inter-region signals" },
+      { key: "disruption", label: "Disruption", description: "Disruption score breakdown for top focal statements" },
       { key: "routing", label: "Routing", description: "Question routing, conditional gates, and merge" },
       { key: "mapping", label: "Mapping", description: "Claims, edges, and structural leverage" },
       { key: "traversal", label: "Traversal", description: "Gate candidates and conflicts" },
@@ -1350,6 +1640,7 @@ export const DecisionMapObservabilityRow: React.FC<DecisionMapObservabilityRowPr
     if (active === "embedding") return buildEmbeddingView(a);
     if (active === "geometry") return buildGeometryView(a);
     if (active === "interpretation") return buildInterpretationView(a);
+    if (active === "disruption") return buildDisruptionView(a);
     if (active === "routing") return buildRoutingView(a);
     if (active === "mapping") return buildMappingView(a);
     if (active === "traversal") return buildTraversalView(a);
@@ -1386,6 +1677,7 @@ export const DecisionMapObservabilityRow: React.FC<DecisionMapObservabilityRowPr
               key={c.key}
               type="button"
               onClick={() => setActive(c.key)}
+              aria-pressed={isActive}
               className={clsx(
                 "px-3 py-1.5 rounded-full text-xs border font-semibold transition-colors",
                 isActive

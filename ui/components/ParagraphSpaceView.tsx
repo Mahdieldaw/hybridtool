@@ -143,7 +143,7 @@ export function ParagraphSpaceView({
   /* state */
   const [mode, setMode] = useState<"pre" | "post">("pre");
   const [sourceFilter, setSourceFilter] = useState<"all" | "referenced" | "orphan">("all");
-  const [queryFilter, setQueryFilter] = useState<"all" | "query">("all");
+  const [queryFilter, setQueryFilter] = useState<"all" | "high" | "medium" | "low">("all");
   const [modelFilter, setModelFilter] = useState<number | "all">("all");
   const [regionFilter, setRegionFilter] = useState<string | "all">("all");
   const [deltaOnly, setDeltaOnly] = useState(false);
@@ -193,19 +193,60 @@ export function ParagraphSpaceView({
     return set;
   }, [claims, statementToParagraphId]);
 
-  const queryRelevantParagraphIds = useMemo(() => {
-    const set = new Set<string>();
-    const tiers = queryRelevance?.tiers;
-    if (!tiers || typeof tiers !== "object") return set;
-    const ids: string[] = [];
-    if (Array.isArray(tiers.high)) ids.push(...tiers.high.map((x: any) => String(x)));
-    if (Array.isArray(tiers.medium)) ids.push(...tiers.medium.map((x: any) => String(x)));
-    for (const sid of ids) {
-      const pid = statementToParagraphId.get(String(sid));
-      if (pid) set.add(pid);
+  const queryCosineByStatementId = useMemo(() => {
+    const out = new Map<string, number>();
+    if (!queryRelevance || typeof queryRelevance !== "object") return out;
+
+    const direct = (queryRelevance as any)?.statementCosines || (queryRelevance as any)?.cosines || (queryRelevance as any)?.scores;
+    if (direct && typeof direct === "object") {
+      for (const [sid, v] of Object.entries(direct)) {
+        if (typeof v === "number" && Number.isFinite(v)) out.set(String(sid), v);
+      }
+      return out;
     }
-    return set;
-  }, [queryRelevance, statementToParagraphId]);
+
+    const statementScores = (queryRelevance as any)?.statementScores;
+    if (statementScores && typeof statementScores === "object") {
+      for (const [sid, score] of Object.entries(statementScores)) {
+        const s = score as any;
+        if (typeof s?.cosine === "number" && Number.isFinite(s.cosine)) {
+          out.set(String(sid), s.cosine);
+        } else if (typeof s?.queryCosine === "number" && Number.isFinite(s.queryCosine)) {
+          out.set(String(sid), s.queryCosine);
+        } else if (typeof s?.querySimilarity === "number" && Number.isFinite(s.querySimilarity)) {
+          out.set(String(sid), (s.querySimilarity * 2) - 1);
+        }
+      }
+    }
+
+    return out;
+  }, [queryRelevance]);
+
+  const queryBucketByParagraphId = useMemo(() => {
+    const HIGH = 0.55;
+    const MEDIUM = 0.35;
+    const LOW = 0.2;
+
+    const bucketRank: Record<"low" | "medium" | "high", number> = { low: 0, medium: 1, high: 2 };
+    const out = new Map<string, "high" | "medium" | "low">();
+
+    for (const [sid, cosine] of queryCosineByStatementId.entries()) {
+      const pid = statementToParagraphId.get(sid);
+      if (!pid) continue;
+
+      const bucket =
+        cosine >= HIGH ? "high"
+          : cosine >= MEDIUM ? "medium"
+            : cosine >= LOW ? "low"
+              : null;
+      if (!bucket) continue;
+
+      const prev = out.get(pid);
+      if (!prev || bucketRank[bucket] > bucketRank[prev]) out.set(pid, bucket);
+    }
+
+    return out;
+  }, [queryCosineByStatementId, statementToParagraphId]);
 
   /** Reverse map: paragraphId → claimIds that reference it */
   const paragraphToClaimIds = useMemo(() => {
@@ -456,7 +497,11 @@ export function ParagraphSpaceView({
       if (modelFilter !== "all") {
         if (p.modelIndex !== modelFilter) continue;
       }
-      if (queryFilter === "query" && queryRelevantParagraphIds.size > 0 && !queryRelevantParagraphIds.has(pid)) continue;
+      if (queryFilter !== "all") {
+        if (queryBucketByParagraphId.size === 0) continue;
+        const bucket = queryBucketByParagraphId.get(pid);
+        if (bucket !== queryFilter) continue;
+      }
       if (sourceFilter === "referenced" && !referencedParagraphIds.has(pid)) continue;
       if (sourceFilter === "orphan" && referencedParagraphIds.has(pid)) continue;
       if (deltaOnly && mode === "post" && hasTraversal) {
@@ -466,7 +511,7 @@ export function ParagraphSpaceView({
       set.add(pid);
     }
     return set;
-  }, [paragraphs, modelFilter, queryFilter, queryRelevantParagraphIds, sourceFilter, referencedParagraphIds, deltaOnly, mode, hasTraversal, deltaParagraphIds]);
+  }, [paragraphs, modelFilter, queryFilter, queryBucketByParagraphId, sourceFilter, referencedParagraphIds, deltaOnly, mode, hasTraversal, deltaParagraphIds]);
 
   /* ── viewBox & scale ─────────────────────────────────────────── */
 
@@ -627,12 +672,14 @@ export function ParagraphSpaceView({
                 value={queryFilter}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v === "all" || v === "query") setQueryFilter(v);
+                  if (v === "all" || v === "high" || v === "medium" || v === "low") setQueryFilter(v);
                 }}
-                disabled={queryRelevantParagraphIds.size === 0}
+                disabled={queryBucketByParagraphId.size === 0}
               >
                 <option value="all">All evidence</option>
-                <option value="query">Query-relevant</option>
+                <option value="high">High cosine</option>
+                <option value="medium">Medium cosine</option>
+                <option value="low">Low cosine</option>
               </select>
               <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={modelFilter} onChange={(e) => { const v = e.target.value; setModelFilter(v === "all" ? "all" : Number(v)); }}>
                 <option value="all">All models</option>

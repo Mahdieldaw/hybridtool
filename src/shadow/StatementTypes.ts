@@ -4,7 +4,7 @@
 //
 // Philosophy: Separate WHAT a statement is (stance) from WHAT it signals (relationships)
 //
-// STANCES (6 types in 3 pairs):
+// STANCES (7 types in 3 pairs + 1 fallback):
 //   Positive     | Negative
 //   -------------|-------------
 //   Prescriptive | Cautionary     (action: do vs don't)
@@ -37,7 +37,7 @@ export const STANCE_PRIORITY: Stance[] = [
     'prescriptive',   // 3 - Action recommendations
     'uncertain',      // 2 - Hedges and caveats
     'assertive',      // 1 - Default factual
-    'unclassified',
+    'unclassified',   // 0 - Fallback for low-confidence embeddings (Bottom)
 ];
 
 // Pattern definitions for each stance

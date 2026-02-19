@@ -93,7 +93,9 @@ export function routeRegions(input: {
 
     // Compute disruption P25 threshold
     const allComposites = ranked.map(s => s.composite);
-    const disruptionP25 = computePercentile(allComposites, 0.25);
+    const disruptionP25 = ranked.length > 0
+        ? computePercentile(allComposites, 0.25)
+        : Infinity;
 
     // Compute average disruption per region
     const regionDisruptionAvg = new Map<string, number>();
@@ -133,7 +135,7 @@ export function routeRegions(input: {
         // Check gate candidacy: conditional density >= threshold AND disruption above P25
         const conditionalDensity = computeConditionalDensity(region, ranked);
         const avgDisruption = regionDisruptionAvg.get(rid) ?? 0;
-        const aboveDisruptionThreshold = avgDisruption >= disruptionP25;
+        const aboveDisruptionThreshold = ranked.length > 0 && avgDisruption >= disruptionP25;
 
         if (conditionalDensity >= CONDITIONAL_DENSITY_THRESHOLD && aboveDisruptionThreshold) {
             reasons.push(`conditional_density=${conditionalDensity.toFixed(3)}`);

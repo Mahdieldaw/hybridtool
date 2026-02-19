@@ -39,8 +39,6 @@ export {
     preloadModel,
     getEmbeddingStatus,
     stripInlineMarkdown,
-    initializeLabelEmbeddings,
-    getCachedLabelEmbeddings,
 } from './embeddings';
 export { buildClusters, toClusterableItems } from './engine';
 

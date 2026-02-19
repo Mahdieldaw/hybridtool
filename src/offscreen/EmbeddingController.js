@@ -22,6 +22,62 @@ let currentModelId = null;
 let wasmThreadingConfig = { numThreads: 1, proxy: false, mode: "single" };
 let wasmThreadingProbed = false;
 
+const DEFAULT_MODEL_ID = "bge-base-en-v1.5";
+const MODEL_ID_RE = /^[a-z0-9._-]+$/i;
+
+const MAX_TEXTS = 4096;
+const MAX_CHARS_PER_TEXT = 12000;
+const MAX_TOTAL_CHARS = 4_000_000;
+const MAX_DIMENSIONS = 2048;
+const MAX_OUTPUT_FLOATS = MAX_TEXTS * MAX_DIMENSIONS;
+
+function normalizeTexts(texts) {
+    if (!Array.isArray(texts)) throw new Error("texts must be an array");
+    if (texts.length > MAX_TEXTS) throw new Error(`Too many texts: ${texts.length} > ${MAX_TEXTS}`);
+
+    let totalChars = 0;
+    const out = new Array(texts.length);
+
+    for (let i = 0; i < texts.length; i++) {
+        const raw = texts[i];
+        let s = typeof raw === "string" ? raw : (raw == null ? "" : String(raw));
+        if (s.length > MAX_CHARS_PER_TEXT) {
+            throw new Error(`Text too long at index ${i}: ${s.length} > ${MAX_CHARS_PER_TEXT}`);
+        }
+        totalChars += s.length;
+        if (totalChars > MAX_TOTAL_CHARS) {
+            throw new Error(`Total text size too large: ${totalChars} > ${MAX_TOTAL_CHARS}`);
+        }
+        out[i] = s;
+    }
+
+    return out;
+}
+
+function sanitizeModelId(modelId) {
+    if (modelId == null || modelId === "") return DEFAULT_MODEL_ID;
+    if (typeof modelId !== "string") throw new Error("modelId must be a string");
+    const id = modelId.trim();
+    if (!id) return DEFAULT_MODEL_ID;
+    if (id.length > 64) throw new Error("modelId too long");
+    if (!MODEL_ID_RE.test(id)) throw new Error("Invalid modelId");
+    return id;
+}
+
+function normalizeDimensions(dimensions, fallback) {
+    if (dimensions == null || dimensions === "") return fallback;
+    const n = Number(dimensions);
+    if (!Number.isFinite(n)) throw new Error("dimensions must be a finite number");
+    const d = Math.floor(n);
+    if (!(d >= 1 && d <= MAX_DIMENSIONS)) throw new Error(`Invalid dimensions: ${d}`);
+    return d;
+}
+
+function assertTrustedSender(sender) {
+    const sid = sender && typeof sender === "object" ? sender.id : null;
+    if (sid && sid !== chrome.runtime.id) throw new Error("Untrusted sender");
+}
+
 function probeWasmThreadingConfig() {
     if (wasmThreadingProbed) return wasmThreadingConfig;
     wasmThreadingProbed = true;
@@ -69,6 +125,7 @@ function probeWasmThreadingConfig() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function ensureModel(modelId = 'bge-base-en-v1.5') {
+    modelId = sanitizeModelId(modelId);
     if (modelCache.has(modelId)) {
         return modelCache.get(modelId);
     }
@@ -352,45 +409,9 @@ async function putEmbeddingsBuffer(buffer) {
     }
 }
 
-async function generateEmbeddings(texts, targetDimensions, modelId = 'bge-base-en-v1.5', opts = {}) {
-    const embedder = await ensureModel(modelId);
-
-    const startTime = performance.now();
-    const batchSize = 32;
-    const allEmbeddings = [];
-    const shouldYield = !!opts.yieldBetweenBatches;
-    const yieldMs = Number.isFinite(opts.yieldMs) ? opts.yieldMs : 0;
-
-    for (let i = 0; i < texts.length; i += batchSize) {
-        const batch = texts.slice(i, i + batchSize);
-
-        const outputs = await embedder(batch, {
-            pooling: 'mean',
-            normalize: true,
-        });
-
-        // Handle both array and single output cases
-        for (let j = 0; j < batch.length; j++) {
-            // outputs.tolist() returns the raw array data
-            const outputData = outputs.tolist ? outputs.tolist() : outputs;
-            const data = Array.isArray(outputData[j]) ? outputData[j] : outputData;
-            const full = Array.isArray(data) ? data : Array.from(data);
-            allEmbeddings.push(full);
-        }
-
-        if (shouldYield && i + batchSize < texts.length) {
-            await yieldToBrowser(yieldMs);
-        }
-    }
-
-    return {
-        embeddings: allEmbeddings,  // number[][] for JSON serialization
-        dimensions: allEmbeddings[0]?.length ?? 768,
-        timeMs: performance.now() - startTime,
-    };
-}
-
 async function generateEmbeddingsBinary(texts, targetDimensions, modelId = 'bge-base-en-v1.5', opts = {}) {
+    texts = normalizeTexts(texts);
+    modelId = sanitizeModelId(modelId);
     const embedder = await ensureModel(modelId);
 
     const startTime = performance.now();
@@ -398,10 +419,14 @@ async function generateEmbeddingsBinary(texts, targetDimensions, modelId = 'bge-
     const shouldYield = !!opts.yieldBetweenBatches;
     const yieldMs = Number.isFinite(opts.yieldMs) ? opts.yieldMs : 0;
 
-    const expectedDims = Number.isFinite(targetDimensions) ? targetDimensions : 768;
+    const expectedDims = normalizeDimensions(targetDimensions, 768);
     let dims = expectedDims;
     let out = null;
     let outIndex = 0;
+
+    if (texts.length * dims > MAX_OUTPUT_FLOATS) {
+        throw new Error("Embedding request too large");
+    }
 
     for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
@@ -415,7 +440,10 @@ async function generateEmbeddingsBinary(texts, targetDimensions, modelId = 'bge-
         if (Array.isArray(maybeDims) && Number.isFinite(maybeDims[1])) {
             const inferred = Number(maybeDims[1]);
             if (inferred > 0 && inferred !== dims && outIndex === 0) {
-                dims = inferred;
+                dims = normalizeDimensions(inferred, expectedDims);
+                if (texts.length * dims > MAX_OUTPUT_FLOATS) {
+                    throw new Error("Embedding request too large");
+                }
             }
         }
 
@@ -502,16 +530,6 @@ const EmbeddingController = {
 
         // Register with bus if available
         if (window['bus']) {
-            window['bus'].on('embeddings.embedTexts', async (texts, opts = {}) => {
-                try {
-                    const { dims = 768, modelId = 'bge-base-en-v1.5' } = opts;
-                    return await generateEmbeddings(texts, dims, modelId);
-                } catch (error) {
-                    console.error('[EmbeddingController] embedTexts failed:', error);
-                    throw error;
-                }
-            });
-
             window['bus'].on('embeddings.ping', async () => {
                 return { ready: modelCache.size > 0 };
             });
@@ -529,11 +547,33 @@ const EmbeddingController = {
 
         // Also listen for direct chrome.runtime messages
         chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-            if (message.type === 'GENERATE_EMBEDDINGS') {
-                const { texts, dimensions, modelId, binary, yieldBetweenBatches, yieldMs } = message.payload || {};
-                const run = binary ? generateEmbeddingsBinary : generateEmbeddings;
+            try {
+                assertTrustedSender(_sender);
+            } catch (e) {
+                sendResponse({ success: false, error: e instanceof Error ? e.message : String(e) });
+                return false;
+            }
 
-                run(texts, dimensions, modelId, { yieldBetweenBatches, yieldMs })
+            if (message.type === 'GENERATE_EMBEDDINGS') {
+                const payload = message.payload || {};
+                const { texts, dimensions, modelId, binary, yieldBetweenBatches, yieldMs } = payload;
+                if (binary !== true) {
+                    sendResponse({ success: false, error: "Non-binary embeddings are not supported" });
+                    return false;
+                }
+                const run = generateEmbeddingsBinary;
+                let dims;
+                let mid;
+                try {
+                    dims = normalizeDimensions(dimensions, 768);
+                    mid = sanitizeModelId(modelId);
+                } catch (error) {
+                    const msg = error instanceof Error ? error.message : String(error);
+                    sendResponse({ success: false, error: msg });
+                    return false;
+                }
+
+                run(texts, dims, mid, { yieldBetweenBatches, yieldMs })
                     .then((result) => sendResponse({ success: true, result }))
                     .catch(error => {
                         console.error('[EmbeddingController] Generation failed:', error);
@@ -545,8 +585,16 @@ const EmbeddingController = {
 
             if (message.type === 'PRELOAD_MODEL') {
                 const { modelId } = message.payload || {};
+                let mid;
+                try {
+                    mid = sanitizeModelId(modelId || DEFAULT_MODEL_ID);
+                } catch (error) {
+                    const msg = error instanceof Error ? error.message : String(error);
+                    sendResponse({ success: false, error: msg });
+                    return false;
+                }
 
-                ensureModel(modelId || 'bge-base-en-v1.5')
+                ensureModel(mid)
                     .then(() => sendResponse({ success: true }))
                     .catch(error => sendResponse({ success: false, error: error.message }));
 

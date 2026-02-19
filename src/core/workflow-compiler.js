@@ -263,6 +263,11 @@ export class WorkflowCompiler {
         ? context.sourceUserMessage
         : request.userMessage;
 
+    const workflowControl =
+      request?.workflowControl && typeof request.workflowControl === "object"
+        ? { ...request.workflowControl }
+        : undefined;
+
     return {
       sessionId,
       threadId: DEFAULT_THREAD,
@@ -270,7 +275,7 @@ export class WorkflowCompiler {
         context.type === "recompute" ? context.sourceTurnId : "",
       sessionCreated,
       userMessage,
-      ...(request?.workflowControl ? { workflowControl: request.workflowControl } : {}),
+      workflowControl,
     };
   }
 

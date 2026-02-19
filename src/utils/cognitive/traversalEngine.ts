@@ -47,6 +47,7 @@ export interface ForcingPoint {
 export interface Resolution {
   forcingPointId: string;
   type: 'conditional' | 'conflict';
+  reason?: string;
 
   // Conditional resolution
   satisfied?: boolean;
@@ -66,6 +67,47 @@ export interface TraversalState {
 
   // Path summary for synthesis
   pathSteps: string[];
+}
+
+const AUTO_RESOLVE_PRUNED_RATIO = 0.8;
+
+export function autoResolveConditionalsByPriorPruning(
+  state: TraversalState,
+  forcingPoints: ForcingPoint[]
+): TraversalState {
+  let nextState: TraversalState | null = null;
+
+  for (const fp of forcingPoints) {
+    if (fp.type !== 'conditional') continue;
+    if (state.resolutions.has(fp.id)) continue;
+
+    const affected = Array.isArray(fp.affectedClaims) ? fp.affectedClaims : [];
+    if (affected.length === 0) continue;
+
+    const prunedCount = affected.reduce((acc, cid) => {
+      return acc + (state.claimStatuses.get(cid) === 'pruned' ? 1 : 0);
+    }, 0);
+    const ratio = prunedCount / affected.length;
+    if (ratio < AUTO_RESOLVE_PRUNED_RATIO) continue;
+
+    if (!nextState) {
+      nextState = {
+        claimStatuses: new Map(state.claimStatuses),
+        resolutions: new Map(state.resolutions),
+        pathSteps: [...state.pathSteps],
+      };
+    }
+
+    nextState.resolutions.set(fp.id, {
+      forcingPointId: fp.id,
+      type: 'conditional',
+      satisfied: true,
+      reason: 'auto_resolved_by_prior_pruning',
+    });
+    nextState.pathSteps.push(`↺ Auto-resolved "${fp.condition}" (auto_resolved_by_prior_pruning)`);
+  }
+
+  return nextState ?? state;
 }
 
 export interface TraversalGraph {

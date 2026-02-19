@@ -68,7 +68,10 @@ export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionRe
 
     const sourceSimilarity = cosineSimilarity(candidateEmbedding, sourceEmbedding);
     const opposingStance = sourceStatement ? isOpposingStance(sourceStatement.stance, statement.stance) : false;
-    const requiredSourceSim = opposingStance ? thresholds.sourceSimilarity + 0.08 : thresholds.sourceSimilarity;
+    const requiredSourceSim = opposingStance
+      ? thresholds.sourceSimilarity + thresholds.opposingStancePenalty
+      : thresholds.sourceSimilarity;
+
     if (sourceSimilarity < requiredSourceSim) continue;
 
     carriers.push({

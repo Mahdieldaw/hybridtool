@@ -10,8 +10,8 @@ function nowMs(): number {
 }
 
 function isOpposingStance(a: unknown, b: unknown): boolean {
-  const sa = String(a || '');
-  const sb = String(b || '');
+  const sa = String(a || '').trim().toLowerCase();
+  const sb = String(b || '').trim().toLowerCase();
   return (
     (sa === 'prescriptive' && sb === 'cautionary') ||
     (sa === 'cautionary' && sb === 'prescriptive') ||
@@ -241,8 +241,9 @@ export async function triageStatements(
           }
         }
 
+        const totalCarriers = carrierResult.carriers.length;
         const canRemove =
-          carriersSkeletonized.length > 0 &&
+          totalCarriers > 0 &&
           !!claimDominantStance &&
           stance === claimDominantStance &&
           relevance >= removeRelevanceMin;
@@ -253,7 +254,7 @@ export async function triageStatements(
           reason: `Pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)}), ${carrierResult.carriers.length} carrier(s) found`,
           triggerClaimId: prunedClaim.id,
           carriersSkeletonized: carriersSkeletonized.length > 0 ? carriersSkeletonized : undefined,
-          isSoleCarrier: carriersSkeletonized.length === 0,
+          isSoleCarrier: totalCarriers === 0,
         });
       } else {
         statementFates.set(sourceStatementId, {

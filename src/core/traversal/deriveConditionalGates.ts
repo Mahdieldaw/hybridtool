@@ -51,7 +51,7 @@ export interface DeriveConditionalGatesInput {
   statementEmbeddings: Map<string, Float32Array> | null;
   paragraphEmbeddings?: Map<string, Float32Array> | null;
   paragraphs: ShadowParagraph[];
-  structuralAnalysis: StructuralAnalysis;
+  structuralAnalysis?: StructuralAnalysis | null;
   queryRelevance?: {
     statementScores?: Record<string, { compositeRelevance?: number }>;
   } | null;
@@ -114,7 +114,7 @@ function extractConditionalClause(text: string): { clause: string; keyword: stri
   const tail = String(m[2] || '').trim();
   if (!tail) return null;
 
-  const rest = clipText(tail.split(/[.;:!?]+/)[0] || tail, 120).replace(/^[,)\]]+/, '').trim();
+  const rest = clipText(tail.split(/(?<![:/])(?<!\d)[.;:!?]+(?=\s|$)/)[0] || tail, 120).replace(/^[,)\]]+/, '').trim();
   if (!rest) return null;
 
   return { clause: `${keyword} ${rest}`.trim(), keyword, rest };
@@ -211,6 +211,7 @@ function computeClaimQueryRelevance(exclusiveIds: string[], queryRelevance: any)
 }
 
 function computeInterRegionBoost(structuralAnalysis: StructuralAnalysis | null | undefined, claimId: string): number {
+  if (!structuralAnalysis) return 0;
   const cid = String(claimId || '').trim();
   if (!cid) return 0;
 
@@ -252,22 +253,7 @@ export async function deriveConditionalGates(input: DeriveConditionalGatesInput)
   const statements = Array.isArray(input?.statements) ? input.statements : [];
   const queryRelevance = input?.queryRelevance ?? null;
 
-  const structuralAnalysis = input?.structuralAnalysis;
-  const shapePrimary = String((structuralAnalysis as any)?.shape?.primary || '').trim();
-  const convergenceRatio = typeof (structuralAnalysis as any)?.landscape?.convergenceRatio === 'number'
-    ? (structuralAnalysis as any).landscape.convergenceRatio
-    : 0;
-  const signalStrength = typeof (structuralAnalysis as any)?.shape?.signalStrength === 'number'
-    ? (structuralAnalysis as any).shape.signalStrength
-    : typeof (structuralAnalysis as any)?.shape?.data?.signalStrength === 'number'
-      ? (structuralAnalysis as any).shape.data.signalStrength
-      : 0;
-  const componentCount = typeof (structuralAnalysis as any)?.graph?.componentCount === 'number'
-    ? (structuralAnalysis as any).graph.componentCount
-    : 0;
-  const conflictCount = Array.isArray((structuralAnalysis as any)?.patterns?.conflicts)
-    ? (structuralAnalysis as any).patterns.conflicts.length
-    : 0;
+  const structuralAnalysis = input?.structuralAnalysis ?? null;
 
   const debug: DerivedGateDebug = {
     shortCircuitReason: null,
@@ -275,22 +261,6 @@ export async function deriveConditionalGates(input: DeriveConditionalGatesInput)
     perClaim: [],
     gates: [],
   };
-
-  if (shapePrimary === 'convergent' && convergenceRatio > 0.7) {
-    debug.shortCircuitReason = 'highly_convergent_landscape';
-    debug.processingTimeMs = nowMs() - start;
-    return { gates: [], debug };
-  }
-  if (signalStrength < 0.2) {
-    debug.shortCircuitReason = 'insufficient_signal';
-    debug.processingTimeMs = nowMs() - start;
-    return { gates: [], debug };
-  }
-  if (componentCount === 1 && conflictCount === 0) {
-    debug.shortCircuitReason = 'single_component_no_conflicts';
-    debug.processingTimeMs = nowMs() - start;
-    return { gates: [], debug };
-  }
 
   const statementsById = new Map<string, ShadowStatement>(
     statements
@@ -390,7 +360,7 @@ export async function deriveConditionalGates(input: DeriveConditionalGatesInput)
 
     const conditionalRatio = exclusiveCount > 0 ? conditionalCount / exclusiveCount : 0;
     const interRegionBoost = computeInterRegionBoost(structuralAnalysis, claimId);
-    const rankingScore = clamp01((0.5 * exclusivityRatio) + (0.5 * conditionalRatio) + interRegionBoost);
+    const rankingScore = clamp01((0.5 * exclusivityRatio) + (0.5 * conditionalRatio));
     const claimQueryRelevance = computeClaimQueryRelevance(exclusiveIds, queryRelevance);
 
     const conditionalClause = (() => {
@@ -554,13 +524,18 @@ export async function deriveConditionalGates(input: DeriveConditionalGatesInput)
     });
   }
 
-  for (const g of finalGates as any[]) {
-    delete g._rankingScore;
-    delete g._queryRelevance;
-    delete g._statementSet;
-    delete g._interRegionBoost;
-  }
+  const cleanedGates: DerivedConditionalGate[] = finalGates.map((g) => ({
+    id: g.id,
+    question: g.question,
+    condition: g.condition,
+    affectedClaims: g.affectedClaims,
+    anchorTerms: g.anchorTerms,
+    sourceStatementIds: g.sourceStatementIds,
+    confidence: g.confidence,
+    axis1_exclusiveFootprint: g.axis1_exclusiveFootprint,
+    axis2_contextSpecificity: g.axis2_contextSpecificity,
+  }));
 
   debug.processingTimeMs = nowMs() - start;
-  return { gates: finalGates, debug };
+  return { gates: cleanedGates, debug };
 }

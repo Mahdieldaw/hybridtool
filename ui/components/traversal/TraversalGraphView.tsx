@@ -3,7 +3,7 @@ import { useAtomValue, useAtom } from 'jotai';
 
 import { useTraversal } from '../../hooks/useTraversal';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
-import type { Claim, MapperPartition } from '../../../shared/contract';
+import type { Claim } from '../../../shared/contract';
 import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
 import api from '../../services/extension-api';
 import { singularityProviderAtom, traversalStateByTurnAtom } from '../../state/atoms';
@@ -13,7 +13,6 @@ interface TraversalGraphViewProps {
   traversalGraph: any;
   conditionals?: any[];
   claims: Claim[];
-  partitions?: MapperPartition[];
   originalQuery: string;
   aiTurnId: string;
   completedTraversalState?: unknown;
@@ -27,7 +26,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   traversalGraph,
   conditionals,
   claims,
-  partitions,
   originalQuery,
   sessionId,
   aiTurnId,
@@ -58,56 +56,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   const [submissionError, setSubmissionError] = React.useState<string | null>(null);
   const isAwaitingTraversal = pipelineStatus === 'awaiting_traversal';
   const isReadOnly = !isAwaitingTraversal && !!hasReceivedSingularityResponse;
-
-  type PartitionChoice = 'A' | 'B' | 'unsure';
-  type PartitionAnswer = { choice: PartitionChoice; userInput?: string };
-
-  const deserializePartitionAnswers = (saved: any): Record<string, PartitionAnswer> | null => {
-    if (!saved) return null;
-    try {
-      const raw = saved?.partitionAnswers;
-      if (!raw) return null;
-      if (raw instanceof Map) {
-        const out: Record<string, PartitionAnswer> = {};
-        for (const [k, v] of Array.from(raw.entries())) {
-          const vv = v && typeof v === 'object' ? (v as any).choice : v;
-          const cc = String(vv || '').toUpperCase();
-          const choice: PartitionChoice = cc === 'A' ? 'A' : cc === 'B' ? 'B' : 'unsure';
-          const userInputRaw = v && typeof v === 'object' ? (v as any).userInput : undefined;
-          const userInput = typeof userInputRaw === 'string' && userInputRaw.trim() ? userInputRaw.trim() : undefined;
-          out[String(k)] = userInput ? { choice, userInput } : { choice };
-        }
-        return out;
-      }
-      if (Array.isArray(raw)) {
-        const out: Record<string, PartitionAnswer> = {};
-        for (const [k, v] of raw as any) {
-          const vv = v && typeof v === 'object' ? (v as any).choice : v;
-          const cc = String(vv || '').toUpperCase();
-          const choice: PartitionChoice = cc === 'A' ? 'A' : cc === 'B' ? 'B' : 'unsure';
-          const userInputRaw = v && typeof v === 'object' ? (v as any).userInput : undefined;
-          const userInput = typeof userInputRaw === 'string' && userInputRaw.trim() ? userInputRaw.trim() : undefined;
-          out[String(k)] = userInput ? { choice, userInput } : { choice };
-        }
-        return out;
-      }
-      if (typeof raw === 'object') {
-        const out: Record<string, PartitionAnswer> = {};
-        for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-          const vv = v && typeof v === 'object' ? (v as any).choice : v;
-          const cc = String(vv || '').toUpperCase();
-          const choice: PartitionChoice = cc === 'A' ? 'A' : cc === 'B' ? 'B' : 'unsure';
-          const userInputRaw = v && typeof v === 'object' ? (v as any).userInput : undefined;
-          const userInput = typeof userInputRaw === 'string' && userInputRaw.trim() ? userInputRaw.trim() : undefined;
-          out[k] = userInput ? { choice, userInput } : { choice };
-        }
-        return out;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  };
 
   const deserializeTraversalState = (saved: any): TraversalState | null => {
     if (!saved) return null;
@@ -161,38 +109,13 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
 
   const hydrationTurnIdRef = React.useRef<string | null>(null);
   const hydratedOverrideRef = React.useRef<TraversalState | null>(null);
-  const hydratedPartitionAnswersRef = React.useRef<Record<string, PartitionAnswer>>({});
 
   if (hydrationTurnIdRef.current !== aiTurnId) {
     hydrationTurnIdRef.current = aiTurnId;
     hydratedOverrideRef.current =
       coerceTraversalState(completedTraversalState) ??
       deserializeTraversalState(traversalStateByTurn?.[aiTurnId]);
-    hydratedPartitionAnswersRef.current =
-      deserializePartitionAnswers(completedTraversalState) ??
-      deserializePartitionAnswers(traversalStateByTurn?.[aiTurnId]) ??
-      {};
   }
-
-  const [partitionAnswers, setPartitionAnswers] = React.useState<Record<string, PartitionAnswer>>({});
-  React.useEffect(() => {
-    setPartitionAnswers(hydratedPartitionAnswersRef.current || {});
-  }, [aiTurnId]);
-
-  const normalizedPartitions = React.useMemo(() => {
-    const arr = Array.isArray(partitions) ? partitions : [];
-    const cleaned = arr.filter((p) => p && typeof p.id === 'string' && String(p.hingeQuestion || '').trim());
-    cleaned.sort((a, b) => {
-      const ia = typeof a?.impactScore === 'number' ? a.impactScore : -1;
-      const ib = typeof b?.impactScore === 'number' ? b.impactScore : -1;
-      if (ia !== ib) return ib - ia;
-      const ca = typeof a?.confidence === 'number' ? a.confidence : -1;
-      const cb = typeof b?.confidence === 'number' ? b.confidence : -1;
-      if (ca !== cb) return cb - ca;
-      return String(a.id).localeCompare(String(b.id));
-    });
-    return cleaned.slice(0, 5);
-  }, [partitions]);
 
   const {
     state,
@@ -206,15 +129,15 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   } = useTraversal(cleanGraph as any, claims as any, hydratedOverrideRef.current);
 
   React.useEffect(() => {
-    setTraversalStateByTurn((draft: any) => {
-      draft[aiTurnId] = {
+    setTraversalStateByTurn((prev: any) => ({
+      ...(prev || {}),
+      [aiTurnId]: {
         claimStatuses: Array.from((state.claimStatuses || new Map()).entries()),
         resolutions: Array.from((state.resolutions || new Map()).entries()),
         pathSteps: Array.isArray(state.pathSteps) ? state.pathSteps : [],
-        partitionAnswers,
-      };
-    });
-  }, [aiTurnId, partitionAnswers, state, setTraversalStateByTurn]);
+      },
+    }));
+  }, [aiTurnId, state, setTraversalStateByTurn]);
 
   const handleSubmitToConcierge = async () => {
     if (isReadOnly) return;
@@ -381,7 +304,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 isTraversalContinuation: true,
                 traversalState: {
                   claimStatuses: Object.fromEntries(state.claimStatuses ?? new Map()),
-                  partitionAnswers,
                 },
               }
             });
@@ -441,130 +363,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
           </button>
         )}
       </div>
-
-      {/* Partition Questions */}
-      {normalizedPartitions.length > 0 && (
-        <div className="mt-6">
-          <h4 className="text-md font-bold text-text-primary mb-4">Partition Questions</h4>
-          <div className="space-y-4">
-            {normalizedPartitions.map((p) => {
-              const selected = partitionAnswers[p.id]?.choice || 'unsure';
-              const hasExplicitSelection = Object.prototype.hasOwnProperty.call(partitionAnswers, p.id);
-              const sideACount = Array.isArray(p.sideAStatementIds) ? p.sideAStatementIds.length : 0;
-              const sideBCount = Array.isArray(p.sideBStatementIds) ? p.sideBStatementIds.length : 0;
-              const confidence =
-                typeof p.confidence === 'number' && Number.isFinite(p.confidence) ? p.confidence : null;
-              const impact =
-                typeof p.impactScore === 'number' && Number.isFinite(p.impactScore) ? p.impactScore : null;
-
-              const choose = (choice: PartitionChoice) => {
-                if (isReadOnly) return;
-                setPartitionAnswers((prev) => ({
-                  ...prev,
-                  [p.id]: {
-                    choice,
-                    userInput: prev?.[p.id]?.userInput,
-                  },
-                }));
-              };
-
-              return (
-                <div
-                  key={p.id}
-                  className="p-6 rounded-xl bg-gradient-to-br from-brand-500/5 to-purple-500/5 border-2 border-brand-500/30"
-                >
-                  <div className="flex items-start gap-3 mb-4">
-                    <span className="text-3xl">🧩</span>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="px-2 py-0.5 rounded-md bg-brand-500/20 text-brand-500 text-xs font-bold uppercase tracking-wide">
-                          Partition
-                        </span>
-                        {hasExplicitSelection && (
-                          <span className="px-2 py-0.5 rounded-md bg-green-500/20 text-green-500 text-xs font-bold">
-                            ✓ Selected {selected === 'unsure' ? 'unsure' : selected}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-base font-bold text-text-primary">
-                        {String(p.hingeQuestion || '').trim()}
-                      </div>
-                      <div className="mt-2 text-xs text-text-muted flex flex-wrap gap-x-3 gap-y-1">
-                        <span>Side A: {sideACount} statements</span>
-                        <span>Side B: {sideBCount} statements</span>
-                        {confidence != null && <span>Confidence: {confidence.toFixed(2)}</span>}
-                        {impact != null && <span>Impact: {impact.toFixed(2)}</span>}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => choose('A')}
-                      disabled={isReadOnly}
-                      className={[
-                        'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
-                        selected === 'A'
-                          ? 'bg-green-500/20 border-green-500/40 text-green-500'
-                          : 'bg-surface-highlight hover:bg-surface-raised border-border-subtle text-text-secondary',
-                        isReadOnly ? 'opacity-60 cursor-not-allowed' : '',
-                      ].join(' ')}
-                    >
-                      Choose A
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => choose('B')}
-                      disabled={isReadOnly}
-                      className={[
-                        'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
-                        selected === 'B'
-                          ? 'bg-green-500/20 border-green-500/40 text-green-500'
-                          : 'bg-surface-highlight hover:bg-surface-raised border-border-subtle text-text-secondary',
-                        isReadOnly ? 'opacity-60 cursor-not-allowed' : '',
-                      ].join(' ')}
-                    >
-                      Choose B
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => choose('unsure')}
-                      disabled={isReadOnly}
-                      className={[
-                        'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
-                        selected === 'unsure'
-                          ? 'bg-surface-raised border-border-strong text-text-primary'
-                          : 'bg-surface-highlight hover:bg-surface-raised border-border-subtle text-text-secondary',
-                        isReadOnly ? 'opacity-60 cursor-not-allowed' : '',
-                      ].join(' ')}
-                    >
-                      Unsure
-                    </button>
-                  </div>
-
-                  {!isReadOnly && selected === 'unsure' && (
-                    <div className="mt-3">
-                      <textarea
-                        value={partitionAnswers[p.id]?.userInput || ''}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setPartitionAnswers((prev) => ({
-                            ...prev,
-                            [p.id]: { choice: 'unsure', userInput: next },
-                          }));
-                        }}
-                        placeholder="Optional: add context for this decision (e.g., constraints, preference, scenario details)"
-                        className="w-full min-h-[76px] px-3 py-2 rounded-lg bg-surface-highlight border border-border-subtle text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Forcing Points */}
       {displayForcingPoints.length > 0 && (

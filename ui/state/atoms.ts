@@ -274,7 +274,12 @@ export const singularityProviderAtom = atomWithStorage<string | null>(
   null,
 );
 
-export const traversalStateByTurnAtom = atomWithImmer<Record<string, any>>({});
+export const traversalStateByTurnAtom = atomWithStorage<Record<string, any>>(
+  "htos_traversal_state_by_turn_v1",
+  {},
+  undefined,
+  { getOnInit: true },
+);
 
 /**
  * Batch auto-run toggle for Singularity phases.
@@ -541,6 +546,5 @@ export const pinnedSingularityProvidersAtom = atom<Record<string, string>>({});
  * Value is the turnId or null
  */
 export const hasAutoOpenedPaneAtom = atom<string | null>(null);
-
 
 

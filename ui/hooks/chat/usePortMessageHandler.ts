@@ -78,6 +78,21 @@ function extractProviderFromStepId(
   return match ? match[1] : null;
 }
 
+function normalizeArtifactCandidate(input: unknown): any | null {
+  if (!input) return null;
+  if (typeof input === "object") return input as any;
+  if (typeof input !== "string") return null;
+  const raw = input.trim();
+  if (!raw) return null;
+  if (!(raw.startsWith("{") || raw.startsWith("["))) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function usePortMessageHandler(enabled: boolean = true) {
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const setTurnIds = useSetAtom(turnIdsAtom);
@@ -612,10 +627,11 @@ export function usePortMessageHandler(enabled: boolean = true) {
                     aiTurn.batch.timestamp = now;
                     aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
                   } else if (stepType === "mapping") {
-                    const artifact =
+                    const artifactRaw =
                       data?.mapping?.artifact ||
                       data?.mappingArtifact ||
                       data?.meta?.mappingArtifact;
+                    const artifact = normalizeArtifactCandidate(artifactRaw) || artifactRaw;
                     if (artifact) {
                       aiTurn.mapping = { artifact, timestamp: now } as any;
                     }
@@ -864,7 +880,8 @@ export function usePortMessageHandler(enabled: boolean = true) {
             pipelineStatus,
             sessionId: msgSessionId,
           } = message as any;
-          const artifact = mapping?.artifact;
+          const artifactRaw = mapping?.artifact;
+          const artifact = normalizeArtifactCandidate(artifactRaw) || artifactRaw;
           if (!aiTurnId) return;
 
           if (msgSessionId) {

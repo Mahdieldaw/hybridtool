@@ -40,7 +40,6 @@ promptmeth/
 # Documentation
 scripts/
 docs/
-  
 *.txt
 *.d.ts
 

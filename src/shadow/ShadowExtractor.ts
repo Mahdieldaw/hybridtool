@@ -16,8 +16,6 @@ import {
     detectSignals,
 } from './StatementTypes';
 import { isExcluded } from './ExclusionRules';
-import type { LabelEmbeddings, SignalLabel, StanceLabel } from '../clustering/embeddings';
-import { cosineSimilarity, quantizeSimilarity } from '../clustering/distance';
 
 // Performance limits
 const SENTENCE_LIMIT = 2000;
@@ -52,21 +50,6 @@ export interface ShadowStatement {
         mutualDegree: number;
         isolationScore: number;
     };
-
-    classificationMeta?: {
-        method: 'embedding' | 'regex';
-        stance?: {
-            bestSim: number;
-            secondSim: number;
-            margin: number;
-            ambiguous: boolean;
-        };
-        signals?: Record<SignalLabel, { sim: number; fired: boolean }>;
-        disagreement?: {
-            stance: boolean;
-            signals: boolean;
-        };
-    };
 }
 
 export interface ShadowStatementLocation {
@@ -91,45 +74,6 @@ export interface ShadowExtractionResult {
         candidatesProcessed: number;
         candidatesExcluded: number;
         sentencesProcessed: number;
-
-        classification?: {
-            method: 'embedding' | 'regex' | 'mixed';
-            fallbackUsed: boolean;
-            fallbackReasons: Record<string, number>;
-            embeddingUsedCount: number;
-            regexUsedCount: number;
-            unclassifiedCount: number;
-            ambiguousCount: number;
-            disagreements: {
-                stance: number;
-                signals: number;
-                any: number;
-            };
-            stanceMargins: {
-                count: number;
-                min: number;
-                p50: number;
-                mean: number;
-                max: number;
-            };
-            thresholds: {
-                stanceMinSimilarity: number;
-                ambiguousMargin: number;
-                signalSimilarity: number;
-            };
-        };
-    };
-}
-
-export interface ShadowEnrichmentOptions {
-    statementEmbeddings?: Map<string, Float32Array> | null;
-    labelEmbeddings?: LabelEmbeddings | null;
-    stanceMinSimilarity?: number;
-    ambiguousMargin?: number;
-    signalSimilarity?: number;
-    transitionLogging?: {
-        enabled?: boolean;
-        maxStatementSamples?: number;
     };
 }
 
@@ -204,6 +148,7 @@ export function extractShadowStatements(
     const statements: ShadowStatement[] = [];
     let idCounter = 0;
     let candidatesProcessed = 0;
+    let candidatesExcluded = 0;
     let sentencesProcessed = 0;
 
     for (const response of responses) {
@@ -235,14 +180,23 @@ export function extractShadowStatements(
 
                 candidatesProcessed++;
 
+                const { stance, confidence } = classifyStance(sentence);
+
+                if (isExcluded(sentence, stance)) {
+                    candidatesExcluded++;
+                    continue;
+                }
+
+                const signals = detectSignals(sentence);
+
                 // Create statement
                 statements.push({
                     id: `s_${idCounter++}`,
                     modelIndex: response.modelIndex,
                     text: sentence,
-                    stance: 'assertive',
-                    confidence: 0,
-                    signals: { sequence: false, tension: false, conditional: false },
+                    stance,
+                    confidence,
+                    signals,
                     location: {
                         paragraphIndex: pIdx,
                         sentenceIndex: sIdx,
@@ -274,7 +228,7 @@ export function extractShadowStatements(
         statements,
         performance.now() - startTime,
         candidatesProcessed,
-        0,
+        candidatesExcluded,
         sentencesProcessed
     );
 
@@ -282,264 +236,6 @@ export function extractShadowStatements(
         statements,
         meta,
     };
-}
-
-export function enrichShadowExtraction(
-    pass1: ShadowExtractionResult,
-    options: ShadowEnrichmentOptions = {}
-): ShadowExtractionResult {
-    const startTime = performance.now();
-    let candidatesExcluded = 0;
-
-    const statements: ShadowStatement[] = [];
-    type ClassificationMeta = NonNullable<ShadowStatement['classificationMeta']>;
-
-    const stanceMinSimilarity = typeof options.stanceMinSimilarity === 'number' ? options.stanceMinSimilarity : 0.28;
-    const ambiguousMargin = typeof options.ambiguousMargin === 'number' ? options.ambiguousMargin : 0.04;
-    const signalSimilarity = typeof options.signalSimilarity === 'number' ? options.signalSimilarity : 0.32;
-
-    const fallbackReasons: Record<string, number> = {};
-    const bumpFallback = (reason: string) => {
-        fallbackReasons[reason] = (fallbackReasons[reason] || 0) + 1;
-    };
-
-    const labelSeverity = options.labelEmbeddings?.meta?.validation?.severity || 'unknown';
-    const labelsOk = !!options.labelEmbeddings && labelSeverity !== 'critical';
-    const embeddingsOk = options.statementEmbeddings instanceof Map && options.statementEmbeddings.size > 0;
-    const allowEmbedding = labelsOk && embeddingsOk;
-
-    if (!labelsOk) bumpFallback(!options.labelEmbeddings ? 'label_embeddings_unavailable' : `label_validation_${labelSeverity}`);
-    if (!embeddingsOk) bumpFallback('statement_embeddings_unavailable');
-
-    const transitionEnabled = !!options.transitionLogging?.enabled;
-    const maxStatementSamples = typeof options.transitionLogging?.maxStatementSamples === 'number'
-        ? options.transitionLogging!.maxStatementSamples!
-        : 20;
-
-    let embeddingUsedCount = 0;
-    let regexUsedCount = 0;
-    let unclassifiedCount = 0;
-    let ambiguousCount = 0;
-
-    let stanceDisagreements = 0;
-    let signalDisagreements = 0;
-    let anyDisagreements = 0;
-
-    const stanceMargins: number[] = [];
-
-    const summarizeMargins = (values: number[]) => {
-        const sorted = [...values].filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
-        const count = sorted.length;
-        if (count === 0) {
-            return { count: 0, min: 0, p50: 0, mean: 0, max: 0 };
-        }
-        const p50 = sorted[Math.floor((count - 1) * 0.5)];
-        let mean = 0;
-        for (const v of sorted) mean += v;
-        mean /= count;
-        return { count, min: sorted[0], p50, mean, max: sorted[count - 1] };
-    };
-
-    const scoreMaxVariant = (emb: Float32Array, variants: [Float32Array, Float32Array, Float32Array]): number => {
-        let best = -Infinity;
-        for (const v of variants) {
-            const s = quantizeSimilarity(cosineSimilarity(emb, v));
-            if (s > best) best = s;
-        }
-        return best;
-    };
-
-    const classifyByEmbedding = (emb: Float32Array, labels: LabelEmbeddings) => {
-        const scores: Array<{ stance: StanceLabel; score: number }> = [];
-        for (const stance of Object.keys(labels.stances) as StanceLabel[]) {
-            scores.push({ stance, score: scoreMaxVariant(emb, labels.stances[stance]) });
-        }
-        scores.sort((a, b) => b.score - a.score || (a.stance < b.stance ? -1 : 1));
-
-        const best = scores[0] || { stance: 'assertive', score: -Infinity };
-        const second = scores[1] || { stance: best.stance, score: -Infinity };
-
-        const bestSim = best.score;
-        const secondSim = second.score;
-        const margin = quantizeSimilarity(bestSim - secondSim);
-        const ambiguous = margin < ambiguousMargin;
-
-        if (!Number.isFinite(bestSim) || bestSim < stanceMinSimilarity) {
-            return {
-                stance: 'unclassified' as Stance,
-                confidence: 0,
-                bestSim,
-                secondSim,
-                margin,
-                ambiguous: false,
-            };
-        }
-
-        let confidence = 0.55;
-        if (margin >= 0.08) confidence = 0.9;
-        else if (margin >= 0.04) confidence = 0.75;
-
-        return {
-            stance: best.stance as Stance,
-            confidence,
-            bestSim,
-            secondSim,
-            margin,
-            ambiguous,
-        };
-    };
-
-    const signalsByEmbedding = (emb: Float32Array, labels: LabelEmbeddings) => {
-        const out: {
-            flags: { sequence: boolean; tension: boolean; conditional: boolean };
-            meta: Record<SignalLabel, { sim: number; fired: boolean }>;
-        } = {
-            flags: { sequence: false, tension: false, conditional: false },
-            meta: {
-                sequence: { sim: -Infinity, fired: false },
-                tension: { sim: -Infinity, fired: false },
-                conditional: { sim: -Infinity, fired: false },
-            },
-        };
-
-        for (const k of Object.keys(labels.signals) as SignalLabel[]) {
-            const sim = scoreMaxVariant(emb, labels.signals[k]);
-            const fired = sim >= signalSimilarity;
-            out.meta[k] = { sim, fired };
-            if (k === 'sequence') out.flags.sequence = fired;
-            if (k === 'tension') out.flags.tension = fired;
-            if (k === 'conditional') out.flags.conditional = fired;
-        }
-        return out;
-    };
-
-    for (const stmt of pass1.statements) {
-        const regexStance = classifyStance(stmt.text);
-        const regexSignals = detectSignals(stmt.text);
-
-        let method: 'embedding' | 'regex' = 'regex';
-        let stance: Stance = regexStance.stance;
-        let confidence: number = regexStance.confidence;
-        let signals = regexSignals;
-        let stanceMeta: ClassificationMeta['stance'] | undefined;
-        let signalsMeta: ClassificationMeta['signals'] | undefined;
-        let disagreement: ClassificationMeta['disagreement'] | undefined;
-
-        if (allowEmbedding && options.statementEmbeddings && options.labelEmbeddings) {
-            const emb = options.statementEmbeddings.get(stmt.id);
-            if (emb) {
-                method = 'embedding';
-                const stanceRes = classifyByEmbedding(emb, options.labelEmbeddings);
-                const sigRes = signalsByEmbedding(emb, options.labelEmbeddings);
-
-                stance = stanceRes.stance;
-                confidence = stanceRes.confidence;
-                signals = sigRes.flags;
-
-                if (stance === 'unclassified') unclassifiedCount++;
-                if (stanceRes.ambiguous) ambiguousCount++;
-                stanceMargins.push(stanceRes.margin);
-                embeddingUsedCount++;
-
-                const stanceMismatch = stanceRes.stance !== regexStance.stance;
-                const signalsMismatch =
-                    sigRes.flags.sequence !== regexSignals.sequence ||
-                    sigRes.flags.tension !== regexSignals.tension ||
-                    sigRes.flags.conditional !== regexSignals.conditional;
-
-                if (stanceMismatch) stanceDisagreements++;
-                if (signalsMismatch) signalDisagreements++;
-                if (stanceMismatch || signalsMismatch) anyDisagreements++;
-
-                if (transitionEnabled) {
-                    const shouldSample =
-                        (stanceMismatch || signalsMismatch || stanceRes.ambiguous) &&
-                        statements.length < maxStatementSamples;
-
-                    if (shouldSample) {
-                        stanceMeta = {
-                            bestSim: stanceRes.bestSim,
-                            secondSim: stanceRes.secondSim,
-                            margin: stanceRes.margin,
-                            ambiguous: stanceRes.ambiguous,
-                        };
-                        signalsMeta = sigRes.meta;
-                        disagreement = { stance: stanceMismatch, signals: signalsMismatch };
-                    }
-                }
-            } else {
-                regexUsedCount++;
-                bumpFallback('statement_embedding_missing');
-            }
-        } else {
-            regexUsedCount++;
-        }
-
-        if (isExcluded(stmt.text, stance)) {
-            candidatesExcluded++;
-            continue;
-        }
-
-        const outStmt: ShadowStatement = {
-            ...stmt,
-            stance,
-            confidence,
-            signals,
-        };
-
-        if (transitionEnabled && (stanceMeta || signalsMeta || disagreement)) {
-            outStmt.classificationMeta = {
-                method,
-                ...(stanceMeta ? { stance: stanceMeta } : {}),
-                ...(signalsMeta ? { signals: signalsMeta } : {}),
-                ...(disagreement ? { disagreement } : {}),
-            };
-        }
-
-        statements.push(outStmt);
-    }
-
-    const meta = buildMetadata(
-        statements,
-        (pass1.meta.processingTimeMs || 0) + (performance.now() - startTime),
-        pass1.meta.candidatesProcessed,
-        candidatesExcluded,
-        pass1.meta.sentencesProcessed
-    );
-
-    const method =
-        embeddingUsedCount > 0 && regexUsedCount > 0
-            ? 'mixed'
-            : embeddingUsedCount > 0
-                ? 'embedding'
-                : 'regex';
-
-    const fallbackUsed =
-        (!allowEmbedding && pass1.statements.length > 0) ||
-        (allowEmbedding && (regexUsedCount > 0 || Object.keys(fallbackReasons).length > 0));
-
-    meta.classification = {
-        method,
-        fallbackUsed,
-        fallbackReasons,
-        embeddingUsedCount,
-        regexUsedCount,
-        unclassifiedCount,
-        ambiguousCount,
-        disagreements: {
-            stance: stanceDisagreements,
-            signals: signalDisagreements,
-            any: anyDisagreements,
-        },
-        stanceMargins: summarizeMargins(stanceMargins),
-        thresholds: {
-            stanceMinSimilarity,
-            ambiguousMargin,
-            signalSimilarity,
-        },
-    };
-
-    return { statements, meta };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

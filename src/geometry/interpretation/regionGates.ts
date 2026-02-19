@@ -2,7 +2,6 @@ import type { GeometricSubstrate } from '../types';
 import type { Region, RegionProfile } from './types';
 import type { RoutedRegion } from './routing';
 import type { ShadowStatement } from '../../shadow/ShadowExtractor';
-import { cosineSimilarity } from '../../clustering/distance';
 import { detectSignals } from '../../shadow';
 
 export interface RegionConditionalGate {
@@ -42,7 +41,6 @@ export interface RegionGateDebug {
 
 const MIN_KNN_EXCLUSIVITY = 0.70;
 const MIN_CONDITIONAL_RATIO = 0.35;
-const DEDUP_COSINE_THRESHOLD = 0.85;
 const MAX_GATES = 5;
 
 function nowMs(): number {
@@ -99,7 +97,7 @@ function extractConditionalClause(text: string): { clause: string; keyword: stri
     const tail = String(m[2] || '').trim();
     if (!tail) return null;
 
-    const rest = clipText(tail.split(/[.;:!?]+/)[0] || tail, 120).replace(/^[,)\]]+/, '').trim();
+    const rest = clipText(tail.split(/(?<![:/])(?<!\d)[.;:!?]+(?=\s|$)/)[0] || tail, 120).replace(/^[,)\]]+/, '').trim();
     if (!rest) return null;
 
     return { clause: `${keyword} ${rest}`.trim(), keyword, rest };
@@ -155,14 +153,30 @@ function buildRegionQuestion(input: {
 
     // Use the most common conditional clause
     if (conditionalClauses.length > 0) {
-        const best = conditionalClauses[0];
+        const clauseCounts = new Map<string, number>();
+        for (const c of conditionalClauses) {
+            const clause = String(c?.clause || '').trim();
+            if (!clause) continue;
+            clauseCounts.set(clause, (clauseCounts.get(clause) || 0) + 1);
+        }
+
+        let bestClause = String(conditionalClauses[0]?.clause || '').trim();
+        let bestCount = 0;
+        for (const [clause, count] of clauseCounts) {
+            if (count > bestCount) {
+                bestCount = count;
+                bestClause = clause;
+            }
+        }
+
+        const best = conditionalClauses.find((c) => String(c?.clause || '').trim() === bestClause) || conditionalClauses[0];
         const { keyword, rest, clause } = best;
         const q =
             keyword === 'if' ? `Does this apply if ${rest}?` :
-            keyword === 'when' ? `Does this apply when ${rest}?` :
-            keyword === 'only if' ? `Does this apply only if ${rest}?` :
-            keyword === 'unless' ? `Does this apply unless ${rest}?` :
-            `Does this apply ${clause}?`;
+                keyword === 'when' ? `Does this apply when ${rest}?` :
+                    keyword === 'only if' ? `Does this apply only if ${rest}?` :
+                        keyword === 'unless' ? `Does this apply unless ${rest}?` :
+                            `Does this apply ${clause}?`;
         const anchors = [keyword, ...rest.split(/\s+/g).slice(0, 6)]
             .map(t => String(t || '').replace(/[^\p{L}\p{N}_-]+/gu, '').trim())
             .filter(Boolean)
@@ -206,7 +220,6 @@ export function deriveRegionConditionalGates(input: {
     profiles: RegionProfile[];
     substrate: GeometricSubstrate;
     statements: ShadowStatement[];
-    paragraphEmbeddings?: Map<string, Float32Array> | null;
 }): RegionGateDerivationResult {
     const start = nowMs();
     const {
@@ -215,7 +228,6 @@ export function deriveRegionConditionalGates(input: {
         profiles,
         substrate,
         statements,
-        paragraphEmbeddings,
     } = input;
 
     const regionById = new Map(regions.map(r => [r.id, r]));
@@ -235,7 +247,7 @@ export function deriveRegionConditionalGates(input: {
         perRegion: [],
     };
 
-    const rawGates: Array<RegionConditionalGate & { _centroid: Float32Array | null }> = [];
+    const rawGates: Array<RegionConditionalGate & { _dedupKey: string }> = [];
 
     for (const candidate of gateCandidates) {
         const region = regionById.get(candidate.regionId);
@@ -303,44 +315,16 @@ export function deriveRegionConditionalGates(input: {
 
         // Compute confidence
         const profile = profileById.get(candidate.regionId);
-        const tierBonus = profile?.tier === 'peak' ? 0.15 : profile?.tier === 'hill' ? 0.08 : 0;
+        const TIER_BONUSES = { peak: 0.15, hill: 0.08, none: 0 };
+        const MAX_TIER_BONUS = Math.max(...Object.values(TIER_BONUSES));
+        const tierBonus = TIER_BONUSES[profile?.tier as keyof typeof TIER_BONUSES] ?? TIER_BONUSES.none;
+
         const confidence = clamp01(
             0.3 * knnExclusivity +
             0.4 * conditionalRatio +
             0.1 * clamp01((profile?.mass?.modelDiversityRatio ?? 0)) +
-            0.2 * tierBonus / 0.15 // normalize tier bonus
+            0.2 * (tierBonus / MAX_TIER_BONUS)
         );
-
-        // Compute centroid for deduplication
-        let centroid: Float32Array | null = null;
-        if (paragraphEmbeddings && paragraphEmbeddings.size > 0) {
-            const nodeIds = region.nodeIds ?? [];
-            let dims = 0;
-            for (const pid of nodeIds) {
-                const emb = paragraphEmbeddings.get(String(pid));
-                if (emb && emb.length > 0) { dims = emb.length; break; }
-            }
-            if (dims > 0) {
-                const acc = new Float32Array(dims);
-                let count = 0;
-                for (const pid of nodeIds) {
-                    const emb = paragraphEmbeddings.get(String(pid));
-                    if (!emb || emb.length !== dims) continue;
-                    for (let i = 0; i < dims; i++) acc[i] += emb[i];
-                    count++;
-                }
-                if (count > 0) {
-                    for (let i = 0; i < dims; i++) acc[i] /= count;
-                    let norm = 0;
-                    for (let i = 0; i < dims; i++) norm += acc[i] * acc[i];
-                    norm = Math.sqrt(norm);
-                    if (norm > 0) {
-                        for (let i = 0; i < dims; i++) acc[i] /= norm;
-                    }
-                    centroid = acc;
-                }
-            }
-        }
 
         const affectedStatementIds = Array.from(regionStatementIds).sort();
 
@@ -354,7 +338,7 @@ export function deriveRegionConditionalGates(input: {
             confidence,
             exclusivityRatio: knnExclusivity,
             conditionalRatio,
-            _centroid: centroid,
+            _dedupKey: String(condition || '').trim().toLowerCase(),
         });
 
         debug.perRegion.push({
@@ -369,34 +353,28 @@ export function deriveRegionConditionalGates(input: {
         });
     }
 
-    // Deduplicate by centroid cosine similarity
     const deduped: typeof rawGates = [];
-    const consumed = new Set<number>();
+    const seenByClause = new Map<string, RegionConditionalGate & { _dedupKey: string }>();
 
-    // Sort by confidence descending
     rawGates.sort((a, b) => b.confidence - a.confidence || a.regionId.localeCompare(b.regionId));
 
-    for (let i = 0; i < rawGates.length; i++) {
-        if (consumed.has(i)) continue;
-        const a = rawGates[i];
-
-        for (let j = i + 1; j < rawGates.length; j++) {
-            if (consumed.has(j)) continue;
-            const b = rawGates[j];
-
-            if (a._centroid && b._centroid) {
-                const sim = cosineSimilarity(a._centroid, b._centroid);
-                if (sim >= DEDUP_COSINE_THRESHOLD) {
-                    consumed.add(j);
-                    debug.gatesDeduped++;
-                    // Merge affected statements into winner
-                    const merged = new Set([...a.affectedStatementIds, ...b.affectedStatementIds]);
-                    a.affectedStatementIds = Array.from(merged).sort();
-                }
-            }
+    for (const g of rawGates) {
+        const key = g._dedupKey;
+        if (!key) {
+            deduped.push(g);
+            continue;
         }
 
-        deduped.push(a);
+        const existing = seenByClause.get(key);
+        if (!existing) {
+            seenByClause.set(key, g);
+            deduped.push(g);
+            continue;
+        }
+
+        debug.gatesDeduped++;
+        const merged = new Set([...(existing.affectedStatementIds || []), ...(g.affectedStatementIds || [])]);
+        existing.affectedStatementIds = Array.from(merged).filter(Boolean).sort();
     }
 
     // Cap at MAX_GATES

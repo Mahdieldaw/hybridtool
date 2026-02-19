@@ -30,6 +30,7 @@ export interface QueryRelevanceMeta {
     adaptiveWeightsActive: boolean;
     regionSignalsUsed: boolean;
     subConsensusMode: 'degree_only' | 'region_profile' | 'mixed';
+    distribution: { min: number; max: number; mean: number; p25: number; p50: number; p75: number };
 }
 
 export interface QueryRelevanceResult {
@@ -207,10 +208,20 @@ export function computeQueryRelevance(input: {
     }
 
     const denom = maxComposite > 0 ? maxComposite : 1;
-    for (const [sid, score] of statementScores.entries()) {
+    for (const score of statementScores.values()) {
         score.compositeRelevance = clamp01(score.compositeRelevance / denom);
-        statementScores.set(sid, score);
     }
+
+    const compositeVals: number[] = [];
+    for (const score of statementScores.values()) compositeVals.push(score.compositeRelevance);
+    const distribution = {
+        min: compositeVals.length > 0 ? Math.min(...compositeVals) : 0,
+        max: compositeVals.length > 0 ? Math.max(...compositeVals) : 0,
+        mean: compositeVals.length > 0 ? compositeVals.reduce((acc, x) => acc + x, 0) / compositeVals.length : 0,
+        p25: quantile(compositeVals, 0.25),
+        p50: quantile(compositeVals, 0.5),
+        p75: quantile(compositeVals, 0.75),
+    };
 
     const sortedIds = statements
         .map(s => s.id)
@@ -247,6 +258,7 @@ export function computeQueryRelevance(input: {
             adaptiveWeightsActive,
             regionSignalsUsed,
             subConsensusMode,
+            distribution,
         },
     };
 }

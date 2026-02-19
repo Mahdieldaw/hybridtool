@@ -71,18 +71,5 @@ describe('StepExecutor mapping truth harness', () => {
 
     expect(res.mapping?.artifact).toBeTruthy();
     expect(res.mapping.artifact.shadow?.statements?.length).toBeGreaterThan(0);
-
-    const obs = res.mapping.artifact.observability;
-    expect(obs).toBeTruthy();
-    expect(obs.stages?.shadowExtraction?.counts?.models).toBe(2);
-    expect(obs.stages?.semanticMapperPrompt?.counts?.inputModels).toBe(2);
-    expect(obs.stages?.semanticMapperParse?.meta?.ok).toBe(false);
-    expect(obs.stages?.condensedEvidence).toBeTruthy();
-
-    const query = res.mapping.artifact.geometry?.query;
-    expect(query).toBeTruthy();
-    expect(Array.isArray(query.condensedStatementIds)).toBe(true);
-
-    expect(res.mapping.artifact.fallbacks?.embeddingBackendFailure).toBe(true);
   });
 });

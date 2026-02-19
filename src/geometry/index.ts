@@ -70,7 +70,7 @@ export { buildClaimVectors, computeAlignment } from './alignment';
 export { deriveLens } from './interpretation/lens';
 export { buildRegions } from './interpretation/regions';
 export { profileRegions } from './interpretation/profiles';
-export { detectOppositions, detectInterRegionSignals } from './interpretation/opposition';
+export { detectOppositions } from './interpretation/opposition';
 export { buildMapperGeometricHints } from './interpretation/guidance';
 export { validateStructuralMapping } from './interpretation/validation';
 export { buildPreSemanticInterpretation } from './interpretation';

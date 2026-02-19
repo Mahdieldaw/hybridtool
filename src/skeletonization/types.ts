@@ -1,5 +1,5 @@
 import type { ShadowStatement, ShadowParagraph } from '../shadow';
-import type { EnrichedClaim, MapperPartition } from '../../shared/contract';
+import type { EnrichedClaim } from '../../shared/contract';
 
 export type StatementAction = 'PROTECTED' | 'UNTRIAGED' | 'SKELETONIZE' | 'REMOVE';
 
@@ -80,7 +80,6 @@ export interface ChewedSubstrate {
     removedStatementCount: number;
   };
   pathSteps: string[];
-  partitionAnswers?: Record<string, PartitionAnswer>;
   meta: {
     triageTimeMs: number;
     reconstructionTimeMs: number;
@@ -89,19 +88,11 @@ export interface ChewedSubstrate {
   };
 }
 
-export type PartitionChoice = 'A' | 'B' | 'unsure';
-
-export interface PartitionAnswer {
-  choice: PartitionChoice;
-  userInput?: string;
-}
-
 export type ConditionalGateAnswer = 'yes' | 'no' | 'unsure';
 
 export interface NormalizedTraversalState {
   claimStatuses: Map<string, 'active' | 'pruned'>;
   pathSteps: string[];
-  partitionAnswers: Record<string, PartitionAnswer>;
   conditionalGateAnswers?: Record<string, ConditionalGateAnswer>;
 }
 
@@ -109,7 +100,6 @@ export interface SkeletonizationInput {
   statements: ShadowStatement[];
   paragraphs: ShadowParagraph[];
   claims: EnrichedClaim[];
-  partitions?: MapperPartition[];
   traversalState: NormalizedTraversalState;
   sourceData: Array<{
     providerId: string;
@@ -121,9 +111,11 @@ export interface SkeletonizationInput {
 export interface CarrierThresholds {
   claimSimilarity: number;
   sourceSimilarity: number;
+  opposingStancePenalty: number;
 }
 
 export const DEFAULT_THRESHOLDS: CarrierThresholds = {
   claimSimilarity: 0.6,
   sourceSimilarity: 0.6,
+  opposingStancePenalty: 0.08,
 };

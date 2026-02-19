@@ -1,0 +1,172 @@
+I'm doing a controlled migration from a clean version to a future version of my codebase. I want to stay on the clean architecture but cherry-pick genuine improvements.
+
+>
+
+> Here are the two versions of `[]`:
+
+>
+
+> **CLEAN:**
+
+>
+
+> **FUTURE:**
+
+> **Architecture context:**
+
+>
+
+> We are rolling back a refactor. The core pipeline must work end-to-end without depending on any of the following — these are being removed:
+
+> - Disruption scoring and jury construction
+
+> - Routing and region gates (`routeRegions`, `deriveRegionConditionalGates`)
+
+> - Automated conditional gate derivation (`deriveConditionalGates.ts`, `questionMerge.ts`)
+
+> - Partition-based mapper flow (worklist/jury mapper prompt, advocacy expansion, partition validation)
+
+> - Mechanical opposition fallback logic
+
+> - Observability/telemetry scaffolding (`pipelineArtifacts` tree, per-stage timing, fallback flags)
+
+> - Evidence condensation / condensed statement sets
+
+> - `buildMechanicalTraversal` — remove entirely, it was the old primary traversal path and that role no longer exists
+
+> - Any UI panels or logic that exclusively reads from the above (they have no data source once these are removed)
+
+>
+
+> **Do NOT remove or conflate with the above:**
+
+> - Query relevance — keep, but restructure. The base object must be a pure cosine similarity score between statement embedding and query embedding, nothing else. Any derived calculations (boosting outliers, downranking consensus, etc.) must be separate computations layered on top of that base score, not baked into the same object. The goal is that the core pipeline can run with or without the derived layer.
+
+> - Structural analysis and geometry — keep. Regions, profiles, oppositions, inter-region signals, substrate construction, clustering all stay. Any of these that currently change runtime pipeline behaviour need to be separated so they are calculated independently and the core pipeline does not depend on their output to function.
+
+> - Shadow extraction (both passes), embedding generation, paragraph projection — these are baseline, do not touch.
+
+> - `conditionalFinder` — do not keep as a main path. The logic may be preserved as a passive signal (detecting conditional clause density in regions) but it must not generate traversal questions or drive any runtime behaviour directly. Flag any usage that makes it load-bearing.
+
+> - Any robustness improvements (input normalization, safe parsing, graceful empty states) — keep these regardless of where they appear.
+
+>
+
+> **General principle:** analysis and scoring layers should be additive and optional. The pipeline must be able to run through its happy path without them. If a computation changes what the core pipeline does rather than just annotating or scoring what it already produced, it needs to be separated from the core flow. The deliberation layer — where the pipeline intentionally halts for user input — is driven by mapper output only. There is no mechanical fallback generating its own question set.
+
+>
+
+> Please:
+
+> 1. List every difference as a numbered change
+
+> 2. For each change, classify it as **KEEP**, **DISCARD**, or **REVIEW**
+
+> 3. Give a one-line reason for each
+
+> 4. At the end, summarize how many of each and flag anything that might have dependencies in other files
+
+>
+
+> Do not apply any changes yet — analysis only. list 11-18 exlude shadow extractor  How to approach this: Run a diff between the two versions. For each difference, describe what changed and in which direction (clean→future or future→clean). Then classify the change. Do not list the files separately or treat them as independent inventories. The unit of analysis is the diff, not the file(do  clean to future stritly recommend for  future as thats the file we will be lookig to work on hybrid-clean hybrid-future
+**Meaty — prioritize these:**
+| Lines | File |
+|-------|------|
+| 1755 | `src/core/execution/StepExecutor.js` |
+| 1212 | `src/ConciergeService/semanticMapper.ts` |
+| 1090 | `ui/components/DecisionMapSheet.tsx` |
+| 821 | `src/geometry/interpretation/index.ts` |
+| 733 | `src/clustering/embeddings.ts` |
+| 641 | `ui/components/traversal/TraversalGraphView.tsx` |
+| 512 | `src/core/traversal/buildMechanicalTraversal.ts` |
+| 383 | `src/offscreen/EmbeddingController.js` |
+| 337 | `src/shadow/ShadowExtractor.ts` |  done
+| 331 | `src/skeletonization/index.ts` |  done
+| 268 | `src/geometry/interpretation/opposition.ts` |  done
+| 241 | `src/skeletonization/TriageEngine.ts` |   done
+| 167 | `src/utils/cognitive/traversalEngine.ts` |
+
+**Medium — worth reviewing:**
+| Lines | File |
+|-------|------|
+| 140 | `shared/contract.ts` |
+| 95 | `src/geometry/interpretation/profiles.ts` |
+| 80 | `src/geometry/interpretation/guidance.ts` |
+| 75 | `src/core/execution/CognitivePipelineHandler.js` |
+| 62 | `ui/hooks/chat/usePortMessageHandler.ts` |
+| 62 | `shared/parsing-utils.ts` |
+| 52 | `src/core/structural-analysis/engine.ts` |
+
+**Small — probably just copy from future or skip:**
+Everything 35 lines and under — most of these you can diff quickly in the IDE and decide in a minute or two each.
+
+The top 3 (`StepExecutor.js`, `semanticMapper.ts`, `DecisionMapSheet.tsx`) account for a huge chunk of the total changes. Worth understanding those well before tackling the rest.
+
+---
+
+## Remaining files to check (git diff list minus files already listed above)
+
+**New files (future only) — review needed:**
+- `src/core/traversal/deriveConditionalGates.ts`
+- `src/core/traversal/questionMerge.ts`
+- `src/core/V31Verification.ts`
+- `src/geometry/interpretation/regionGates.ts`
+- `src/geometry/interpretation/routing.ts`
+- `src/geometry/queryRelevance.ts`
+- `ui/components/DecisionMapObservabilityRow.tsx`
+- `ui/types/env.d.ts`
+- `ui/types/jotai-immer.d.ts`
+- `ui/types/think-shims.d.ts`
+- `src/think/computeThinkFlag.d.ts`
+
+**Test files (future only) — likely safe to keep:**
+- `src/ConciergeService/semanticMapper.advocacyExpansion.test.ts`
+- `src/core/execution/StepExecutor.mapping.truth-harness.test.ts`
+- `src/skeletonization/normalizeTraversalState.test.ts`
+- `src/utils/cognitive/traversalEngine.partitionAutoResolve.test.ts`
+- `src/geometry/interpretation/guidance.test.ts`
+- `src/geometry/queryRelevance.test.ts`
+
+**Modified files — meaty (core logic):**
+- `src/skeletonization/SubstrateReconstructor.ts`
+- `src/skeletonization/CarrierDetector.ts`
+- `src/skeletonization/types.ts`
+- `src/core/traversal/conditionalFinder.ts`
+- `src/core/traversal/conflictDeriver.ts`
+- `src/ConciergeService/claimAssembly.ts`
+
+**Modified files — mid-size:**
+- `src/core/structural-analysis/builders.ts`
+- `src/core/structural-analysis/classification.ts`
+- `src/core/structural-analysis/graph.ts`
+- `src/core/structural-analysis/metrics.ts`
+- `src/core/structural-analysis/utils.ts`
+- `src/geometry/interpretation/types.ts`
+- `src/geometry/index.ts`
+- `src/shadow/index.ts`
+- `src/shadow/ShadowDelta.ts`
+- `src/shadow/ExclusionRules.ts`
+- `src/shadow/StatementTypes.ts`
+
+**Modified files — likely small/config:**
+- `shared/cognitive-artifact.ts`
+- `src/clustering/config.ts`
+- `src/clustering/index.ts`
+- `src/core/execution/streamingmanager.ts`
+- `src/core/execution/turnemitter.ts`
+- `src/core/connection-handler.js`
+- `src/core/workflow-compiler.js`
+- `src/core/workflow-engine.js`
+- `src/offscreen-entry.js`
+- `src/sw-entry.js`
+- `ui/components/cognitive/CognitiveOutputRenderer.tsx`
+- `ui/components/debug/StatementClusteringDebugOverlay.tsx`
+- `ui/components/HistoryPanel.tsx`
+- `ui/components/ModelResponsePanel.tsx`
+- `ui/components/ParagraphSpaceView.tsx`
+- `ui/hooks/useTraversal.ts`
+- `ui/state/atoms.ts`
+- `ui/utils/copy-format-utils.ts`
+- `package.json`
+- `tsconfig.json`
+- `.gitignore`

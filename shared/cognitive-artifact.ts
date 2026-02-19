@@ -33,14 +33,7 @@ export function buildCognitiveArtifact(
         strongEdges: substrateGraph?.strongEdges ?? [],
         softThreshold: substrateGraph?.softThreshold,
       },
-      query: pipeline?.query
-        ? {
-          ...pipeline.query,
-          condensedStatementIds: Array.isArray(pipeline.query.condensedStatementIds)
-            ? pipeline.query.condensedStatementIds
-            : [],
-        }
-        : undefined,
+      query: pipeline?.query ? { ...pipeline.query } : undefined,
       preSemantic: pipeline?.preSemantic
         ? {
           ...pipeline.preSemantic,
@@ -62,7 +55,6 @@ export function buildCognitiveArtifact(
       conditionals: mapper?.conditionals ?? [],
       narrative: mapper?.narrative,
       ghosts: Array.isArray(mapper?.ghosts) ? mapper.ghosts : undefined,
-      partitions: Array.isArray(mapper?.partitions) ? mapper.partitions : undefined,
     },
     traversal: {
       forcingPoints: mapper?.forcingPoints ?? [],
@@ -90,9 +82,6 @@ export function buildCognitiveArtifact(
         },
     },
     traversalAnalysis: mapper?.traversalAnalysis ?? undefined,
-    mechanicalGating: mapper?.mechanicalGating ?? undefined,
-    observability: pipeline?.observability ?? undefined,
-    fallbacks: pipeline?.fallbacks ?? undefined,
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
       query: mapper?.query ?? undefined,
