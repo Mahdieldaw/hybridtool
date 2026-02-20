@@ -31,7 +31,7 @@ export interface RegionizationResult {
         regionCount: number;
         kindCounts: Record<Region['kind'], number>;
         fallbackUsed: boolean;
-        fallbackReason?: 'clustering_skipped_by_lens' | 'no_multi_member_clusters';
+        fallbackReason?: 'clustering_skipped_by_lens' | 'no_multi_member_clusters' | 'degenerate_substrate';
         coveredNodes: number;
         totalNodes: number;
     };
@@ -58,9 +58,6 @@ export interface RegionProfile {
         nearestCarrierSimilarity: number;
         avgInternalSimilarity: number;
     };
-    predicted: {
-        likelyClaims: number;
-    };
 }
 
 export type GateVerdict = 'proceed' | 'skip_geometry' | 'trivial_convergence' | 'insufficient_structure';
@@ -82,7 +79,7 @@ export interface PipelineGateResult {
 export interface ModelScore {
     modelIndex: number;
     irreplaceability: number;
-    queryRelevanceBoost?: Map<number, number>;
+    queryRelevanceBoost?: number;
     breakdown: {
         soloCarrierRegions: number;
         lowDiversityContribution: number;
@@ -97,16 +94,18 @@ export interface ModelOrderingResult {
         totalModels: number;
         regionCount: number;
         processingTimeMs: number;
+        queryRelevanceVariance?: number;
+        adaptiveAlphaFraction?: number;
     };
 }
 
 export interface GeometricObservation {
     type:
-        | 'uncovered_peak'
-        | 'overclaimed_floor'
-        | 'claim_count_outside_range'
-        | 'topology_mapper_divergence'
-        | 'embedding_quality_suspect';
+    | 'uncovered_peak'
+    | 'overclaimed_floor'
+    | 'claim_count_outside_range'
+    | 'topology_mapper_divergence'
+    | 'embedding_quality_suspect';
     observation: string;
     regionIds?: string[];
     claimIds?: string[];

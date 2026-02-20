@@ -121,24 +121,27 @@ export function computeModelOrdering(
         if (!regionId || totalParagraphs === 0) continue;
 
         const countsByModel = new Map<number, number>();
+        let validNodeCount = 0;
         for (const pidRaw of nodeIds) {
             const pid = String(pidRaw || '').trim();
             if (!pid) continue;
             const mi = modelIndexByParagraphId.get(pid);
-            if (typeof mi !== 'number') continue;
+            if (typeof mi !== 'number' || !Number.isFinite(mi)) continue;
             countsByModel.set(mi, (countsByModel.get(mi) ?? 0) + 1);
+            validNodeCount++;
         }
+
+        const denominator = validNodeCount > 0 ? validNodeCount : totalParagraphs;
 
         const modelDiversity =
             modelDiversityByRegionId.get(regionId) ??
-            (region?.modelIndices?.length ?? countsByModel.size) ??
-            countsByModel.size;
+            ((region?.modelIndices && region.modelIndices.length > 0) ? region.modelIndices.length : countsByModel.size);
 
         const diversity = Math.max(1, modelDiversity);
         const regionWeight = 1 / diversity;
 
         for (const [modelIndex, count] of countsByModel.entries()) {
-            const fraction = count / totalParagraphs;
+            const fraction = count / denominator;
             const s = ensure(modelIndex);
             s.irreplaceability += fraction * regionWeight;
             s.breakdown.totalParagraphsInRegions += count;
@@ -147,6 +150,9 @@ export function computeModelOrdering(
         }
     }
 
+    let queryRelevanceVariance: number | undefined;
+    let adaptiveAlphaFraction: number | undefined;
+
     if (queryRelevanceBoost && queryRelevanceBoost.size > 0) {
         let maxBoost = 0;
         for (const v of queryRelevanceBoost.values()) {
@@ -154,17 +160,32 @@ export function computeModelOrdering(
         }
 
         if (maxBoost > 0) {
+            // Adaptive alpha: blend weight scales with stddev of per-model relevance.
+            // When models agree on what's relevant (low stddev), irreplaceability alone
+            // is sufficient — the geometric anomaly already finds the interesting model.
+            // When models diverge (high stddev), relevance and irreplaceability become
+            // independent axes and the blend earns its weight.
+            const boostValues = Array.from(queryRelevanceBoost.values());
+            const meanBoost = boostValues.reduce((a, b) => a + b, 0) / boostValues.length;
+            queryRelevanceVariance = boostValues.reduce((s, v) => s + (v - meanBoost) ** 2, 0) / boostValues.length;
+            const queryRelevanceStddev = Math.sqrt(queryRelevanceVariance);
+            // Cap at 0.25: at stddev ≥ 0.25 (high cross-model divergence), full weight applies.
+            adaptiveAlphaFraction = Math.min(0.25, queryRelevanceStddev);
+
             let maxIrr = 0;
             for (const s of scoreByModelIndex.values()) {
                 if (s.irreplaceability > maxIrr) maxIrr = s.irreplaceability;
             }
 
-            const alpha = maxIrr > 0 ? (maxIrr * 0.25) / maxBoost : 0.1 / maxBoost;
+            const alpha = maxIrr > 0
+                ? (maxIrr * adaptiveAlphaFraction) / maxBoost
+                : adaptiveAlphaFraction * 0.1 / maxBoost;
 
             for (const [mi, boost] of queryRelevanceBoost) {
                 const s = scoreByModelIndex.get(mi);
                 if (s) {
                     s.irreplaceability += boost * alpha;
+                    s.queryRelevanceBoost = boost;
                 }
             }
         }
@@ -194,6 +215,7 @@ export function computeModelOrdering(
                 totalModels: observedModelIndices.length,
                 regionCount: regions.length,
                 processingTimeMs: Date.now() - startedAt,
+                ...(queryRelevanceVariance !== undefined ? { queryRelevanceVariance, adaptiveAlphaFraction } : {}),
             },
         };
     }
@@ -213,6 +235,7 @@ export function computeModelOrdering(
             totalModels: observedModelIndices.length,
             regionCount: regions.length,
             processingTimeMs: Date.now() - startedAt,
+            ...(queryRelevanceVariance !== undefined ? { queryRelevanceVariance, adaptiveAlphaFraction } : {}),
         },
     };
 }

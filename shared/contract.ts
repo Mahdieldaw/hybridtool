@@ -71,14 +71,14 @@ export interface Claim {
   dimension?: string | null; // Optional legacy metadata
   supporters: number[];
   type:
-    | 'factual'
-    | 'prescriptive'
-    | 'cautionary'
-    | 'assertive'
-    | 'uncertain'
-    | 'conditional'
-    | 'contested'
-    | 'speculative';
+  | 'factual'
+  | 'prescriptive'
+  | 'cautionary'
+  | 'assertive'
+  | 'uncertain'
+  | 'conditional'
+  | 'contested'
+  | 'speculative';
   role: 'anchor' | 'branch' | 'challenger' | 'supplement';
   challenges: string | null;
   quote?: string;
@@ -589,13 +589,13 @@ export interface SecondaryPattern {
   type: SecondaryPatternType;
   severity: 'high' | 'medium' | 'low';
   data:
-    | ChallengedPatternData
-    | KeystonePatternData
-    | ChainPatternData
-    | FragilePatternData
-    | ConditionalPatternData
-    | OrphanedPatternData
-    | DissentPatternData;
+  | ChallengedPatternData
+  | KeystonePatternData
+  | ChainPatternData
+  | FragilePatternData
+  | ConditionalPatternData
+  | OrphanedPatternData
+  | DissentPatternData;
 }
 
 export interface ChallengedPatternData {
@@ -1248,6 +1248,58 @@ export interface PreSemanticInterpretation {
   modelOrdering?: ModelOrderingResult;
 }
 
+export interface PipelineGeometricObservation {
+  type:
+  | 'uncovered_peak'
+  | 'overclaimed_floor'
+  | 'claim_count_outside_range'
+  | 'topology_mapper_divergence'
+  | 'embedding_quality_suspect';
+  observation: string;
+  regionIds?: string[];
+  claimIds?: string[];
+}
+
+export interface PipelineClaimGeometricMeasurement {
+  claimId: string;
+  sourceCoherence: number | null;
+  embeddingSpread: number | null;
+  regionSpan: number;
+  sourceModelDiversity: number;
+  sourceStatementCount: number;
+  dominantRegionId: string | null;
+  dominantRegionTier: 'peak' | 'hill' | 'floor' | null;
+  dominantRegionModelDiversity: number | null;
+}
+
+export interface PipelineEdgeGeographicMeasurement {
+  edgeId: string;
+  from: string;
+  to: string;
+  edgeType: string;
+  crossesRegionBoundary: boolean;
+  centroidSimilarity: number | null;
+  fromRegionId: string | null;
+  toRegionId: string | null;
+}
+
+export interface PipelineDiagnosticMeasurements {
+  claimMeasurements: PipelineClaimGeometricMeasurement[];
+  edgeMeasurements: PipelineEdgeGeographicMeasurement[];
+}
+
+export interface PipelineDiagnosticsResult {
+  observations: PipelineGeometricObservation[];
+  measurements: PipelineDiagnosticMeasurements;
+  summary: string;
+  meta: {
+    regionCount: number;
+    claimCount: number;
+    processingTimeMs: number;
+  };
+}
+
+
 export interface EnrichmentResult {
   enrichedCount: number;
   unenrichedCount: number;
@@ -1337,8 +1389,8 @@ export interface CognitiveArtifact {
     embeddingStatus: "computed" | "failed";
     substrate: PipelineSubstrateGraph;
     preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
+    diagnostics?: PipelineDiagnosticsResult | null;
     structuralValidation?: any | null;
-    diagnostics?: any | null;
   };
   semantic: {
     claims: Claim[];

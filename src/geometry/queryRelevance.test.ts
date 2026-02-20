@@ -79,7 +79,6 @@ function makeRegionProfile(regionId: string, tier: RegionProfile["tier"], tierCo
     mass: { nodeCount: 1, modelDiversity, modelDiversityRatio: 1 },
     purity: { dominantStance: "assertive", stanceUnanimity, contestedRatio, stanceVariety: 1 },
     geometry: { internalDensity: 0.5, isolation: 0.2, nearestCarrierSimilarity: 0, avgInternalSimilarity: 0.8 },
-    predicted: { likelyClaims: 1 },
   };
 }
 

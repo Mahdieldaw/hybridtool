@@ -1086,9 +1086,9 @@ export class StepExecutor {
                         {
                           sessionId: context.sessionId,
                           useThinking: false,
-                          onPartial: () => {},
+                          onPartial: () => { },
                           onAllComplete: (results) => {
-                            const r = results?.[payload.mappingProvider];
+                            const r = results?.get?.(payload.mappingProvider);
                             surveyText = r?.text || '';
                             resolve({ text: surveyText });
                           },
@@ -1489,6 +1489,7 @@ export class StepExecutor {
                     ...(substrateSummary ? { substrate: substrateSummary } : {}),
                   };
 
+                  let diagnosticsResult = null;
                   try {
                     if (preSemanticInterpretation && mapperArtifact) {
                       const { computeStructuralAnalysis } = await import('../PromptMethods');
@@ -1496,7 +1497,7 @@ export class StepExecutor {
                       // Convert to cognitive shape for structural analysis
                       const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
                       const postSemantic = computeStructuralAnalysis(tempCognitive);
-                      structuralValidation = validateStructuralMapping(
+                      diagnosticsResult = validateStructuralMapping(
                         preSemanticInterpretation,
                         postSemantic,
                         substrate,
@@ -1505,13 +1506,13 @@ export class StepExecutor {
                       );
                     }
                   } catch (_) {
-                    structuralValidation = null;
+                    diagnosticsResult = null;
                   }
 
                   if (mapperArtifact) {
                     try {
-                      const diagnostics = structuralValidation;
-                      mapperArtifact.structuralValidation = diagnostics;
+                      const diagnostics = diagnosticsResult;
+                      mapperArtifact.diagnostics = diagnostics;
 
                       const claimMeasurements = diagnostics?.measurements?.claimMeasurements;
                       if (Array.isArray(claimMeasurements)) {

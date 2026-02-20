@@ -112,7 +112,7 @@ type QueryRelevanceRow = {
   tier: "high" | "medium" | "low";
   composite: number | null;
   querySim: number | null;
-  novelty: number | null;
+  recusant: number | null;
   subConsensus: number | null;
   stance: string | null;
   modelIndex: number | null;
@@ -125,7 +125,7 @@ type QueryRelevanceSortKey =
   | "tier"
   | "composite"
   | "querySim"
-  | "novelty"
+  | "recusant"
   | "subConsensus"
   | "stance"
   | "modelIndex";
@@ -1362,7 +1362,7 @@ export const DecisionMapSheet = React.memo(() => {
         tier,
         composite: typeof score?.compositeRelevance === "number" ? score.compositeRelevance : null,
         querySim: typeof score?.querySimilarity === "number" ? score.querySimilarity : null,
-        novelty: typeof score?.novelty === "number" ? score.novelty : null,
+        recusant: typeof score?.recusant === "number" ? score.recusant : null,
         subConsensus: typeof score?.subConsensusCorroboration === "number" ? score.subConsensusCorroboration : null,
         stance: s?.stance != null ? String(s.stance) : null,
         modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : null,
@@ -1402,8 +1402,8 @@ export const DecisionMapSheet = React.memo(() => {
           ? a.composite
           : key === "querySim"
             ? a.querySim
-            : key === "novelty"
-              ? a.novelty
+            : key === "recusant"
+              ? a.recusant
               : key === "subConsensus"
                 ? a.subConsensus
                 : key === "modelIndex"
@@ -1414,8 +1414,8 @@ export const DecisionMapSheet = React.memo(() => {
           ? b.composite
           : key === "querySim"
             ? b.querySim
-            : key === "novelty"
-              ? b.novelty
+            : key === "recusant"
+              ? b.recusant
               : key === "subConsensus"
                 ? b.subConsensus
                 : key === "modelIndex"
@@ -1437,20 +1437,20 @@ export const DecisionMapSheet = React.memo(() => {
       tier: r.tier,
       composite: r.composite,
       querySim: r.querySim,
-      novelty: r.novelty,
+      recusant: r.recusant,
       subConsensus: r.subConsensus,
     }));
   }, [queryRelevanceRows]);
 
   const queryRelevanceScoresCsv = useMemo(() => {
-    const header = ["id", "tier", "composite", "querySim", "novelty", "subConsensus"].join(",");
+    const header = ["id", "tier", "composite", "querySim", "recusant", "subConsensus"].join(",");
     const lines = queryRelevanceScores.map((r) => {
       const cells = [
         r.id,
         r.tier,
         typeof r.composite === "number" ? String(r.composite) : "",
         typeof r.querySim === "number" ? String(r.querySim) : "",
-        typeof r.novelty === "number" ? String(r.novelty) : "",
+        typeof r.recusant === "number" ? String(r.recusant) : "",
         typeof r.subConsensus === "number" ? String(r.subConsensus) : "",
       ];
       return cells.join(",");
@@ -1708,7 +1708,7 @@ export const DecisionMapSheet = React.memo(() => {
                         setActiveTab(key);
                         if (key !== 'partition') setSelectedNode(null);
                       }
-                    }>
+                      }>
                       {label}
                     </button>
                   );
@@ -1820,459 +1820,459 @@ export const DecisionMapSheet = React.memo(() => {
                       ))}
                     </div>
                     {partitionSubTab === 'graph' && (
-                    <div className="px-6 pt-4 pb-3 flex-1 min-h-0">
-                      <div className="flex flex-col lg:flex-row gap-3 h-full min-h-0">
-                        <div className="flex-1 rounded-2xl overflow-hidden border border-border-subtle bg-surface flex flex-col min-h-0">
-                          <div className="px-4 py-2 border-b border-border-subtle flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-muted">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block w-6 h-[2px] bg-slate-400" />
-                              <span>Supports</span>
+                      <div className="px-6 pt-4 pb-3 flex-1 min-h-0">
+                        <div className="flex flex-col lg:flex-row gap-3 h-full min-h-0">
+                          <div className="flex-1 rounded-2xl overflow-hidden border border-border-subtle bg-surface flex flex-col min-h-0">
+                            <div className="px-4 py-2 border-b border-border-subtle flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-muted">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block w-6 h-[2px] bg-slate-400" />
+                                <span>Supports</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block w-6 h-[2px] bg-orange-400" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(251,146,60,1) 0 4px, rgba(0,0,0,0) 4px 7px)" }} />
+                                <span>Tradeoff</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block w-6 h-[2px] bg-red-400" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(248,113,113,1) 0 8px, rgba(0,0,0,0) 8px 14px)" }} />
+                                <span>Conflicts</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block w-6 h-[2px] bg-slate-900" />
+                                <span>Prerequisite</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-[12px] leading-none">👑</span>
+                                <span>Keystone</span>
+                                <span className="text-[12px] leading-none">⚡</span>
+                                <span>Dissent</span>
+                                <span className="text-[12px] leading-none">★</span>
+                                <span>Peak</span>
+                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-400 text-white text-[10px] font-bold leading-none">~</span>
+                                <span>Fragile</span>
+                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">!</span>
+                                <span>Anomaly</span>
+                              </div>
+                              {graphTopology && (
+                                <div className="ml-auto flex items-center gap-2">
+                                  <CopyButton
+                                    text={formatGraphForMd(graphTopology)}
+                                    label="Copy graph as list"
+                                    variant="icon"
+                                  />
+                                </div>
+                              )}
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block w-6 h-[2px] bg-orange-400" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(251,146,60,1) 0 4px, rgba(0,0,0,0) 4px 7px)" }} />
-                              <span>Tradeoff</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block w-6 h-[2px] bg-red-400" style={{ backgroundImage: "repeating-linear-gradient(90deg, rgba(248,113,113,1) 0 8px, rgba(0,0,0,0) 8px 14px)" }} />
-                              <span>Conflicts</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block w-6 h-[2px] bg-slate-900" />
-                              <span>Prerequisite</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-[12px] leading-none">👑</span>
-                              <span>Keystone</span>
-                              <span className="text-[12px] leading-none">⚡</span>
-                              <span>Dissent</span>
-                              <span className="text-[12px] leading-none">★</span>
-                              <span>Peak</span>
-                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-400 text-white text-[10px] font-bold leading-none">~</span>
-                              <span>Fragile</span>
-                              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">!</span>
-                              <span>Anomaly</span>
-                            </div>
-                            {graphTopology && (
-                              <div className="ml-auto flex items-center gap-2">
-                                <CopyButton
-                                  text={formatGraphForMd(graphTopology)}
-                                  label="Copy graph as list"
-                                  variant="icon"
+                            <div ref={containerRef} className="w-full flex-1 min-h-0">
+                              <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
+                                <DecisionMapGraph
+                                  claims={graphData.claims}
+                                  edges={graphData.edges}
+                                  problemStructure={shape ?? undefined}
+                                  enrichedClaims={structuralAnalysis?.claimsWithLeverage}
+                                  citationSourceOrder={citationSourceOrder}
+                                  width={dims.w}
+                                  height={dims.h}
+                                  onNodeClick={handleNodeClick}
+                                  selectedClaimIds={selectedClaimIds}
                                 />
+                              </Suspense>
+                            </div>
+                          </div>
+
+                          <div
+                            className={clsx(
+                              "w-full rounded-2xl overflow-hidden border border-border-subtle bg-surface transition-[width] duration-200 ease-out flex flex-col min-h-0",
+                              selectedNode ? "lg:w-[420px]" : "hidden lg:block lg:w-12"
+                            )}
+                          >
+                            {selectedNode ? (
+                              <>
+                                <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-text-primary truncate">Claim detail</div>
+                                    <div className="text-[11px] text-text-muted mt-0.5 truncate">
+                                      {selectedNode.label}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors flex-none"
+                                    onClick={() => setSelectedNode(null)}
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                                <div className="p-4 flex-1 overflow-y-auto custom-scrollbar">
+                                  <DetailView
+                                    node={selectedNode}
+                                    narrativeExcerpt={narrativeExcerpt}
+                                    citationSourceOrder={citationSourceOrder}
+                                    onBack={() => setSelectedNode(null)}
+                                    onOrbClick={handleDetailOrbClick}
+                                    structural={structuralAnalysis}
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <div className="h-full w-full flex items-center justify-center bg-surface-highlight/10">
+                                <div
+                                  className="text-[11px] font-semibold tracking-wide text-text-muted select-none"
+                                  style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+                                >
+                                  Claim
+                                </div>
                               </div>
                             )}
                           </div>
-                          <div ref={containerRef} className="w-full flex-1 min-h-0">
-                            <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
-                              <DecisionMapGraph
-                                claims={graphData.claims}
-                                edges={graphData.edges}
-                                problemStructure={shape ?? undefined}
-                                enrichedClaims={structuralAnalysis?.claimsWithLeverage}
-                                citationSourceOrder={citationSourceOrder}
-                                width={dims.w}
-                                height={dims.h}
-                                onNodeClick={handleNodeClick}
-                                selectedClaimIds={selectedClaimIds}
-                              />
-                            </Suspense>
-                          </div>
-                        </div>
-
-                        <div
-                          className={clsx(
-                            "w-full rounded-2xl overflow-hidden border border-border-subtle bg-surface transition-[width] duration-200 ease-out flex flex-col min-h-0",
-                            selectedNode ? "lg:w-[420px]" : "hidden lg:block lg:w-12"
-                          )}
-                        >
-                          {selectedNode ? (
-                            <>
-                              <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-text-primary truncate">Claim detail</div>
-                                  <div className="text-[11px] text-text-muted mt-0.5 truncate">
-                                    {selectedNode.label}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors flex-none"
-                                  onClick={() => setSelectedNode(null)}
-                                >
-                                  Clear
-                                </button>
-                              </div>
-                              <div className="p-4 flex-1 overflow-y-auto custom-scrollbar">
-                                <DetailView
-                                  node={selectedNode}
-                                  narrativeExcerpt={narrativeExcerpt}
-                                  citationSourceOrder={citationSourceOrder}
-                                  onBack={() => setSelectedNode(null)}
-                                  onOrbClick={handleDetailOrbClick}
-                                  structural={structuralAnalysis}
-                                />
-                              </div>
-                            </>
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center bg-surface-highlight/10">
-                              <div
-                                className="text-[11px] font-semibold tracking-wide text-text-muted select-none"
-                                style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
-                              >
-                                Claim
-                              </div>
-                            </div>
-                          )}
                         </div>
                       </div>
-                    </div>
                     )}
                     {partitionSubTab === 'narrative' && (
-                    <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
-                    {doesRawDifferFromNarrative && (
-                      <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-                        <button
-                          type="button"
-                          className={clsx(
-                            "px-3 py-1.5 rounded-full text-xs border",
-                            narrativeMode === "formatted"
-                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
-                              : "bg-transparent border-border-subtle text-text-muted"
-                          )}
-                          onClick={() => setNarrativeMode("formatted")}
-                        >
-                          Formatted
-                        </button>
-                        <button
-                          type="button"
-                          className={clsx(
-                            "px-3 py-1.5 rounded-full text-xs border",
-                            narrativeMode === "raw"
-                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
-                              : "bg-transparent border-border-subtle text-text-muted"
-                          )}
-                          onClick={() => setNarrativeMode("raw")}
-                        >
-                          Raw
-                        </button>
+                      <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
+                        {doesRawDifferFromNarrative && (
+                          <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+                            <button
+                              type="button"
+                              className={clsx(
+                                "px-3 py-1.5 rounded-full text-xs border",
+                                narrativeMode === "formatted"
+                                  ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                                  : "bg-transparent border-border-subtle text-text-muted"
+                              )}
+                              onClick={() => setNarrativeMode("formatted")}
+                            >
+                              Formatted
+                            </button>
+                            <button
+                              type="button"
+                              className={clsx(
+                                "px-3 py-1.5 rounded-full text-xs border",
+                                narrativeMode === "raw"
+                                  ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                                  : "bg-transparent border-border-subtle text-text-muted"
+                              )}
+                              onClick={() => setNarrativeMode("raw")}
+                            >
+                              Raw
+                            </button>
+                          </div>
+                        )}
+                        {(narrativeMode === "formatted" ? mappingText : rawMappingText) && (
+                          <div className="absolute top-4 right-4 z-10">
+                            <CopyButton
+                              text={narrativeMode === "formatted" ? mappingText : rawMappingText}
+                              label="Copy narrative"
+                              variant="icon"
+                            />
+                          </div>
+                        )}
+                        {narrativeMode === "raw" ? (
+                          rawMappingText ? (
+                            <pre className="text-xs leading-relaxed whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4">{rawMappingText}</pre>
+                          ) : (
+                            <div className="text-text-muted text-sm text-center py-8">No raw mapping text available.</div>
+                          )
+                        ) : mappingText ? (
+                          <div className="narrative-prose">
+                            <MarkdownDisplay content={transformCitations(mappingText)} components={markdownComponents} />
+                          </div>
+                        ) : (
+                          <div className="text-text-muted text-sm text-center py-8">No narrative available.</div>
+                        )}
+                        {/* Options/themes merged into narrative sub-tab */}
+                        {parsedThemes && parsedThemes.length > 0 && (
+                          <div className="mt-6 border-t border-white/10 pt-4">
+                            <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
+                          </div>
+                        )}
+                        {graphTopology && (
+                          <div className="mt-4">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Graph topology</div>
+                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                              <MarkdownDisplay content={formatGraphForMd(graphTopology)} />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {(narrativeMode === "formatted" ? mappingText : rawMappingText) && (
-                      <div className="absolute top-4 right-4 z-10">
-                        <CopyButton
-                          text={narrativeMode === "formatted" ? mappingText : rawMappingText}
-                          label="Copy narrative"
-                          variant="icon"
-                        />
-                      </div>
-                    )}
-                    {narrativeMode === "raw" ? (
-                      rawMappingText ? (
-                        <pre className="text-xs leading-relaxed whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4">{rawMappingText}</pre>
-                      ) : (
-                        <div className="text-text-muted text-sm text-center py-8">No raw mapping text available.</div>
-                      )
-                    ) : mappingText ? (
-                      <div className="narrative-prose">
-                        <MarkdownDisplay content={transformCitations(mappingText)} components={markdownComponents} />
-                      </div>
-                    ) : (
-                      <div className="text-text-muted text-sm text-center py-8">No narrative available.</div>
-                    )}
-                    {/* Options/themes merged into narrative sub-tab */}
-                    {parsedThemes && parsedThemes.length > 0 && (
-                      <div className="mt-6 border-t border-white/10 pt-4">
-                        <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
-                      </div>
-                    )}
-                    {graphTopology && (
-                      <div className="mt-4">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Graph topology</div>
-                        <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                          <MarkdownDisplay content={formatGraphForMd(graphTopology)} />
-                        </div>
-                      </div>
-                    )}
-                    </div>
                     )}
                     {partitionSubTab === 'gates' && (
-                    <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
-                      <div className="mb-4">
-                        <div className="text-lg font-bold text-text-primary">Mapper Gates</div>
-                        <div className="text-xs text-text-muted mt-1">
-                          Structural decision points derived from conflict and tradeoff edges
+                      <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
+                        <div className="mb-4">
+                          <div className="text-lg font-bold text-text-primary">Mapper Gates</div>
+                          <div className="text-xs text-text-muted mt-1">
+                            Structural decision points derived from conflict and tradeoff edges
+                          </div>
                         </div>
-                      </div>
-                      {(() => {
-                        const gates = (mappingArtifact as any)?.gates || (mappingArtifact as any)?.output?.gates || [];
-                        if (!Array.isArray(gates) || gates.length === 0) {
-                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No gates found for this turn. This may mean all claims coexist peacefully.</div>;
-                        }
-                        return (
-                          <div className="space-y-3">
-                            {gates.map((g: any) => {
-                              const classification = String(g?.classification || '');
-                              const badgeClass = classification === 'forced_choice'
-                                ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                                : 'bg-sky-500/15 text-sky-400 border-sky-500/30';
-                              return (
-                                <div key={String(g?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
-                                  <div className="flex items-center justify-between gap-3 mb-3">
-                                    <div className="text-sm font-semibold text-text-primary">{String(g?.id || '')}</div>
-                                    <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badgeClass)}>
-                                      {classification === 'forced_choice' ? 'FORCED CHOICE' : 'CONDITIONAL GATE'}
-                                    </span>
-                                  </div>
-                                  <div className="space-y-2 text-xs">
-                                    <div><span className="text-text-muted">Construct:</span> <span className="text-text-primary">{String(g?.construct || '—')}</span></div>
-                                    <div><span className="text-text-muted">Claims:</span> <span className="text-text-primary font-mono">{Array.isArray(g?.claims) ? g.claims.join(', ') : '—'}</span></div>
-                                    <div><span className="text-text-muted">Fork:</span> <span className="text-text-secondary">{String(g?.fork || '—')}</span></div>
-                                    <div><span className="text-text-muted">Hinge:</span> <span className="text-text-primary">{String(g?.hinge || '—')}</span></div>
-                                    <div className="mt-2 p-3 bg-black/20 border border-border-subtle rounded-lg">
-                                      <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Question</div>
-                                      <div className="text-sm text-text-primary">{String(g?.question || '—')}</div>
+                        {(() => {
+                          const gates = (mappingArtifact as any)?.gates || (mappingArtifact as any)?.output?.gates || [];
+                          if (!Array.isArray(gates) || gates.length === 0) {
+                            return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No gates found for this turn. This may mean all claims coexist peacefully.</div>;
+                          }
+                          return (
+                            <div className="space-y-3">
+                              {gates.map((g: any) => {
+                                const classification = String(g?.classification || '');
+                                const badgeClass = classification === 'forced_choice'
+                                  ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                  : 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+                                return (
+                                  <div key={String(g?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                      <div className="text-sm font-semibold text-text-primary">{String(g?.id || '')}</div>
+                                      <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badgeClass)}>
+                                        {classification === 'forced_choice' ? 'FORCED CHOICE' : 'CONDITIONAL GATE'}
+                                      </span>
+                                    </div>
+                                    <div className="space-y-2 text-xs">
+                                      <div><span className="text-text-muted">Construct:</span> <span className="text-text-primary">{String(g?.construct || '—')}</span></div>
+                                      <div><span className="text-text-muted">Claims:</span> <span className="text-text-primary font-mono">{Array.isArray(g?.claims) ? g.claims.join(', ') : '—'}</span></div>
+                                      <div><span className="text-text-muted">Fork:</span> <span className="text-text-secondary">{String(g?.fork || '—')}</span></div>
+                                      <div><span className="text-text-muted">Hinge:</span> <span className="text-text-primary">{String(g?.hinge || '—')}</span></div>
+                                      <div className="mt-2 p-3 bg-black/20 border border-border-subtle rounded-lg">
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Question</div>
+                                        <div className="text-sm text-text-primary">{String(g?.question || '—')}</div>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
-                    </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     )}
                     {partitionSubTab === 'traversal' && (
-                    <div className="flex-1 overflow-y-auto relative custom-scrollbar">
-                    <div className="px-6 pt-6 pb-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="text-lg font-bold text-text-primary">Traversal Analysis</div>
-                          <div className="text-xs text-text-muted mt-1">
-                            Debug-only scan of conditionals and conflicts
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {(["conditions", "conflicts", "orphans"] as const).map((k) => {
-                            const active = traversalSubTab === k;
-                            const label =
-                              k === "conditions"
-                                ? "Conditions"
-                                : k === "conflicts"
-                                  ? "Conflicts"
-                                  : "Orphans";
-                            return (
-                              <button
-                                key={k}
-                                type="button"
-                                onClick={() => setTraversalSubTab(k)}
-                                className={clsx(
-                                  "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
-                                  active
-                                    ? "bg-surface-raised border-border-strong text-text-primary"
-                                    : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
-                                )}
-                              >
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {!sheetData.traversalAnalysis && (
-                      <div className="px-6 pb-6">
-                        <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
-                          Traversal analysis not computed for this turn
-                        </div>
-                      </div>
-                    )}
-
-                    {sheetData.traversalAnalysis && traversalSubTab === "conditions" && (
-                      <div className="px-6 pb-10 space-y-3">
-                        {sheetData.traversalAnalysis.conditions.length === 0 ? (
-                          <div className="text-sm text-text-muted">No conditionals detected.</div>
-                        ) : (
-                          sheetData.traversalAnalysis.conditions.map((c, idx) => {
-                            const badge =
-                              c.status === "passing"
-                                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                                : "bg-amber-500/15 text-amber-400 border-amber-500/30";
-                            return (
-                              <details
-                                key={c.id}
-                                open={idx === 0}
-                                className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
-                              >
-                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-text-primary truncate">
-                                      {c.clause ? c.clause : "Conditional cluster"}
-                                    </div>
-                                    <div className="text-[11px] text-text-muted mt-0.5">
-                                      {c.claimIds.length} claim(s) · {c.statements.length} statement(s)
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2 flex-none">
-                                    <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badge)}>
-                                      {c.status === "passing" ? "PASSING" : "FILTERED OUT"}
-                                    </span>
-                                    <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted font-mono">
-                                      {c.strength.toFixed(2)}
-                                    </span>
-                                  </div>
-                                </summary>
-                                <div className="px-4 pb-4 pt-1 space-y-3">
-                                  {c.filterReason && (
-                                    <div className="text-[12px] text-text-muted">
-                                      Filter: {c.filterReason}
-                                    </div>
-                                  )}
-                                  <div className="space-y-1">
-                                    <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Claims</div>
-                                    <div className="flex flex-wrap gap-2">
-                                      {c.claimIds.map((cid) => (
-                                        <button
-                                          key={cid}
-                                          type="button"
-                                          className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors"
-                                          onClick={() => {
-                                            const label = (semanticClaims || []).find((x: any) => String(x?.id || "") === cid)?.label;
-                                            setActiveTab("partition");
-                                            setPartitionSubTab("graph");
-                                            setSelectedNode({ id: cid, label: String(label || cid), supporters: [] });
-                                          }}
-                                        >
-                                          {cid}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Statements</div>
-                                    <div className="space-y-2">
-                                      {c.statements.map((s) => (
-                                        <div key={s.id} className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
-                                          <div className="flex items-center justify-between gap-3">
-                                            <div className="text-xs text-text-muted font-mono">
-                                              {s.id}
-                                              {typeof s.modelIndex === "number" ? ` · M${s.modelIndex}` : ""}
-                                              {s.stance ? ` · ${s.stance}` : ""}
-                                            </div>
-                                            {typeof s.confidence === "number" && (
-                                              <div className="text-xs text-text-muted font-mono">
-                                                {s.confidence.toFixed(2)}
-                                              </div>
-                                            )}
-                                          </div>
-                                          <div className="text-sm text-text-primary mt-2 leading-relaxed">
-                                            "{s.text}"
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </div>
-                              </details>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-
-                    {sheetData.traversalAnalysis && traversalSubTab === "conflicts" && (
-                      <div className="px-6 pb-10 space-y-3">
-                        {sheetData.traversalAnalysis.conflicts.length === 0 ? (
-                          <div className="text-sm text-text-muted">No conflicts detected.</div>
-                        ) : (
-                          sheetData.traversalAnalysis.conflicts.map((c, idx) => {
-                            const badge =
-                              c.status === "passing"
-                                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                                : "bg-amber-500/15 text-amber-400 border-amber-500/30";
-                            return (
-                              <details
-                                key={c.id}
-                                open={idx === 0}
-                                className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
-                              >
-                                <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-text-primary truncate">
-                                      {c.claimA.label} vs {c.claimB.label}
-                                    </div>
-                                    <div className="text-[11px] text-text-muted mt-0.5">
-                                      significance {c.significance.toFixed(2)} · threshold {c.threshold}
-                                    </div>
-                                  </div>
-                                  <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold flex-none", badge)}>
-                                    {c.status === "passing" ? "PASSING" : "FILTERED OUT"}
-                                  </span>
-                                </summary>
-                                <div className="px-4 pb-4 pt-1 space-y-2">
-                                  <div className="text-[12px] text-text-muted">
-                                    {c.status === "passing" ? "Pass:" : "Filter:"} {c.reason}
-                                  </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {[c.claimA, c.claimB].map((cl) => (
-                                      <button
-                                        key={cl.id}
-                                        type="button"
-                                        className="text-left bg-surface-highlight/10 border border-border-subtle rounded-lg p-3 hover:bg-surface-highlight/20 transition-colors"
-                                        onClick={() => {
-                                          setActiveTab("partition");
-                                          setPartitionSubTab("graph");
-                                          setSelectedNode({ id: cl.id, label: cl.label, supporters: [] });
-                                        }}
-                                      >
-                                        <div className="text-xs text-text-muted font-mono">{cl.id}</div>
-                                        <div className="text-sm font-semibold text-text-primary mt-1">{cl.label}</div>
-                                        <div className="text-[11px] text-text-muted mt-1">supporters {cl.supportCount}</div>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </details>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-
-                    {sheetData.traversalAnalysis && traversalSubTab === "orphans" && (
-                      <div className="px-6 pb-10 space-y-3">
-                        {sheetData.traversalAnalysis.orphans.length === 0 ? (
-                          <div className="text-sm text-text-muted">No orphaned conditionals.</div>
-                        ) : (
-                          sheetData.traversalAnalysis.orphans.map((o) => (
-                            <div key={o.statement.id} className="bg-surface border border-border-subtle rounded-xl p-4">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="text-xs text-text-muted font-mono">
-                                  {o.statement.id}
-                                  {typeof o.statement.modelIndex === "number" ? ` · M${o.statement.modelIndex}` : ""}
-                                  {o.statement.stance ? ` · ${o.statement.stance}` : ""}
-                                </div>
-                                <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">
-                                  ORPHAN
-                                </span>
-                              </div>
-                              {o.clause && (
-                                <div className="text-[12px] text-text-muted mt-2">
-                                  Extracted clause: {o.clause}
-                                </div>
-                              )}
-                              <div className="text-[12px] text-text-muted mt-1">
-                                Reason: {o.reason}
-                              </div>
-                              <div className="text-sm text-text-primary mt-3 leading-relaxed">
-                                "{o.statement.text}"
+                      <div className="flex-1 overflow-y-auto relative custom-scrollbar">
+                        <div className="px-6 pt-6 pb-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="text-lg font-bold text-text-primary">Traversal Analysis</div>
+                              <div className="text-xs text-text-muted mt-1">
+                                Debug-only scan of conditionals and conflicts
                               </div>
                             </div>
-                          ))
+                            <div className="flex items-center gap-2">
+                              {(["conditions", "conflicts", "orphans"] as const).map((k) => {
+                                const active = traversalSubTab === k;
+                                const label =
+                                  k === "conditions"
+                                    ? "Conditions"
+                                    : k === "conflicts"
+                                      ? "Conflicts"
+                                      : "Orphans";
+                                return (
+                                  <button
+                                    key={k}
+                                    type="button"
+                                    onClick={() => setTraversalSubTab(k)}
+                                    className={clsx(
+                                      "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+                                      active
+                                        ? "bg-surface-raised border-border-strong text-text-primary"
+                                        : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
+                                    )}
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        {!sheetData.traversalAnalysis && (
+                          <div className="px-6 pb-6">
+                            <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
+                              Traversal analysis not computed for this turn
+                            </div>
+                          </div>
+                        )}
+
+                        {sheetData.traversalAnalysis && traversalSubTab === "conditions" && (
+                          <div className="px-6 pb-10 space-y-3">
+                            {sheetData.traversalAnalysis.conditions.length === 0 ? (
+                              <div className="text-sm text-text-muted">No conditionals detected.</div>
+                            ) : (
+                              sheetData.traversalAnalysis.conditions.map((c, idx) => {
+                                const badge =
+                                  c.status === "passing"
+                                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                    : "bg-amber-500/15 text-amber-400 border-amber-500/30";
+                                return (
+                                  <details
+                                    key={c.id}
+                                    open={idx === 0}
+                                    className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+                                  >
+                                    <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="text-sm font-semibold text-text-primary truncate">
+                                          {c.clause ? c.clause : "Conditional cluster"}
+                                        </div>
+                                        <div className="text-[11px] text-text-muted mt-0.5">
+                                          {c.claimIds.length} claim(s) · {c.statements.length} statement(s)
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-none">
+                                        <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badge)}>
+                                          {c.status === "passing" ? "PASSING" : "FILTERED OUT"}
+                                        </span>
+                                        <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted font-mono">
+                                          {c.strength.toFixed(2)}
+                                        </span>
+                                      </div>
+                                    </summary>
+                                    <div className="px-4 pb-4 pt-1 space-y-3">
+                                      {c.filterReason && (
+                                        <div className="text-[12px] text-text-muted">
+                                          Filter: {c.filterReason}
+                                        </div>
+                                      )}
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Claims</div>
+                                        <div className="flex flex-wrap gap-2">
+                                          {c.claimIds.map((cid) => (
+                                            <button
+                                              key={cid}
+                                              type="button"
+                                              className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors"
+                                              onClick={() => {
+                                                const label = (semanticClaims || []).find((x: any) => String(x?.id || "") === cid)?.label;
+                                                setActiveTab("partition");
+                                                setPartitionSubTab("graph");
+                                                setSelectedNode({ id: cid, label: String(label || cid), supporters: [] });
+                                              }}
+                                            >
+                                              {cid}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Statements</div>
+                                        <div className="space-y-2">
+                                          {c.statements.map((s) => (
+                                            <div key={s.id} className="bg-surface-highlight/10 border border-border-subtle rounded-lg p-3">
+                                              <div className="flex items-center justify-between gap-3">
+                                                <div className="text-xs text-text-muted font-mono">
+                                                  {s.id}
+                                                  {typeof s.modelIndex === "number" ? ` · M${s.modelIndex}` : ""}
+                                                  {s.stance ? ` · ${s.stance}` : ""}
+                                                </div>
+                                                {typeof s.confidence === "number" && (
+                                                  <div className="text-xs text-text-muted font-mono">
+                                                    {s.confidence.toFixed(2)}
+                                                  </div>
+                                                )}
+                                              </div>
+                                              <div className="text-sm text-text-primary mt-2 leading-relaxed">
+                                                "{s.text}"
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </details>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+
+                        {sheetData.traversalAnalysis && traversalSubTab === "conflicts" && (
+                          <div className="px-6 pb-10 space-y-3">
+                            {sheetData.traversalAnalysis.conflicts.length === 0 ? (
+                              <div className="text-sm text-text-muted">No conflicts detected.</div>
+                            ) : (
+                              sheetData.traversalAnalysis.conflicts.map((c, idx) => {
+                                const badge =
+                                  c.status === "passing"
+                                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                    : "bg-amber-500/15 text-amber-400 border-amber-500/30";
+                                return (
+                                  <details
+                                    key={c.id}
+                                    open={idx === 0}
+                                    className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+                                  >
+                                    <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="text-sm font-semibold text-text-primary truncate">
+                                          {c.claimA.label} vs {c.claimB.label}
+                                        </div>
+                                        <div className="text-[11px] text-text-muted mt-0.5">
+                                          significance {c.significance.toFixed(2)} · threshold {c.threshold}
+                                        </div>
+                                      </div>
+                                      <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold flex-none", badge)}>
+                                        {c.status === "passing" ? "PASSING" : "FILTERED OUT"}
+                                      </span>
+                                    </summary>
+                                    <div className="px-4 pb-4 pt-1 space-y-2">
+                                      <div className="text-[12px] text-text-muted">
+                                        {c.status === "passing" ? "Pass:" : "Filter:"} {c.reason}
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {[c.claimA, c.claimB].map((cl) => (
+                                          <button
+                                            key={cl.id}
+                                            type="button"
+                                            className="text-left bg-surface-highlight/10 border border-border-subtle rounded-lg p-3 hover:bg-surface-highlight/20 transition-colors"
+                                            onClick={() => {
+                                              setActiveTab("partition");
+                                              setPartitionSubTab("graph");
+                                              setSelectedNode({ id: cl.id, label: cl.label, supporters: [] });
+                                            }}
+                                          >
+                                            <div className="text-xs text-text-muted font-mono">{cl.id}</div>
+                                            <div className="text-sm font-semibold text-text-primary mt-1">{cl.label}</div>
+                                            <div className="text-[11px] text-text-muted mt-1">supporters {cl.supportCount}</div>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </details>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+
+                        {sheetData.traversalAnalysis && traversalSubTab === "orphans" && (
+                          <div className="px-6 pb-10 space-y-3">
+                            {sheetData.traversalAnalysis.orphans.length === 0 ? (
+                              <div className="text-sm text-text-muted">No orphaned conditionals.</div>
+                            ) : (
+                              sheetData.traversalAnalysis.orphans.map((o) => (
+                                <div key={o.statement.id} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-xs text-text-muted font-mono">
+                                      {o.statement.id}
+                                      {typeof o.statement.modelIndex === "number" ? ` · M${o.statement.modelIndex}` : ""}
+                                      {o.statement.stance ? ` · ${o.statement.stance}` : ""}
+                                    </div>
+                                    <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">
+                                      ORPHAN
+                                    </span>
+                                  </div>
+                                  {o.clause && (
+                                    <div className="text-[12px] text-text-muted mt-2">
+                                      Extracted clause: {o.clause}
+                                    </div>
+                                  )}
+                                  <div className="text-[12px] text-text-muted mt-1">
+                                    Reason: {o.reason}
+                                  </div>
+                                  <div className="text-sm text-text-primary mt-3 leading-relaxed">
+                                    "{o.statement.text}"
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                    </div>
                     )}
                   </m.div>
                 )}
@@ -2309,293 +2309,293 @@ export const DecisionMapSheet = React.memo(() => {
                       ))}
                     </div>
                     {landscapeSubTab === 'space' && (
-                    <div className="flex-1 overflow-hidden relative">
-                      <ParagraphSpaceView
-                        graph={sheetData.mappingArtifact?.geometry?.substrate || null}
-                        paragraphProjection={sheetData.paragraphProjection}
-                        claims={sheetData.semanticClaims}
-                        shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}
-                        queryRelevance={(sheetData.mappingArtifact as any)?.geometry?.query?.relevance || null}
-                        mutualEdges={sheetData.mappingArtifact?.geometry?.substrate?.mutualEdges || null}
-                        strongEdges={sheetData.mappingArtifact?.geometry?.substrate?.strongEdges || null}
-                        regions={sheetData.preSemanticRegions}
-                        traversalState={sheetData.aiTurn?.singularity?.traversalState || null}
-                        preSemantic={(sheetData.mappingArtifact as any)?.geometry?.preSemantic || null}
-                        embeddingStatus={(sheetData.mappingArtifact as any)?.geometry?.embeddingStatus || null}
-                        batchResponses={(() => {
-                          const responses = (sheetData.aiTurn as any)?.batch?.responses || {};
-                          const entries = Object.entries(responses);
-                          let fallbackIndex = 1;
-                          return entries.map(([providerId, r]: any) => {
-                            const modelIndex = typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++;
-                            return { modelIndex, text: String(r?.text || ''), providerId: String(providerId) };
-                          });
-                        })()}
-                        completeness={null}
-                        shape={sheetData.shape}
-                      />
-                    </div>
+                      <div className="flex-1 overflow-hidden relative">
+                        <ParagraphSpaceView
+                          graph={sheetData.mappingArtifact?.geometry?.substrate || null}
+                          paragraphProjection={sheetData.paragraphProjection}
+                          claims={sheetData.semanticClaims}
+                          shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}
+                          queryRelevance={(sheetData.mappingArtifact as any)?.geometry?.query?.relevance || null}
+                          mutualEdges={sheetData.mappingArtifact?.geometry?.substrate?.mutualEdges || null}
+                          strongEdges={sheetData.mappingArtifact?.geometry?.substrate?.strongEdges || null}
+                          regions={sheetData.preSemanticRegions}
+                          traversalState={sheetData.aiTurn?.singularity?.traversalState || null}
+                          preSemantic={(sheetData.mappingArtifact as any)?.geometry?.preSemantic || null}
+                          embeddingStatus={(sheetData.mappingArtifact as any)?.geometry?.embeddingStatus || null}
+                          batchResponses={(() => {
+                            const responses = (sheetData.aiTurn as any)?.batch?.responses || {};
+                            const entries = Object.entries(responses);
+                            let fallbackIndex = 1;
+                            return entries.map(([providerId, r]: any) => {
+                              const modelIndex = typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++;
+                              return { modelIndex, text: String(r?.text || ''), providerId: String(providerId) };
+                            });
+                          })()}
+                          completeness={null}
+                          shape={sheetData.shape}
+                        />
+                      </div>
                     )}
                     {landscapeSubTab === 'regions' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                      <div className="mb-4">
-                        <div className="text-lg font-bold text-text-primary">Regions</div>
-                        <div className="text-xs text-text-muted mt-1">Pre-semantic region profiles</div>
-                      </div>
-                      {(() => {
-                        const regions = sheetData.preSemanticRegions;
-                        if (!Array.isArray(regions) || regions.length === 0) {
-                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No region data available for this turn.</div>;
-                        }
-                        return (
-                          <div className="space-y-3">
-                            {regions.map((r: any) => (
-                              <div key={String(r?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="flex items-center justify-between gap-3 mb-2">
-                                  <div className="text-sm font-semibold text-text-primary">{String(r?.id || 'Region')}</div>
-                                  {r?.tier && (
-                                    <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">{String(r.tier)}</span>
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="mb-4">
+                          <div className="text-lg font-bold text-text-primary">Regions</div>
+                          <div className="text-xs text-text-muted mt-1">Pre-semantic region profiles</div>
+                        </div>
+                        {(() => {
+                          const regions = sheetData.preSemanticRegions;
+                          if (!Array.isArray(regions) || regions.length === 0) {
+                            return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No region data available for this turn.</div>;
+                          }
+                          return (
+                            <div className="space-y-3">
+                              {regions.map((r: any) => (
+                                <div key={String(r?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="flex items-center justify-between gap-3 mb-2">
+                                    <div className="text-sm font-semibold text-text-primary">{String(r?.id || 'Region')}</div>
+                                    {r?.tier && (
+                                      <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">{String(r.tier)}</span>
+                                    )}
+                                  </div>
+                                  {r?.profile && <div className="text-xs text-text-secondary mb-2">{String(r.profile)}</div>}
+                                  {Array.isArray(r?.memberIds) && r.memberIds.length > 0 && (
+                                    <div className="text-[11px] text-text-muted">Members: {r.memberIds.length} paragraphs</div>
                                   )}
                                 </div>
-                                {r?.profile && <div className="text-xs text-text-secondary mb-2">{String(r.profile)}</div>}
-                                {Array.isArray(r?.memberIds) && r.memberIds.length > 0 && (
-                                  <div className="text-[11px] text-text-muted">Members: {r.memberIds.length} paragraphs</div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                    </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     )}
                     {landscapeSubTab === 'query' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="mb-4 flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-lg font-bold text-text-primary">Query relevance</div>
-                        <div className="text-xs text-text-muted mt-1">
-                          Statement-level scores against the current prompt query
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[11px] text-text-muted">Statements</div>
-                        <div className="text-[11px] text-text-muted">{queryRelevanceRows.length.toLocaleString()} shown</div>
-                      </div>
-                    </div>
-
-                    <div className="mb-4 flex flex-wrap items-center gap-3">
-                      <input
-                        value={queryRelevanceSearch}
-                        onChange={(e) => setQueryRelevanceSearch(e.target.value)}
-                        placeholder="Search id or text…"
-                        className="w-full md:w-[360px] bg-black/30 border border-white/10 rounded px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
-                      />
-                      <div className="flex items-center gap-2">
-                        {(["all", "high", "medium", "low"] as const).map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            className={clsx(
-                              "px-2.5 py-1 rounded-full text-[11px] border",
-                              queryRelevanceTier === t
-                                ? "bg-white/10 border-brand-500 text-text-primary"
-                                : "bg-transparent border-border-subtle text-text-muted"
-                            )}
-                            onClick={() => setQueryRelevanceTier(t)}
-                          >
-                            {t === "all" ? "All tiers" : t}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="flex-1" />
-
-                      <div className="flex items-center gap-2">
-                        <CopyButton
-                          text={queryRelevanceScoresCsv}
-                          buttonText="Copy scores (CSV)"
-                          variant="pill"
-                          disabled={queryRelevanceRows.length === 0}
-                        />
-                        <CopyButton
-                          text={queryRelevanceScoresJson}
-                          buttonText="Copy scores (JSON)"
-                          variant="pill"
-                          disabled={queryRelevanceRows.length === 0}
-                        />
-                      </div>
-                    </div>
-
-                    {queryRelevanceRows.length === 0 ? (
-                      <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
-                        No query relevance scores found for this turn.
-                      </div>
-                    ) : (
-                      <div className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
-                        <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-border-subtle text-[10px] uppercase tracking-wider text-text-muted font-semibold">
-                          <button
-                            type="button"
-                            className={clsx("col-span-2 text-left", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "id";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
-                            }}
-                          >
-                            Statement
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-left", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "tier";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
-                            }}
-                          >
-                            Tier
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "composite";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
-                            }}
-                          >
-                            Composite
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "querySim";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
-                            }}
-                          >
-                            Query
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "novelty";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
-                            }}
-                          >
-                            Novelty
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "subConsensus";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
-                            }}
-                          >
-                            Subcons
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-left", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "stance";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
-                            }}
-                          >
-                            Stance
-                          </button>
-                          <button
-                            type="button"
-                            className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
-                            onClick={() => {
-                              const nextKey: QueryRelevanceSortKey = "modelIndex";
-                              if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                              else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
-                            }}
-                          >
-                            Model
-                          </button>
-                          <div className="col-span-3">Text</div>
-                        </div>
-                        <div className="divide-y divide-border-subtle">
-                          {queryRelevanceRows.map((r) => (
-                            <div key={r.id} className="grid grid-cols-12 gap-2 px-4 py-3 text-xs">
-                              <div className="col-span-2 font-mono text-[11px] text-text-secondary break-all">{r.id}</div>
-                              <div className="col-span-1 text-[11px] text-text-muted">{r.tier}</div>
-                              <div className="col-span-1 text-right tabular-nums text-text-primary">
-                                {typeof r.composite === "number" ? r.composite.toFixed(3) : "—"}
-                              </div>
-                              <div className="col-span-1 text-right tabular-nums text-text-muted">
-                                {typeof r.querySim === "number" ? r.querySim.toFixed(3) : "—"}
-                              </div>
-                              <div className="col-span-1 text-right tabular-nums text-text-muted">
-                                {typeof r.novelty === "number" ? r.novelty.toFixed(3) : "—"}
-                              </div>
-                              <div className="col-span-1 text-right tabular-nums text-text-muted">
-                                {typeof r.subConsensus === "number" ? r.subConsensus.toFixed(0) : "—"}
-                              </div>
-                              <div className="col-span-1 text-[11px] text-text-muted">{r.stance || "—"}</div>
-                              <div className="col-span-1 text-right tabular-nums text-text-muted">
-                                {typeof r.modelIndex === "number" ? r.modelIndex : "—"}
-                              </div>
-                              <div className="col-span-3 text-text-primary whitespace-pre-wrap break-words">
-                                {r.text || "—"}
-                              </div>
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="mb-4 flex items-start justify-between gap-4">
+                          <div>
+                            <div className="text-lg font-bold text-text-primary">Query relevance</div>
+                            <div className="text-xs text-text-muted mt-1">
+                              Statement-level scores against the current prompt query
                             </div>
-                          ))}
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[11px] text-text-muted">Statements</div>
+                            <div className="text-[11px] text-text-muted">{queryRelevanceRows.length.toLocaleString()} shown</div>
+                          </div>
                         </div>
+
+                        <div className="mb-4 flex flex-wrap items-center gap-3">
+                          <input
+                            value={queryRelevanceSearch}
+                            onChange={(e) => setQueryRelevanceSearch(e.target.value)}
+                            placeholder="Search id or text…"
+                            className="w-full md:w-[360px] bg-black/30 border border-white/10 rounded px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
+                          />
+                          <div className="flex items-center gap-2">
+                            {(["all", "high", "medium", "low"] as const).map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                className={clsx(
+                                  "px-2.5 py-1 rounded-full text-[11px] border",
+                                  queryRelevanceTier === t
+                                    ? "bg-white/10 border-brand-500 text-text-primary"
+                                    : "bg-transparent border-border-subtle text-text-muted"
+                                )}
+                                onClick={() => setQueryRelevanceTier(t)}
+                              >
+                                {t === "all" ? "All tiers" : t}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="flex-1" />
+
+                          <div className="flex items-center gap-2">
+                            <CopyButton
+                              text={queryRelevanceScoresCsv}
+                              buttonText="Copy scores (CSV)"
+                              variant="pill"
+                              disabled={queryRelevanceRows.length === 0}
+                            />
+                            <CopyButton
+                              text={queryRelevanceScoresJson}
+                              buttonText="Copy scores (JSON)"
+                              variant="pill"
+                              disabled={queryRelevanceRows.length === 0}
+                            />
+                          </div>
+                        </div>
+
+                        {queryRelevanceRows.length === 0 ? (
+                          <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
+                            No query relevance scores found for this turn.
+                          </div>
+                        ) : (
+                          <div className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                            <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-border-subtle text-[10px] uppercase tracking-wider text-text-muted font-semibold">
+                              <button
+                                type="button"
+                                className={clsx("col-span-2 text-left", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "id";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
+                                }}
+                              >
+                                Statement
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-left", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "tier";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                                }}
+                              >
+                                Tier
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "composite";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                                }}
+                              >
+                                Composite
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "querySim";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                                }}
+                              >
+                                Query
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "recusant";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                                }}
+                              >
+                                Recusant
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "subConsensus";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
+                                }}
+                              >
+                                Subcons
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-left", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "stance";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
+                                }}
+                              >
+                                Stance
+                              </button>
+                              <button
+                                type="button"
+                                className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
+                                onClick={() => {
+                                  const nextKey: QueryRelevanceSortKey = "modelIndex";
+                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
+                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("asc"); }
+                                }}
+                              >
+                                Model
+                              </button>
+                              <div className="col-span-3">Text</div>
+                            </div>
+                            <div className="divide-y divide-border-subtle">
+                              {queryRelevanceRows.map((r) => (
+                                <div key={r.id} className="grid grid-cols-12 gap-2 px-4 py-3 text-xs">
+                                  <div className="col-span-2 font-mono text-[11px] text-text-secondary break-all">{r.id}</div>
+                                  <div className="col-span-1 text-[11px] text-text-muted">{r.tier}</div>
+                                  <div className="col-span-1 text-right tabular-nums text-text-primary">
+                                    {typeof r.composite === "number" ? r.composite.toFixed(3) : "—"}
+                                  </div>
+                                  <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                    {typeof r.querySim === "number" ? r.querySim.toFixed(3) : "—"}
+                                  </div>
+                                  <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                    {typeof r.recusant === "number" ? r.recusant.toFixed(3) : "—"}
+                                  </div>
+                                  <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                    {typeof r.subConsensus === "number" ? r.subConsensus.toFixed(0) : "—"}
+                                  </div>
+                                  <div className="col-span-1 text-[11px] text-text-muted">{r.stance || "—"}</div>
+                                  <div className="col-span-1 text-right tabular-nums text-text-muted">
+                                    {typeof r.modelIndex === "number" ? r.modelIndex : "—"}
+                                  </div>
+                                  <div className="col-span-3 text-text-primary whitespace-pre-wrap break-words">
+                                    {r.text || "—"}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                    </div>
                     )}
                     {landscapeSubTab === 'geometry' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                      <div className="mb-4">
-                        <div className="text-lg font-bold text-text-primary">Geometry</div>
-                        <div className="text-xs text-text-muted mt-1">Clustering summary, substrate topology, and shape classification</div>
-                      </div>
-                      {(() => {
-                        const geo = (sheetData.mappingArtifact as any)?.geometry;
-                        const substrate = geo?.substrate;
-                        const shapeVal = sheetData.shape;
-                        if (!geo) {
-                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No geometry data available for this turn.</div>;
-                        }
-                        return (
-                          <div className="space-y-4">
-                            {shapeVal && (
-                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shape classification</div>
-                                <div className="text-sm text-text-primary">{typeof shapeVal === 'string' ? shapeVal : JSON.stringify(shapeVal)}</div>
-                              </div>
-                            )}
-                            {substrate && (
-                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Substrate</div>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                                  <div><span className="text-text-muted">kNN edges:</span> <span className="text-text-primary">{substrate.knnEdges?.length ?? '—'}</span></div>
-                                  <div><span className="text-text-muted">Mutual edges:</span> <span className="text-text-primary">{substrate.mutualEdges?.length ?? '—'}</span></div>
-                                  <div><span className="text-text-muted">Strong edges:</span> <span className="text-text-primary">{substrate.strongEdges?.length ?? '—'}</span></div>
-                                  <div><span className="text-text-muted">Density:</span> <span className="text-text-primary">{typeof substrate.density === 'number' ? substrate.density.toFixed(3) : '—'}</span></div>
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="mb-4">
+                          <div className="text-lg font-bold text-text-primary">Geometry</div>
+                          <div className="text-xs text-text-muted mt-1">Clustering summary, substrate topology, and shape classification</div>
+                        </div>
+                        {(() => {
+                          const geo = (sheetData.mappingArtifact as any)?.geometry;
+                          const substrate = geo?.substrate;
+                          const shapeVal = sheetData.shape;
+                          if (!geo) {
+                            return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No geometry data available for this turn.</div>;
+                          }
+                          return (
+                            <div className="space-y-4">
+                              {shapeVal && (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shape classification</div>
+                                  <div className="text-sm text-text-primary">{typeof shapeVal === 'string' ? shapeVal : JSON.stringify(shapeVal)}</div>
                                 </div>
-                              </div>
-                            )}
-                            {geo.embeddingStatus && (
-                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Embedding status</div>
-                                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(geo.embeddingStatus, null, 2)}</pre>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
+                              )}
+                              {substrate && (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Substrate</div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                                    <div><span className="text-text-muted">kNN edges:</span> <span className="text-text-primary">{substrate.knnEdges?.length ?? '—'}</span></div>
+                                    <div><span className="text-text-muted">Mutual edges:</span> <span className="text-text-primary">{substrate.mutualEdges?.length ?? '—'}</span></div>
+                                    <div><span className="text-text-muted">Strong edges:</span> <span className="text-text-primary">{substrate.strongEdges?.length ?? '—'}</span></div>
+                                    <div><span className="text-text-muted">Density:</span> <span className="text-text-primary">{typeof substrate.density === 'number' ? substrate.density.toFixed(3) : '—'}</span></div>
+                                  </div>
+                                </div>
+                              )}
+                              {geo.embeddingStatus && (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Embedding status</div>
+                                  <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(geo.embeddingStatus, null, 2)}</pre>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     )}
                   </m.div>
                 )}
@@ -2635,416 +2635,416 @@ export const DecisionMapSheet = React.memo(() => {
                       ))}
                     </div>
                     {evidenceSubTab === 'extraction' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                      <ShadowAuditView
-                        audit={shadowDeltaForView?.audit}
-                        topUnreferenced={shadowDeltaForView?.unreferenced}
-                        processingTimeMs={shadowDeltaForView?.processingTimeMs}
-                      />
-                      {shadowDeltaForView && (
-                        <div className="mt-4 bg-surface border border-border-subtle rounded-xl p-4">
-                          <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shadow delta stats</div>
-                          <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(shadowDeltaForView.audit || {}, null, 2)}</pre>
-                        </div>
-                      )}
-                    </div>
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <ShadowAuditView
+                          audit={shadowDeltaForView?.audit}
+                          topUnreferenced={shadowDeltaForView?.unreferenced}
+                          processingTimeMs={shadowDeltaForView?.processingTimeMs}
+                        />
+                        {shadowDeltaForView && (
+                          <div className="mt-4 bg-surface border border-border-subtle rounded-xl p-4">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shadow delta stats</div>
+                            <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(shadowDeltaForView.audit || {}, null, 2)}</pre>
+                          </div>
+                        )}
+                      </div>
                     )}
                     {(evidenceSubTab === 'statements' || evidenceSubTab === 'paragraphs') && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="mb-4 flex items-start justify-between gap-4">
-                      <ShadowAuditView
-                        audit={shadowDeltaForView?.audit}
-                        topUnreferenced={shadowDeltaForView?.unreferenced}
-                        processingTimeMs={shadowDeltaForView?.processingTimeMs}
-                      />
-                      <div className="text-right">
-                        <div className="text-[11px] text-text-muted">Evidence</div>
-                        <div className="text-[11px] text-text-muted">
-                          {evidenceViewMode === "statements"
-                            ? `${filteredShadowStatements.length.toLocaleString()} shown`
-                            : `${filteredShadowParagraphs.length.toLocaleString()} shown`}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mb-4 bg-surface border border-border-subtle rounded-xl p-3">
-                      {evidenceViewMode === "statements" ? (() => {
-                        const s = computeEvidenceStatsFromStatements(filteredShadowStatements, shadowUnreferencedIdSet);
-                        return (
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Statements: {s.total.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Ref: {s.referenced.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Unref: {s.unreferenced.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">SEQ: {s.bySignal.sequence.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">TENS: {s.bySignal.tension.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">COND: {s.bySignal.conditional.toLocaleString()}</span>
-                          </div>
-                        );
-                      })() : (() => {
-                        const p = computeEvidenceStatsFromParagraphs(filteredShadowParagraphs, shadowUnreferencedIdSet);
-                        return (
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Paragraphs: {p.total.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Contested: {p.contested.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Ref: {p.referenced.toLocaleString()}</span>
-                            <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Unref: {p.unreferenced.toLocaleString()}</span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3 mb-4">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className={clsx(
-                            "px-3 py-1.5 rounded-full text-xs border",
-                            evidenceViewMode === "statements"
-                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
-                              : "bg-transparent border-border-subtle text-text-muted"
-                          )}
-                          onClick={() => setEvidenceViewMode("statements")}
-                        >
-                          Statements
-                        </button>
-                        <button
-                          type="button"
-                          className={clsx(
-                            "px-3 py-1.5 rounded-full text-xs border",
-                            evidenceViewMode === "paragraphs"
-                              ? "bg-brand-500/20 border-brand-500 text-text-primary"
-                              : "bg-transparent border-border-subtle text-text-muted"
-                          )}
-                          onClick={() => setEvidenceViewMode("paragraphs")}
-                        >
-                          Paragraphs
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {[
-                          { key: "all", label: "All" },
-                          { key: "prescriptive", label: "Prescriptive" },
-                          { key: "cautionary", label: "Cautionary" },
-                          { key: "prerequisite", label: "Prerequisites" },
-                          { key: "dependent", label: "Dependents" },
-                          { key: "assertive", label: "Assertive" },
-                          { key: "uncertain", label: "Uncertain" },
-                        ].map((f) => (
-                          <button
-                            key={f.key}
-                            type="button"
-                            className={clsx(
-                              "px-2.5 py-1 rounded-full text-[11px] border",
-                              evidenceStanceFilter === f.key
-                                ? "bg-white/10 border-brand-500 text-text-primary"
-                                : "bg-transparent border-border-subtle text-text-muted"
-                            )}
-                            onClick={() => setEvidenceStanceFilter(f.key)}
-                          >
-                            {f.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {[
-                          { key: "all" as const, label: "All" },
-                          { key: "referenced" as const, label: "Referenced" },
-                          { key: "unreferenced" as const, label: "Unreferenced" },
-                        ].map((f) => (
-                          <button
-                            key={f.key}
-                            type="button"
-                            className={clsx(
-                              "px-2.5 py-1 rounded-full text-[11px] border",
-                              evidenceRefFilter === f.key
-                                ? "bg-white/10 border-brand-500 text-text-primary"
-                                : "bg-transparent border-border-subtle text-text-muted"
-                            )}
-                            onClick={() => setEvidenceRefFilter(f.key)}
-                          >
-                            {f.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <select
-                          className="bg-black/30 border border-white/10 rounded px-2 py-1 text-[11px] text-text-primary"
-                          value={evidenceModelFilter === "all" ? "all" : String(evidenceModelFilter)}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setEvidenceModelFilter(v === "all" ? "all" : Number(v));
-                          }}
-                          disabled={evidenceModelIndices.length === 0}
-                        >
-                          <option value="all">All models</option>
-                          {evidenceModelIndices.map((mi) => (
-                            <option key={mi} value={String(mi)}>Model {mi}</option>
-                          ))}
-                        </select>
-                      </div>
-                      {evidenceViewMode === "statements" ? (
-                        <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
-                            <input
-                              type="checkbox"
-                              className="rounded"
-                              checked={evidenceSignalFilters.sequence}
-                              onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, sequence: e.target.checked }))}
-                            />
-                            SEQ
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
-                            <input
-                              type="checkbox"
-                              className="rounded"
-                              checked={evidenceSignalFilters.tension}
-                              onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, tension: e.target.checked }))}
-                            />
-                            TENS
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
-                            <input
-                              type="checkbox"
-                              className="rounded"
-                              checked={evidenceSignalFilters.conditional}
-                              onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, conditional: e.target.checked }))}
-                            />
-                            COND
-                          </label>
-                        </div>
-                      ) : (
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
-                          <input
-                            type="checkbox"
-                            className="rounded"
-                            checked={evidenceContestedOnly}
-                            onChange={(e) => setEvidenceContestedOnly(e.target.checked)}
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="mb-4 flex items-start justify-between gap-4">
+                          <ShadowAuditView
+                            audit={shadowDeltaForView?.audit}
+                            topUnreferenced={shadowDeltaForView?.unreferenced}
+                            processingTimeMs={shadowDeltaForView?.processingTimeMs}
                           />
-                          Contested
-                        </label>
-                      )}
-                    </div>
-                    {evidenceViewMode === "statements" && (
-                      <div className="space-y-2">
-                        {filteredShadowStatements.length === 0 && (
-                          <div className="text-sm text-text-muted">No statements match the current filters.</div>
-                        )}
-                        {filteredShadowStatements.map((s: any) => {
-                          const id = String(s?.id || "");
-                          const stance = String(s?.stance || "");
-                          const modelIndex = typeof s?.modelIndex === "number" ? s.modelIndex : null;
-                          const isUnreferenced = id && shadowUnreferencedIdSet.has(id);
-                          const signals = s?.signals || {};
-                          const hasSequence = !!signals.sequence;
-                          const hasTension = !!signals.tension;
-                          const hasConditional = !!signals.conditional;
-                          const regionId = String(s?.geometricCoordinates?.regionId || "").trim();
-                          const linkedClaimIds = id ? (statementToClaimIds.get(id) || []) : [];
-                          const linkedClaims = linkedClaimIds.map((cid) => claimById.get(cid)).filter(Boolean);
-                          return (
-                            <div
-                              key={id || s?.text}
-                              className="p-3 rounded-xl bg-surface border border-border-subtle flex flex-col gap-2"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
-                                    {stance || "unknown"}
-                                  </span>
-                                  {isUnreferenced && (
-                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-[10px] font-mono uppercase text-amber-400">
-                                      Unreferenced
-                                    </span>
-                                  )}
-                                  {modelIndex != null && (
-                                    <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
-                                      Model {modelIndex}
-                                    </span>
-                                  )}
-                                  {regionId && (
-                                    <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
-                                      Region {regionId}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1 text-[10px] text-text-muted">
-                                  {hasSequence && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">SEQ</span>}
-                                  {hasTension && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">TENS</span>}
-                                  {hasConditional && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">COND</span>}
-                                </div>
-                              </div>
-                              <div className="text-sm text-text-primary leading-relaxed">
-                                {s?.text}
-                              </div>
-                              {linkedClaims.length > 0 && (
-                                <div className="pt-2 border-t border-white/5">
-                                  <div className="text-[10px] text-text-muted mb-1">Claims:</div>
-                                  <div className="flex flex-wrap gap-2">
-                                    {linkedClaims.slice(0, 4).map((c: any) => (
-                                      <span key={String(c?.id)} className="px-2 py-1 rounded-full bg-amber-500/5 border border-amber-400/20 text-[10px] text-amber-300 truncate max-w-[260px]">
-                                        {String(c?.label || c?.id)}
-                                      </span>
-                                    ))}
-                                    {linkedClaims.length > 4 && (
-                                      <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle text-[10px] text-text-muted">
-                                        +{linkedClaims.length - 4} more
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
+                          <div className="text-right">
+                            <div className="text-[11px] text-text-muted">Evidence</div>
+                            <div className="text-[11px] text-text-muted">
+                              {evidenceViewMode === "statements"
+                                ? `${filteredShadowStatements.length.toLocaleString()} shown`
+                                : `${filteredShadowParagraphs.length.toLocaleString()} shown`}
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {evidenceViewMode === "paragraphs" && (
-                      <div className="space-y-2">
-                        {filteredShadowParagraphs.length === 0 && (
-                          <div className="text-sm text-text-muted">No paragraphs match the current filters.</div>
-                        )}
-                        {filteredShadowParagraphs.map((p: any) => {
-                          const key = String(p?.id || `${p?.modelIndex}:${p?.paragraphIndex}`);
-                          const stance = String(p?.dominantStance || "");
-                          const contested = !!p?.contested;
-                          const byModel = typeof p?.modelIndex === "number" ? p.modelIndex : null;
-                          const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
-                          const linkedClaimIdSet = new Set<string>();
-                          for (const raw of ids) {
-                            const sid = String(raw || "").trim();
-                            if (!sid) continue;
-                            const cids = statementToClaimIds.get(sid) || [];
-                            for (const cid of cids) linkedClaimIdSet.add(cid);
-                          }
-                          const linkedClaims = Array.from(linkedClaimIdSet).map((cid) => claimById.get(cid)).filter(Boolean);
-                          let hasUnref = false;
-                          let hasRef = false;
-                          for (const raw of ids) {
-                            const id = String(raw || "").trim();
-                            if (!id) continue;
-                            if (shadowUnreferencedIdSet.has(id)) hasUnref = true;
-                            else hasRef = true;
-                            if (hasUnref && hasRef) break;
-                          }
-                          const paragraphClass =
-                            hasUnref && !hasRef
-                              ? "border-amber-500/60"
-                              : hasRef && !hasUnref
-                              ? "border-emerald-500/60"
-                              : "border-border-subtle";
-                          return (
-                            <div
-                              key={key}
-                              className={clsx(
-                                "p-3 rounded-xl bg-surface border flex flex-col gap-2",
-                                paragraphClass
-                              )}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
-                                    {stance || "unknown"}
-                                  </span>
-                                  {contested && (
-                                    <span className="px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/40 text-[10px] font-mono uppercase text-rose-400">
-                                      Contested
-                                    </span>
-                                  )}
-                                  {byModel != null && (
-                                    <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
-                                      Model {byModel}
-                                    </span>
-                                  )}
-                                  {hasUnref && !hasRef && (
-                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-[10px] font-mono uppercase text-amber-400">
-                                      All Unreferenced
-                                    </span>
-                                  )}
-                                  {hasRef && !hasUnref && (
-                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/40 text-[10px] font-mono uppercase text-emerald-400">
-                                      Referenced
-                                    </span>
-                                  )}
-                                  {hasRef && hasUnref && (
-                                    <span className="px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/40 text-[10px] font-mono uppercase text-sky-400">
-                                      Mixed
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-text-muted">
-                                  {ids.length.toLocaleString()} statements
-                                </div>
-                              </div>
-                              <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
-                                {p?._fullParagraph}
-                              </div>
-                              {linkedClaims.length > 0 && (
-                                <div className="pt-2 border-t border-white/5">
-                                  <div className="text-[10px] text-text-muted mb-1">Claims:</div>
-                                  <div className="flex flex-wrap gap-2">
-                                    {linkedClaims.slice(0, 4).map((c: any) => (
-                                      <span key={String(c?.id)} className="px-2 py-1 rounded-full bg-amber-500/5 border border-amber-400/20 text-[10px] text-amber-300 truncate max-w-[260px]">
-                                        {String(c?.label || c?.id)}
-                                      </span>
-                                    ))}
-                                    {linkedClaims.length > 4 && (
-                                      <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle text-[10px] text-text-muted">
-                                        +{linkedClaims.length - 4} more
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <div className="mt-6">
-                      <button
-                        type="button"
-                        className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-surface border border-border-subtle hover:bg-surface-highlight transition-colors"
-                        onClick={() => setEvidenceCoverageOpen((v) => !v)}
-                      >
-                        <div className="text-xs font-semibold text-text-primary">Coverage</div>
-                        <div className={clsx("text-text-muted", evidenceCoverageOpen && "rotate-180")}>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </div>
-                      </button>
-                      {evidenceCoverageOpen && (
-                        <div className="mt-2 bg-black/20 border border-border-subtle rounded-xl p-4">
-                          <div className="text-[11px] text-text-muted">
-                            Unreferenced statements: {shadowUnreferencedIdSet.size.toLocaleString()}
                           </div>
-                          {(() => {
-                            const highSignal = filteredShadowStatements.filter((s: any) => {
-                              const id = String(s?.id || "").trim();
-                              if (!id || !shadowUnreferencedIdSet.has(id)) return false;
-                              const sig = s?.signals || {};
-                              return !!sig.sequence || !!sig.tension || !!sig.conditional;
-                            });
-                            if (highSignal.length === 0) return null;
+                        </div>
+
+                        <div className="mb-4 bg-surface border border-border-subtle rounded-xl p-3">
+                          {evidenceViewMode === "statements" ? (() => {
+                            const s = computeEvidenceStatsFromStatements(filteredShadowStatements, shadowUnreferencedIdSet);
                             return (
-                              <div className="mt-3">
-                                <div className="text-[11px] font-medium text-text-primary mb-2">High-signal unreferenced</div>
-                                <div className="space-y-2">
-                                  {highSignal.slice(0, 6).map((s: any) => (
-                                    <div key={String(s?.id || s?.text)} className="text-[11px] text-text-secondary">
-                                      <span className="font-mono text-text-muted mr-2">{String(s?.id || "")}</span>
-                                      {String(s?.text || "").slice(0, 220)}
-                                      {String(s?.text || "").length > 220 ? "\u2026" : ""}
-                                    </div>
-                                  ))}
-                                </div>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Statements: {s.total.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Ref: {s.referenced.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Unref: {s.unreferenced.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">SEQ: {s.bySignal.sequence.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">TENS: {s.bySignal.tension.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">COND: {s.bySignal.conditional.toLocaleString()}</span>
+                              </div>
+                            );
+                          })() : (() => {
+                            const p = computeEvidenceStatsFromParagraphs(filteredShadowParagraphs, shadowUnreferencedIdSet);
+                            return (
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Paragraphs: {p.total.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Contested: {p.contested.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Ref: {p.referenced.toLocaleString()}</span>
+                                <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle">Unref: {p.unreferenced.toLocaleString()}</span>
                               </div>
                             );
                           })()}
                         </div>
-                      )}
-                    </div>
-                    </div>
+
+                        <div className="flex flex-wrap items-center gap-3 mb-4">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className={clsx(
+                                "px-3 py-1.5 rounded-full text-xs border",
+                                evidenceViewMode === "statements"
+                                  ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                                  : "bg-transparent border-border-subtle text-text-muted"
+                              )}
+                              onClick={() => setEvidenceViewMode("statements")}
+                            >
+                              Statements
+                            </button>
+                            <button
+                              type="button"
+                              className={clsx(
+                                "px-3 py-1.5 rounded-full text-xs border",
+                                evidenceViewMode === "paragraphs"
+                                  ? "bg-brand-500/20 border-brand-500 text-text-primary"
+                                  : "bg-transparent border-border-subtle text-text-muted"
+                              )}
+                              onClick={() => setEvidenceViewMode("paragraphs")}
+                            >
+                              Paragraphs
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {[
+                              { key: "all", label: "All" },
+                              { key: "prescriptive", label: "Prescriptive" },
+                              { key: "cautionary", label: "Cautionary" },
+                              { key: "prerequisite", label: "Prerequisites" },
+                              { key: "dependent", label: "Dependents" },
+                              { key: "assertive", label: "Assertive" },
+                              { key: "uncertain", label: "Uncertain" },
+                            ].map((f) => (
+                              <button
+                                key={f.key}
+                                type="button"
+                                className={clsx(
+                                  "px-2.5 py-1 rounded-full text-[11px] border",
+                                  evidenceStanceFilter === f.key
+                                    ? "bg-white/10 border-brand-500 text-text-primary"
+                                    : "bg-transparent border-border-subtle text-text-muted"
+                                )}
+                                onClick={() => setEvidenceStanceFilter(f.key)}
+                              >
+                                {f.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {[
+                              { key: "all" as const, label: "All" },
+                              { key: "referenced" as const, label: "Referenced" },
+                              { key: "unreferenced" as const, label: "Unreferenced" },
+                            ].map((f) => (
+                              <button
+                                key={f.key}
+                                type="button"
+                                className={clsx(
+                                  "px-2.5 py-1 rounded-full text-[11px] border",
+                                  evidenceRefFilter === f.key
+                                    ? "bg-white/10 border-brand-500 text-text-primary"
+                                    : "bg-transparent border-border-subtle text-text-muted"
+                                )}
+                                onClick={() => setEvidenceRefFilter(f.key)}
+                              >
+                                {f.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <select
+                              className="bg-black/30 border border-white/10 rounded px-2 py-1 text-[11px] text-text-primary"
+                              value={evidenceModelFilter === "all" ? "all" : String(evidenceModelFilter)}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setEvidenceModelFilter(v === "all" ? "all" : Number(v));
+                              }}
+                              disabled={evidenceModelIndices.length === 0}
+                            >
+                              <option value="all">All models</option>
+                              {evidenceModelIndices.map((mi) => (
+                                <option key={mi} value={String(mi)}>Model {mi}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {evidenceViewMode === "statements" ? (
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                                <input
+                                  type="checkbox"
+                                  className="rounded"
+                                  checked={evidenceSignalFilters.sequence}
+                                  onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, sequence: e.target.checked }))}
+                                />
+                                SEQ
+                              </label>
+                              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                                <input
+                                  type="checkbox"
+                                  className="rounded"
+                                  checked={evidenceSignalFilters.tension}
+                                  onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, tension: e.target.checked }))}
+                                />
+                                TENS
+                              </label>
+                              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                                <input
+                                  type="checkbox"
+                                  className="rounded"
+                                  checked={evidenceSignalFilters.conditional}
+                                  onChange={(e) => setEvidenceSignalFilters((prev) => ({ ...prev, conditional: e.target.checked }))}
+                                />
+                                COND
+                              </label>
+                            </div>
+                          ) : (
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted">
+                              <input
+                                type="checkbox"
+                                className="rounded"
+                                checked={evidenceContestedOnly}
+                                onChange={(e) => setEvidenceContestedOnly(e.target.checked)}
+                              />
+                              Contested
+                            </label>
+                          )}
+                        </div>
+                        {evidenceViewMode === "statements" && (
+                          <div className="space-y-2">
+                            {filteredShadowStatements.length === 0 && (
+                              <div className="text-sm text-text-muted">No statements match the current filters.</div>
+                            )}
+                            {filteredShadowStatements.map((s: any) => {
+                              const id = String(s?.id || "");
+                              const stance = String(s?.stance || "");
+                              const modelIndex = typeof s?.modelIndex === "number" ? s.modelIndex : null;
+                              const isUnreferenced = id && shadowUnreferencedIdSet.has(id);
+                              const signals = s?.signals || {};
+                              const hasSequence = !!signals.sequence;
+                              const hasTension = !!signals.tension;
+                              const hasConditional = !!signals.conditional;
+                              const regionId = String(s?.geometricCoordinates?.regionId || "").trim();
+                              const linkedClaimIds = id ? (statementToClaimIds.get(id) || []) : [];
+                              const linkedClaims = linkedClaimIds.map((cid) => claimById.get(cid)).filter(Boolean);
+                              return (
+                                <div
+                                  key={id || s?.text}
+                                  className="p-3 rounded-xl bg-surface border border-border-subtle flex flex-col gap-2"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
+                                        {stance || "unknown"}
+                                      </span>
+                                      {isUnreferenced && (
+                                        <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-[10px] font-mono uppercase text-amber-400">
+                                          Unreferenced
+                                        </span>
+                                      )}
+                                      {modelIndex != null && (
+                                        <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
+                                          Model {modelIndex}
+                                        </span>
+                                      )}
+                                      {regionId && (
+                                        <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
+                                          Region {regionId}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1 text-[10px] text-text-muted">
+                                      {hasSequence && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">SEQ</span>}
+                                      {hasTension && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">TENS</span>}
+                                      {hasConditional && <span className="px-1 py-0.5 rounded bg-surface-highlight/60">COND</span>}
+                                    </div>
+                                  </div>
+                                  <div className="text-sm text-text-primary leading-relaxed">
+                                    {s?.text}
+                                  </div>
+                                  {linkedClaims.length > 0 && (
+                                    <div className="pt-2 border-t border-white/5">
+                                      <div className="text-[10px] text-text-muted mb-1">Claims:</div>
+                                      <div className="flex flex-wrap gap-2">
+                                        {linkedClaims.slice(0, 4).map((c: any) => (
+                                          <span key={String(c?.id)} className="px-2 py-1 rounded-full bg-amber-500/5 border border-amber-400/20 text-[10px] text-amber-300 truncate max-w-[260px]">
+                                            {String(c?.label || c?.id)}
+                                          </span>
+                                        ))}
+                                        {linkedClaims.length > 4 && (
+                                          <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle text-[10px] text-text-muted">
+                                            +{linkedClaims.length - 4} more
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {evidenceViewMode === "paragraphs" && (
+                          <div className="space-y-2">
+                            {filteredShadowParagraphs.length === 0 && (
+                              <div className="text-sm text-text-muted">No paragraphs match the current filters.</div>
+                            )}
+                            {filteredShadowParagraphs.map((p: any) => {
+                              const key = String(p?.id || `${p?.modelIndex}:${p?.paragraphIndex}`);
+                              const stance = String(p?.dominantStance || "");
+                              const contested = !!p?.contested;
+                              const byModel = typeof p?.modelIndex === "number" ? p.modelIndex : null;
+                              const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
+                              const linkedClaimIdSet = new Set<string>();
+                              for (const raw of ids) {
+                                const sid = String(raw || "").trim();
+                                if (!sid) continue;
+                                const cids = statementToClaimIds.get(sid) || [];
+                                for (const cid of cids) linkedClaimIdSet.add(cid);
+                              }
+                              const linkedClaims = Array.from(linkedClaimIdSet).map((cid) => claimById.get(cid)).filter(Boolean);
+                              let hasUnref = false;
+                              let hasRef = false;
+                              for (const raw of ids) {
+                                const id = String(raw || "").trim();
+                                if (!id) continue;
+                                if (shadowUnreferencedIdSet.has(id)) hasUnref = true;
+                                else hasRef = true;
+                                if (hasUnref && hasRef) break;
+                              }
+                              const paragraphClass =
+                                hasUnref && !hasRef
+                                  ? "border-amber-500/60"
+                                  : hasRef && !hasUnref
+                                    ? "border-emerald-500/60"
+                                    : "border-border-subtle";
+                              return (
+                                <div
+                                  key={key}
+                                  className={clsx(
+                                    "p-3 rounded-xl bg-surface border flex flex-col gap-2",
+                                    paragraphClass
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
+                                        {stance || "unknown"}
+                                      </span>
+                                      {contested && (
+                                        <span className="px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/40 text-[10px] font-mono uppercase text-rose-400">
+                                          Contested
+                                        </span>
+                                      )}
+                                      {byModel != null && (
+                                        <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono text-text-muted">
+                                          Model {byModel}
+                                        </span>
+                                      )}
+                                      {hasUnref && !hasRef && (
+                                        <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-[10px] font-mono uppercase text-amber-400">
+                                          All Unreferenced
+                                        </span>
+                                      )}
+                                      {hasRef && !hasUnref && (
+                                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/40 text-[10px] font-mono uppercase text-emerald-400">
+                                          Referenced
+                                        </span>
+                                      )}
+                                      {hasRef && hasUnref && (
+                                        <span className="px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/40 text-[10px] font-mono uppercase text-sky-400">
+                                          Mixed
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-text-muted">
+                                      {ids.length.toLocaleString()} statements
+                                    </div>
+                                  </div>
+                                  <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+                                    {p?._fullParagraph}
+                                  </div>
+                                  {linkedClaims.length > 0 && (
+                                    <div className="pt-2 border-t border-white/5">
+                                      <div className="text-[10px] text-text-muted mb-1">Claims:</div>
+                                      <div className="flex flex-wrap gap-2">
+                                        {linkedClaims.slice(0, 4).map((c: any) => (
+                                          <span key={String(c?.id)} className="px-2 py-1 rounded-full bg-amber-500/5 border border-amber-400/20 text-[10px] text-amber-300 truncate max-w-[260px]">
+                                            {String(c?.label || c?.id)}
+                                          </span>
+                                        ))}
+                                        {linkedClaims.length > 4 && (
+                                          <span className="px-2 py-1 rounded-full bg-black/20 border border-border-subtle text-[10px] text-text-muted">
+                                            +{linkedClaims.length - 4} more
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="mt-6">
+                          <button
+                            type="button"
+                            className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-surface border border-border-subtle hover:bg-surface-highlight transition-colors"
+                            onClick={() => setEvidenceCoverageOpen((v) => !v)}
+                          >
+                            <div className="text-xs font-semibold text-text-primary">Coverage</div>
+                            <div className={clsx("text-text-muted", evidenceCoverageOpen && "rotate-180")}>
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </div>
+                          </button>
+                          {evidenceCoverageOpen && (
+                            <div className="mt-2 bg-black/20 border border-border-subtle rounded-xl p-4">
+                              <div className="text-[11px] text-text-muted">
+                                Unreferenced statements: {shadowUnreferencedIdSet.size.toLocaleString()}
+                              </div>
+                              {(() => {
+                                const highSignal = filteredShadowStatements.filter((s: any) => {
+                                  const id = String(s?.id || "").trim();
+                                  if (!id || !shadowUnreferencedIdSet.has(id)) return false;
+                                  const sig = s?.signals || {};
+                                  return !!sig.sequence || !!sig.tension || !!sig.conditional;
+                                });
+                                if (highSignal.length === 0) return null;
+                                return (
+                                  <div className="mt-3">
+                                    <div className="text-[11px] font-medium text-text-primary mb-2">High-signal unreferenced</div>
+                                    <div className="space-y-2">
+                                      {highSignal.slice(0, 6).map((s: any) => (
+                                        <div key={String(s?.id || s?.text)} className="text-[11px] text-text-secondary">
+                                          <span className="font-mono text-text-muted mr-2">{String(s?.id || "")}</span>
+                                          {String(s?.text || "").slice(0, 220)}
+                                          {String(s?.text || "").length > 220 ? "\u2026" : ""}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </m.div>
                 )}
@@ -3079,79 +3079,79 @@ export const DecisionMapSheet = React.memo(() => {
                       ))}
                     </div>
                     {synthesisSubTab === 'output' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                      <div className="mb-4">
-                        <div className="text-lg font-bold text-text-primary">Singularity Output</div>
-                        <div className="text-xs text-text-muted mt-1">Provider, timestamp, and pipeline status for the final synthesis</div>
-                      </div>
-                      {(() => {
-                        const sing = aiTurn?.singularity;
-                        if (!sing) {
-                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No singularity data available for this turn.</div>;
-                        }
-                        return (
-                          <div className="space-y-4">
-                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                              <div className="grid grid-cols-2 gap-3 text-xs">
-                                <div><span className="text-text-muted">Status:</span> <span className="text-text-primary">{String((sing as any)?.status || '—')}</span></div>
-                                <div><span className="text-text-muted">Provider:</span> <span className="text-text-primary">{String((sing as any)?.providerId || '—')}</span></div>
-                                {(sing as any)?.timestamp && <div><span className="text-text-muted">Timestamp:</span> <span className="text-text-primary">{String((sing as any).timestamp)}</span></div>}
-                                {(sing as any)?.traversalState && <div><span className="text-text-muted">Traversal state:</span> <span className="text-text-primary">{String((sing as any).traversalState)}</span></div>}
-                              </div>
-                            </div>
-                            {(sing as any)?.prompt && (
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="mb-4">
+                          <div className="text-lg font-bold text-text-primary">Singularity Output</div>
+                          <div className="text-xs text-text-muted mt-1">Provider, timestamp, and pipeline status for the final synthesis</div>
+                        </div>
+                        {(() => {
+                          const sing = aiTurn?.singularity;
+                          if (!sing) {
+                            return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No singularity data available for this turn.</div>;
+                          }
+                          return (
+                            <div className="space-y-4">
                               <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Singularity prompt</div>
-                                  <CopyButton text={String((sing as any).prompt)} label="Copy prompt" variant="icon" />
+                                <div className="grid grid-cols-2 gap-3 text-xs">
+                                  <div><span className="text-text-muted">Status:</span> <span className="text-text-primary">{String((sing as any)?.status || '—')}</span></div>
+                                  <div><span className="text-text-muted">Provider:</span> <span className="text-text-primary">{String((sing as any)?.providerId || '—')}</span></div>
+                                  {(sing as any)?.timestamp && <div><span className="text-text-muted">Timestamp:</span> <span className="text-text-primary">{String((sing as any).timestamp)}</span></div>}
+                                  {(sing as any)?.traversalState && <div><span className="text-text-muted">Traversal state:</span> <span className="text-text-primary">{String((sing as any).traversalState)}</span></div>}
                                 </div>
-                                <pre className="text-[11px] leading-snug whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4 max-h-[400px] overflow-y-auto">{String((sing as any).prompt)}</pre>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
+                              {(sing as any)?.prompt && (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Singularity prompt</div>
+                                    <CopyButton text={String((sing as any).prompt)} label="Copy prompt" variant="icon" />
+                                  </div>
+                                  <pre className="text-[11px] leading-snug whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4 max-h-[400px] overflow-y-auto">{String((sing as any).prompt)}</pre>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     )}
                     {synthesisSubTab === 'substrate' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                      <div className="mb-4">
-                        <div className="text-lg font-bold text-text-primary">Chewed Substrate</div>
-                        <div className="text-xs text-text-muted mt-1">Skeletonization debug info: protected, skeletonized, and removed counts</div>
-                      </div>
-                      {(() => {
-                        const chewed = (aiTurn?.singularity as any)?.chewedSubstrate || (mappingArtifact as any)?.chewedSubstrate;
-                        if (!chewed) {
-                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No chewed substrate data available for this turn.</div>;
-                        }
-                        return (
-                          <div className="space-y-4">
-                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                              <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Summary</div>
-                              <div className="grid grid-cols-3 gap-3 text-xs">
-                                <div><span className="text-text-muted">Protected:</span> <span className="text-emerald-400">{chewed.protectedCount ?? '—'}</span></div>
-                                <div><span className="text-text-muted">Skeletonized:</span> <span className="text-amber-400">{chewed.skeletonizedCount ?? '—'}</span></div>
-                                <div><span className="text-text-muted">Removed:</span> <span className="text-red-400">{chewed.removedCount ?? '—'}</span></div>
-                              </div>
-                            </div>
-                            {Array.isArray(chewed.pathSteps) && chewed.pathSteps.length > 0 && (
+                      <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="mb-4">
+                          <div className="text-lg font-bold text-text-primary">Chewed Substrate</div>
+                          <div className="text-xs text-text-muted mt-1">Skeletonization debug info: protected, skeletonized, and removed counts</div>
+                        </div>
+                        {(() => {
+                          const chewed = (aiTurn?.singularity as any)?.chewedSubstrate || (mappingArtifact as any)?.chewedSubstrate;
+                          if (!chewed) {
+                            return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No chewed substrate data available for this turn.</div>;
+                          }
+                          return (
+                            <div className="space-y-4">
                               <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Path steps</div>
-                                <div className="space-y-1">
-                                  {chewed.pathSteps.map((step: any, i: number) => (
-                                    <div key={i} className="text-[11px] text-text-secondary font-mono">{JSON.stringify(step)}</div>
-                                  ))}
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Summary</div>
+                                <div className="grid grid-cols-3 gap-3 text-xs">
+                                  <div><span className="text-text-muted">Protected:</span> <span className="text-emerald-400">{chewed.protectedCount ?? '—'}</span></div>
+                                  <div><span className="text-text-muted">Skeletonized:</span> <span className="text-amber-400">{chewed.skeletonizedCount ?? '—'}</span></div>
+                                  <div><span className="text-text-muted">Removed:</span> <span className="text-red-400">{chewed.removedCount ?? '—'}</span></div>
                                 </div>
                               </div>
-                            )}
-                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                              <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Raw data</div>
-                              <pre className="text-[11px] text-text-secondary whitespace-pre-wrap max-h-[400px] overflow-y-auto">{JSON.stringify(chewed, null, 2)}</pre>
+                              {Array.isArray(chewed.pathSteps) && chewed.pathSteps.length > 0 && (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Path steps</div>
+                                  <div className="space-y-1">
+                                    {chewed.pathSteps.map((step: any, i: number) => (
+                                      <div key={i} className="text-[11px] text-text-secondary font-mono">{JSON.stringify(step)}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Raw data</div>
+                                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap max-h-[400px] overflow-y-auto">{JSON.stringify(chewed, null, 2)}</pre>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
+                          );
+                        })()}
+                      </div>
                     )}
                   </m.div>
                 )}

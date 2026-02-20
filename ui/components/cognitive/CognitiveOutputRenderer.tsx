@@ -53,6 +53,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
     const effectiveSessionId = currentSessionId || aiTurn.sessionId;
+    const surveyTest = useAtomValue(surveyTestAtom);
     const setSurveyTest = useSetAtom(surveyTestAtom);
     const mappingProvider = useAtomValue(mappingProviderAtom);
 
@@ -214,10 +215,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         <button
                             type="button"
                             onClick={handleTestSurvey}
-                            className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
+                            disabled={surveyTest?.loading}
+                            className={`px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2 ${surveyTest?.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                             aria-label="Run survey mapper test for this turn"
                         >
-                            <span>Survey</span>
+                            <span>{surveyTest?.loading ? 'Survey...' : 'Survey'}</span>
                         </button>
                     )}
                 </div>

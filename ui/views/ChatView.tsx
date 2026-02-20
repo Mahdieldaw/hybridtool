@@ -252,7 +252,7 @@ export default function ChatView() {
         <DecisionMapSheet />
       </Suspense>
       {powerUserMode && <StatementClusteringDebugOverlay />}
-      <SurveyTestOverlay />
+      {powerUserMode && <SurveyTestOverlay />}
 
       <div
         className={clsx(

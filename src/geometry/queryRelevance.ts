@@ -6,7 +6,7 @@ import { cosineSimilarity } from '../clustering/distance';
 
 export interface QueryRelevanceStatementScore {
     querySimilarity: number;
-    novelty: number;
+    recusant: number;
     subConsensusCorroboration: number;
     compositeRelevance: number;
     meta?: {
@@ -24,8 +24,8 @@ export interface QueryRelevanceStatementScore {
 }
 
 export interface QueryRelevanceMeta {
-    weightsUsed: { querySimilarity: number; novelty: number; subConsensus: number };
-    adaptiveWeights?: { querySimilarity: number; novelty: number; subConsensus: number };
+    weightsUsed: { querySimilarity: number; recusant: number; subConsensus: number };
+    adaptiveWeights?: { querySimilarity: number; recusant: number; subConsensus: number };
     adaptiveWeightSource?: { prior: GeometricSubstrate['shape']['prior']; confidence: number };
     adaptiveWeightsActive: boolean;
     regionSignalsUsed: boolean;
@@ -82,7 +82,7 @@ export function computeQueryRelevance(input: {
         regionProfiles,
     } = input;
 
-    const weightsUsed = { querySimilarity: 0.5, novelty: 0.3, subConsensus: 0.2 };
+    const weightsUsed = { querySimilarity: 0.5, recusant: 0.3, subConsensus: 0.2 };
     const adaptiveWeights = getAdaptiveWeights(substrate.shape.prior);
     const adaptiveWeightsActive = false;
 
@@ -161,7 +161,7 @@ export function computeQueryRelevance(input: {
 
         const degree = perStatementDegree.get(st.id) ?? 0;
         const normalizedDensity = maxDegree > minDegree ? clamp01((degree - minDegree) / (maxDegree - minDegree)) : 0;
-        const novelty = clamp01(1 - normalizedDensity);
+        const recusant = clamp01(1 - normalizedDensity);
 
         const regionId = pid ? paragraphToRegionId.get(pid) || null : null;
         const regionProfile = regionId ? profileByRegionId.get(regionId) : undefined;
@@ -182,14 +182,14 @@ export function computeQueryRelevance(input: {
 
         const compositeRaw =
             (querySimilarity * weightsUsed.querySimilarity) +
-            (novelty * weightsUsed.novelty) +
+            (recusant * weightsUsed.recusant) +
             (subConsensusCorroboration > 0 ? weightsUsed.subConsensus : 0);
 
         if (compositeRaw > maxComposite) maxComposite = compositeRaw;
 
         statementScores.set(st.id, {
             querySimilarity,
-            novelty,
+            recusant,
             subConsensusCorroboration,
             compositeRelevance: compositeRaw,
             meta: {
@@ -278,13 +278,13 @@ export function toJsonSafeQueryRelevance(result: QueryRelevanceResult): {
 function getAdaptiveWeights(prior: GeometricSubstrate['shape']['prior']): QueryRelevanceMeta['adaptiveWeights'] {
     switch (prior) {
         case 'convergent_core':
-            return { querySimilarity: 0.35, novelty: 0.4, subConsensus: 0.25 };
+            return { querySimilarity: 0.35, recusant: 0.4, subConsensus: 0.25 };
         case 'fragmented':
-            return { querySimilarity: 0.55, novelty: 0.25, subConsensus: 0.2 };
+            return { querySimilarity: 0.55, recusant: 0.25, subConsensus: 0.2 };
         case 'bimodal_fork':
-            return { querySimilarity: 0.4, novelty: 0.3, subConsensus: 0.3 };
+            return { querySimilarity: 0.4, recusant: 0.3, subConsensus: 0.3 };
         case 'parallel_components':
-            return { querySimilarity: 0.45, novelty: 0.3, subConsensus: 0.25 };
+            return { querySimilarity: 0.45, recusant: 0.3, subConsensus: 0.25 };
     }
 }
 

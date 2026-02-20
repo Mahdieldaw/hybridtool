@@ -41,7 +41,7 @@ function buildCleanModelOutputs(responses: RawModelResponse[]): string {
 }
 
 /**
- * Build semantic mapper prompt (v3 — gates edition).
+ * Build semantic mapper prompt (v4 — claims/edges edition).
  */
 export function buildSemanticMapperPrompt(
   userQuery: string,
@@ -132,10 +132,9 @@ export interface ParseResult {
   errors?: Array<{ field: string; issue: string; context?: string }>;
   warnings?: string[];
 }
-
 /**
  * Wrapper around the shared parser that provides specific SemanticMapperOutput typing.
- * Handles v3 gates output: normalizes gates into conditionals for downstream compatibility.
+ * Always initializes conditionals as empty array for downstream compatibility.
  */
 export function parseSemanticMapperOutput(
   rawResponse: string,

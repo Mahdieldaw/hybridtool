@@ -78,7 +78,7 @@ export function buildPreSemanticInterpretation(
                     regionCount: 0,
                     kindCounts: { cluster: 0, component: 0, patch: 0 },
                     fallbackUsed: true,
-                    fallbackReason: 'clustering_skipped_by_lens',
+                    fallbackReason: 'degenerate_substrate',
                     coveredNodes: 0,
                     totalNodes: substrate.nodes.length,
                 },

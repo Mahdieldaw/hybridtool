@@ -1331,6 +1331,15 @@ export function parseSemanticMapperOutput(
     if ((edges == null || edges.length === 0) && claims.length > 0) {
         const derived: any[] = [];
         const seen = new Set<string>();
+        for (const e of finalEdges) {
+            const f = String((e as any)?.from || '').trim();
+            const t = String((e as any)?.to || '').trim();
+            if (f && t) {
+                const a = f < t ? f : t;
+                const b = f < t ? t : f;
+                seen.add(`${a}::${b}`);
+            }
+        }
         const hasClaim = (id: string) => claimIds.has(id);
 
         for (let i = 0; i < claims.length; i++) {

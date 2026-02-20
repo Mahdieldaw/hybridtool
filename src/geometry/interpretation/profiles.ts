@@ -269,8 +269,6 @@ function profileRegion(
     const tier = assignTier(modelDiversity, modelDiversityRatio, observedModelCount, internalDensity);
     const tierConfidence = computeTierConfidence(tier, modelDiversityRatio, observedModelCount, internalDensity);
 
-    const likelyClaims = contestedRatio > 0.3 || stanceVariety >= 3 || stanceUnanimity < 0.6 ? 2 : 1;
-
     return {
         regionId: region.id,
         tier,
@@ -291,9 +289,6 @@ function profileRegion(
             isolation,
             nearestCarrierSimilarity,
             avgInternalSimilarity,
-        },
-        predicted: {
-            likelyClaims,
         },
     };
 }
