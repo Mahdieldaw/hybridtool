@@ -7,6 +7,7 @@ export interface CompletenessReport {
         total: number;
         inClaims: number;
         orphaned: number;
+        unaddressed: number;
         noise: number;
         coverageRatio: number;
     };
@@ -14,28 +15,24 @@ export interface CompletenessReport {
         total: number;
         attended: number;
         unattended: number;
-        unattendedWithLikelyClaims: number;
         coverageRatio: number;
     };
     verdict: {
         complete: boolean;
         confidence: 'high' | 'medium' | 'low';
-        estimatedMissedClaims: number;
         recommendation: 'coverage_acceptable' | 'review_orphans' | 'possible_gaps';
     };
     recovery: {
-        highSignalOrphans: Array<{
+        unaddressedStatements: Array<{
             statementId: string;
             text: string;
-            stance: string;
-            signalWeight: number;
-            reason: string;
+            modelIndex: number;
+            querySimilarity: number;
         }>;
         unattendedRegionPreviews: Array<{
             regionId: string;
             statementPreviews: string[];
             reason: string;
-            likelyClaim: boolean;
         }>;
     };
 }
@@ -50,30 +47,28 @@ export function buildCompletenessReport(
     const totalStatements = fateArray.length;
     const inClaims = fateArray.filter(f => f.fate === 'primary' || f.fate === 'supporting').length;
     const orphaned = fateArray.filter(f => f.fate === 'orphan').length;
+    const unaddressedFates = fateArray.filter(f => f.fate === 'unaddressed');
     const noise = fateArray.filter(f => f.fate === 'noise').length;
     const statementCoverage = totalStatements > 0 ? inClaims / totalStatements : 1;
 
     const unattendedCount = unattendedRegions.length;
     const attendedCount = Math.max(0, totalRegions - unattendedCount);
-    const unattendedWithLikelyClaims = unattendedRegions.filter(r => r.likelyClaim).length;
     const regionCoverage = totalRegions > 0 ? attendedCount / totalRegions : 1;
 
     const complete = statementCoverage > 0.85 && regionCoverage > 0.8;
-
-    const highSignalOrphans = fateArray.filter(f => f.fate === 'orphan' && f.shadowMetadata.signalWeight >= 2);
-    const estimatedMissedClaims = unattendedWithLikelyClaims + Math.ceil(highSignalOrphans.length / 3);
+    const unaddressedCount = unaddressedFates.length;
 
     let recommendation: CompletenessReport['verdict']['recommendation'];
-    if (!complete || unattendedWithLikelyClaims > 0) {
+    if (!complete || unaddressedCount > 0) {
         recommendation = 'possible_gaps';
-    } else if (highSignalOrphans.length > 0) {
+    } else if (orphaned > 0) {
         recommendation = 'review_orphans';
     } else {
         recommendation = 'coverage_acceptable';
     }
 
     const confidence: CompletenessReport['verdict']['confidence'] =
-        complete && estimatedMissedClaims === 0
+        complete && unaddressedCount === 0
             ? 'high'
             : statementCoverage > 0.7 && regionCoverage > 0.6
                 ? 'medium'
@@ -81,23 +76,22 @@ export function buildCompletenessReport(
 
     const stmtById = new Map(statements.map(s => [s.id, s]));
 
-    const recoveryOrphans = highSignalOrphans
-        .filter(fate => (stmtById.get(fate.statementId)?.text ?? '').length > 0)
-        .sort((a, b) => b.shadowMetadata.signalWeight - a.shadowMetadata.signalWeight)
+    // Recovery: unaddressed statements sorted by querySimilarity descending
+    const unaddressedStatements = unaddressedFates
+        .sort((a, b) => (b.querySimilarity ?? 0) - (a.querySimilarity ?? 0))
         .slice(0, 10)
         .map(fate => {
             const stmt = stmtById.get(fate.statementId);
             return {
                 statementId: fate.statementId,
                 text: stmt?.text ?? '',
-                stance: fate.shadowMetadata.stance,
-                signalWeight: fate.shadowMetadata.signalWeight,
-                reason: fate.reason,
+                modelIndex: stmt?.modelIndex ?? -1,
+                querySimilarity: fate.querySimilarity ?? 0,
             };
-        });
+        })
+        .filter(s => s.text.length > 0);
 
     const regionPreviews = unattendedRegions
-        .filter(r => r.likelyClaim)
         .slice(0, 5)
         .map(region => ({
             regionId: region.id,
@@ -106,7 +100,6 @@ export function buildCompletenessReport(
                 .map(sid => stmtById.get(sid)?.text ?? '')
                 .filter(t => t.length > 0),
             reason: region.reason,
-            likelyClaim: region.likelyClaim,
         }));
 
     return {
@@ -114,6 +107,7 @@ export function buildCompletenessReport(
             total: totalStatements,
             inClaims,
             orphaned,
+            unaddressed: unaddressedCount,
             noise,
             coverageRatio: statementCoverage,
         },
@@ -121,17 +115,15 @@ export function buildCompletenessReport(
             total: totalRegions,
             attended: attendedCount,
             unattended: unattendedCount,
-            unattendedWithLikelyClaims,
             coverageRatio: regionCoverage,
         },
         verdict: {
             complete,
             confidence,
-            estimatedMissedClaims,
             recommendation,
         },
         recovery: {
-            highSignalOrphans: recoveryOrphans,
+            unaddressedStatements,
             unattendedRegionPreviews: regionPreviews,
         },
     };

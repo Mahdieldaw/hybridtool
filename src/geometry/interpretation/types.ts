@@ -1,6 +1,5 @@
 import type { ParagraphCluster } from '../../clustering/types';
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
-import type { Stance } from '../../shadow/StatementTypes';
 import type { EnrichedClaim, Edge } from '../../../shared/contract';
 import type { GeometricSubstrate } from '../types';
 
@@ -39,18 +38,10 @@ export interface RegionizationResult {
 
 export interface RegionProfile {
     regionId: string;
-    tier: 'peak' | 'hill' | 'floor';
-    tierConfidence: number;
     mass: {
         nodeCount: number;
         modelDiversity: number;
         modelDiversityRatio: number;
-    };
-    purity: {
-        dominantStance: Stance;
-        stanceUnanimity: number;
-        contestedRatio: number;
-        stanceVariety: number;
     };
     geometry: {
         internalDensity: number;
@@ -119,7 +110,6 @@ export interface ClaimGeometricMeasurement {
     sourceModelDiversity: number;
     sourceStatementCount: number;
     dominantRegionId: string | null;
-    dominantRegionTier: 'peak' | 'hill' | 'floor' | null;
     dominantRegionModelDiversity: number | null;
 }
 

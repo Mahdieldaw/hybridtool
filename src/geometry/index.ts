@@ -75,4 +75,4 @@ export { computeDiagnostics } from './interpretation/diagnostics';
 export { buildPreSemanticInterpretation } from './interpretation';
 
 export type { QueryRelevanceResult, QueryRelevanceStatementScore } from './queryRelevance';
-export { computeQueryRelevance, toJsonSafeQueryRelevance } from './queryRelevance';
+export { computeQueryRelevance } from './queryRelevance';

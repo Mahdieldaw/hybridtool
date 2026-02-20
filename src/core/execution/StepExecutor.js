@@ -955,9 +955,23 @@ export class StepExecutor {
     }
 
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
+    // Apply geometry-informed model ordering if available (outside-in: most irreplaceable at edges).
+    // Falls back to citationOrder if pre-semantic didn't run or produced no ordering.
+    const orderedModelIndices = preSemanticInterpretation?.modelOrdering?.orderedModelIndices;
+    const orderedSourceData = (Array.isArray(orderedModelIndices) && orderedModelIndices.length > 0)
+      ? (() => {
+          const positionByModelIndex = new Map(orderedModelIndices.map((mi, pos) => [mi, pos]));
+          return [...indexedSourceData].sort((a, b) => {
+            const pa = positionByModelIndex.get(a.modelIndex) ?? indexedSourceData.length;
+            const pb = positionByModelIndex.get(b.modelIndex) ?? indexedSourceData.length;
+            return pa - pb;
+          });
+        })()
+      : indexedSourceData;
+
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
+      orderedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
     );
 
     const promptLength = mappingPrompt.length;
@@ -1046,9 +1060,7 @@ export class StepExecutor {
                   paragraphResult.paragraphs,
                   embeddingResult?.embeddings || new Map(),
                   regions,
-                  regionProfiles,
                   citationOrder.length,
-                  unifiedEdges,
                   statementEmbeddingResult?.embeddings || null
                 );
 
@@ -1149,7 +1161,7 @@ export class StepExecutor {
                 let completeness = null;
                 try {
                   if (substrate && Array.isArray(regions) && regions.length > 0) {
-                    const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims);
+                    const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims, queryRelevance?.statementScores ?? null);
                     const unattendedRegions = findUnattendedRegions(
                       substrate,
                       paragraphResult.paragraphs,
@@ -1172,7 +1184,7 @@ export class StepExecutor {
                       statementCoverage: `${(completenessReport.statements.coverageRatio * 100).toFixed(1)}%`,
                       regionCoverage: `${(completenessReport.regions.coverageRatio * 100).toFixed(1)}%`,
                       verdict: completenessReport.verdict.recommendation,
-                      estimatedMissedClaims: completenessReport.verdict.estimatedMissedClaims
+                      unaddressed: completenessReport.statements.unaddressed
                     });
                   }
                 } catch (err) {
@@ -1526,6 +1538,23 @@ export class StepExecutor {
                       }
                     } catch (err) {
                       console.error('[StepExecutor] Diagnostics stamp failed', err);
+                    }
+
+                    // Claim Provenance (debug panel — first entries of Claim entity profile)
+                    try {
+                      const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
+                      const ownership = computeStatementOwnership(enrichedClaims);
+                      const exclusivity = computeClaimExclusivity(enrichedClaims, ownership);
+                      const overlap = computeClaimOverlap(enrichedClaims);
+                      mapperArtifact.claimProvenance = {
+                        statementOwnership: Object.fromEntries(
+                          Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
+                        ),
+                        claimExclusivity: Object.fromEntries(exclusivity),
+                        claimOverlap: overlap,
+                      };
+                    } catch (err) {
+                      console.warn('[StepExecutor] Claim provenance failed:', err);
                     }
                   }
 

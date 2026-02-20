@@ -727,6 +727,32 @@ export interface EnrichedClaim extends Claim {
   chainDepth: number;
 }
 
+/**
+ * Output of reconstructProvenance — a mapper claim linked to its source statements.
+ * This is what reconstructProvenance honestly computes: provenance linking only.
+ * Structural analysis fields (leverage, keystoneScore, roles, etc.) belong to the SA engine.
+ */
+export interface LinkedClaim {
+  // From mapper output
+  id: string;
+  label: string;
+  text: string;
+  supporters: number[];
+  challenges: string | null;
+  support_count: number;
+  // Placeholder types for artifact compatibility (SA engine sets real values)
+  type: Claim['type'];
+  role: Claim['role'];
+  // Computed by reconstructProvenance (Level 1 — pure linking)
+  sourceStatementIds: string[];
+  sourceStatements: ShadowStatement[];
+  sourceRegionIds: string[];  // which regions the source statements live in
+  supportRatio: number;       // supporters.length / totalModelCount
+  hasConditionalSignal: boolean; // any source statement has signals.conditional
+  hasSequenceSignal: boolean;
+  hasTensionSignal: boolean;
+}
+
 export interface LeverageInversionInfo {
   claimId: string;
   claimLabel: string;
@@ -1272,7 +1298,7 @@ export interface PipelineClaimGeometricMeasurement {
   dominantRegionModelDiversity: number | null;
 }
 
-export interface PipelineEdgeGeographicMeasurement {
+export interface PipelineEdgeGeometricMeasurement {
   edgeId: string;
   from: string;
   to: string;
@@ -1285,7 +1311,7 @@ export interface PipelineEdgeGeographicMeasurement {
 
 export interface PipelineDiagnosticMeasurements {
   claimMeasurements: PipelineClaimGeometricMeasurement[];
-  edgeMeasurements: PipelineEdgeGeographicMeasurement[];
+  edgeMeasurements: PipelineEdgeGeometricMeasurement[];
 }
 
 export interface PipelineDiagnosticsResult {
@@ -1313,8 +1339,9 @@ export interface StatementFate {
   statementId: string;
   regionId: string | null;
   claimIds: string[];
-  fate: 'primary' | 'supporting' | 'orphan' | 'noise';
+  fate: 'primary' | 'supporting' | 'unaddressed' | 'orphan' | 'noise';
   reason: string;
+  querySimilarity?: number;
   shadowMetadata: {
     stance: ShadowStance;
     confidence: number;
@@ -1330,7 +1357,6 @@ export interface UnattendedRegion {
   statementCount: number;
   modelDiversity: number;
   avgIsolation: number;
-  likelyClaim: boolean;
   reason:
   | 'stance_diversity'
   | 'high_connectivity'
@@ -1345,6 +1371,7 @@ export interface CompletenessReport {
     total: number;
     inClaims: number;
     orphaned: number;
+    unaddressed: number;
     noise: number;
     coverageRatio: number;
   };
@@ -1352,28 +1379,24 @@ export interface CompletenessReport {
     total: number;
     attended: number;
     unattended: number;
-    unattendedWithLikelyClaims: number;
     coverageRatio: number;
   };
   verdict: {
     complete: boolean;
     confidence: 'high' | 'medium' | 'low';
-    estimatedMissedClaims: number;
     recommendation: 'coverage_acceptable' | 'review_orphans' | 'possible_gaps';
   };
   recovery: {
-    highSignalOrphans: Array<{
+    unaddressedStatements: Array<{
       statementId: string;
       text: string;
-      stance: string;
-      signalWeight: number;
-      reason: string;
+      modelIndex: number;
+      querySimilarity: number;
     }>;
     unattendedRegionPreviews: Array<{
       regionId: string;
       statementPreviews: string[];
       reason: string;
-      likelyClaim: boolean;
     }>;
   };
 }

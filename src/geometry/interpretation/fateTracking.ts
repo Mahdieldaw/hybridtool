@@ -5,8 +5,9 @@ export interface StatementFate {
     statementId: string;
     regionId: string | null;
     claimIds: string[];
-    fate: 'primary' | 'supporting' | 'orphan' | 'noise';
+    fate: 'primary' | 'supporting' | 'unaddressed' | 'orphan' | 'noise';
     reason: string;
+    querySimilarity?: number;
     shadowMetadata: {
         stance: Stance;
         confidence: number;
@@ -14,6 +15,8 @@ export interface StatementFate {
         geometricIsolation: number;
     };
 }
+
+const UNADDRESSED_QUERY_THRESHOLD = 0.55;
 
 function computeSignalWeight(signals: { sequence: boolean; tension: boolean; conditional: boolean }): number {
     let weight = 0;
@@ -25,7 +28,8 @@ function computeSignalWeight(signals: { sequence: boolean; tension: boolean; con
 
 export function buildStatementFates(
     statements: ShadowStatement[],
-    claims: Array<{ id: string; sourceStatementIds?: string[] }>
+    claims: Array<{ id: string; sourceStatementIds?: string[] }>,
+    queryRelevanceScores: Map<string, { querySimilarity: number }> | null = null
 ): Map<string, StatementFate> {
     const enrichedCount = statements.reduce((acc, s) => acc + (s.geometricCoordinates ? 1 : 0), 0);
     if (enrichedCount === 0 && statements.length > 0) {
@@ -50,22 +54,40 @@ export function buildStatementFates(
 
         let fate: StatementFate['fate'];
         let reason: string;
+        let querySimilarity: number | undefined;
 
         if (claimIds.length > 0) {
             fate = claimIds.length === 1 ? 'primary' : 'supporting';
             reason = `Referenced by ${claimIds.length} claim(s): ${claimIds.join(', ')}`;
-        } else if (coords?.regionId) {
-            fate = 'orphan';
-            reason = `In region ${coords.regionId} but not referenced by any claim`;
-        } else if (coords?.componentId) {
-            fate = 'orphan';
-            reason = `In component ${coords.componentId} but no region assignment`;
-        } else if (coords) {
-            fate = 'noise';
-            reason = 'Isolated node';
         } else {
-            fate = 'noise';
-            reason = 'No geometric coordinates';
+            // Classify as orphan or noise first, then promote orphans to unaddressed
+            let baseOrphan = false;
+            if (coords?.regionId) {
+                baseOrphan = true;
+                reason = `In region ${coords.regionId} but not referenced by any claim`;
+            } else if (coords?.componentId) {
+                baseOrphan = true;
+                reason = `In component ${coords.componentId} but no region assignment`;
+            } else if (coords) {
+                reason = 'Isolated node';
+            } else {
+                reason = 'No geometric coordinates';
+            }
+
+            if (baseOrphan && queryRelevanceScores !== null) {
+                const qScore = queryRelevanceScores.get(stmt.id);
+                if (qScore && qScore.querySimilarity > UNADDRESSED_QUERY_THRESHOLD) {
+                    fate = 'unaddressed';
+                    querySimilarity = qScore.querySimilarity;
+                    reason = `${reason}; query-relevant (querySimilarity=${qScore.querySimilarity.toFixed(3)})`;
+                } else {
+                    fate = 'orphan';
+                }
+            } else if (baseOrphan) {
+                fate = 'orphan';
+            } else {
+                fate = 'noise';
+            }
         }
 
         fates.set(stmt.id, {
@@ -74,6 +96,7 @@ export function buildStatementFates(
             claimIds,
             fate,
             reason,
+            ...(querySimilarity !== undefined ? { querySimilarity } : {}),
             shadowMetadata: {
                 stance: stmt.stance,
                 confidence: stmt.confidence,
@@ -84,22 +107,4 @@ export function buildStatementFates(
     }
 
     return fates;
-}
-
-export function getHighSignalOrphans(
-    fates: Map<string, StatementFate>,
-    statements: ShadowStatement[],
-    limit: number = 10
-): Array<{ statement: ShadowStatement; fate: StatementFate }> {
-    const stmtById = new Map(statements.map(s => [s.id, s]));
-
-    return Array.from(fates.values())
-        .filter(f => f.fate === 'orphan' && f.shadowMetadata.signalWeight >= 2)
-        .sort((a, b) => b.shadowMetadata.signalWeight - a.shadowMetadata.signalWeight)
-        .slice(0, limit)
-        .map(fate => {
-            const statement = stmtById.get(fate.statementId);
-            return statement ? { statement, fate } : null;
-        })
-        .filter((v): v is { statement: ShadowStatement; fate: StatementFate } => v !== null);
 }

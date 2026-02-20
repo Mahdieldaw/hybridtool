@@ -34,7 +34,6 @@ export interface ClaimVector {
 
 export interface RegionCoverage {
     regionId: string;
-    tier: RegionProfile['tier'];
     totalStatements: number;
     coveredStatements: number;
     coverageRatio: number;
@@ -86,6 +85,7 @@ export function buildClaimVectors(
         id: string;
         label: string;
         sourceStatementIds?: string[];
+        sourceRegionIds?: string[];
         geometricSignals?: { sourceRegionIds?: string[] };
     }>,
     statementEmbeddings: Map<string, Float32Array>,
@@ -127,7 +127,7 @@ export function buildClaimVectors(
             claimLabel: claim.label,
             vector: pooled as Float32Array<ArrayBuffer>,
             sourceStatementIds: sids,
-            sourceRegionIds: claim.geometricSignals?.sourceRegionIds || [],
+            sourceRegionIds: claim.sourceRegionIds || claim.geometricSignals?.sourceRegionIds || [],
         });
     }
 
@@ -145,7 +145,7 @@ const DEFAULT_MERGE_THRESHOLD = 0.92;
 export function computeAlignment(
     claimVectors: ClaimVector[],
     regions: Region[],
-    regionProfiles: RegionProfile[],
+    _regionProfiles: RegionProfile[],
     statementEmbeddings: Map<string, Float32Array>,
     options: {
         coverageThreshold?: number;
@@ -158,16 +158,12 @@ export function computeAlignment(
     const splitThreshold = options.splitThreshold ?? DEFAULT_SPLIT_THRESHOLD;
     const mergeThreshold = options.mergeThreshold ?? DEFAULT_MERGE_THRESHOLD;
 
-    const profileById = new Map(regionProfiles.map(r => [r.regionId, r]));
-
     // ── REGION COVERAGE ──────────────────────────────────────────────────
     const regionCoverages: RegionCoverage[] = [];
     let totalStatements = 0;
     let totalCovered = 0;
 
     for (const region of regions) {
-        const profile = profileById.get(region.id);
-        const tier = profile?.tier ?? 'floor';
         const sids = region.statementIds || [];
         let coveredCount = 0;
         let bestClaimId: string | null = null;
@@ -198,7 +194,6 @@ export function computeAlignment(
         const coverageRatio = sids.length > 0 ? coveredCount / sids.length : 0;
         regionCoverages.push({
             regionId: region.id,
-            tier,
             totalStatements: sids.length,
             coveredStatements: coveredCount,
             coverageRatio,

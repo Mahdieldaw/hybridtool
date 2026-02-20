@@ -1,10 +1,9 @@
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
-import type { Stance } from '../../shadow/StatementTypes';
 import type { GeometricSubstrate, NodeLocalStats } from '../types';
 import type { Region, RegionProfile } from './types';
 import { cosineSimilarity } from '../../clustering/distance';
 
-const TIER_THRESHOLDS = {
+export const TIER_THRESHOLDS = {
     peak: {
         minModelDiversityRatio: 0.5,
         minModelDiversityAbsolute: 3,
@@ -63,62 +62,6 @@ function computeAvgInternalSimilarity(nodeIds: string[], substrate: GeometricSub
     if (mutualCount > 0) return mutualSum / mutualCount;
 
     return 0;
-}
-
-function computePeakMinDiversityRatio(observedModelCount: number): number {
-    const { peak } = TIER_THRESHOLDS;
-    const safeModelCount = Math.max(1, observedModelCount);
-    const absAsRatio = peak.minModelDiversityAbsolute / safeModelCount;
-    return Math.max(peak.minModelDiversityRatio, absAsRatio);
-}
-
-function assignTier(
-    modelDiversity: number,
-    modelDiversityRatio: number,
-    observedModelCount: number,
-    internalDensity: number
-): RegionProfile['tier'] {
-    const { peak, hill } = TIER_THRESHOLDS;
-    const peakMinRatio = computePeakMinDiversityRatio(observedModelCount);
-    if (
-        modelDiversity >= peak.minModelDiversityAbsolute &&
-        modelDiversityRatio >= peakMinRatio &&
-        internalDensity >= peak.minInternalDensity
-    ) {
-        return 'peak';
-    }
-    if (
-        modelDiversity >= hill.minModelDiversityAbsolute &&
-        modelDiversityRatio >= hill.minModelDiversityRatio &&
-        internalDensity >= hill.minInternalDensity
-    ) {
-        return 'hill';
-    }
-    return 'floor';
-}
-
-function computeTierConfidence(
-    tier: RegionProfile['tier'],
-    modelDiversityRatio: number,
-    observedModelCount: number,
-    internalDensity: number
-): number {
-    const { peak } = TIER_THRESHOLDS;
-    const peakMinRatio = computePeakMinDiversityRatio(observedModelCount);
-
-    if (tier === 'peak') {
-        const diversityMargin = (modelDiversityRatio - peakMinRatio) / (1 - peakMinRatio);
-        const densityMargin = (internalDensity - peak.minInternalDensity) / (1 - peak.minInternalDensity);
-        return clamp(0.7 + 0.3 * Math.min(diversityMargin, densityMargin), 0, 1);
-    }
-
-    if (tier === 'hill') {
-        const diversityProgress = modelDiversityRatio / peakMinRatio;
-        const densityProgress = internalDensity / peak.minInternalDensity;
-        return clamp(0.5 + 0.3 * Math.max(diversityProgress, densityProgress), 0, 1);
-    }
-
-    return clamp(0.3 + 0.2 * Math.max(modelDiversityRatio, internalDensity), 0, 0.6);
 }
 
 export function profileRegions(
@@ -227,62 +170,23 @@ function profileRegion(
     const modelDiversity = modelIndices.length;
     const modelDiversityRatio = observedModelCount > 0 ? modelDiversity / observedModelCount : 0;
 
-    const stanceCounts: Record<Stance, number> = {
-        prerequisite: 0,
-        dependent: 0,
-        cautionary: 0,
-        prescriptive: 0,
-        uncertain: 0,
-        assertive: 0,
-        unclassified: 0,
-    };
-    let contestedCount = 0;
-
-    for (const nodeId of nodeIds) {
-        const node = nodesById.get(nodeId);
-        if (!node) continue;
-        stanceCounts[node.dominantStance]++;
-        if (node.contested) contestedCount++;
-    }
-
-    const stanceEntries = Object.entries(stanceCounts) as Array<[Stance, number]>;
-    stanceEntries.sort((a, b) => b[1] - a[1]);
-    const dominantStance = stanceEntries[0]?.[0] ?? 'assertive';
-    const totalStances = stanceEntries.reduce((sum, [, count]) => sum + count, 0);
-    const stanceUnanimity = totalStances > 0 ? stanceCounts[dominantStance] / totalStances : 0;
-    const contestedRatio = nodeIds.length > 0 ? contestedCount / nodeIds.length : 0;
-    const stanceVariety = stanceEntries.filter(([, count]) => count > 0).length;
-
     const internalDensity = computeInternalDensity(nodeIds, substrate);
     const avgInternalSimilarity = computeAvgInternalSimilarity(nodeIds, substrate);
 
     let totalIsolation = 0;
-
     for (const nodeId of nodeIds) {
         const node = nodesById.get(nodeId);
         if (!node) continue;
         totalIsolation += node.isolationScore;
     }
-
     const isolation = nodeIds.length > 0 ? totalIsolation / nodeIds.length : 1;
-
-    const tier = assignTier(modelDiversity, modelDiversityRatio, observedModelCount, internalDensity);
-    const tierConfidence = computeTierConfidence(tier, modelDiversityRatio, observedModelCount, internalDensity);
 
     return {
         regionId: region.id,
-        tier,
-        tierConfidence,
         mass: {
             nodeCount: nodeIds.length,
             modelDiversity,
             modelDiversityRatio,
-        },
-        purity: {
-            dominantStance,
-            stanceUnanimity,
-            contestedRatio,
-            stanceVariety,
         },
         geometry: {
             internalDensity,

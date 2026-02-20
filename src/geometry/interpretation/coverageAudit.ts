@@ -11,7 +11,6 @@ export interface UnattendedRegion {
     statementCount: number;
     modelDiversity: number;
     avgIsolation: number;
-    likelyClaim: boolean;
     reason:
         | 'stance_diversity'
         | 'high_connectivity'
@@ -99,17 +98,13 @@ export function findUnattendedRegions(
         }
         const stanceVariety = stanceCounts.size;
 
-        let likelyClaim = false;
         let reason: UnattendedRegion['reason'] = 'insufficient_signals';
 
         if (avgIsolation > 0.8 && region.nodeIds.length === 1) {
-            likelyClaim = false;
             reason = 'isolated_noise';
         } else if (stanceVariety >= 2) {
-            likelyClaim = true;
             reason = 'stance_diversity';
         } else if (avgMutualDegree >= 2 && region.nodeIds.length >= 2) {
-            likelyClaim = true;
             reason = 'high_connectivity';
         }
 
@@ -125,8 +120,7 @@ export function findUnattendedRegions(
         }
         const bridgesTo = Array.from(bridgesToSet);
 
-        if (bridgesTo.length > 1 && !likelyClaim) {
-            likelyClaim = true;
+        if (bridgesTo.length > 1 && reason === 'insufficient_signals') {
             reason = 'bridge_region';
         }
 
@@ -137,7 +131,6 @@ export function findUnattendedRegions(
             statementCount: regionStatementIds.length,
             modelDiversity: modelIndices.size,
             avgIsolation,
-            likelyClaim,
             reason,
             bridgesTo,
         });

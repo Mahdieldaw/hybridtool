@@ -7,7 +7,9 @@ import type {
     GeometricObservation,
     PreSemanticInterpretation,
     Region,
+    RegionProfile,
 } from './types';
+import { TIER_THRESHOLDS } from './profiles';
 
 class UnionFind {
     private parent: Map<string, string>;
@@ -233,8 +235,18 @@ export function computeDiagnostics(
     const claims = Array.isArray(postSemantic.claimsWithLeverage) ? postSemantic.claimsWithLeverage : [];
     const observations: GeometricObservation[] = [];
 
-    const peakRegions = regionProfiles.filter(p => p.tier === 'peak').map(p => String(p.regionId || '').trim()).filter(Boolean);
-    const floorRegions = regionProfiles.filter(p => p.tier === 'floor').map(p => String(p.regionId || '').trim()).filter(Boolean);
+    const isPeakByL1 = (p: RegionProfile) =>
+        p.mass.modelDiversity >= TIER_THRESHOLDS.peak.minModelDiversityAbsolute &&
+        p.mass.modelDiversityRatio >= TIER_THRESHOLDS.peak.minModelDiversityRatio &&
+        p.geometry.internalDensity >= TIER_THRESHOLDS.peak.minInternalDensity;
+    const isHillByL1 = (p: RegionProfile) =>
+        p.mass.modelDiversity >= TIER_THRESHOLDS.hill.minModelDiversityAbsolute &&
+        p.mass.modelDiversityRatio >= TIER_THRESHOLDS.hill.minModelDiversityRatio &&
+        p.geometry.internalDensity >= TIER_THRESHOLDS.hill.minInternalDensity;
+    const isFloorByL1 = (p: RegionProfile) => !isPeakByL1(p) && !isHillByL1(p);
+
+    const peakRegions = regionProfiles.filter(isPeakByL1).map(p => String(p.regionId || '').trim()).filter(Boolean);
+    const floorRegions = regionProfiles.filter(isFloorByL1).map(p => String(p.regionId || '').trim()).filter(Boolean);
 
     for (const regionId of peakRegions) {
         const regionSet = regionStatementSets.get(regionId);
@@ -354,7 +366,6 @@ export function computeDiagnostics(
             sourceModelDiversity: computeSourceModelDiversity(sids, statementToModelIndex),
             sourceStatementCount: sids.length,
             dominantRegionId,
-            dominantRegionTier: profile?.tier ?? null,
             dominantRegionModelDiversity: profile?.mass?.modelDiversity ?? null,
         });
     }
