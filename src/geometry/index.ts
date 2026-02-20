@@ -38,7 +38,6 @@ export type { ShapePrior, ShapeClassification } from './shape';
 export { classifyShape } from './shape';
 
 export type {
-    Regime,
     AdaptiveLens,
     Region,
     RegionizationResult,

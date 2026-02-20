@@ -520,15 +520,13 @@ export class StepExecutor {
       `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
 
     // ════════════════════════════════════════════════════════════════════════
-    // 2.6 CLUSTERING (async, may fail gracefully)
+    // 2.6 GEOMETRY (async, may fail gracefully)
     // ════════════════════════════════════════════════════════════════════════
-    let clusteringResult = null;
     let embeddingResult = null;
     let statementEmbeddingResult = null;
     let geometryParagraphEmbeddings = null;
     let queryEmbedding = null;
     let queryRelevance = null;
-    let paragraphClusteringSummary = null;
     let substrateSummary = null;
     let substrateGraph = null;
     let substrateDegenerate = null;
@@ -574,7 +572,7 @@ export class StepExecutor {
           clusteringModule = await import('../../clustering');
         }
 
-        const { generateTextEmbeddings, stripInlineMarkdown, poolToParagraphEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
+        const { generateTextEmbeddings, stripInlineMarkdown, poolToParagraphEmbeddings, getEmbeddingStatus, DEFAULT_CONFIG } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
@@ -714,42 +712,6 @@ export class StepExecutor {
           );
         }
 
-        if (paragraphResult.paragraphs.length >= 3) {
-          clusteringResult = buildClusters(
-            paragraphResult.paragraphs,
-            shadowResult.statements,
-            geometryParagraphEmbeddings,
-            DEFAULT_CONFIG,
-            substrate.graphs.mutual
-          );
-          geometryDiagnostics.stages.clustering = {
-            status: 'ok',
-            clusters: Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters.length : 0,
-            paragraphs: Array.isArray(paragraphResult?.paragraphs) ? paragraphResult.paragraphs.length : 0,
-          };
-
-          clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
-          clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
-
-          try {
-            paragraphClusteringSummary = {
-              meta: { ...(clusteringResult.meta || {}) },
-              clusters: (clusteringResult.clusters || []).map((c) => ({
-                id: c.id,
-                size: Array.isArray(c.paragraphIds) ? c.paragraphIds.length : 0,
-                cohesion: typeof c.cohesion === 'number' ? c.cohesion : 0,
-                pairwiseCohesion: typeof c.pairwiseCohesion === 'number' ? c.pairwiseCohesion : 0,
-                uncertain: !!c.uncertain,
-                ...(Array.isArray(c.uncertaintyReasons) ? { uncertaintyReasons: c.uncertaintyReasons } : {}),
-              })),
-            };
-          } catch (_) {
-            paragraphClusteringSummary = null;
-          }
-        } else {
-          clusteringResult = null;
-          paragraphClusteringSummary = null;
-        }
 
         let perModelQueryRelevance = undefined;
         if (queryEmbedding && statementEmbeddingResult?.embeddings && paragraphResult?.paragraphs) {
@@ -770,7 +732,6 @@ export class StepExecutor {
             preSemanticInterpretation = buildPreSemanticInterpretation(
               substrate,
               paragraphResult.paragraphs,
-              Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined,
               geometryParagraphEmbeddings,
               perModelQueryRelevance
             );
@@ -908,39 +869,16 @@ export class StepExecutor {
           console.warn('[Enrichment] Failed:', getErrorMessage(err));
         }
 
-        if (clusteringResult) {
-          const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
-          console.log(`[StepExecutor] Clustering results:`);
-          console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
-          console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
-          console.log(`  - Multi-member: ${nonSingletons.length}`);
-          console.log(`  - Uncertain: ${clusteringResult.meta.uncertainCount}`);
-          console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
-          console.log(
-            `  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
-            `cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`
-          );
 
-          if (nonSingletons.length > 0) {
-            const largest = [...nonSingletons]
-              .sort((a, b) => b.paragraphIds.length - a.paragraphIds.length)
-              .slice(0, 3);
-            console.log(
-              `  - Largest clusters:`,
-              largest.map(c => `${c.id}: ${c.paragraphIds.length} paragraphs`)
-            );
-          }
-        }
       } catch (clusteringError) {
-        // Per design: skip clustering entirely on failure, continue without
-        console.warn('[StepExecutor] Clustering failed, continuing without clusters:', getErrorMessage(clusteringError));
+        // Per design: skip geometry entirely on failure, continue without
+        console.warn('[StepExecutor] Geometry pipeline failed, continuing without:', getErrorMessage(clusteringError));
         geometryDiagnostics.embeddingBackendFailure = true;
-        geometryDiagnostics.stages.clusteringFailure = {
+        geometryDiagnostics.stages.geometryFailure = {
           startedAtMs: nowMs(),
           timeMs: 0,
           error: getErrorMessage(clusteringError),
         };
-        clusteringResult = null;
       }
     } else {
       const reason = paragraphResult.paragraphs.length === 0
@@ -960,13 +898,13 @@ export class StepExecutor {
     const orderedModelIndices = preSemanticInterpretation?.modelOrdering?.orderedModelIndices;
     const orderedSourceData = (Array.isArray(orderedModelIndices) && orderedModelIndices.length > 0)
       ? (() => {
-          const positionByModelIndex = new Map(orderedModelIndices.map((mi, pos) => [mi, pos]));
-          return [...indexedSourceData].sort((a, b) => {
-            const pa = positionByModelIndex.get(a.modelIndex) ?? indexedSourceData.length;
-            const pb = positionByModelIndex.get(b.modelIndex) ?? indexedSourceData.length;
-            return pa - pb;
-          });
-        })()
+        const positionByModelIndex = new Map(orderedModelIndices.map((mi, pos) => [mi, pos]));
+        return [...indexedSourceData].sort((a, b) => {
+          const pa = positionByModelIndex.get(a.modelIndex) ?? indexedSourceData.length;
+          const pb = positionByModelIndex.get(b.modelIndex) ?? indexedSourceData.length;
+          return pa - pb;
+        });
+      })()
       : indexedSourceData;
 
     const mappingPrompt = buildSemanticMapperPrompt(
@@ -1183,7 +1121,6 @@ export class StepExecutor {
                     console.log('[Reconciliation] Completeness:', {
                       statementCoverage: `${(completenessReport.statements.coverageRatio * 100).toFixed(1)}%`,
                       regionCoverage: `${(completenessReport.regions.coverageRatio * 100).toFixed(1)}%`,
-                      verdict: completenessReport.verdict.recommendation,
                       unaddressed: completenessReport.statements.unaddressed
                     });
                   }
@@ -1554,7 +1491,7 @@ export class StepExecutor {
                         claimOverlap: overlap,
                       };
                     } catch (err) {
-                      console.warn('[StepExecutor] Claim provenance failed:', err);
+                      console.warn('[StepExecutor] Claim provenance failed:', getErrorMessage(err));
                     }
                   }
 

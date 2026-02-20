@@ -1,5 +1,4 @@
 export type {
-    Regime,
     AdaptiveLens,
     Region,
     RegionizationResult,
@@ -24,7 +23,6 @@ export { computeModelOrdering, computePerModelQueryRelevance } from './modelOrde
 export { computeDiagnostics } from './diagnostics';
 export { validateStructuralMapping } from './validation';
 
-import type { ParagraphCluster } from '../../clustering/types';
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
 import type { GeometricSubstrate } from '../types';
 import type { ModelOrderingResult, PreSemanticInterpretation } from './types';
@@ -62,7 +60,6 @@ function buildDefaultModelOrdering(substrate: GeometricSubstrate, regionCount: n
 export function buildPreSemanticInterpretation(
     substrate: GeometricSubstrate,
     paragraphs: ShadowParagraph[],
-    clusters?: ParagraphCluster[],
     paragraphEmbeddings?: Map<string, Float32Array> | null,
     queryRelevanceBoost?: Map<number, number>
 ): PreSemanticInterpretation {
@@ -76,9 +73,7 @@ export function buildPreSemanticInterpretation(
                 regions: [],
                 meta: {
                     regionCount: 0,
-                    kindCounts: { cluster: 0, component: 0, patch: 0 },
-                    fallbackUsed: true,
-                    fallbackReason: 'degenerate_substrate',
+                    kindCounts: { component: 0, patch: 0 },
                     coveredNodes: 0,
                     totalNodes: substrate.nodes.length,
                 },
@@ -88,7 +83,7 @@ export function buildPreSemanticInterpretation(
         };
     }
 
-    const regionization = buildRegions(substrate, paragraphs, lens, clusters);
+    const regionization = buildRegions(substrate, paragraphs, lens);
     const regionProfiles = profileRegions(regionization.regions, substrate, paragraphs, paragraphEmbeddings ?? null);
     const modelOrdering =
         pipelineGate.verdict === 'insufficient_structure'

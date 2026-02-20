@@ -1,16 +1,11 @@
 import { EXAMPLE_PROMPT } from "../constants";
 import logoIcon from "../assets/brand/logo-icon.png";
-import { useAtomValue, useSetAtom } from "jotai";
-import { powerUserModeAtom, statementClusteringDebugOpenAtom } from "../state/atoms";
-
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
   isLoading?: boolean;
 }
 
 const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
-  const setStatementClusteringOpen = useSetAtom(statementClusteringDebugOpenAtom);
-  const powerUserMode = useAtomValue(powerUserModeAtom);
   return (
     <div className="flex flex-col items-center justify-center h-full text-center p-10 pb-40 relative">
       {/* Orb Icon */}
@@ -49,14 +44,6 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
         </button>
       )}
 
-      {powerUserMode && (
-        <button
-          onClick={() => setStatementClusteringOpen(true)}
-          className="mt-4 text-xs text-text-muted px-3 py-2 border border-border-subtle rounded-lg bg-chip hover:bg-surface-highlight transition-all duration-200"
-        >
-          Statement clustering debug
-        </button>
-      )}
     </div>
   );
 };

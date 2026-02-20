@@ -5,6 +5,38 @@ Status: **active** = wired in happy path | **diagnostic** = computed, stored in 
 
 ---
 
+## Shadow Layer — Stances and Signals: Architectural Position
+
+### What they actually are
+
+Stances and signals are **L1 keyword observations labeled with L2 inference tags**.
+
+- The **computation is L1**: `STANCE_PATTERNS['prerequisite'].some(p => p.test(text))` is deterministic pattern matching.
+- The **label is L2 inference**: "text contains 'before' → this is a prerequisite claim." The label is a bet, not a fact.
+- The **`confidence` field** (0.65 / 0.80 / 0.95) is not semantic confidence — it is pattern match count (1/2/3+ patterns). The honest name would be `patternStrength`. Rename deferred (touches `ShadowStatement` in contract and many consumers).
+
+### Why false positives are managed (post Phase 1–4)
+
+Stances and signals do not gate any geometry decision after the previous cleanup. Their impact is now limited to:
+1. `ShadowDelta.ts` — `signalWeight` used for advisory ranking of unreferenced statements
+2. `claimAssembly.ts` — `has*Signal` boolean flags on `LinkedClaim` (display only)
+3. `coverageAudit.ts` — `reason` label on unattended regions (display annotation only)
+
+A false positive produces a wrong label or a slightly re-ranked advisory list — cosmetic, not structural.
+
+### The genuine remaining risk
+
+`ExclusionRules.ts` (88 patterns, 329 lines) applies **semantic gatekeeping at the extraction layer**: it tries to distinguish epistemic vs deontic modality, temporal narration vs causal ordering, rhetorical vs genuine warning — all via regex. These are L3 semantic judgments that regex cannot reliably make. A false exclusion drops a real statement from the pipeline entirely, silently.
+
+**Status: deferred as a tuning problem.** The architecture is sound — the exclusion rules are the right place to do this filtering. The patterns themselves need domain review, not structural change. Periodically: audit which rules exclude statements that should have survived; consider moving hard→soft for ambiguous pattern classes.
+
+### Recommended long-term posture
+- Stances/signals remain **soft annotations with a known false-positive budget**
+- Never expand their use as hard gates
+- Future pass: rename `confidence` → `patternStrength` across the shadow layer (requires contract migration)
+
+---
+
 ## Layer 1 — Shadow / Evidence
 
 **File:** `src/shadow/ShadowExtractor.ts`
@@ -59,13 +91,13 @@ Status: **active** = wired in happy path | **diagnostic** = computed, stored in 
 
 | Computation | Output | Consumer | Status |
 |---|---|---|---|
-| `deriveLens(substrate)` | `AdaptiveLens`: regime, shouldRunClustering, hardMergeThreshold, softThreshold, k, confidence, evidence[] | `buildRegions`, `computeDiagnostics` (position group threshold) | active |
+| `deriveLens(substrate)` | `AdaptiveLens`: hardMergeThreshold, softThreshold, k, confidence, evidence[] | `buildRegions`, `computeDiagnostics` (position group threshold) | active |
 
 **File:** `src/geometry/interpretation/regions.ts`
 
 | Computation | Output | Consumer | Status |
 |---|---|---|---|
-| `buildRegions(substrate, paragraphs, lens, clusters?)` | `RegionizationResult`: regions[] each with id, kind (cluster/component/patch), nodeIds[], statementIds[], sourceId, modelIndices[] | profiles, modelOrdering, diagnostics, coverageAudit, enrichment, alignment | active |
+| `buildRegions(substrate, paragraphs, lens)` | `RegionizationResult`: regions[] each with id, kind (component/patch), nodeIds[], statementIds[], sourceId, modelIndices[] | profiles, modelOrdering, diagnostics, coverageAudit, enrichment, alignment | active |
 
 **File:** `src/geometry/interpretation/profiles.ts`
 
@@ -114,19 +146,33 @@ Status: **active** = wired in happy path | **diagnostic** = computed, stored in 
 
 | Computation | Output | Consumer | Status |
 |---|---|---|---|
-| `findUnattendedRegions(substrate, paragraphs, claims, regions, statements)` | `UnattendedRegion[]`: id, statementIds, modelDiversity, avgIsolation, reason (stance_diversity/high_connectivity/bridge_region/isolated_noise), bridgesTo[] | `buildCompletenessReport` | active |
+| `findUnattendedRegions(substrate, paragraphs, claims, regions, statements)` | `UnattendedRegion[]`: id, nodeIds, statementIds, statementCount, modelDiversity, avgIsolation, bridgesTo[] | `buildCompletenessReport` | active |
 
-*Removed (Phase 4): `likelyClaim` field and the three heuristics (stanceVariety≥2, avgMutualDegree≥2, bridgesTo>1) that fed it.*
+*Removed (Phase 3): `reason` label (stance_diversity/high_connectivity/bridge_region) — same three likelyClaim heuristics wearing a different name. `Stance` import removed. `stanceVariety` calculation removed.*
 
 **File:** `src/geometry/interpretation/completenessReport.ts`
 
 | Computation | Output | Consumer | Status |
 |---|---|---|---|
-| `buildCompletenessReport(statementFates, unattendedRegions, statements, totalRegions)` | `CompletenessReport`: statements.{total, inClaims, orphaned, **unaddressed**, noise, coverageRatio}, regions.{total, attended, unattended, coverageRatio}, verdict.{complete, confidence, **recommendation**}, recovery.{**unaddressedStatements[]**, unattendedRegionPreviews[]} | Stored in artifact | diagnostic |
+| `buildCompletenessReport(statementFates, unattendedRegions, statements, totalRegions)` | `CompletenessReport`: statements.{total, inClaims, orphaned, **unaddressed**, noise, coverageRatio}, regions.{total, attended, unattended, coverageRatio}, recovery.{**unaddressedStatements[]**, unattendedRegionPreviews[]} | Stored in artifact | diagnostic |
 
-*Removed (Phase 4): `estimatedMissedClaims` (`/3` divisor invented), `highSignalOrphans` (signalWeight-ordered), `unattendedWithLikelyClaims` (likelyClaim is gone).*
+*Removed (Phase 4): `verdict` block (complete, confidence, recommendation) — unjustified thresholds (0.85/0.8/0.7/0.6) compressing continuous measurements into categorical labels. Also removed: `estimatedMissedClaims` (/3 divisor invented), `highSignalOrphans` (signalWeight-ordered), `unattendedWithLikelyClaims` (likelyClaim is gone).*
 
 ~~**File:** `src/geometry/interpretation/regionGates.ts` — **DELETED**~~
+
+~~**Files:** `src/clustering/engine.ts`, `src/clustering/hac.ts` — **DELETED** (Phase 1)~~
+- `buildClusters()` — HAC orchestration, only consumer was `regions.ts` via `shouldRunClustering` path. No extractable L1 measurements — `findCentroid` superseded by existing claim centroid logic in alignment/diagnostics; `detectUncertainty` was L2 classification via stance labels.
+- `hierarchicalCluster()` — pure L1 algorithm but only has value with the cluster construct. Construct removed.
+
+~~**Types:** `ClusterableItem`, `ParagraphCluster`, `ClusteringResult` from `src/clustering/types.ts` — **DELETED** (Phase 1)~~
+
+~~**Functions:** `buildDistanceMatrix`, `computeCohesion`, `pairwiseCohesion` from `src/clustering/distance.ts` — **DELETED** (Phase 1)~~
+- `buildDistanceMatrix` had L2 contamination: stance-adjusted and model-diversity-weighted distances (not honest cosine). Correctly removed.
+- `computeCohesion`, `pairwiseCohesion` were L1 but only consumed by `engine.ts`.
+- `cosineSimilarity`, `quantizeSimilarity` kept — 6 active consumers across pipeline.
+
+~~**Exports:** `AdaptiveLens.regime`, `AdaptiveLens.shouldRunClustering`, `mapPriorToRegime()`, `Regime` type — **DELETED** (Phase 2)~~
+- `mapPriorToRegime()` was a 1:1 identity passthrough. `regime` was just `shape.prior` under a different name. UI updated to read `substrate.shape.prior` directly.
 
 ---
 

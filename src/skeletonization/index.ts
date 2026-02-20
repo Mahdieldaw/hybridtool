@@ -27,10 +27,8 @@ function countFates(statements: SkeletonizationInput['statements'], statementFat
   for (const st of statements) {
     const action = statementFates.get(st.id)?.action ?? 'PROTECTED';
     if (action === 'PROTECTED') protectedCount++;
-    else if (action === 'UNTRIAGED') {
-      protectedCount++;
-      untriagedCount++;
-    } else if (action === 'SKELETONIZE') skeletonizedCount++;
+    else if (action === 'UNTRIAGED') untriagedCount++;
+    else if (action === 'SKELETONIZE') skeletonizedCount++;
     else removedCount++;
   }
 
@@ -108,11 +106,11 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
       skeletonizedCount: counts.skeletonizedCount,
       removedCount: counts.removedCount,
       processingTimeMs: triageResultPartial.meta.processingTimeMs,
+      embeddingTimeMs: triageResultPartial.meta.embeddingTimeMs,
     },
   };
 
-  const embeddingTimeMs = triageResultPartial.meta.processingTimeMs * 0.7;
-  return reconstructSubstrate(normalizedInput, triageResult, embeddingTimeMs);
+  return reconstructSubstrate(normalizedInput, triageResult, triageResultPartial.meta.embeddingTimeMs);
 }
 
 interface BatchResponse {

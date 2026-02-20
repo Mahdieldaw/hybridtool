@@ -1,4 +1,3 @@
-import type { ParagraphCluster } from '../../clustering/types';
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
 import type { NodeLocalStats, GeometricSubstrate } from '../types';
 import type { AdaptiveLens, Region, RegionizationResult } from './types';
@@ -20,27 +19,6 @@ function unionStatementIdsStable(nodeIds: string[], nodesById: Map<string, NodeL
         }
     }
     return out;
-}
-
-function clusterToRegion(
-    cluster: ParagraphCluster,
-    regionId: string,
-    nodesById: Map<string, NodeLocalStats>
-): Region {
-    const modelIndices: number[] = [];
-    for (const nodeId of cluster.paragraphIds) {
-        const node = nodesById.get(nodeId);
-        if (node) modelIndices.push(node.modelIndex);
-    }
-
-    return {
-        id: regionId,
-        kind: 'cluster',
-        nodeIds: [...cluster.paragraphIds],
-        statementIds: [...cluster.statementIds],
-        sourceId: cluster.id,
-        modelIndices: uniqueSorted(modelIndices),
-    };
 }
 
 function componentToRegion(
@@ -90,8 +68,7 @@ function patchToRegion(
 export function buildRegions(
     substrate: GeometricSubstrate,
     paragraphs: ShadowParagraph[],
-    lens: AdaptiveLens,
-    clusters?: ParagraphCluster[]
+    _lens: AdaptiveLens
 ): RegionizationResult {
     const nodesById = new Map(substrate.nodes.map(n => [n.paragraphId, n]));
     const totalNodes = substrate.nodes.length;
@@ -100,28 +77,17 @@ export function buildRegions(
     const coveredNodeIds = new Set<string>();
     let regionIndex = 0;
 
-    const usableClusters = clusters?.filter(c => c.paragraphIds.length >= 2) ?? [];
-
-    if (lens.shouldRunClustering && usableClusters.length > 0) {
-        for (const cluster of usableClusters) {
-            const region = clusterToRegion(cluster, `r_${regionIndex++}`, nodesById);
+    // Component-based regions: each connected component with ≥2 nodes becomes a region
+    for (const component of substrate.topology.components) {
+        const uncoveredInComponent = component.nodeIds.filter(id => !coveredNodeIds.has(id));
+        if (uncoveredInComponent.length >= 2) {
+            const region = componentToRegion(component, uncoveredInComponent, `r_${regionIndex++}`, nodesById);
             regions.push(region);
-            for (const id of cluster.paragraphIds) coveredNodeIds.add(id);
+            for (const id of uncoveredInComponent) coveredNodeIds.add(id);
         }
     }
 
-    const uncoveredByCluster = substrate.nodes.filter(n => !coveredNodeIds.has(n.paragraphId));
-    if (uncoveredByCluster.length > 0) {
-        for (const component of substrate.topology.components) {
-            const uncoveredInComponent = component.nodeIds.filter(id => !coveredNodeIds.has(id));
-            if (uncoveredInComponent.length >= 2) {
-                const region = componentToRegion(component, uncoveredInComponent, `r_${regionIndex++}`, nodesById);
-                regions.push(region);
-                for (const id of uncoveredInComponent) coveredNodeIds.add(id);
-            }
-        }
-    }
-
+    // Patch-based regions: group remaining uncovered nodes by mutual neighborhood
     const stillUncovered = substrate.nodes.filter(n => !coveredNodeIds.has(n.paragraphId));
     if (stillUncovered.length > 0) {
         const stillUncoveredSet = new Set(stillUncovered.map(n => n.paragraphId));
@@ -145,24 +111,21 @@ export function buildRegions(
         }
     }
 
+    // Sort: components first (larger first), then patches
     regions.sort((a, b) => {
-        const kindOrder = { cluster: 0, component: 1, patch: 2 } as const;
+        const kindOrder = { component: 0, patch: 1 } as const;
         if (kindOrder[a.kind] !== kindOrder[b.kind]) return kindOrder[a.kind] - kindOrder[b.kind];
         if (b.nodeIds.length !== a.nodeIds.length) return b.nodeIds.length - a.nodeIds.length;
         return a.id.localeCompare(b.id);
     });
 
+    // Renumber IDs after sort
     regions.forEach((r, idx) => {
         r.id = `r_${idx}`;
     });
 
-    const kindCounts: Record<Region['kind'], number> = { cluster: 0, component: 0, patch: 0 };
+    const kindCounts: Record<Region['kind'], number> = { component: 0, patch: 0 };
     for (const r of regions) kindCounts[r.kind]++;
-
-    const fallbackUsed = kindCounts.cluster === 0;
-    const fallbackReason = fallbackUsed
-        ? (lens.shouldRunClustering ? 'no_multi_member_clusters' : 'clustering_skipped_by_lens')
-        : undefined;
 
     void paragraphs;
 
@@ -171,8 +134,6 @@ export function buildRegions(
         meta: {
             regionCount: regions.length,
             kindCounts,
-            fallbackUsed,
-            fallbackReason,
             coveredNodes: coveredNodeIds.size,
             totalNodes,
         },

@@ -436,12 +436,11 @@ function buildClusteringView(artifact: any) {
 
   const regionization = artifact?.geometry?.preSemantic?.regionization || artifact?.preSemantic?.regionization || null;
   const regions = safeArr<any>(regionization?.regions);
-  const clusterRegions = regions.filter((r) => r?.kind === "cluster" && typeof r?.sourceId === "string");
   const membersByClusterId = new Map<string, string[]>();
-  for (const r of clusterRegions) {
-    const cid = safeStr(r?.sourceId).trim();
+  for (const r of regions) {
+    const rid = safeStr(r?.id).trim();
     const nodeIds = safeArr<any>(r?.nodeIds).map((x) => safeStr(x).trim()).filter(Boolean);
-    if (cid) membersByClusterId.set(cid, nodeIds);
+    if (rid) membersByClusterId.set(rid, nodeIds);
   }
 
   const cards: SummaryCard[] = [
@@ -660,7 +659,7 @@ function buildInterpretationView(artifact: any) {
   const cards: SummaryCard[] = [
     { label: "Regions", value: formatInt(regions.length), emphasis: regions.length > 0 ? "good" : "warn" },
     { label: "Profiles", value: formatInt(profiles.length), emphasis: profiles.length > 0 ? "good" : "warn" },
-    { label: "Regime", value: safeStr(pre?.lens?.regime).trim() || "—" },
+    { label: "Shape", value: safeStr(artifact?.geometry?.substrate?.shape?.prior ?? artifact?.substrate?.shape?.prior).trim() || "—" },
     { label: "Gate", value: safeStr(pipelineGate?.verdict).trim() || "—" },
   ];
 
@@ -684,22 +683,13 @@ function buildInterpretationView(artifact: any) {
 
   const rows = profiles.map((rp: any, idx: number) => {
     const regionId = safeStr(rp?.regionId).trim() || safeStr(rp?.id).trim();
-    const tier = safeStr(rp?.tier).trim();
-    const purity = rp?.purity || {};
     const geometry = rp?.geometry || {};
     const mass = rp?.mass || {};
-    const stanceVariety = safeNum(purity?.stanceVariety);
-    const dominantStance = safeStr(purity?.dominantStance).trim();
-    const contestedRatio = safeNum(purity?.contestedRatio);
     return {
       id: regionId || String(idx),
       regionId,
-      tier,
       paragraphCount: nodesByRegion.get(regionId) ?? safeNum(mass?.paragraphCount) ?? null,
       modelDiversity: safeNum(mass?.modelDiversity),
-      dominantStance,
-      stanceVariety,
-      contested: (contestedRatio ?? 0) > 0,
       internalDensity: safeNum(geometry?.internalDensity),
       isolation: safeNum(geometry?.isolation),
       confidence: safeNum(rp?.confidence),
@@ -713,12 +703,8 @@ function buildInterpretationView(artifact: any) {
     emptyMessage: "No region profiles available on artifact.geometry.preSemantic.regionProfiles.",
     columns: [
       { key: "regionId", header: "Region", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.regionId || "—", sortValue: (r) => r.regionId || null },
-      { key: "tier", header: "Tier", className: "whitespace-nowrap", cell: (r) => r.tier || "—", sortValue: (r) => r.tier || null },
       { key: "paragraphCount", header: "Nodes", className: "whitespace-nowrap", cell: (r) => formatInt(r.paragraphCount), sortValue: (r) => r.paragraphCount ?? null },
       { key: "modelDiversity", header: "Model div", className: "whitespace-nowrap", cell: (r) => formatNum(r.modelDiversity, 2), sortValue: (r) => r.modelDiversity ?? null },
-      { key: "dominantStance", header: "Stance", className: "whitespace-nowrap", cell: (r) => r.dominantStance || "—", sortValue: (r) => r.dominantStance || null },
-      { key: "stanceVariety", header: "Variety", className: "whitespace-nowrap", cell: (r) => formatNum(r.stanceVariety, 2), sortValue: (r) => r.stanceVariety ?? null },
-      { key: "contested", header: "Cont", className: "whitespace-nowrap", cell: (r) => (r.contested ? "yes" : "—"), sortValue: (r) => (r.contested ? 1 : 0) },
       { key: "internalDensity", header: "Density", className: "whitespace-nowrap", cell: (r) => formatNum(r.internalDensity, 3), sortValue: (r) => r.internalDensity ?? null },
       { key: "isolation", header: "Iso", className: "whitespace-nowrap", cell: (r) => formatNum(r.isolation, 3), sortValue: (r) => r.isolation ?? null },
       { key: "confidence", header: "Conf", className: "whitespace-nowrap", cell: (r) => formatPct(r.confidence, 0), sortValue: (r) => r.confidence ?? null },
@@ -1033,9 +1019,6 @@ function buildMappingView(artifact: any) {
     const sourceStatementCount = sourceStatementIds.length;
     const sourceCoherence =
       safeNum(c?.sourceCoherence) ?? safeNum(claimMeasurementById.get(id)?.sourceCoherence);
-    const hints = c?.geometricSignals || {};
-    const regionTier =
-      hints?.backedByPeak ? "peak" : hints?.backedByHill ? "hill" : hints?.backedByFloor ? "floor" : null;
     const leverage = leverageById.get(id) || null;
     const sourceStatementSummary = sourceStatementIds
       .map((sid) => {
@@ -1052,7 +1035,6 @@ function buildMappingView(artifact: any) {
       sourceStatementCount,
       sourceStatementSummary,
       sourceCoherence,
-      regionTier,
       leverage: safeNum(leverage?.leverage) ?? null,
       keystoneScore: safeNum(leverage?.keystoneScore) ?? null,
       supportRatio: safeNum(leverage?.supportRatio) ?? null,
@@ -1080,7 +1062,6 @@ function buildMappingView(artifact: any) {
         ),
         sortValue: (r) => r.sourceStatementCount ?? null,
       },
-      { key: "regionTier", header: "Tier", className: "whitespace-nowrap", cell: (r) => r.regionTier || "—", sortValue: (r) => r.regionTier || null },
       { key: "sourceCoherence", header: "Coherence", className: "whitespace-nowrap", cell: (r) => (typeof r.sourceCoherence === "number" ? r.sourceCoherence.toFixed(2) : "—"), sortValue: (r) => r.sourceCoherence ?? null },
       { key: "supportRatio", header: "Support%", className: "whitespace-nowrap", cell: (r) => formatPct(r.supportRatio, 0), sortValue: (r) => r.supportRatio ?? null },
       { key: "contestedRatio", header: "Cont%", className: "whitespace-nowrap", cell: (r) => formatPct(r.contestedRatio, 0), sortValue: (r) => r.contestedRatio ?? null },
@@ -1124,7 +1105,6 @@ function buildMappingView(artifact: any) {
     regionSpan: safeNum(m?.regionSpan),
     sourceModelDiversity: safeNum(m?.sourceModelDiversity),
     dominantRegionId: safeStr(m?.dominantRegionId).trim() || null,
-    dominantRegionTier: safeStr(m?.dominantRegionTier).trim() || null,
   }));
 
   const claimMeasurementsTable: TableSpec<any> = {
@@ -1139,7 +1119,6 @@ function buildMappingView(artifact: any) {
       { key: "regionSpan", header: "Span", className: "whitespace-nowrap", cell: (r) => formatInt(r.regionSpan), sortValue: (r) => r.regionSpan ?? null },
       { key: "sourceModelDiversity", header: "Model div", className: "whitespace-nowrap", cell: (r) => formatNum(r.sourceModelDiversity, 2), sortValue: (r) => r.sourceModelDiversity ?? null },
       { key: "dominantRegionId", header: "Dom region", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.dominantRegionId || "—", sortValue: (r) => r.dominantRegionId || null },
-      { key: "dominantRegionTier", header: "Dom tier", className: "whitespace-nowrap", cell: (r) => r.dominantRegionTier || "—", sortValue: (r) => r.dominantRegionTier || null },
     ],
     rows: claimMeasurementRows,
   };
@@ -1443,7 +1422,6 @@ function buildQueryView(artifact: any) {
       subConsensus: safeNum(s?.subConsensusCorroboration),
       modelCount: safeNum(s?.meta?.modelCount),
       regionId: safeStr(s?.meta?.regionId).trim() || null,
-      regionTier: safeStr(s?.meta?.regionTier).trim() || null,
       regionModelDiversity: safeNum(s?.meta?.regionModelDiversity),
       regionContestedRatio: safeNum(s?.meta?.regionContestedRatio),
       stance: safeStr(s?.meta?.dominantStance).trim() || null,
@@ -1461,7 +1439,6 @@ function buildQueryView(artifact: any) {
       { key: "querySim", header: "Query", className: "whitespace-nowrap", cell: (r) => formatNum(r.querySim, 3), sortValue: (r) => r.querySim ?? null },
       { key: "recusant", header: "Recusant", className: "whitespace-nowrap", cell: (r) => formatNum(r.recusant, 3), sortValue: (r) => r.recusant ?? null },
       { key: "subConsensus", header: "SubC", className: "whitespace-nowrap", cell: (r) => formatNum(r.subConsensus, 3), sortValue: (r) => r.subConsensus ?? null },
-      { key: "regionTier", header: "Region tier", className: "whitespace-nowrap", cell: (r) => r.regionTier || "—", sortValue: (r) => r.regionTier || null },
       { key: "regionModelDiversity", header: "Reg div", className: "whitespace-nowrap", cell: (r) => formatNum(r.regionModelDiversity, 2), sortValue: (r) => r.regionModelDiversity ?? null },
       { key: "regionContestedRatio", header: "Reg cont", className: "whitespace-nowrap", cell: (r) => formatPct(r.regionContestedRatio, 0), sortValue: (r) => r.regionContestedRatio ?? null },
       { key: "paragraphIndex", header: "P#", className: "whitespace-nowrap", cell: (r) => formatInt(r.paragraphIndex), sortValue: (r) => r.paragraphIndex ?? null },

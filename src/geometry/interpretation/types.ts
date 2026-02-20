@@ -1,13 +1,8 @@
-import type { ParagraphCluster } from '../../clustering/types';
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
 import type { EnrichedClaim, Edge } from '../../../shared/contract';
 import type { GeometricSubstrate } from '../types';
 
-export type Regime = 'fragmented' | 'parallel_components' | 'bimodal_fork' | 'convergent_core';
-
 export interface AdaptiveLens {
-    regime: Regime;
-    shouldRunClustering: boolean;
     hardMergeThreshold: number;
     softThreshold: number;
     k: number;
@@ -17,7 +12,7 @@ export interface AdaptiveLens {
 
 export interface Region {
     id: string;
-    kind: 'cluster' | 'component' | 'patch';
+    kind: 'component' | 'patch';
     nodeIds: string[];
     statementIds: string[];
     sourceId: string;
@@ -29,8 +24,6 @@ export interface RegionizationResult {
     meta: {
         regionCount: number;
         kindCounts: Record<Region['kind'], number>;
-        fallbackUsed: boolean;
-        fallbackReason?: 'clustering_skipped_by_lens' | 'no_multi_member_clusters' | 'degenerate_substrate';
         coveredNodes: number;
         totalNodes: number;
     };
@@ -151,7 +144,6 @@ export interface PreSemanticInterpretation {
 export interface InterpretationInputs {
     substrate: GeometricSubstrate;
     paragraphs: ShadowParagraph[];
-    clusters?: ParagraphCluster[];
 }
 
 export type ClaimWithProvenance = EnrichedClaim & { sourceStatementIds?: string[] };

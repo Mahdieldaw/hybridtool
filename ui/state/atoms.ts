@@ -243,7 +243,6 @@ export const turnStreamingStateFamily = atomFamily(
 export const isHistoryPanelOpenAtom = atom<boolean>(false);
 export const isSettingsOpenAtom = atom<boolean>(false);
 export const showWelcomeAtom = atom((get) => get(turnIdsAtom).length === 0);
-export const statementClusteringDebugOpenAtom = atom<boolean>(false);
 export const turnExpandedStateFamily = atomFamily(
   (_turnId: string) => atom(false),
   (a, b) => a === b,

@@ -1044,14 +1044,14 @@ export const DecisionMapSheet = React.memo(() => {
 
     const normalize = (input: unknown) => {
       if (!Array.isArray(input)) return null;
-      const out: Array<{ id: string; kind: "cluster" | "component" | "patch"; nodeIds: string[] }> = [];
+      const out: Array<{ id: string; kind: "component" | "patch"; nodeIds: string[] }> = [];
       for (const r of input) {
         if (!r || typeof r !== 'object') continue;
         const rr = r as Record<string, unknown>;
         const id = typeof rr.id === 'string' ? rr.id : '';
         if (!id) continue;
         const kindRaw = typeof rr.kind === 'string' ? rr.kind : '';
-        const kind = kindRaw === 'cluster' || kindRaw === 'component' || kindRaw === 'patch' ? kindRaw : 'patch';
+        const kind = kindRaw === 'component' || kindRaw === 'patch' ? kindRaw : 'patch';
         const nodeIds = Array.isArray(rr.nodeIds) ? rr.nodeIds.map((x) => String(x)).filter(Boolean) : [];
         out.push({ id, kind, nodeIds });
       }
@@ -2353,9 +2353,6 @@ export const DecisionMapSheet = React.memo(() => {
                                 <div key={String(r?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
                                   <div className="flex items-center justify-between gap-3 mb-2">
                                     <div className="text-sm font-semibold text-text-primary">{String(r?.id || 'Region')}</div>
-                                    {r?.tier && (
-                                      <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">{String(r.tier)}</span>
-                                    )}
                                   </div>
                                   {r?.profile && <div className="text-xs text-text-secondary mb-2">{String(r.profile)}</div>}
                                   {Array.isArray(r?.memberIds) && r.memberIds.length > 0 && (

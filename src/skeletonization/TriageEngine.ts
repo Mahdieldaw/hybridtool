@@ -104,7 +104,9 @@ export async function triageStatements(
   }
 
   const statementTexts = statements.map(s => s.text);
+  const embeddingStart = nowMs();
   const rawStatementEmbeddings = await generateTextEmbeddings(statementTexts);
+  const embeddingTimeMs = nowMs() - embeddingStart;
   const statementEmbeddings = new Map<string, Float32Array>();
   for (let i = 0; i < statements.length; i++) {
     const emb = rawStatementEmbeddings.get(String(i));
@@ -158,8 +160,8 @@ export async function triageStatements(
       if (!claimCentroid || !sourceEmbedding || !sourceStatement) {
         statementFates.set(sourceStatementId, {
           statementId: sourceStatementId,
-          action: 'UNTRIAGED',
-          reason: `Missing claim centroid or statement embedding for pruned ${prunedClaim.id}`,
+          action: 'PROTECTED',
+          reason: `Cannot confirm carrier of pruned ${prunedClaim.id} — missing embedding`,
           triggerClaimId: prunedClaim.id,
         });
         continue;
@@ -181,8 +183,8 @@ export async function triageStatements(
       if (relevance < relevanceMin) {
         statementFates.set(sourceStatementId, {
           statementId: sourceStatementId,
-          action: 'UNTRIAGED',
-          reason: `Low claim relevance for pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)})`,
+          action: 'PROTECTED',
+          reason: `Not a confirmed carrier of pruned ${prunedClaim.id} — low relevance (${relevance.toFixed(2)})`,
           triggerClaimId: prunedClaim.id,
         });
         continue;
@@ -222,8 +224,8 @@ export async function triageStatements(
             if (carrierRelevance < relevanceMin) {
               statementFates.set(carrier.statementId, {
                 statementId: carrier.statementId,
-                action: 'UNTRIAGED',
-                reason: `Low claim relevance carrier vs pruned ${prunedClaim.id} (relevance: ${carrierRelevance.toFixed(2)})`,
+                action: 'PROTECTED',
+                reason: `Not a confirmed carrier of pruned ${prunedClaim.id} — low relevance (${carrierRelevance.toFixed(2)})`,
                 triggerClaimId: prunedClaim.id,
                 isSoleCarrier: false,
               });
@@ -318,8 +320,8 @@ export async function triageStatements(
         } else if (triggerClaimId && (!claimCentroid || relevance < relevanceMin)) {
           statementFates.set(stmt.id, {
             statementId: stmt.id,
-            action: 'UNTRIAGED',
-            reason: `Low claim relevance paraphrase vs pruned ${triggerClaimId} (sim: ${similarity.toFixed(2)}, rel: ${relevance.toFixed(2)})`,
+            action: 'PROTECTED',
+            reason: `Not a confirmed carrier paraphrase for pruned ${triggerClaimId} — low relevance (sim: ${similarity.toFixed(2)}, rel: ${relevance.toFixed(2)})`,
             triggerClaimId,
             isSoleCarrier: false,
           });
@@ -347,8 +349,8 @@ export async function triageStatements(
     if (!statementFates.has(statement.id)) {
       statementFates.set(statement.id, {
         statementId: statement.id,
-        action: 'PROTECTED',
-        reason: 'Not linked to any claim (passthrough)',
+        action: 'UNTRIAGED',
+        reason: 'Not linked to any claim',
       });
     }
   }
@@ -360,10 +362,7 @@ export async function triageStatements(
 
   for (const fate of statementFates.values()) {
     if (fate.action === 'PROTECTED') protectedCount++;
-    else if (fate.action === 'UNTRIAGED') {
-      protectedCount++;
-      untriagedCount++;
-    }
+    else if (fate.action === 'UNTRIAGED') untriagedCount++;
     else if (fate.action === 'SKELETONIZE') skeletonizedCount++;
     else removedCount++;
   }
@@ -378,6 +377,7 @@ export async function triageStatements(
       skeletonizedCount,
       removedCount,
       processingTimeMs: nowMs() - start,
+      embeddingTimeMs,
     },
   };
 }

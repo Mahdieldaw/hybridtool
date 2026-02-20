@@ -1168,11 +1168,7 @@ export interface CognitivePreSemantic {
   regions: Array<Pick<PipelineRegion, 'id' | 'kind' | 'nodeIds'>>;
 }
 
-export type PipelineRegime = 'fragmented' | 'parallel_components' | 'bimodal_fork' | 'convergent_core';
-
 export interface PipelineAdaptiveLens {
-  regime: PipelineRegime;
-  shouldRunClustering: boolean;
   hardMergeThreshold: number;
   softThreshold: number;
   k: number;
@@ -1182,7 +1178,7 @@ export interface PipelineAdaptiveLens {
 
 export interface PipelineRegion {
   id: string;
-  kind: 'cluster' | 'component' | 'patch';
+  kind: 'component' | 'patch';
   nodeIds: string[];
   statementIds: string[];
   sourceId: string;
@@ -1194,8 +1190,6 @@ export interface PipelineRegionizationResult {
   meta: {
     regionCount: number;
     kindCounts: Record<PipelineRegion['kind'], number>;
-    fallbackUsed: boolean;
-    fallbackReason?: 'clustering_skipped_by_lens' | 'no_multi_member_clusters';
     coveredNodes: number;
     totalNodes: number;
   };
@@ -1203,27 +1197,16 @@ export interface PipelineRegionizationResult {
 
 export interface PipelineRegionProfile {
   regionId: string;
-  tier: 'peak' | 'hill' | 'floor';
-  tierConfidence: number;
   mass: {
     nodeCount: number;
     modelDiversity: number;
     modelDiversityRatio: number;
-  };
-  purity: {
-    dominantStance: ShadowStance;
-    stanceUnanimity: number;
-    contestedRatio: number;
-    stanceVariety: number;
   };
   geometry: {
     internalDensity: number;
     isolation: number;
     nearestCarrierSimilarity: number;
     avgInternalSimilarity: number;
-  };
-  predicted: {
-    likelyClaims: number;
   };
 }
 
@@ -1294,7 +1277,6 @@ export interface PipelineClaimGeometricMeasurement {
   sourceModelDiversity: number;
   sourceStatementCount: number;
   dominantRegionId: string | null;
-  dominantRegionTier: 'peak' | 'hill' | 'floor' | null;
   dominantRegionModelDiversity: number | null;
 }
 
@@ -1357,12 +1339,6 @@ export interface UnattendedRegion {
   statementCount: number;
   modelDiversity: number;
   avgIsolation: number;
-  reason:
-  | 'stance_diversity'
-  | 'high_connectivity'
-  | 'bridge_region'
-  | 'isolated_noise'
-  | 'insufficient_signals';
   bridgesTo: string[];
 }
 
@@ -1381,11 +1357,6 @@ export interface CompletenessReport {
     unattended: number;
     coverageRatio: number;
   };
-  verdict: {
-    complete: boolean;
-    confidence: 'high' | 'medium' | 'low';
-    recommendation: 'coverage_acceptable' | 'review_orphans' | 'possible_gaps';
-  };
   recovery: {
     unaddressedStatements: Array<{
       statementId: string;
@@ -1396,7 +1367,6 @@ export interface CompletenessReport {
     unattendedRegionPreviews: Array<{
       regionId: string;
       statementPreviews: string[];
-      reason: string;
     }>;
   };
 }

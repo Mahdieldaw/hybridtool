@@ -2,7 +2,6 @@ import type { GeometricSubstrate } from '../types';
 import type { ShadowStatement } from '../../shadow/ShadowExtractor';
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
 import type { Region } from './types';
-import type { Stance } from '../../shadow/StatementTypes';
 
 export interface UnattendedRegion {
     id: string;
@@ -11,12 +10,6 @@ export interface UnattendedRegion {
     statementCount: number;
     modelDiversity: number;
     avgIsolation: number;
-    reason:
-        | 'stance_diversity'
-        | 'high_connectivity'
-        | 'bridge_region'
-        | 'isolated_noise'
-        | 'insufficient_signals';
     bridgesTo: string[];
 }
 
@@ -36,7 +29,7 @@ export function findUnattendedRegions(
     paragraphs: ShadowParagraph[],
     claims: Array<{ id: string; sourceStatementIds?: string[] }>,
     regions: Region[],
-    statements: ShadowStatement[]
+    _statements: ShadowStatement[]
 ): UnattendedRegion[] {
     const paragraphToStatementIds = new Map<string, string[]>();
     const statementToParagraph = new Map<string, string>();
@@ -60,7 +53,6 @@ export function findUnattendedRegions(
         }
     }
 
-    const stmtById = new Map(statements.map(s => [s.id, s]));
     const nodeById = new Map(substrate.nodes.map(n => [n.paragraphId, n]));
 
     const unattendedRegions: UnattendedRegion[] = [];
@@ -74,7 +66,6 @@ export function findUnattendedRegions(
 
         const modelIndices = new Set<number>();
         let totalIsolation = 0;
-        let totalMutualDegree = 0;
         let processedCount = 0;
 
         for (const nodeId of region.nodeIds) {
@@ -83,30 +74,10 @@ export function findUnattendedRegions(
             processedCount += 1;
             modelIndices.add(node.modelIndex);
             totalIsolation += node.isolationScore;
-            totalMutualDegree += node.mutualDegree;
         }
 
         const denom = Math.max(1, processedCount);
         const avgIsolation = totalIsolation / denom;
-        const avgMutualDegree = totalMutualDegree / denom;
-
-        const stanceCounts = new Map<Stance, number>();
-        for (const stmtId of regionStatementIds) {
-            const stmt = stmtById.get(stmtId);
-            if (!stmt) continue;
-            stanceCounts.set(stmt.stance, (stanceCounts.get(stmt.stance) ?? 0) + 1);
-        }
-        const stanceVariety = stanceCounts.size;
-
-        let reason: UnattendedRegion['reason'] = 'insufficient_signals';
-
-        if (avgIsolation > 0.8 && region.nodeIds.length === 1) {
-            reason = 'isolated_noise';
-        } else if (stanceVariety >= 2) {
-            reason = 'stance_diversity';
-        } else if (avgMutualDegree >= 2 && region.nodeIds.length >= 2) {
-            reason = 'high_connectivity';
-        }
 
         const bridgesToSet = new Set<string>();
         for (const nodeId of region.nodeIds) {
@@ -120,10 +91,6 @@ export function findUnattendedRegions(
         }
         const bridgesTo = Array.from(bridgesToSet);
 
-        if (bridgesTo.length > 1 && reason === 'insufficient_signals') {
-            reason = 'bridge_region';
-        }
-
         unattendedRegions.push({
             id: region.id,
             nodeIds: region.nodeIds,
@@ -131,7 +98,6 @@ export function findUnattendedRegions(
             statementCount: regionStatementIds.length,
             modelDiversity: modelIndices.size,
             avgIsolation,
-            reason,
             bridgesTo,
         });
     }

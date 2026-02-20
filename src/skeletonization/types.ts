@@ -37,6 +37,7 @@ export interface TriageResult {
     skeletonizedCount: number;
     removedCount: number;
     processingTimeMs: number;
+    embeddingTimeMs: number;
   };
 }
 

@@ -17,11 +17,6 @@ export interface CompletenessReport {
         unattended: number;
         coverageRatio: number;
     };
-    verdict: {
-        complete: boolean;
-        confidence: 'high' | 'medium' | 'low';
-        recommendation: 'coverage_acceptable' | 'review_orphans' | 'possible_gaps';
-    };
     recovery: {
         unaddressedStatements: Array<{
             statementId: string;
@@ -32,7 +27,6 @@ export interface CompletenessReport {
         unattendedRegionPreviews: Array<{
             regionId: string;
             statementPreviews: string[];
-            reason: string;
         }>;
     };
 }
@@ -54,25 +48,6 @@ export function buildCompletenessReport(
     const unattendedCount = unattendedRegions.length;
     const attendedCount = Math.max(0, totalRegions - unattendedCount);
     const regionCoverage = totalRegions > 0 ? attendedCount / totalRegions : 1;
-
-    const complete = statementCoverage > 0.85 && regionCoverage > 0.8;
-    const unaddressedCount = unaddressedFates.length;
-
-    let recommendation: CompletenessReport['verdict']['recommendation'];
-    if (!complete || unaddressedCount > 0) {
-        recommendation = 'possible_gaps';
-    } else if (orphaned > 0) {
-        recommendation = 'review_orphans';
-    } else {
-        recommendation = 'coverage_acceptable';
-    }
-
-    const confidence: CompletenessReport['verdict']['confidence'] =
-        complete && unaddressedCount === 0
-            ? 'high'
-            : statementCoverage > 0.7 && regionCoverage > 0.6
-                ? 'medium'
-                : 'low';
 
     const stmtById = new Map(statements.map(s => [s.id, s]));
 
@@ -99,7 +74,6 @@ export function buildCompletenessReport(
                 .slice(0, 3)
                 .map(sid => stmtById.get(sid)?.text ?? '')
                 .filter(t => t.length > 0),
-            reason: region.reason,
         }));
 
     return {
@@ -107,7 +81,7 @@ export function buildCompletenessReport(
             total: totalStatements,
             inClaims,
             orphaned,
-            unaddressed: unaddressedCount,
+            unaddressed: unaddressedFates.length,
             noise,
             coverageRatio: statementCoverage,
         },
@@ -116,11 +90,6 @@ export function buildCompletenessReport(
             attended: attendedCount,
             unattended: unattendedCount,
             coverageRatio: regionCoverage,
-        },
-        verdict: {
-            complete,
-            confidence,
-            recommendation,
         },
         recovery: {
             unaddressedStatements,
