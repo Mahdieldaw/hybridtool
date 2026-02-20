@@ -37,7 +37,14 @@ export function buildCognitiveArtifact(
       preSemantic: pipeline?.preSemantic
         ? {
           ...pipeline.preSemantic,
-          hint: pipeline.preSemantic.lens?.shape ?? 'sparse',
+          hint: (() => {
+            const prior = pipeline?.substrate?.shape?.prior;
+            if (prior === 'convergent_core') return 'convergent';
+            if (prior === 'bimodal_fork') return 'forked';
+            if (prior === 'parallel_components') return 'parallel';
+            if (prior === 'fragmented') return 'sparse';
+            return 'sparse';
+          })(),
           regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
             id: r.id,
             kind: r.kind,
@@ -45,6 +52,7 @@ export function buildCognitiveArtifact(
           })),
         }
         : undefined,
+      diagnostics: mapper?.diagnostics ?? mapper?.structuralValidation ?? undefined,
       structuralValidation: mapper?.structuralValidation ?? undefined,
       convergence: mapper?.convergence ?? undefined,
       alignment: mapper?.alignment ?? undefined,

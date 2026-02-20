@@ -84,14 +84,13 @@ export interface Claim {
   quote?: string;
   support_count?: number;
   sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
-  convergenceConfidence?: number;
+  sourceCoherence?: number;
 }
 
 export interface Edge {
   from: string;
   to: string;
   type: 'supports' | 'conflicts' | 'tradeoff' | 'prerequisite';
-  convergenceConfidence?: number;
 }
 
 export interface MapperClaim {
@@ -141,6 +140,29 @@ export type Determinant =
     no_means?: string;
   };
 
+export interface MapperGate {
+  id: string;
+  claims: string[];
+  construct: string;
+  classification: 'forced_choice' | 'conditional_gate';
+  fork: string;
+  hinge: string;
+  question: string;
+}
+
+/** Gate produced by the Survey Mapper (runs after semantic mapper). */
+export interface SurveyGate {
+  id: string;
+  claims: string[];
+  construct: string;
+  classification: 'forced_choice' | 'conditional_gate';
+  fork: string;
+  hinge: string;
+  question: string;
+  /** Claim ids to prune when the gate resolves against them. */
+  affectedClaims: string[];
+}
+
 export interface UnifiedMapperOutput {
   claims: MapperClaim[];
   conditions?: Array<{
@@ -150,6 +172,7 @@ export interface UnifiedMapperOutput {
   determinants?: Determinant[];
   edges: Edge[];
   conditionals: ConditionalPruner[];
+  gates?: MapperGate[];
 }
 
 export interface ConditionMatch {
@@ -768,7 +791,11 @@ export interface MapperArtifact extends MapperOutput {
   forcingPoints?: ForcingPoint[];
   conditionals?: ConditionalPruner[];
   preSemantic?: PreSemanticInterpretation | null;
-  structuralValidation?: StructuralValidation | null;
+  structuralValidation?: any | null;
+
+  // Survey Mapper output (runs after semantic mapper; null when survey mapper is disabled or found no gates)
+  surveyGates?: SurveyGate[];
+  surveyRationale?: string | null;
 
   shadow?: {
     statements: ShadowStatement[];
@@ -1166,6 +1193,7 @@ export interface PipelineRegionProfile {
   geometry: {
     internalDensity: number;
     isolation: number;
+    nearestCarrierSimilarity: number;
     avgInternalSimilarity: number;
   };
   predicted: {
@@ -1173,96 +1201,51 @@ export interface PipelineRegionProfile {
   };
 }
 
-export interface PipelineOppositionPair {
-  regionA: string;
-  regionB: string;
-  similarity: number;
-  stanceConflict: boolean;
-  reason: string;
-}
+export type PipelineGateVerdict = 'proceed' | 'skip_geometry' | 'trivial_convergence' | 'insufficient_structure';
+export type GateVerdict = PipelineGateVerdict;
 
-export type PipelineInterRegionRelationship = 'conflict' | 'support' | 'tradeoff' | 'independent';
-
-export interface PipelineInterRegionSignal {
-  regionA: string;
-  regionB: string;
-  similarity: number;
-  relationship: PipelineInterRegionRelationship;
-  confidence: number;
-  reasons: string[];
-}
-
-export interface PipelineShapePrediction {
-  predicted: PrimaryShape;
+export interface PipelineGateResult {
+  verdict: PipelineGateVerdict;
   confidence: number;
   evidence: string[];
-}
-
-export interface PipelineMapperGeometricHints {
-  predictedShape: PipelineShapePrediction;
-  expectedClaimCount: [number, number];
-  expectedConflicts: number;
-  expectedDissent: boolean;
-  attentionRegions: Array<{
-    regionId: string;
-    reason:
-    | 'semantic_opposition'
-    | 'high_isolation'
-    | 'stance_inversion'
-    | 'uncertain'
-    | 'bridge'
-    | 'low_cohesion';
-    priority: 'high' | 'medium' | 'low';
-    guidance: string;
-  }>;
-  meta: {
-    usedClusters: boolean;
-    regionCount: number;
-    oppositionCount: number;
+  measurements?: {
+    isDegenerate: boolean;
+    largestComponentRatio: number;
+    largestComponentModelDiversityRatio: number;
+    isolationRatio: number;
+    maxComponentSize: number;
+    nodeCount: number;
   };
 }
+
+export interface PipelineModelScore {
+  modelIndex: number;
+  irreplaceability: number;
+  breakdown?: {
+    soloCarrierRegions: number;
+    lowDiversityContribution: number;
+    totalParagraphsInRegions: number;
+  };
+}
+
+export interface ModelOrderingResult {
+  orderedModelIndices: number[];
+  scores: PipelineModelScore[];
+  meta?: {
+    totalModels: number;
+    regionCount: number;
+    processingTimeMs: number;
+  };
+}
+
+export type ModelScore = PipelineModelScore;
 
 export interface PreSemanticInterpretation {
   lens: PipelineAdaptiveLens;
   regionization: PipelineRegionizationResult;
   regionProfiles: PipelineRegionProfile[];
-  oppositions: PipelineOppositionPair[];
-  interRegionSignals?: PipelineInterRegionSignal[];
-  hints: PipelineMapperGeometricHints;
-}
-
-export interface StructuralViolation {
-  type:
-  | 'shape_mismatch'
-  | 'claim_count_mismatch'
-  | 'tier_mismatch'
-  | 'missed_conflict'
-  | 'false_conflict';
-  severity: 'high' | 'medium' | 'low';
-  predicted: { description: string; evidence: string };
-  actual: { description: string; evidence: string };
-  regionIds?: string[];
-  claimIds?: string[];
-}
-
-export interface StructuralValidation {
-  shapeMatch: boolean;
-  predictedShape: PrimaryShape;
-  actualShape: PrimaryShape;
-  tierAlignmentScore: number;
-  conflictPrecision: number;
-  conflictRecall: number;
-  violations: StructuralViolation[];
-  overallFidelity: number;
-  confidence: 'high' | 'medium' | 'low';
-  summary: string;
-  diagnostics: {
-    expectedClaimCount: [number, number];
-    expectedConflicts: number;
-    actualConflictEdges: number;
-    actualPeakClaims: number;
-    mappedPeakClaims: number;
-  };
+  pipelineGate?: PipelineGateResult;
+  modelOrdering?: ModelOrderingResult;
 }
 
 export interface EnrichmentResult {
@@ -1354,7 +1337,8 @@ export interface CognitiveArtifact {
     embeddingStatus: "computed" | "failed";
     substrate: PipelineSubstrateGraph;
     preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
-    structuralValidation?: StructuralValidation | null;
+    structuralValidation?: any | null;
+    diagnostics?: any | null;
   };
   semantic: {
     claims: Claim[];

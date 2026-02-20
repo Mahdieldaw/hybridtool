@@ -558,7 +558,7 @@ const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, on
 // ============================================================================
 
 interface DetailViewProps {
-  node: { id: string; label: string; supporters: (string | number)[]; theme?: string; convergenceConfidence?: number };
+  node: { id: string; label: string; supporters: (string | number)[]; theme?: string; sourceCoherence?: number };
   narrativeExcerpt: string;
   citationSourceOrder?: Record<number, string>;
   onBack: () => void;
@@ -662,9 +662,9 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
           <span className="text-sm text-text-muted mt-2">{node.theme}</span>
         )}
 
-        {typeof node.convergenceConfidence === "number" && (
+        {typeof node.sourceCoherence === "number" && (
           <span className="mt-3 text-[11px] px-2 py-1 rounded-full border font-semibold bg-surface-highlight/10 border-border-subtle text-text-muted">
-            Convergence {(Number(node.convergenceConfidence || 0) * 100).toFixed(0)}%
+            Coherence {node.sourceCoherence.toFixed(2)}
           </span>
         )}
       </div>
@@ -804,8 +804,12 @@ export const DecisionMapSheet = React.memo(() => {
 
   const setToast = useSetAtom(toastAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'query' | 'evidence' | 'traversal'>('graph');
-  const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string; convergenceConfidence?: number } | null>(null);
+  const [activeTab, setActiveTab] = useState<'evidence' | 'landscape' | 'partition' | 'synthesis'>('partition');
+  const [evidenceSubTab, setEvidenceSubTab] = useState<'statements' | 'paragraphs' | 'extraction'>('statements');
+  const [landscapeSubTab, setLandscapeSubTab] = useState<'space' | 'regions' | 'query' | 'geometry'>('space');
+  const [partitionSubTab, setPartitionSubTab] = useState<'graph' | 'narrative' | 'gates' | 'traversal'>('graph');
+  const [synthesisSubTab, setSynthesisSubTab] = useState<'output' | 'substrate'>('output');
+  const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string; sourceCoherence?: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
@@ -820,17 +824,23 @@ export const DecisionMapSheet = React.memo(() => {
   useEffect(() => {
     if (openState) {
       const raw = String(openState.tab || 'graph');
-      const mapped: 'graph' | 'narrative' | 'options' | 'space' | 'query' | 'evidence' | 'traversal' =
-        raw === 'shadow' || raw === 'evidence' || raw === 'json'
-          ? 'evidence'
-          : raw === 'query' || raw === 'queryRelevance'
-            ? 'query'
-          : raw === 'traversal'
-            ? 'traversal'
-            : raw === 'graph' || raw === 'narrative' || raw === 'options' || raw === 'space'
-              ? raw
-              : 'graph';
-      setActiveTab(mapped);
+      // Map legacy tab names to new 4-module tabs
+      let mainTab: 'evidence' | 'landscape' | 'partition' | 'synthesis' = 'partition';
+      if (raw === 'shadow' || raw === 'evidence' || raw === 'json') {
+        mainTab = 'evidence';
+      } else if (raw === 'query' || raw === 'queryRelevance' || raw === 'space') {
+        mainTab = 'landscape';
+        if (raw === 'space') setLandscapeSubTab('space');
+        else setLandscapeSubTab('query');
+      } else if (raw === 'traversal') {
+        mainTab = 'partition';
+        setPartitionSubTab('traversal');
+      } else if (raw === 'graph' || raw === 'narrative' || raw === 'options') {
+        mainTab = 'partition';
+        if (raw === 'narrative' || raw === 'options') setPartitionSubTab('narrative');
+        else setPartitionSubTab('graph');
+      }
+      setActiveTab(mainTab);
       setSelectedNode(null);
       setSheetHeightRatio(0.5);
       setTraversalSubTab("conditions");
@@ -1162,11 +1172,11 @@ export const DecisionMapSheet = React.memo(() => {
     const fromSemantic = Array.isArray(semanticClaims)
       ? semanticClaims.find((c: any) => String(c?.id || "") === String(node?.id || ""))
       : null;
-    const convergenceConfidence =
-      typeof (fromSemantic as any)?.convergenceConfidence === "number"
-        ? (fromSemantic as any).convergenceConfidence
-        : typeof node?.convergenceConfidence === "number"
-          ? node.convergenceConfidence
+    const sourceCoherence =
+      typeof (fromSemantic as any)?.sourceCoherence === "number"
+        ? (fromSemantic as any).sourceCoherence
+        : typeof node?.sourceCoherence === "number"
+          ? node.sourceCoherence
           : undefined;
 
     setSelectedNode({
@@ -1174,7 +1184,7 @@ export const DecisionMapSheet = React.memo(() => {
       label: node.label,
       supporters: node.supporters || [],
       theme: node.type || node.theme,
-      convergenceConfidence,
+      sourceCoherence,
     });
   }, [semanticClaims]);
 
@@ -1601,13 +1611,10 @@ export const DecisionMapSheet = React.memo(() => {
   }
 
   const tabConfig = [
-    { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
-    { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
-    { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
-    { key: 'space' as const, label: 'Space', activeClass: 'decision-tab-active-space' },
-    { key: 'query' as const, label: 'Query', activeClass: 'decision-tab-active-options' },
     { key: 'evidence' as const, label: 'Evidence', activeClass: 'decision-tab-active-options' },
-    { key: 'traversal' as const, label: 'Traversal', activeClass: 'decision-tab-active-graph' },
+    { key: 'landscape' as const, label: 'Landscape', activeClass: 'decision-tab-active-space' },
+    { key: 'partition' as const, label: 'Partition', activeClass: 'decision-tab-active-graph' },
+    { key: 'synthesis' as const, label: 'Synthesis', activeClass: 'decision-tab-active-narrative' },
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
@@ -1699,9 +1706,9 @@ export const DecisionMapSheet = React.memo(() => {
                       )}
                       onClick={() => {
                         setActiveTab(key);
-                        if (key !== 'graph') setSelectedNode(null);
-                      }}
-                    >
+                        if (key !== 'partition') setSelectedNode(null);
+                      }
+                    }>
                       {label}
                     </button>
                   );
@@ -1781,14 +1788,38 @@ export const DecisionMapSheet = React.memo(() => {
             {/* Content */}
             <div className="flex-1 overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
               <AnimatePresence mode="wait">
-                {activeTab === 'graph' && (
+                {activeTab === 'partition' && (
                   <m.div
-                    key="graph"
+                    key="partition"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     className="w-full h-full flex flex-col"
                   >
+                    {/* Partition sub-tab bar */}
+                    <div className="px-6 pt-3 pb-0 flex items-center gap-2">
+                      {([
+                        { key: 'graph' as const, label: 'Graph' },
+                        { key: 'narrative' as const, label: 'Narrative' },
+                        { key: 'gates' as const, label: 'Gates' },
+                        { key: 'traversal' as const, label: 'Traversal' },
+                      ]).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setPartitionSubTab(key)}
+                          className={clsx(
+                            "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+                            partitionSubTab === key
+                              ? "bg-surface-raised border-border-strong text-text-primary"
+                              : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {partitionSubTab === 'graph' && (
                     <div className="px-6 pt-4 pb-3 flex-1 min-h-0">
                       <div className="flex flex-col lg:flex-row gap-3 h-full min-h-0">
                         <div className="flex-1 rounded-2xl overflow-hidden border border-border-subtle bg-surface flex flex-col min-h-0">
@@ -1895,17 +1926,9 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       </div>
                     </div>
-                  </m.div>
-                )}
-
-                {activeTab === 'narrative' && (
-                  <m.div
-                    key="narrative"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="p-6 h-full overflow-y-auto relative custom-scrollbar"
-                  >
+                    )}
+                    {partitionSubTab === 'narrative' && (
+                    <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
                     {doesRawDifferFromNarrative && (
                       <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
                         <button
@@ -1956,83 +1979,70 @@ export const DecisionMapSheet = React.memo(() => {
                     ) : (
                       <div className="text-text-muted text-sm text-center py-8">No narrative available.</div>
                     )}
-                  </m.div>
-                )}
-
-                {activeTab === 'options' && (
-                  <m.div
-                    key="options"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full overflow-y-auto relative custom-scrollbar"
-                  >
-                    {optionsText && (
-                      <div className="absolute top-4 right-4 z-10">
-                        <CopyButton
-                          text={optionsText}
-                          label="Copy options"
-                          variant="icon"
-                        />
+                    {/* Options/themes merged into narrative sub-tab */}
+                    {parsedThemes && parsedThemes.length > 0 && (
+                      <div className="mt-6 border-t border-white/10 pt-4">
+                        <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
                       </div>
                     )}
-                    <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
-                    <div className="px-6 pb-6 pt-2">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Graph topology</div>
-                      {graphTopology ? (
+                    {graphTopology && (
+                      <div className="mt-4">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Graph topology</div>
                         <div className="bg-surface border border-border-subtle rounded-xl p-4">
                           <MarkdownDisplay content={formatGraphForMd(graphTopology)} />
                         </div>
-                      ) : (
-                        <div className="text-text-muted text-sm">No graph topology available.</div>
-                      )}
+                      </div>
+                    )}
                     </div>
-                  </m.div>
-                )}
-
-                {activeTab === 'space' && (
-                  <m.div
-                    key="space"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full overflow-hidden relative"
-                  >
-                    <ParagraphSpaceView
-                      graph={sheetData.mappingArtifact?.geometry?.substrate || null}
-                      paragraphProjection={sheetData.paragraphProjection}
-                      claims={sheetData.semanticClaims}
-                      shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}
-                      queryRelevance={(sheetData.mappingArtifact as any)?.geometry?.query?.relevance || null}
-                      mutualEdges={sheetData.mappingArtifact?.geometry?.substrate?.mutualEdges || null}
-                      strongEdges={sheetData.mappingArtifact?.geometry?.substrate?.strongEdges || null}
-                      regions={sheetData.preSemanticRegions}
-                      traversalState={sheetData.aiTurn?.singularity?.traversalState || null}
-                      preSemantic={(sheetData.mappingArtifact as any)?.geometry?.preSemantic || null}
-                      embeddingStatus={(sheetData.mappingArtifact as any)?.geometry?.embeddingStatus || null}
-                      batchResponses={(() => {
-                        const responses = (sheetData.aiTurn as any)?.batch?.responses || {};
-                        const entries = Object.entries(responses);
-                        let fallbackIndex = 1;
-                        return entries.map(([providerId, r]: any) => {
-                          const modelIndex = typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++;
-                          return { modelIndex, text: String(r?.text || ''), providerId: String(providerId) };
-                        });
+                    )}
+                    {partitionSubTab === 'gates' && (
+                    <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
+                      <div className="mb-4">
+                        <div className="text-lg font-bold text-text-primary">Mapper Gates</div>
+                        <div className="text-xs text-text-muted mt-1">
+                          Structural decision points derived from conflict and tradeoff edges
+                        </div>
+                      </div>
+                      {(() => {
+                        const gates = (mappingArtifact as any)?.gates || (mappingArtifact as any)?.output?.gates || [];
+                        if (!Array.isArray(gates) || gates.length === 0) {
+                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No gates found for this turn. This may mean all claims coexist peacefully.</div>;
+                        }
+                        return (
+                          <div className="space-y-3">
+                            {gates.map((g: any) => {
+                              const classification = String(g?.classification || '');
+                              const badgeClass = classification === 'forced_choice'
+                                ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                : 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+                              return (
+                                <div key={String(g?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                  <div className="flex items-center justify-between gap-3 mb-3">
+                                    <div className="text-sm font-semibold text-text-primary">{String(g?.id || '')}</div>
+                                    <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badgeClass)}>
+                                      {classification === 'forced_choice' ? 'FORCED CHOICE' : 'CONDITIONAL GATE'}
+                                    </span>
+                                  </div>
+                                  <div className="space-y-2 text-xs">
+                                    <div><span className="text-text-muted">Construct:</span> <span className="text-text-primary">{String(g?.construct || '—')}</span></div>
+                                    <div><span className="text-text-muted">Claims:</span> <span className="text-text-primary font-mono">{Array.isArray(g?.claims) ? g.claims.join(', ') : '—'}</span></div>
+                                    <div><span className="text-text-muted">Fork:</span> <span className="text-text-secondary">{String(g?.fork || '—')}</span></div>
+                                    <div><span className="text-text-muted">Hinge:</span> <span className="text-text-primary">{String(g?.hinge || '—')}</span></div>
+                                    <div className="mt-2 p-3 bg-black/20 border border-border-subtle rounded-lg">
+                                      <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Question</div>
+                                      <div className="text-sm text-text-primary">{String(g?.question || '—')}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
                       })()}
-                      completeness={null}
-                      shape={sheetData.shape}
-                    />
-                  </m.div>
-                )}
-
-                {activeTab === 'traversal' && (
-                  <m.div
-                    key="traversal"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full overflow-y-auto relative custom-scrollbar"
-                  >
+                    </div>
+                    )}
+                    {partitionSubTab === 'traversal' && (
+                    <div className="flex-1 overflow-y-auto relative custom-scrollbar">
                     <div className="px-6 pt-6 pb-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
@@ -2128,7 +2138,8 @@ export const DecisionMapSheet = React.memo(() => {
                                           className="px-2 py-1 rounded-md bg-surface-highlight/20 border border-border-subtle text-xs text-text-secondary hover:bg-surface-highlight/40 transition-colors"
                                           onClick={() => {
                                             const label = (semanticClaims || []).find((x: any) => String(x?.id || "") === cid)?.label;
-                                            setActiveTab("graph");
+                                            setActiveTab("partition");
+                                            setPartitionSubTab("graph");
                                             setSelectedNode({ id: cid, label: String(label || cid), supporters: [] });
                                           }}
                                         >
@@ -2209,7 +2220,8 @@ export const DecisionMapSheet = React.memo(() => {
                                         type="button"
                                         className="text-left bg-surface-highlight/10 border border-border-subtle rounded-lg p-3 hover:bg-surface-highlight/20 transition-colors"
                                         onClick={() => {
-                                          setActiveTab("graph");
+                                          setActiveTab("partition");
+                                          setPartitionSubTab("graph");
                                           setSelectedNode({ id: cl.id, label: cl.label, supporters: [] });
                                         }}
                                       >
@@ -2260,17 +2272,104 @@ export const DecisionMapSheet = React.memo(() => {
                         )}
                       </div>
                     )}
+                    </div>
+                    )}
                   </m.div>
                 )}
 
-                {activeTab === 'query' && (
+                {activeTab === 'landscape' && (
                   <m.div
-                    key="query"
+                    key="landscape"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                    className="w-full h-full flex flex-col"
                   >
+                    {/* Landscape sub-tab bar */}
+                    <div className="px-6 pt-3 pb-0 flex items-center gap-2">
+                      {([
+                        { key: 'space' as const, label: 'Space' },
+                        { key: 'regions' as const, label: 'Regions' },
+                        { key: 'query' as const, label: 'Query' },
+                        { key: 'geometry' as const, label: 'Geometry' },
+                      ]).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setLandscapeSubTab(key)}
+                          className={clsx(
+                            "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+                            landscapeSubTab === key
+                              ? "bg-surface-raised border-border-strong text-text-primary"
+                              : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {landscapeSubTab === 'space' && (
+                    <div className="flex-1 overflow-hidden relative">
+                      <ParagraphSpaceView
+                        graph={sheetData.mappingArtifact?.geometry?.substrate || null}
+                        paragraphProjection={sheetData.paragraphProjection}
+                        claims={sheetData.semanticClaims}
+                        shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}
+                        queryRelevance={(sheetData.mappingArtifact as any)?.geometry?.query?.relevance || null}
+                        mutualEdges={sheetData.mappingArtifact?.geometry?.substrate?.mutualEdges || null}
+                        strongEdges={sheetData.mappingArtifact?.geometry?.substrate?.strongEdges || null}
+                        regions={sheetData.preSemanticRegions}
+                        traversalState={sheetData.aiTurn?.singularity?.traversalState || null}
+                        preSemantic={(sheetData.mappingArtifact as any)?.geometry?.preSemantic || null}
+                        embeddingStatus={(sheetData.mappingArtifact as any)?.geometry?.embeddingStatus || null}
+                        batchResponses={(() => {
+                          const responses = (sheetData.aiTurn as any)?.batch?.responses || {};
+                          const entries = Object.entries(responses);
+                          let fallbackIndex = 1;
+                          return entries.map(([providerId, r]: any) => {
+                            const modelIndex = typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++;
+                            return { modelIndex, text: String(r?.text || ''), providerId: String(providerId) };
+                          });
+                        })()}
+                        completeness={null}
+                        shape={sheetData.shape}
+                      />
+                    </div>
+                    )}
+                    {landscapeSubTab === 'regions' && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                      <div className="mb-4">
+                        <div className="text-lg font-bold text-text-primary">Regions</div>
+                        <div className="text-xs text-text-muted mt-1">Pre-semantic region profiles</div>
+                      </div>
+                      {(() => {
+                        const regions = sheetData.preSemanticRegions;
+                        if (!Array.isArray(regions) || regions.length === 0) {
+                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No region data available for this turn.</div>;
+                        }
+                        return (
+                          <div className="space-y-3">
+                            {regions.map((r: any) => (
+                              <div key={String(r?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                  <div className="text-sm font-semibold text-text-primary">{String(r?.id || 'Region')}</div>
+                                  {r?.tier && (
+                                    <span className="text-[11px] px-2 py-1 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">{String(r.tier)}</span>
+                                  )}
+                                </div>
+                                {r?.profile && <div className="text-xs text-text-secondary mb-2">{String(r.profile)}</div>}
+                                {Array.isArray(r?.memberIds) && r.memberIds.length > 0 && (
+                                  <div className="text-[11px] text-text-muted">Members: {r.memberIds.length} paragraphs</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    )}
+                    {landscapeSubTab === 'query' && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
                     <div className="mb-4 flex items-start justify-between gap-4">
                       <div>
                         <div className="text-lg font-bold text-text-primary">Query relevance</div>
@@ -2453,6 +2552,51 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       </div>
                     )}
+                    </div>
+                    )}
+                    {landscapeSubTab === 'geometry' && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                      <div className="mb-4">
+                        <div className="text-lg font-bold text-text-primary">Geometry</div>
+                        <div className="text-xs text-text-muted mt-1">Clustering summary, substrate topology, and shape classification</div>
+                      </div>
+                      {(() => {
+                        const geo = (sheetData.mappingArtifact as any)?.geometry;
+                        const substrate = geo?.substrate;
+                        const shapeVal = sheetData.shape;
+                        if (!geo) {
+                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No geometry data available for this turn.</div>;
+                        }
+                        return (
+                          <div className="space-y-4">
+                            {shapeVal && (
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shape classification</div>
+                                <div className="text-sm text-text-primary">{typeof shapeVal === 'string' ? shapeVal : JSON.stringify(shapeVal)}</div>
+                              </div>
+                            )}
+                            {substrate && (
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Substrate</div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                                  <div><span className="text-text-muted">kNN edges:</span> <span className="text-text-primary">{substrate.knnEdges?.length ?? '—'}</span></div>
+                                  <div><span className="text-text-muted">Mutual edges:</span> <span className="text-text-primary">{substrate.mutualEdges?.length ?? '—'}</span></div>
+                                  <div><span className="text-text-muted">Strong edges:</span> <span className="text-text-primary">{substrate.strongEdges?.length ?? '—'}</span></div>
+                                  <div><span className="text-text-muted">Density:</span> <span className="text-text-primary">{typeof substrate.density === 'number' ? substrate.density.toFixed(3) : '—'}</span></div>
+                                </div>
+                              </div>
+                            )}
+                            {geo.embeddingStatus && (
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Embedding status</div>
+                                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(geo.embeddingStatus, null, 2)}</pre>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    )}
                   </m.div>
                 )}
 
@@ -2462,8 +2606,51 @@ export const DecisionMapSheet = React.memo(() => {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                    className="w-full h-full flex flex-col"
                   >
+                    {/* Evidence sub-tab bar */}
+                    <div className="px-6 pt-3 pb-0 flex items-center gap-2">
+                      {([
+                        { key: 'statements' as const, label: 'Statements' },
+                        { key: 'paragraphs' as const, label: 'Paragraphs' },
+                        { key: 'extraction' as const, label: 'Extraction' },
+                      ]).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => {
+                            setEvidenceSubTab(key);
+                            if (key === 'statements') setEvidenceViewMode('statements');
+                            if (key === 'paragraphs') setEvidenceViewMode('paragraphs');
+                          }}
+                          className={clsx(
+                            "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+                            evidenceSubTab === key
+                              ? "bg-surface-raised border-border-strong text-text-primary"
+                              : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {evidenceSubTab === 'extraction' && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                      <ShadowAuditView
+                        audit={shadowDeltaForView?.audit}
+                        topUnreferenced={shadowDeltaForView?.unreferenced}
+                        processingTimeMs={shadowDeltaForView?.processingTimeMs}
+                      />
+                      {shadowDeltaForView && (
+                        <div className="mt-4 bg-surface border border-border-subtle rounded-xl p-4">
+                          <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shadow delta stats</div>
+                          <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(shadowDeltaForView.audit || {}, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                    )}
+                    {(evidenceSubTab === 'statements' || evidenceSubTab === 'paragraphs') && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
                     <div className="mb-4 flex items-start justify-between gap-4">
                       <ShadowAuditView
                         audit={shadowDeltaForView?.audit}
@@ -2857,6 +3044,115 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       )}
                     </div>
+                    </div>
+                    )}
+                  </m.div>
+                )}
+
+                {activeTab === 'synthesis' && (
+                  <m.div
+                    key="synthesis"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="w-full h-full flex flex-col"
+                  >
+                    {/* Synthesis sub-tab bar */}
+                    <div className="px-6 pt-3 pb-0 flex items-center gap-2">
+                      {([
+                        { key: 'output' as const, label: 'Output' },
+                        { key: 'substrate' as const, label: 'Substrate' },
+                      ]).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setSynthesisSubTab(key)}
+                          className={clsx(
+                            "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors",
+                            synthesisSubTab === key
+                              ? "bg-surface-raised border-border-strong text-text-primary"
+                              : "bg-surface-highlight/20 border-border-subtle text-text-muted hover:text-text-secondary hover:bg-surface-highlight/40"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {synthesisSubTab === 'output' && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                      <div className="mb-4">
+                        <div className="text-lg font-bold text-text-primary">Singularity Output</div>
+                        <div className="text-xs text-text-muted mt-1">Provider, timestamp, and pipeline status for the final synthesis</div>
+                      </div>
+                      {(() => {
+                        const sing = aiTurn?.singularity;
+                        if (!sing) {
+                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No singularity data available for this turn.</div>;
+                        }
+                        return (
+                          <div className="space-y-4">
+                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div><span className="text-text-muted">Status:</span> <span className="text-text-primary">{String((sing as any)?.status || '—')}</span></div>
+                                <div><span className="text-text-muted">Provider:</span> <span className="text-text-primary">{String((sing as any)?.providerId || '—')}</span></div>
+                                {(sing as any)?.timestamp && <div><span className="text-text-muted">Timestamp:</span> <span className="text-text-primary">{String((sing as any).timestamp)}</span></div>}
+                                {(sing as any)?.traversalState && <div><span className="text-text-muted">Traversal state:</span> <span className="text-text-primary">{String((sing as any).traversalState)}</span></div>}
+                              </div>
+                            </div>
+                            {(sing as any)?.prompt && (
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Singularity prompt</div>
+                                  <CopyButton text={String((sing as any).prompt)} label="Copy prompt" variant="icon" />
+                                </div>
+                                <pre className="text-[11px] leading-snug whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4 max-h-[400px] overflow-y-auto">{String((sing as any).prompt)}</pre>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    )}
+                    {synthesisSubTab === 'substrate' && (
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                      <div className="mb-4">
+                        <div className="text-lg font-bold text-text-primary">Chewed Substrate</div>
+                        <div className="text-xs text-text-muted mt-1">Skeletonization debug info: protected, skeletonized, and removed counts</div>
+                      </div>
+                      {(() => {
+                        const chewed = (aiTurn?.singularity as any)?.chewedSubstrate || (mappingArtifact as any)?.chewedSubstrate;
+                        if (!chewed) {
+                          return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No chewed substrate data available for this turn.</div>;
+                        }
+                        return (
+                          <div className="space-y-4">
+                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                              <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Summary</div>
+                              <div className="grid grid-cols-3 gap-3 text-xs">
+                                <div><span className="text-text-muted">Protected:</span> <span className="text-emerald-400">{chewed.protectedCount ?? '—'}</span></div>
+                                <div><span className="text-text-muted">Skeletonized:</span> <span className="text-amber-400">{chewed.skeletonizedCount ?? '—'}</span></div>
+                                <div><span className="text-text-muted">Removed:</span> <span className="text-red-400">{chewed.removedCount ?? '—'}</span></div>
+                              </div>
+                            </div>
+                            {Array.isArray(chewed.pathSteps) && chewed.pathSteps.length > 0 && (
+                              <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Path steps</div>
+                                <div className="space-y-1">
+                                  {chewed.pathSteps.map((step: any, i: number) => (
+                                    <div key={i} className="text-[11px] text-text-secondary font-mono">{JSON.stringify(step)}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                              <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Raw data</div>
+                              <pre className="text-[11px] text-text-secondary whitespace-pre-wrap max-h-[400px] overflow-y-auto">{JSON.stringify(chewed, null, 2)}</pre>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    )}
                   </m.div>
                 )}
               </AnimatePresence>

@@ -1,9 +1,3 @@
-import type {
-    MapperPartition,
-    TraversalQuestion,
-    TraversalQuestionMergeResult,
-    TraversalQuestionType,
-} from '../../../shared/contract';
 import type { RegionConditionalGate } from '../../geometry/interpretation/regionGates';
 import { cosineSimilarity } from '../../clustering/distance';
 
@@ -11,6 +5,60 @@ const MAX_QUESTIONS = 5;
 const BLOCKED_BY_COSINE_THRESHOLD = 0.5;
 const AUTO_RESOLVE_PRUNED_RATIO = 0.8;
 const PARTITION_TYPE_BOOST = 0.3;
+
+export type TraversalQuestionType = 'partition' | 'conditional';
+
+export type TraversalQuestionStatus = 'pending' | 'blocked' | 'answered' | 'auto_resolved';
+
+export interface MapperPartition {
+    id: string;
+    hingeQuestion?: string | null;
+    defaultSide?: string | null;
+    sideAStatementIds?: string[] | null;
+    sideBStatementIds?: string[] | null;
+    sideAAdvocacyStatementIds?: string[] | null;
+    sideBAdvocacyStatementIds?: string[] | null;
+}
+
+export interface TraversalQuestion {
+    id: string;
+    type: TraversalQuestionType;
+    question: string;
+    condition: string;
+    priority: number;
+    blockedBy: string[];
+    status: TraversalQuestionStatus;
+    sourceRegionIds: string[];
+    affectedStatementIds: string[];
+    anchorTerms: string[];
+    confidence: number;
+
+    partitionId?: string;
+    sideAStatementIds?: string[];
+    sideBStatementIds?: string[];
+    hingeQuestion?: string | null;
+    defaultSide?: string | null;
+
+    gateId?: string;
+    exclusivityRatio?: number;
+    conditionalRatio?: number;
+
+    answer?: string;
+    autoResolvedReason?: string;
+}
+
+export interface TraversalQuestionMergeResult {
+    questions: TraversalQuestion[];
+    meta: {
+        partitionCount: number;
+        conditionalCount: number;
+        totalBeforeCap: number;
+        totalAfterCap: number;
+        autoResolvedCount: number;
+        blockedCount: number;
+        processingTimeMs: number;
+    };
+}
 
 function nowMs(): number {
     return typeof performance !== 'undefined' && typeof performance.now === 'function'

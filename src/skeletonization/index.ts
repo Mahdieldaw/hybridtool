@@ -166,7 +166,7 @@ export function getSourceData(
 }
 
 export function normalizeTraversalState(state: unknown): NormalizedTraversalState {
-  if (!state || typeof state !== 'object') return { claimStatuses: new Map(), pathSteps: [] };
+  if (!state || typeof state !== 'object') return { claimStatuses: new Map(), pathSteps: [], conditionalGateAnswers: {} };
   const s = state as Record<string, unknown>;
 
   let claimStatuses: Map<string, 'active' | 'pruned'>;

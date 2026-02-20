@@ -8,7 +8,14 @@
       "Bash(ls:*)",
       "Bash(git -C \"C:/Users/Mahdi/Desktop/Singularityv3\" diff -- \"ui/components/debug/\")",
       "Bash(git -C \"C:/Users/Mahdi/Desktop/Singularityv3\" show HEAD:ui/components/debug/ConciergePipelinePanel.tsx)",
-      "Bash(git -C \"C:/Users/Mahdi/Desktop/Singularityv3\" show HEAD:ui/components/debug/StructuralDebugPanel.tsx)"
+      "Bash(git -C \"C:/Users/Mahdi/Desktop/Singularityv3\" show HEAD:ui/components/debug/StructuralDebugPanel.tsx)",
+      "Bash(powershell -command \"Get-Content ''C:\\\\Users\\\\Mahdi\\\\Desktop\\\\hybrid\\\\ui\\\\components\\\\DecisionMapSheet.tsx'' | Select-Object -Skip 1787 -First 1383 | Select-String -Pattern ''\\\\{activeTab ==='' | Measure-Object | Select-Object -ExpandProperty Count\")",
+      "Bash(powershell -command:*)",
+      "Bash(npm run build:*)",
+      "mcp__filesystem__read_file",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "mcp__Desktop_Commander__list_directory"
     ]
   }
 }

@@ -654,64 +654,25 @@ function buildInterpretationView(artifact: any) {
   const regionization = pre?.regionization || null;
   const regions = safeArr<any>(regionization?.regions);
   const profiles = safeArr<any>(pre?.regionProfiles);
-  const signals = safeArr<any>(pre?.interRegionSignals);
-  const convergence = artifact?.structural?.convergence ?? artifact?.convergence ?? null;
-  const partitionConv = convergence?.partitionMechanicalConvergence ?? null;
+  const pipelineGate = pre?.pipelineGate || null;
+  const modelOrdering = pre?.modelOrdering || null;
 
   const cards: SummaryCard[] = [
     { label: "Regions", value: formatInt(regions.length), emphasis: regions.length > 0 ? "good" : "warn" },
     { label: "Profiles", value: formatInt(profiles.length), emphasis: profiles.length > 0 ? "good" : "warn" },
-    { label: "Signals", value: formatInt(signals.length) },
     { label: "Regime", value: safeStr(pre?.lens?.regime).trim() || "—" },
-    { label: "Shape", value: safeStr(pre?.lens?.shape).trim() || safeStr(pre?.hint).trim() || "—" },
+    { label: "Gate", value: safeStr(pipelineGate?.verdict).trim() || "—" },
   ];
 
-  if (convergence && typeof convergence === "object") {
-    const conflictRatio = safeNum(convergence?.mechanicalConflictConvergence?.confirmationRatio);
-    const agreementRatio = safeNum(convergence?.relationshipConvergence?.agreementRatio);
-    cards.push({
-      label: "Conv conflict",
-      value: formatPct(conflictRatio, 0),
-      emphasis: conflictRatio == null ? "neutral" : conflictRatio >= 0.6 ? "good" : conflictRatio >= 0.35 ? "warn" : "bad",
-    });
-    cards.push({
-      label: "Conv edges",
-      value: formatPct(agreementRatio, 0),
-      emphasis: agreementRatio == null ? "neutral" : agreementRatio >= 0.6 ? "good" : agreementRatio >= 0.35 ? "warn" : "bad",
-    });
-  }
-
-  if (partitionConv && typeof partitionConv === "object") {
-    const oppCov = safeNum(partitionConv?.oppositionCoverageRatio);
-    const mechSupport = safeNum(partitionConv?.mechanicalSupportRatio);
-    const sideSep = safeNum(partitionConv?.sideSeparatedRatio);
-
-    const oppPred = safeNum(partitionConv?.oppositionsPredicted);
-    const oppCovered = safeNum(partitionConv?.oppositionsCoveredByPartitions);
-    const partTotal = safeNum(partitionConv?.partitions);
-    const partSupported = safeNum(partitionConv?.partitionsWithMechanicalSupport);
-
-    cards.push({
-      label: "Opp covered",
-      value:
-        oppCov == null
-          ? "—"
-          : `${formatPct(oppCov, 0)}${oppCovered != null && oppPred != null ? ` (${formatInt(oppCovered)}/${formatInt(oppPred)})` : ""}`,
-      emphasis: oppCov == null ? "neutral" : oppCov >= 0.6 ? "good" : oppCov >= 0.35 ? "warn" : "bad",
-    });
-    cards.push({
-      label: "Part support",
-      value:
-        mechSupport == null
-          ? "—"
-          : `${formatPct(mechSupport, 0)}${partSupported != null && partTotal != null ? ` (${formatInt(partSupported)}/${formatInt(partTotal)})` : ""}`,
-      emphasis: mechSupport == null ? "neutral" : mechSupport >= 0.6 ? "good" : mechSupport >= 0.35 ? "warn" : "bad",
-    });
-    cards.push({
-      label: "Side split",
-      value: formatPct(sideSep, 0),
-      emphasis: sideSep == null ? "neutral" : sideSep >= 0.6 ? "good" : sideSep >= 0.35 ? "warn" : "bad",
-    });
+  if (pipelineGate && typeof pipelineGate === "object") {
+    const conf = safeNum(pipelineGate?.confidence);
+    if (conf != null) {
+      cards.push({
+        label: "Gate conf",
+        value: formatPct(conf, 0),
+        emphasis: conf >= 0.75 ? "good" : conf >= 0.5 ? "warn" : "neutral",
+      });
+    }
   }
 
   const nodesByRegion = new Map<string, number>();
@@ -765,77 +726,63 @@ function buildInterpretationView(artifact: any) {
     rows,
   };
 
-  const signalRows = signals.map((s: any, idx: number) => {
-    const a = safeStr(s?.aRegionId || s?.a || s?.regionA).trim();
-    const b = safeStr(s?.bRegionId || s?.b || s?.regionB).trim();
+  const ordering = modelOrdering && typeof modelOrdering === "object" ? modelOrdering : null;
+  const ordered = Array.isArray(ordering?.orderedModelIndices) ? ordering.orderedModelIndices : [];
+  const orderIndexByModel = new Map<number, number>();
+  for (let i = 0; i < ordered.length; i++) {
+    const mi = safeNum(ordered[i]);
+    if (mi != null) orderIndexByModel.set(mi, i);
+  }
+
+  const orderingScores = Array.isArray(ordering?.scores) ? ordering.scores : [];
+  const modelRows = orderingScores.map((s: any, idx: number) => {
+    const modelIndex = safeNum(s?.modelIndex);
+    const ir = safeNum(s?.irreplaceability);
+    const breakdown = s?.breakdown || {};
+    const pos = modelIndex != null ? orderIndexByModel.get(modelIndex) ?? null : null;
     return {
-      id: `${a}:${b}:${idx}`,
-      a,
-      b,
-      kind: safeStr(s?.kind || s?.type).trim(),
-      strength: safeNum(s?.strength),
-      evidence: safeStr(s?.evidence).trim(),
+      id: `${modelIndex ?? "m"}:${idx}`,
+      modelIndex,
+      irreplaceability: ir,
+      placement: pos,
+      soloCarrierRegions: safeNum(breakdown?.soloCarrierRegions),
+      lowDiversityContribution: safeNum(breakdown?.lowDiversityContribution),
+      totalParagraphsInRegions: safeNum(breakdown?.totalParagraphsInRegions),
     };
   });
 
-  const signalTable: TableSpec<any> = {
-    title: "Inter-region signals",
-    defaultSortKey: "strength",
+  const modelOrderingTable: TableSpec<any> = {
+    title: "Model ordering",
+    defaultSortKey: "irreplaceability",
     defaultSortDir: "desc",
-    emptyMessage: "No inter-region signals available on artifact.geometry.preSemantic.interRegionSignals.",
+    emptyMessage: "No model ordering available on artifact.geometry.preSemantic.modelOrdering.",
     columns: [
-      { key: "a", header: "A", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.a || "—", sortValue: (r) => r.a || null },
-      { key: "b", header: "B", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.b || "—", sortValue: (r) => r.b || null },
-      { key: "kind", header: "Kind", className: "whitespace-nowrap", cell: (r) => r.kind || "—", sortValue: (r) => r.kind || null },
-      { key: "strength", header: "Strength", className: "whitespace-nowrap", cell: (r) => formatNum(r.strength, 3), sortValue: (r) => r.strength ?? null },
+      { key: "modelIndex", header: "Model", className: "whitespace-nowrap", cell: (r) => formatInt(r.modelIndex), sortValue: (r) => r.modelIndex ?? null },
+      { key: "placement", header: "Place", className: "whitespace-nowrap", cell: (r) => (r.placement == null ? "—" : formatInt(r.placement)), sortValue: (r) => r.placement ?? null },
+      { key: "irreplaceability", header: "Irreplace", className: "whitespace-nowrap", cell: (r) => formatNum(r.irreplaceability, 4), sortValue: (r) => r.irreplaceability ?? null },
+      { key: "soloCarrierRegions", header: "Solo regs", className: "whitespace-nowrap", cell: (r) => formatInt(r.soloCarrierRegions), sortValue: (r) => r.soloCarrierRegions ?? null },
+      { key: "lowDiversityContribution", header: "Low-div", className: "whitespace-nowrap", cell: (r) => formatNum(r.lowDiversityContribution, 4), sortValue: (r) => r.lowDiversityContribution ?? null },
+      { key: "totalParagraphsInRegions", header: "Paras", className: "whitespace-nowrap", cell: (r) => formatInt(r.totalParagraphsInRegions), sortValue: (r) => r.totalParagraphsInRegions ?? null },
+    ],
+    rows: modelRows,
+  };
+
+  const gateEvidence = Array.isArray(pipelineGate?.evidence) ? pipelineGate.evidence : [];
+  const gateEvidenceRows = gateEvidence.map((e: any, idx: number) => ({ id: `gate_${idx}`, evidence: safeStr(e).trim() }));
+  const gateEvidenceTable: TableSpec<any> = {
+    title: "Pipeline gate evidence",
+    defaultSortKey: "evidence",
+    defaultSortDir: "asc",
+    emptyMessage: "No pipeline gate evidence available on artifact.geometry.preSemantic.pipelineGate.evidence.",
+    columns: [
       { key: "evidence", header: "Evidence", className: "min-w-[360px]", cell: (r) => <span className="text-text-primary">{r.evidence || "—"}</span>, sortValue: (r) => r.evidence || null },
     ],
-    rows: signalRows,
+    rows: gateEvidenceRows,
   };
 
   const tables: Array<TableSpec<any>> = [];
 
-  if (partitionConv && Array.isArray(partitionConv?.perPartition)) {
-    const rows = safeArr<any>(partitionConv.perPartition).map((p: any, idx: number) => {
-      return {
-        id: safeStr(p?.id).trim() || `partition_${idx}`,
-        dominantA: safeStr(p?.dominantRegionA).trim() || "—",
-        dominantB: safeStr(p?.dominantRegionB).trim() || "—",
-        purityA: safeNum(p?.purityA),
-        purityB: safeNum(p?.purityB),
-        focalRegion: safeStr(p?.focalRegionId).trim() || "—",
-        focalOpp: !!p?.focalHasOpposition,
-        pairOpp: !!p?.pairIsOpposition,
-        sideSep: !!p?.hasSideSeparation,
-        mechSupport: !!p?.hasMechanicalSupport,
-        strong: !!p?.hasStrongSupport,
-      };
-    });
-
-    const table: TableSpec<any> = {
-      title: "Convergence (Partitions vs Mechanical)",
-      defaultSortKey: "strong",
-      defaultSortDir: "desc",
-      emptyMessage: "No partition convergence rows found on convergence.partitionMechanicalConvergence.perPartition.",
-      columns: [
-        { key: "id", header: "Partition", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.id, sortValue: (r) => r.id || null },
-        { key: "dominantA", header: "Dom A", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.dominantA, sortValue: (r) => r.dominantA || null },
-        { key: "dominantB", header: "Dom B", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.dominantB, sortValue: (r) => r.dominantB || null },
-        { key: "purityA", header: "Pur A", className: "whitespace-nowrap", cell: (r) => formatPct(r.purityA, 0), sortValue: (r) => r.purityA ?? null },
-        { key: "purityB", header: "Pur B", className: "whitespace-nowrap", cell: (r) => formatPct(r.purityB, 0), sortValue: (r) => r.purityB ?? null },
-        { key: "focalRegion", header: "Focal", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.focalRegion, sortValue: (r) => r.focalRegion || null },
-        { key: "sideSep", header: "Split", className: "whitespace-nowrap", cell: (r) => (r.sideSep ? "yes" : "—"), sortValue: (r) => (r.sideSep ? 1 : 0) },
-        { key: "focalOpp", header: "Focal opp", className: "whitespace-nowrap", cell: (r) => (r.focalOpp ? "yes" : "—"), sortValue: (r) => (r.focalOpp ? 1 : 0) },
-        { key: "pairOpp", header: "Opp pair", className: "whitespace-nowrap", cell: (r) => (r.pairOpp ? "yes" : "—"), sortValue: (r) => (r.pairOpp ? 1 : 0) },
-        { key: "mechSupport", header: "Support", className: "whitespace-nowrap", cell: (r) => (r.mechSupport ? "yes" : "—"), sortValue: (r) => (r.mechSupport ? 1 : 0) },
-        { key: "strong", header: "Strong", className: "whitespace-nowrap", cell: (r) => (r.strong ? "yes" : "—"), sortValue: (r) => (r.strong ? 1 : 0) },
-      ],
-      rows,
-    };
-    tables.push(table);
-  }
-
-  tables.push(profileTable, signalTable);
+  tables.push(profileTable, gateEvidenceTable, modelOrderingTable);
   return { cards, tables };
 }
 
@@ -1048,6 +995,30 @@ function buildMappingView(artifact: any) {
     leverageById.set(id, cl);
   }
 
+  const diagnostics =
+    artifact?.structural?.diagnostics ??
+    artifact?.structural?.structuralValidation ??
+    artifact?.geometry?.diagnostics ??
+    artifact?.geometry?.structuralValidation ??
+    artifact?.diagnostics ??
+    artifact?.structuralValidation ??
+    null;
+
+  const claimMeasurementById = new Map<string, any>();
+  const claimMeasurements = safeArr<any>(diagnostics?.measurements?.claimMeasurements);
+  for (const m of claimMeasurements) {
+    const claimId = safeStr(m?.claimId).trim();
+    if (claimId) claimMeasurementById.set(claimId, m);
+  }
+
+  const edgeMeasurementById = new Map<string, any>();
+  const edgeMeasurements = safeArr<any>(diagnostics?.measurements?.edgeMeasurements);
+  for (const m of edgeMeasurements) {
+    const edgeId = safeStr(m?.edgeId).trim();
+    if (edgeId) edgeMeasurementById.set(edgeId, m);
+  }
+  const observations = safeArr<any>(diagnostics?.observations);
+
   const cards: SummaryCard[] = [
     { label: "Claims", value: formatInt(claims.length), emphasis: claims.length > 0 ? "good" : "warn" },
     { label: "Edges", value: formatInt(edges.length), emphasis: edges.length > 0 ? "good" : "warn" },
@@ -1060,7 +1031,8 @@ function buildMappingView(artifact: any) {
     const supportCount = safeNum(c?.support_count) ?? safeArr(c?.supporters).length;
     const sourceStatementIds = safeArr<any>(c?.sourceStatementIds).map((x) => safeStr(x).trim()).filter(Boolean);
     const sourceStatementCount = sourceStatementIds.length;
-    const conv = safeNum(c?.convergenceConfidence);
+    const sourceCoherence =
+      safeNum(c?.sourceCoherence) ?? safeNum(claimMeasurementById.get(id)?.sourceCoherence);
     const hints = c?.geometricSignals || {};
     const regionTier =
       hints?.backedByPeak ? "peak" : hints?.backedByHill ? "hill" : hints?.backedByFloor ? "floor" : null;
@@ -1079,7 +1051,7 @@ function buildMappingView(artifact: any) {
       supportCount,
       sourceStatementCount,
       sourceStatementSummary,
-      convergence: conv,
+      sourceCoherence,
       regionTier,
       leverage: safeNum(leverage?.leverage) ?? null,
       keystoneScore: safeNum(leverage?.keystoneScore) ?? null,
@@ -1109,7 +1081,7 @@ function buildMappingView(artifact: any) {
         sortValue: (r) => r.sourceStatementCount ?? null,
       },
       { key: "regionTier", header: "Tier", className: "whitespace-nowrap", cell: (r) => r.regionTier || "—", sortValue: (r) => r.regionTier || null },
-      { key: "convergence", header: "Conv", className: "whitespace-nowrap", cell: (r) => formatPct(r.convergence, 0), sortValue: (r) => r.convergence ?? null },
+      { key: "sourceCoherence", header: "Coherence", className: "whitespace-nowrap", cell: (r) => (typeof r.sourceCoherence === "number" ? r.sourceCoherence.toFixed(2) : "—"), sortValue: (r) => r.sourceCoherence ?? null },
       { key: "supportRatio", header: "Support%", className: "whitespace-nowrap", cell: (r) => formatPct(r.supportRatio, 0), sortValue: (r) => r.supportRatio ?? null },
       { key: "contestedRatio", header: "Cont%", className: "whitespace-nowrap", cell: (r) => formatPct(r.contestedRatio, 0), sortValue: (r) => r.contestedRatio ?? null },
       { key: "conflictDegree", header: "Conf deg", className: "whitespace-nowrap", cell: (r) => formatNum(r.conflictDegree, 2), sortValue: (r) => r.conflictDegree ?? null },
@@ -1124,13 +1096,14 @@ function buildMappingView(artifact: any) {
     const target = safeStr(e?.target).trim();
     const kind = safeStr(e?.kind || e?.type).trim();
     const weight = safeNum(e?.weight);
-    const conv = safeNum(e?.convergenceConfidence);
-    return { id: `${source}->${target}:${idx}`, source, target, kind, weight, convergence: conv };
+    const edgeId = `${source}->${target}`;
+    const centroidSimilarity = safeNum(edgeMeasurementById.get(edgeId)?.centroidSimilarity);
+    return { id: `${edgeId}:${idx}`, source, target, kind, weight, centroidSimilarity };
   });
 
   const edgeTable: TableSpec<any> = {
     title: "Edges",
-    defaultSortKey: "convergence",
+    defaultSortKey: "centroidSimilarity",
     defaultSortDir: "desc",
     emptyMessage: "No edges available.",
     columns: [
@@ -1138,12 +1111,93 @@ function buildMappingView(artifact: any) {
       { key: "target", header: "To", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.target || "—", sortValue: (r) => r.target || null },
       { key: "kind", header: "Kind", className: "whitespace-nowrap", cell: (r) => r.kind || "—", sortValue: (r) => r.kind || null },
       { key: "weight", header: "Weight", className: "whitespace-nowrap", cell: (r) => formatNum(r.weight, 2), sortValue: (r) => r.weight ?? null },
-      { key: "convergence", header: "Conv", className: "whitespace-nowrap", cell: (r) => formatPct(r.convergence, 0), sortValue: (r) => r.convergence ?? null },
+      { key: "centroidSimilarity", header: "Centroid", className: "whitespace-nowrap", cell: (r) => formatPct(r.centroidSimilarity, 0), sortValue: (r) => r.centroidSimilarity ?? null },
     ],
     rows: edgeRows,
   };
 
-  return { cards, tables: [claimTable, edgeTable] };
+  const claimMeasurementRows = claimMeasurements.map((m: any, idx: number) => ({
+    id: safeStr(m?.claimId).trim() || String(idx),
+    claimId: safeStr(m?.claimId).trim(),
+    sourceCoherence: safeNum(m?.sourceCoherence),
+    embeddingSpread: safeNum(m?.embeddingSpread),
+    regionSpan: safeNum(m?.regionSpan),
+    sourceModelDiversity: safeNum(m?.sourceModelDiversity),
+    dominantRegionId: safeStr(m?.dominantRegionId).trim() || null,
+    dominantRegionTier: safeStr(m?.dominantRegionTier).trim() || null,
+  }));
+
+  const claimMeasurementsTable: TableSpec<any> = {
+    title: "Diagnostics: claim measurements",
+    defaultSortKey: "sourceCoherence",
+    defaultSortDir: "desc",
+    emptyMessage: "No diagnostics claim measurements available.",
+    columns: [
+      { key: "claimId", header: "Claim", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.claimId || "—", sortValue: (r) => r.claimId || null },
+      { key: "sourceCoherence", header: "Coherence", className: "whitespace-nowrap", cell: (r) => (typeof r.sourceCoherence === "number" ? r.sourceCoherence.toFixed(2) : "—"), sortValue: (r) => r.sourceCoherence ?? null },
+      { key: "embeddingSpread", header: "Spread", className: "whitespace-nowrap", cell: (r) => formatNum(r.embeddingSpread, 3), sortValue: (r) => r.embeddingSpread ?? null },
+      { key: "regionSpan", header: "Span", className: "whitespace-nowrap", cell: (r) => formatInt(r.regionSpan), sortValue: (r) => r.regionSpan ?? null },
+      { key: "sourceModelDiversity", header: "Model div", className: "whitespace-nowrap", cell: (r) => formatNum(r.sourceModelDiversity, 2), sortValue: (r) => r.sourceModelDiversity ?? null },
+      { key: "dominantRegionId", header: "Dom region", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.dominantRegionId || "—", sortValue: (r) => r.dominantRegionId || null },
+      { key: "dominantRegionTier", header: "Dom tier", className: "whitespace-nowrap", cell: (r) => r.dominantRegionTier || "—", sortValue: (r) => r.dominantRegionTier || null },
+    ],
+    rows: claimMeasurementRows,
+  };
+
+  const edgeMeasurementRows = edgeMeasurements.map((m: any, idx: number) => ({
+    id: safeStr(m?.edgeId).trim() || String(idx),
+    edgeId: safeStr(m?.edgeId).trim(),
+    edgeType: safeStr(m?.edgeType).trim(),
+    crossesRegionBoundary: !!m?.crossesRegionBoundary,
+    centroidSimilarity: safeNum(m?.centroidSimilarity),
+    fromRegionId: safeStr(m?.fromRegionId).trim() || null,
+    toRegionId: safeStr(m?.toRegionId).trim() || null,
+  }));
+
+  const edgeMeasurementsTable: TableSpec<any> = {
+    title: "Diagnostics: edge measurements",
+    defaultSortKey: "centroidSimilarity",
+    defaultSortDir: "desc",
+    emptyMessage: "No diagnostics edge measurements available.",
+    columns: [
+      { key: "edgeId", header: "Edge", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.edgeId || "—", sortValue: (r) => r.edgeId || null },
+      { key: "edgeType", header: "Type", className: "whitespace-nowrap", cell: (r) => r.edgeType || "—", sortValue: (r) => r.edgeType || null },
+      { key: "crossesRegionBoundary", header: "Crosses", className: "whitespace-nowrap", cell: (r) => (r.crossesRegionBoundary ? "yes" : "—"), sortValue: (r) => (r.crossesRegionBoundary ? 1 : 0) },
+      { key: "centroidSimilarity", header: "Centroid", className: "whitespace-nowrap", cell: (r) => formatPct(r.centroidSimilarity, 0), sortValue: (r) => r.centroidSimilarity ?? null },
+      { key: "fromRegionId", header: "From reg", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.fromRegionId || "—", sortValue: (r) => r.fromRegionId || null },
+      { key: "toRegionId", header: "To reg", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.toRegionId || "—", sortValue: (r) => r.toRegionId || null },
+    ],
+    rows: edgeMeasurementRows,
+  };
+
+  const observationRows = observations.map((o: any, idx: number) => ({
+    id: `${safeStr(o?.type).trim() || "obs"}:${idx}`,
+    type: safeStr(o?.type).trim(),
+    observation: safeStr(o?.observation).trim(),
+    regionIds: safeArr<any>(o?.regionIds).map((x) => safeStr(x).trim()).filter(Boolean).join(", "),
+    claimIds: safeArr<any>(o?.claimIds).map((x) => safeStr(x).trim()).filter(Boolean).join(", "),
+  }));
+
+  const observationsTable: TableSpec<any> = {
+    title: "Diagnostics: observations",
+    defaultSortKey: "type",
+    defaultSortDir: "asc",
+    emptyMessage: "No diagnostics observations available.",
+    columns: [
+      { key: "type", header: "Type", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.type || "—", sortValue: (r) => r.type || null },
+      { key: "observation", header: "Observation", className: "min-w-[520px]", cell: (r) => <span className="text-text-primary">{r.observation || "—"}</span>, sortValue: (r) => r.observation || null },
+      { key: "regionIds", header: "Regions", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.regionIds || "—", sortValue: (r) => r.regionIds || null },
+      { key: "claimIds", header: "Claims", className: "whitespace-nowrap font-mono text-[11px]", cell: (r) => r.claimIds || "—" , sortValue: (r) => r.claimIds || null },
+    ],
+    rows: observationRows,
+  };
+
+  const tables: Array<TableSpec<any>> = [claimTable, edgeTable];
+  if (claimMeasurementRows.length > 0) tables.push(claimMeasurementsTable);
+  if (edgeMeasurementRows.length > 0) tables.push(edgeMeasurementsTable);
+  if (observationRows.length > 0) tables.push(observationsTable);
+
+  return { cards, tables };
 }
 
 function normalizeTraversalAnalysis(value: any): any | null {

@@ -1,6 +1,5 @@
 import type { GeometricSubstrate } from '../types';
 import type { Region, RegionProfile } from './types';
-import type { RoutedRegion } from './routing';
 import type { ShadowStatement } from '../../shadow/ShadowExtractor';
 import { detectSignals } from '../../shadow';
 
@@ -215,7 +214,7 @@ function buildRegionQuestion(input: {
 }
 
 export function deriveRegionConditionalGates(input: {
-    gateCandidates: RoutedRegion[];
+    gateCandidates: Array<{ regionId: string }>;
     regions: Region[];
     profiles: RegionProfile[];
     substrate: GeometricSubstrate;

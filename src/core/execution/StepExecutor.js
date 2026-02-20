@@ -751,13 +751,28 @@ export class StepExecutor {
           paragraphClusteringSummary = null;
         }
 
+        let perModelQueryRelevance = undefined;
+        if (queryEmbedding && statementEmbeddingResult?.embeddings && paragraphResult?.paragraphs) {
+          try {
+            const { computePerModelQueryRelevance } = await import('../../geometry/interpretation/modelOrdering');
+            perModelQueryRelevance = computePerModelQueryRelevance(
+              queryEmbedding,
+              statementEmbeddingResult.embeddings,
+              paragraphResult.paragraphs
+            );
+          } catch (err) {
+            console.warn('[StepExecutor] Per-model query relevance failed:', getErrorMessage(err));
+          }
+        }
+
         try {
           if (!substrateDegenerate && typeof buildPreSemanticInterpretation === 'function') {
             preSemanticInterpretation = buildPreSemanticInterpretation(
               substrate,
               paragraphResult.paragraphs,
               Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined,
-              geometryParagraphEmbeddings
+              geometryParagraphEmbeddings,
+              perModelQueryRelevance
             );
           } else {
             preSemanticInterpretation = null;
@@ -1011,7 +1026,9 @@ export class StepExecutor {
 
                 const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
                 let unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
-                let mechanicalGating = null;
+                // rawGates and gateQuestionByClaimPair are populated by the Survey Mapper below (after enrichedClaims)
+                let rawGates = [];
+                let gateQuestionByClaimPair = new Map();
 
                 let enrichedClaims = [];
 
@@ -1034,6 +1051,100 @@ export class StepExecutor {
                   unifiedEdges,
                   statementEmbeddingResult?.embeddings || null
                 );
+
+                // ── SURVEY MAPPER ─────────────────────────────────────────
+                // Runs after enrichedClaims are ready. Produces gates (forced_choice /
+                // conditional_gate) using strict survey methodology. Toggle useSurveyMapper
+                // to false to bypass entirely and flow straight to Singularity with no gates.
+                let surveyRationale = null;
+                const useSurveyMapper = true;
+
+                if (useSurveyMapper && enrichedClaims.length > 0) {
+                  try {
+                    const { buildSurveyMapperPrompt, parseSurveyMapperOutput: parseSurveyOutput } =
+                      await import('../../ConciergeService/surveyMapper');
+
+                    const claimsForSurvey = enrichedClaims.map((c) => ({
+                      id: String(c?.id || ''),
+                      label: String(c?.label || ''),
+                      text: String(c?.text || ''),
+                      supporters: Array.isArray(c?.supporters) ? c.supporters : [],
+                    }));
+
+                    const surveyPrompt = buildSurveyMapperPrompt(
+                      payload.originalPrompt,
+                      claimsForSurvey,
+                      unifiedEdges,
+                      indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
+                    );
+
+                    const surveyResult = await new Promise((resolve) => {
+                      let surveyText = '';
+                      this.orchestrator.executeParallelFanout(
+                        surveyPrompt,
+                        [payload.mappingProvider],
+                        {
+                          sessionId: context.sessionId,
+                          useThinking: false,
+                          onPartial: () => {},
+                          onAllComplete: (results) => {
+                            const r = results?.[payload.mappingProvider];
+                            surveyText = r?.text || '';
+                            resolve({ text: surveyText });
+                          },
+                          onError: () => resolve({ text: '' }),
+                        }
+                      );
+                    });
+
+                    if (surveyResult?.text) {
+                      const parsed = parseSurveyOutput(surveyResult.text);
+                      rawGates = parsed.gates;
+                      surveyRationale = parsed.rationale;
+                      if (parsed.errors.length > 0) {
+                        console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
+                      }
+                      console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
+
+                      // Rebuild unifiedConditionals and gateQuestionByClaimPair from survey gates
+                      unifiedConditionals = [];
+                      gateQuestionByClaimPair = new Map();
+
+                      for (const gate of rawGates) {
+                        if (!gate || !gate.id) continue;
+                        const gClaims = Array.isArray(gate.claims)
+                          ? gate.claims.map((c) => String(c).trim()).filter(Boolean)
+                          : [];
+                        if (gClaims.length === 0) continue;
+
+                        if (gate.classification === 'conditional_gate') {
+                          const affected = Array.isArray(gate.affectedClaims) && gate.affectedClaims.length > 0
+                            ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
+                            : gClaims;
+                          unifiedConditionals.push({
+                            id: gate.id,
+                            question: String(gate.question || '').trim(),
+                            affectedClaims: affected,
+                            construct: gate.construct || null,
+                            hinge: gate.hinge || null,
+                            classification: 'conditional_gate',
+                          });
+                        } else if (gate.classification === 'forced_choice' && gClaims.length >= 2) {
+                          for (let i = 0; i < gClaims.length; i++) {
+                            for (let j = i + 1; j < gClaims.length; j++) {
+                              const key = [gClaims[i], gClaims[j]].sort().join('::');
+                              gateQuestionByClaimPair.set(key, String(gate.question || '').trim());
+                            }
+                          }
+                        }
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('[SurveyMapper] Failed, continuing without gates:', getErrorMessage(err));
+                    rawGates = [];
+                    surveyRationale = null;
+                  }
+                }
 
                 let completeness = null;
                 try {
@@ -1191,9 +1302,12 @@ export class StepExecutor {
                     if (!conflictsById.has(from)) conflictsById.set(from, []);
                     const fromLabel = claimLabelById.get(from) || from;
                     const toLabel = claimLabelById.get(to) || to;
+                    // Use gate question if a forced_choice gate exists for this claim pair
+                    const gateKey = [from, to].sort().join('::');
+                    const gateQuestion = gateQuestionByClaimPair.get(gateKey) || '';
                     conflictsById.get(from).push({
                       claimId: to,
-                      question: String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
+                      question: gateQuestion || String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
                       sourceStatementIds: [],
                     });
                   }
@@ -1338,42 +1452,7 @@ export class StepExecutor {
                   }
 
                   const ghosts = null;
-                  let traversalAnalysis = null;
-
-                  try {
-                    const { buildMechanicalTraversal } = await import('../traversal/buildMechanicalTraversal');
-                    const draftMapperArtifact = {
-                      id: `artifact-${Date.now()}`,
-                      query: payload.originalPrompt,
-                      turn: context.turn || 0,
-                      timestamp: new Date().toISOString(),
-                      model_count: citationOrder.length,
-                      claims: enrichedClaims,
-                      edges: [...semanticEdges, ...derivedSupportEdges],
-                      ghosts,
-                      narrative: String(parseResult.narrative || '').trim(),
-                      conditionals: unifiedConditionals,
-                    };
-
-                    const tempCognitiveForTraversal = buildCognitiveArtifact(draftMapperArtifact, {
-                      shadow: {
-                        extraction: shadowResult || null,
-                        delta: shadowDelta || null,
-                      },
-                      paragraphProjection: paragraphResult || null,
-                      substrate: {
-                        graph: substrateGraph,
-                      },
-                      preSemantic: preSemanticInterpretation || null,
-                      ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
-                    });
-
-                    traversalAnalysis = await buildMechanicalTraversal(tempCognitiveForTraversal, {
-                      statementEmbeddings: statementEmbeddingResult?.embeddings || null,
-                    });
-                  } catch (err) {
-                    traversalAnalysis = null;
-                  }
+                  const traversalAnalysis = null;
 
                   mapperArtifact = {
                     id: `artifact-${Date.now()}`,
@@ -1392,6 +1471,7 @@ export class StepExecutor {
                     traversalGraph,
                     forcingPoints,
                     traversalAnalysis,
+                    ...(rawGates.length > 0 ? { surveyGates: rawGates, surveyRationale } : { surveyRationale }),
                     preSemantic: preSemanticInterpretation || null,
                     ...(completeness ? { completeness } : {}),
                     ...(alignmentResult ? { alignment: alignmentResult } : {}),
@@ -1416,501 +1496,35 @@ export class StepExecutor {
                       // Convert to cognitive shape for structural analysis
                       const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
                       const postSemantic = computeStructuralAnalysis(tempCognitive);
-                      structuralValidation = validateStructuralMapping(preSemanticInterpretation, postSemantic);
+                      structuralValidation = validateStructuralMapping(
+                        preSemanticInterpretation,
+                        postSemantic,
+                        substrate,
+                        statementEmbeddingResult?.embeddings ?? null,
+                        paragraphResult?.paragraphs ?? null
+                      );
                     }
                   } catch (_) {
                     structuralValidation = null;
                   }
 
                   if (mapperArtifact) {
-                    mapperArtifact.structuralValidation = structuralValidation;
                     try {
-                      // 1. Setup & Helpers
-                      const pre = preSemanticInterpretation || null;
-                      const signals = Array.isArray(pre?.interRegionSignals) ? pre.interRegionSignals : [];
-                      const regionProfiles = Array.isArray(pre?.regionProfiles) ? pre.regionProfiles : [];
-                      const regionProfileById = new Map(regionProfiles.map((p) => [String(p.regionId), p]));
+                      const diagnostics = structuralValidation;
+                      mapperArtifact.structuralValidation = diagnostics;
 
-                      const hintsExpectedClaimCount =
-                        pre?.hints && Array.isArray(pre.hints.expectedClaimCount) && pre.hints.expectedClaimCount.length === 2
-                          ? pre.hints.expectedClaimCount
-                          : null;
-
-                      const statementEmbeddings =
-                        statementEmbeddingResult?.embeddings && typeof statementEmbeddingResult.embeddings.get === 'function'
-                          ? statementEmbeddingResult.embeddings
-                          : null;
-
-                      const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
-                      const clamp01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x);
-                      const tierRank = (t) => (t === 'peak' ? 3 : t === 'hill' ? 2 : 1);
-                      const hashSeed = (str) => {
-                        let h = 2166136261;
-                        for (let i = 0; i < str.length; i++) {
-                          h ^= str.charCodeAt(i);
-                          h = Math.imul(h, 16777619);
-                        }
-                        return h >>> 0;
-                      };
-                      const cosineSim = (a, b) => {
-                        if (!a || !b || typeof a.length !== 'number' || typeof b.length !== 'number') return 0;
-                        const n = Math.min(a.length, b.length);
-                        let dot = 0;
-                        let na = 0;
-                        let nb = 0;
-                        for (let i = 0; i < n; i++) {
-                          const av = a[i] || 0;
-                          const bv = b[i] || 0;
-                          dot += av * bv;
-                          na += av * av;
-                          nb += bv * bv;
-                        }
-                        if (na <= 0 || nb <= 0) return 0;
-                        return dot / (Math.sqrt(na) * Math.sqrt(nb));
-                      };
-
-                      const edgeTypeToRelationship = (t) => {
-                        const s = String(t || '').trim();
-                        if (s === 'conflicts') return 'conflict';
-                        if (s === 'supports') return 'support';
-                        if (s === 'tradeoff') return 'tradeoff';
-                        return null;
-                      };
-
-                      const claims = Array.isArray(mapperArtifact.claims) ? mapperArtifact.claims : [];
-                      const edges = Array.isArray(mapperArtifact.edges) ? mapperArtifact.edges : [];
-
-                      // Shared state across blocks
-                      const dominantRegionByClaimId = new Map();
-                      const signalByPairKey = new Map();
-                      const regionPairHasMapperConflict = new Set();
-                      const confirmedClaims = new Set();
-                      const claimConfidenceById = new Map();
-                      let comparableEdges = 0;
-                      let matchedEdges = 0;
-                      let mechanicalConflictsConfirmed = 0;
-
-                      // 2. Region Dominance
-                      try {
-                        for (const c of claims) {
-                          const claimId = String(c?.id || '').trim();
-                          if (!claimId) continue;
-                          const sourceRegionIds = Array.isArray(c?.geometricSignals?.sourceRegionIds)
-                            ? c.geometricSignals.sourceRegionIds.map((x) => String(x)).filter(Boolean)
-                            : [];
-                          let best = null;
-                          for (const rid of sourceRegionIds) {
-                            const p = regionProfileById.get(rid);
-                            const tier = p?.tier || 'floor';
-                            const conf = typeof p?.tierConfidence === 'number' ? p.tierConfidence : 0;
-                            const candidate = { regionId: rid, tier, tierConfidence: conf };
-                            if (!best) {
-                              best = candidate;
-                              continue;
-                            }
-                            const r1 = tierRank(candidate.tier);
-                            const r2 = tierRank(best.tier);
-                            if (r1 > r2 || (r1 === r2 && candidate.tierConfidence > best.tierConfidence)) {
-                              best = candidate;
-                            }
+                      const claimMeasurements = diagnostics?.measurements?.claimMeasurements;
+                      if (Array.isArray(claimMeasurements)) {
+                        const coherenceById = new Map(claimMeasurements.map(m => [m.claimId, m]));
+                        for (const c of (mapperArtifact.claims ?? [])) {
+                          const m = coherenceById.get(c?.id);
+                          if (m && typeof m.sourceCoherence === 'number') {
+                            c.sourceCoherence = m.sourceCoherence;
                           }
-                          dominantRegionByClaimId.set(claimId, best);
                         }
-                      } catch (err) {
-                        console.error('[StepExecutor] Convergence: Region dominance failed', err);
                       }
-
-                      // 3. Signal Mapping
-                      try {
-                        for (const s of signals) {
-                          const a = String(s?.regionA || '').trim();
-                          const b = String(s?.regionB || '').trim();
-                          if (!a || !b || a === b) continue;
-                          const k = pairKey(a, b);
-                          const prev = signalByPairKey.get(k);
-                          if (!prev || (typeof s?.confidence === 'number' ? s.confidence : 0) > (typeof prev?.confidence === 'number' ? prev.confidence : 0)) {
-                            signalByPairKey.set(k, s);
-                          }
-                        }
-                      } catch (err) {
-                        console.error('[StepExecutor] Convergence: Signal mapping failed', err);
-                      }
-
-                      // 4. Edge Validation
-                      try {
-                        for (const e of edges) {
-                          const rel = edgeTypeToRelationship(e?.type);
-                          if (!rel) continue;
-                          const from = String(e?.from || '').trim();
-                          const to = String(e?.to || '').trim();
-                          if (!from || !to) continue;
-                          const ra = dominantRegionByClaimId.get(from)?.regionId || null;
-                          const rb = dominantRegionByClaimId.get(to)?.regionId || null;
-                          if (!ra || !rb || ra === rb) continue;
-                          const k = pairKey(ra, rb);
-                          const signal = signalByPairKey.get(k);
-                          if (!signal) continue;
-                          comparableEdges++;
-                          const ok = String(signal.relationship || '').trim() === rel;
-                          if (ok) {
-                            matchedEdges++;
-                            confirmedClaims.add(from);
-                            confirmedClaims.add(to);
-                            if (rel === 'conflict') regionPairHasMapperConflict.add(k);
-                          }
-                        }
-                      } catch (err) {
-                        console.error('[StepExecutor] Convergence: Edge validation failed', err);
-                      }
-
-                      // 5. Claim Confidence
-                      try {
-                        const meanPairwiseSimilarity = (vecs, seedStr) => {
-                          const n = vecs.length;
-                          if (n < 2) return null;
-                          const totalPairs = (n * (n - 1)) / 2;
-                          const maxPairs = 60;
-                          const pairsToSample = Math.min(maxPairs, totalPairs);
-                          let sum = 0;
-                          let count = 0;
-                          if (totalPairs <= maxPairs) {
-                            for (let i = 0; i < n; i++) {
-                              for (let j = i + 1; j < n; j++) {
-                                sum += cosineSim(vecs[i], vecs[j]);
-                                count++;
-                              }
-                            }
-                          } else {
-                            let seed = hashSeed(seedStr);
-                            for (let k = 0; k < pairsToSample; k++) {
-                              seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-                              const i = seed % n;
-                              seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-                              let j = seed % n;
-                              if (j === i) j = (j + 1) % n;
-                              const a = i < j ? i : j;
-                              const b = i < j ? j : i;
-                              sum += cosineSim(vecs[a], vecs[b]);
-                              count++;
-                            }
-                          }
-                          return count > 0 ? sum / count : null;
-                        };
-
-                        const claimCoherenceMeanById = new Map();
-
-                        for (const c of claims) {
-                          const claimId = String(c?.id || '').trim();
-                          if (!claimId) continue;
-                          const dom = dominantRegionByClaimId.get(claimId) || null;
-                          const tier = String(dom?.tier || '').trim();
-                          const tierComponent = tier === 'peak' || tier === 'hill' ? 0.33 : 0;
-                          const relationshipComponent = confirmedClaims.has(claimId) ? 0.33 : 0;
-
-                          let coherenceMean = null;
-                          if (statementEmbeddings) {
-                            const sids = Array.isArray(c?.sourceStatementIds)
-                              ? c.sourceStatementIds.map((x) => String(x)).filter(Boolean)
-                              : [];
-                            const vecs = [];
-                            for (const sid of sids) {
-                              const v = statementEmbeddings.get(sid);
-                              if (v) vecs.push(v);
-                            }
-                            coherenceMean = meanPairwiseSimilarity(vecs, `${claimId}:${vecs.length}`);
-                          }
-                          claimCoherenceMeanById.set(claimId, coherenceMean);
-                          const coherenceComponent = typeof coherenceMean === 'number' && coherenceMean >= 0.5 ? 0.33 : 0;
-                          const confidence = clamp01(tierComponent + relationshipComponent + coherenceComponent);
-                          claimConfidenceById.set(claimId, confidence);
-                          c.convergenceConfidence = confidence;
-                        }
-                      } catch (err) {
-                        console.error('[StepExecutor] Convergence: Claim confidence failed', err);
-                      }
-
-                      // 6. Edge Scoring
-                      try {
-                        const oppositeStances = new Set([
-                          'prescriptive|cautionary',
-                          'cautionary|prescriptive',
-                          'assertive|uncertain',
-                          'uncertain|assertive',
-                        ]);
-
-                        const hasOpposingStanceDynamics = (ra, rb) => {
-                          const pa = regionProfileById.get(ra);
-                          const pb = regionProfileById.get(rb);
-                          if (!pa || !pb) return false;
-                          const a = String(pa?.purity?.dominantStance || '').trim();
-                          const b = String(pb?.purity?.dominantStance || '').trim();
-                          const contested =
-                            (typeof pa?.purity?.contestedRatio === 'number' ? pa.purity.contestedRatio : 0) > 0.3 ||
-                            (typeof pb?.purity?.contestedRatio === 'number' ? pb.purity.contestedRatio : 0) > 0.3;
-                          const variety =
-                            (typeof pa?.purity?.stanceVariety === 'number' ? pa.purity.stanceVariety : 0) >= 3 ||
-                            (typeof pb?.purity?.stanceVariety === 'number' ? pb.purity.stanceVariety : 0) >= 3;
-                          return oppositeStances.has(`${a}|${b}`) || contested || variety;
-                        };
-
-                        for (const e of edges) {
-                          const rel = edgeTypeToRelationship(e?.type);
-                          if (!rel) continue;
-                          const from = String(e?.from || '').trim();
-                          const to = String(e?.to || '').trim();
-                          if (!from || !to) continue;
-                          const ra = dominantRegionByClaimId.get(from)?.regionId || null;
-                          const rb = dominantRegionByClaimId.get(to)?.regionId || null;
-                          if (!ra || !rb || ra === rb) {
-                            e.convergenceConfidence = 0;
-                            continue;
-                          }
-                          const k = pairKey(ra, rb);
-                          const signal = signalByPairKey.get(k);
-                          let score = 0;
-                          const hasCompatible = !!signal && String(signal.relationship || '').trim() === rel;
-                          if (hasCompatible) score += 0.5;
-                          if ((rel === 'conflict' || rel === 'tradeoff') && hasOpposingStanceDynamics(ra, rb)) score += 0.25;
-                          const fromOk = (claimConfidenceById.get(from) ?? 0) >= 0.5;
-                          const toOk = (claimConfidenceById.get(to) ?? 0) >= 0.5;
-                          if (fromOk && toOk) score += 0.25;
-                          e.convergenceConfidence = clamp01(score);
-                        }
-                      } catch (err) {
-                        console.error('[StepExecutor] Convergence: Edge scoring failed', err);
-                      }
-
-                      // 7. Conflict Confirmation & Artifact Construction
-                      let mechanicalConflicts = [];
-                      try {
-                        mechanicalConflicts = signals.filter((s) => String(s?.relationship || '').trim() === 'conflict');
-                        for (const s of mechanicalConflicts) {
-                          const a = String(s?.regionA || '').trim();
-                          const b = String(s?.regionB || '').trim();
-                          if (!a || !b || a === b) continue;
-                          if (regionPairHasMapperConflict.has(pairKey(a, b))) mechanicalConflictsConfirmed++;
-                        }
-
-                        const coverageWithinExpected =
-                          hintsExpectedClaimCount
-                            ? claims.length >= (hintsExpectedClaimCount[0] ?? 0) && claims.length <= (hintsExpectedClaimCount[1] ?? Infinity)
-                            : null;
-
-                        const comparableAgreementRatio = comparableEdges > 0 ? matchedEdges / comparableEdges : null;
-                        const conflictConfirmationRatio =
-                          mechanicalConflicts.length > 0 ? mechanicalConflictsConfirmed / mechanicalConflicts.length : null;
-
-                        let partitionMechanicalConvergence = null;
-                        try {
-                          const partitions = Array.isArray(mapperArtifact?.partitions) ? mapperArtifact.partitions : [];
-                          const oppositions = Array.isArray(pre?.oppositions) ? pre.oppositions : [];
-                          const regionizationRegions = Array.isArray(pre?.regionization?.regions) ? pre.regionization.regions : [];
-
-                          const statementRegionIdByStatementId = new Map();
-                          for (const r of regionizationRegions) {
-                            const rid = String(r?.id || '').trim();
-                            if (!rid) continue;
-                            const sids = Array.isArray(r?.statementIds) ? r.statementIds : [];
-                            for (const sidRaw of sids) {
-                              const sid = String(sidRaw || '').trim();
-                              if (!sid) continue;
-                              if (!statementRegionIdByStatementId.has(sid)) statementRegionIdByStatementId.set(sid, rid);
-                            }
-                          }
-
-                          const dominantRegion = (statementIds) => {
-                            const counts = new Map();
-                            let mapped = 0;
-                            for (const sidRaw of statementIds) {
-                              const sid = String(sidRaw || '').trim();
-                              if (!sid) continue;
-                              const rid = statementRegionIdByStatementId.get(sid) || null;
-                              if (!rid) continue;
-                              mapped++;
-                              counts.set(rid, (counts.get(rid) ?? 0) + 1);
-                            }
-                            let bestRegionId = null;
-                            let bestCount = 0;
-                            for (const [rid, c] of counts.entries()) {
-                              if (c > bestCount || (c === bestCount && String(rid) < String(bestRegionId ?? '\uffff'))) {
-                                bestRegionId = rid;
-                                bestCount = c;
-                              }
-                            }
-                            const purity = mapped > 0 ? bestCount / mapped : 0;
-                            return { regionId: bestRegionId, purity, mappedCount: mapped, distinctRegionCount: counts.size };
-                          };
-
-                          const oppositionPairKeys = new Set(
-                            oppositions
-                              .map((o) => {
-                                const a = String(o?.regionA || '').trim();
-                                const b = String(o?.regionB || '').trim();
-                                return a && b && a !== b ? pairKey(a, b) : null;
-                              })
-                              .filter(Boolean)
-                          );
-
-                          const oppositionRegions = new Set(
-                            oppositions
-                              .flatMap((o) => [String(o?.regionA || '').trim(), String(o?.regionB || '').trim()])
-                              .filter(Boolean)
-                          );
-
-                          const perPartition = [];
-                          const partitionPairKeys = new Set();
-                          let partitionsWithRegionEvidence = 0;
-                          let partitionsSideSeparated = 0;
-                          let partitionsFocalInOppositionRegion = 0;
-                          let partitionsAlignedToOppositionPairs = 0;
-                          let partitionsWithMechanicalSupport = 0;
-                          let partitionsWithStrongSupport = 0;
-
-                          for (const p of partitions) {
-                            const partitionId = String(p?.id || '').trim();
-                            const sideA =
-                              Array.isArray(p?.sideAStatementIds) && p.sideAStatementIds.length > 0
-                                ? p.sideAStatementIds
-                                : Array.isArray(p?.sideAAdvocacyStatementIds)
-                                  ? p.sideAAdvocacyStatementIds
-                                  : [];
-                            const sideB =
-                              Array.isArray(p?.sideBStatementIds) && p.sideBStatementIds.length > 0
-                                ? p.sideBStatementIds
-                                : Array.isArray(p?.sideBAdvocacyStatementIds)
-                                  ? p.sideBAdvocacyStatementIds
-                                  : [];
-
-                            const aDom = dominantRegion(sideA);
-                            const bDom = dominantRegion(sideB);
-                            const hasRegionEvidence = aDom.mappedCount > 0 && bDom.mappedCount > 0 && !!aDom.regionId && !!bDom.regionId;
-                            if (hasRegionEvidence) partitionsWithRegionEvidence++;
-
-                            const hasSideSeparation = hasRegionEvidence && aDom.regionId !== bDom.regionId;
-                            if (hasSideSeparation) partitionsSideSeparated++;
-
-                            const focalStatementId = p?.focalStatementId != null ? String(p.focalStatementId).trim() : '';
-                            const focalRegionId = focalStatementId ? statementRegionIdByStatementId.get(focalStatementId) || null : null;
-                            const focalHasOpposition = !!focalRegionId && oppositionRegions.has(focalRegionId);
-                            if (focalHasOpposition) partitionsFocalInOppositionRegion++;
-
-                            const pairIsOpposition =
-                              hasSideSeparation && aDom.regionId && bDom.regionId ? oppositionPairKeys.has(pairKey(aDom.regionId, bDom.regionId)) : false;
-                            if (pairIsOpposition) partitionsAlignedToOppositionPairs++;
-
-                            const hasMechanicalSupport = hasSideSeparation || focalHasOpposition;
-                            if (hasMechanicalSupport) partitionsWithMechanicalSupport++;
-
-                            const hasStrongSupport = hasSideSeparation && pairIsOpposition;
-                            if (hasStrongSupport) partitionsWithStrongSupport++;
-
-                            if (hasSideSeparation && aDom.regionId && bDom.regionId) {
-                              partitionPairKeys.add(pairKey(aDom.regionId, bDom.regionId));
-                            }
-
-                            perPartition.push({
-                              id: partitionId || null,
-                              dominantRegionA: aDom.regionId,
-                              dominantRegionB: bDom.regionId,
-                              purityA: aDom.purity,
-                              purityB: bDom.purity,
-                              sideAStatementsMapped: aDom.mappedCount,
-                              sideBStatementsMapped: bDom.mappedCount,
-                              focalStatementId: focalStatementId || null,
-                              focalRegionId,
-                              focalHasOpposition,
-                              hasSideSeparation,
-                              pairIsOpposition,
-                              hasMechanicalSupport,
-                              hasStrongSupport,
-                            });
-                          }
-
-                          let oppositionsCoveredByPartitions = 0;
-                          for (const o of oppositions) {
-                            const a = String(o?.regionA || '').trim();
-                            const b = String(o?.regionB || '').trim();
-                            if (!a || !b || a === b) continue;
-                            if (partitionPairKeys.has(pairKey(a, b))) oppositionsCoveredByPartitions++;
-                          }
-
-                          const ratio = (num, den) => (den > 0 ? num / den : null);
-
-                          partitionMechanicalConvergence = {
-                            partitions: partitions.length,
-                            partitionsWithRegionEvidence,
-                            partitionsSideSeparated,
-                            sideSeparatedRatio: ratio(partitionsSideSeparated, partitions.length),
-                            partitionsFocalInOppositionRegion,
-                            focalOppositionRatio: ratio(partitionsFocalInOppositionRegion, partitions.length),
-                            partitionsAlignedToOppositionPairs,
-                            alignedToOppositionPairsRatio: ratio(partitionsAlignedToOppositionPairs, partitions.length),
-                            partitionsWithMechanicalSupport,
-                            mechanicalSupportRatio: ratio(partitionsWithMechanicalSupport, partitions.length),
-                            partitionsWithStrongSupport,
-                            strongSupportRatio: ratio(partitionsWithStrongSupport, partitions.length),
-                            oppositionsPredicted: oppositions.length,
-                            oppositionsCoveredByPartitions,
-                            oppositionCoverageRatio: ratio(oppositionsCoveredByPartitions, oppositions.length),
-                            perPartition,
-                          };
-                        } catch (err) {
-                          partitionMechanicalConvergence = null;
-                        }
-
-                        const claimScores = claims
-                          .map((c) => (typeof c?.convergenceConfidence === 'number' ? c.convergenceConfidence : null))
-                          .filter((x) => typeof x === 'number');
-                        const edgeScores = edges
-                          .map((e) => (typeof e?.convergenceConfidence === 'number' ? e.convergenceConfidence : null))
-                          .filter((x) => typeof x === 'number');
-
-                        const avg = (arr) => (arr.length > 0 ? arr.reduce((s, x) => s + x, 0) / arr.length : null);
-
-                        mapperArtifact.convergence = {
-                          computedAt: new Date().toISOString(),
-                          coverageConvergence: {
-                            expectedClaimCount: hintsExpectedClaimCount,
-                            mapperClaimCount: claims.length,
-                            withinExpectedRange: coverageWithinExpected,
-                          },
-                          mechanicalConflictConvergence: {
-                            mechanicalConflicts: mechanicalConflicts.length,
-                            confirmedByMapper: mechanicalConflictsConfirmed,
-                            confirmationRatio: conflictConfirmationRatio,
-                          },
-                          relationshipConvergence: {
-                            comparableEdges,
-                            matchedEdges,
-                            agreementRatio: comparableAgreementRatio,
-                          },
-                          partitionMechanicalConvergence,
-                          confidenceSummaries: {
-                            claims: {
-                              avg: avg(claimScores),
-                              highCount: claimScores.filter((x) => x >= 0.5).length,
-                              total: claims.length,
-                            },
-                            edges: {
-                              avg: avg(edgeScores),
-                              highCount: edgeScores.filter((x) => x >= 0.5).length,
-                              total: edges.length,
-                            },
-                          },
-                          inputs: {
-                            hasPreSemantic: !!pre,
-                            interRegionSignals: signals.length,
-                            hasStatementEmbeddings: !!statementEmbeddings,
-                          },
-                        };
-                      } catch (err) {
-                        console.error('[StepExecutor] Convergence: Artifact construction failed', err);
-                        mapperArtifact.convergence = null;
-                      }
-
-                    } catch (outerErr) {
-                      console.error('[StepExecutor] Critical convergence error:', outerErr);
-                      mapperArtifact.convergence = null;
+                    } catch (err) {
+                      console.error('[StepExecutor] Diagnostics stamp failed', err);
                     }
                   }
 
@@ -1987,6 +1601,7 @@ export class StepExecutor {
               paragraphProjection: paragraphResult || null,
               substrate: {
                 graph: substrateGraph,
+                shape: substrate?.shape,
               },
               preSemantic: preSemanticInterpretation || null,
               ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),

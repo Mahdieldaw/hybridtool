@@ -327,6 +327,10 @@ export class ConnectionHandler {
             }
             break;
 
+          case "RUN_SURVEY_TEST":
+            await this._handleSurveyTest(message);
+            break;
+
           default:
             console.warn(
               `[ConnectionHandler] Unknown message type: ${message.type}`,
@@ -364,6 +368,68 @@ export class ConnectionHandler {
           stepType: scope,
           targetProvider: providerId,
         },
+      });
+    }
+  }
+
+  /**
+   * Handle RUN_SURVEY_TEST: one-shot survey mapper call for debug overlay.
+   * Runs the survey mapper against the claims/edges/batch texts of a given turn
+   * and posts SURVEY_TEST_RESULT back to the port. Nothing is persisted.
+   */
+  async _handleSurveyTest(message) {
+    const { turnId, claims, edges, batchTexts, userQuery, provider } = message.payload || {};
+    if (!turnId || !provider) {
+      this.port.postMessage({ type: 'SURVEY_TEST_RESULT', turnId, error: 'Missing turnId or provider' });
+      return;
+    }
+
+    try {
+      await this._ensureBackendReady();
+      const { buildSurveyMapperPrompt, parseSurveyMapperOutput } = await import('../ConciergeService/surveyMapper');
+
+      const prompt = buildSurveyMapperPrompt(
+        userQuery || '',
+        Array.isArray(claims) ? claims : [],
+        Array.isArray(edges) ? edges : [],
+        Array.isArray(batchTexts) ? batchTexts : []
+      );
+
+      let resultText = '';
+      await new Promise((resolve, reject) => {
+        this.services.orchestrator.executeParallelFanout(
+          prompt,
+          [provider],
+          {
+            sessionId: 'survey-test',
+            useThinking: false,
+            onPartial: () => {},
+            onAllComplete: (results) => {
+              resultText = results?.[provider]?.text || '';
+              resolve();
+            },
+            onError: (err) => reject(err),
+          }
+        );
+      });
+
+      const parsed = parseSurveyMapperOutput(resultText);
+      this.port.postMessage({
+        type: 'SURVEY_TEST_RESULT',
+        turnId,
+        gates: parsed.gates,
+        rationale: parsed.rationale,
+        errors: parsed.errors,
+        rawText: resultText,
+      });
+    } catch (err) {
+      this.port.postMessage({
+        type: 'SURVEY_TEST_RESULT',
+        turnId,
+        error: String(err?.message || err),
+        gates: [],
+        rationale: null,
+        rawText: '',
       });
     }
   }

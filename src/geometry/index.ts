@@ -43,16 +43,14 @@ export type {
     Region,
     RegionizationResult,
     RegionProfile,
-    OppositionPair,
-    InterRegionRelationship,
-    InterRegionSignal,
-    ShapePrediction,
-    MapperGeometricHints,
     PreSemanticInterpretation,
-    StructuralViolation,
-    StructuralValidation,
+    GateVerdict,
+    PipelineGateResult,
+    ModelScore,
+    ModelOrderingResult,
+    GeometricObservation,
+    DiagnosticsResult,
     InterpretationInputs,
-    ValidationInputs,
     ClaimWithProvenance,
     EdgeList,
 } from './interpretation/types';
@@ -70,9 +68,10 @@ export { buildClaimVectors, computeAlignment } from './alignment';
 export { deriveLens } from './interpretation/lens';
 export { buildRegions } from './interpretation/regions';
 export { profileRegions } from './interpretation/profiles';
-export { detectOppositions } from './interpretation/opposition';
-export { buildMapperGeometricHints } from './interpretation/guidance';
 export { validateStructuralMapping } from './interpretation/validation';
+export { evaluatePipelineGates } from './interpretation/pipelineGates';
+export { computeModelOrdering } from './interpretation/modelOrdering';
+export { computeDiagnostics } from './interpretation/diagnostics';
 export { buildPreSemanticInterpretation } from './interpretation';
 
 export type { QueryRelevanceResult, QueryRelevanceStatementScore } from './queryRelevance';

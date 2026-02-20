@@ -21,6 +21,7 @@ import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { safeLazy } from "../utils/safeLazy";
 import { StatementClusteringDebugOverlay } from "../components/debug/StatementClusteringDebugOverlay";
+import { SurveyTestOverlay } from "../components/debug/SurveyTestOverlay";
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
 const CouncilOrbsVertical = safeLazy(() => import("../components/CouncilOrbsVertical").then(m => ({ default: m.CouncilOrbsVertical })));
@@ -251,6 +252,7 @@ export default function ChatView() {
         <DecisionMapSheet />
       </Suspense>
       {powerUserMode && <StatementClusteringDebugOverlay />}
+      <SurveyTestOverlay />
 
       <div
         className={clsx(

@@ -248,6 +248,14 @@ export function ParagraphSpaceView({
     return out;
   }, [queryCosineByStatementId, statementToParagraphId]);
 
+  const queryBucketSize = queryBucketByParagraphId.size;
+
+  useEffect(() => {
+    if (queryFilter !== "all" && queryBucketSize === 0) {
+      setQueryFilter("all");
+    }
+  }, [queryBucketSize, queryFilter]);
+
   /** Reverse map: paragraphId → claimIds that reference it */
   const paragraphToClaimIds = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -455,9 +463,9 @@ export function ParagraphSpaceView({
     const lens = ps?.lens || null;
     const regionization = ps?.regionization || null;
     const regionProfiles = Array.isArray(ps?.regionProfiles) ? ps.regionProfiles : [];
-    const oppositions = Array.isArray(ps?.oppositions) ? ps.oppositions : [];
-    const hints = ps?.hints || null;
-    return { lens, regionization, regionProfiles, oppositions, hints };
+    const pipelineGate = ps?.pipelineGate || null;
+    const modelOrdering = ps?.modelOrdering || null;
+    return { lens, regionization, regionProfiles, pipelineGate, modelOrdering };
   }, [preSemantic]);
 
   const unattendedRegions = useMemo(() => {
@@ -1028,53 +1036,63 @@ export function ParagraphSpaceView({
               </div>
 
               <div className="bg-black/20 border border-white/10 rounded-xl p-3">
-                <div className="text-[11px] text-text-muted font-medium mb-2">Oppositions</div>
-                {preSemanticData?.oppositions?.length ? (
-                  <div className="space-y-1">
-                    {preSemanticData.oppositions.slice(0, 10).map((o: any, idx: number) => (
-                      <div key={`${o.regionA}-${o.regionB}-${idx}`} className="text-[11px] text-text-muted">
-                        <span className="text-text-primary">{String(o.regionA)}</span> ↔ <span className="text-text-primary">{String(o.regionB)}</span>
-                        <span className="ml-2">{typeof o.similarity === "number" ? o.similarity.toFixed(3) : ""}</span>
-                        {typeof o.stanceConflict === "boolean" && <span className="ml-2">{o.stanceConflict ? "stance conflict" : "aligned"}</span>}
+                <div className="text-[11px] text-text-muted font-medium mb-2">Pipeline Gate</div>
+                {preSemanticData?.pipelineGate ? (
+                  <div className="space-y-1 text-[11px] text-text-muted">
+                    {preSemanticData.pipelineGate?.verdict && (
+                      <div>Verdict: <span className="text-text-primary">{String(preSemanticData.pipelineGate.verdict)}</span></div>
+                    )}
+                    {typeof preSemanticData.pipelineGate?.confidence === "number" && (
+                      <div>Confidence: <span className="text-text-primary">{Math.round(preSemanticData.pipelineGate.confidence * 100)}%</span></div>
+                    )}
+                    {Array.isArray(preSemanticData.pipelineGate?.evidence) && preSemanticData.pipelineGate.evidence.length > 0 && (
+                      <div className="pt-1 space-y-0.5">
+                        {preSemanticData.pipelineGate.evidence.slice(0, 6).map((e: any, idx: number) => (
+                          <div key={`gate-evidence-${idx}`} className="text-[11px] text-text-muted">
+                            <span className="text-text-primary">{String(e)}</span>
+                          </div>
+                        ))}
+                        {preSemanticData.pipelineGate.evidence.length > 6 && (
+                          <div className="text-[11px] text-text-muted">+{preSemanticData.pipelineGate.evidence.length - 6} more</div>
+                        )}
                       </div>
-                    ))}
+                    )}
                   </div>
                 ) : (
-                  <div className="text-[11px] text-text-muted">No opposition data available.</div>
+                  <div className="text-[11px] text-text-muted">No pipeline gate data available.</div>
                 )}
               </div>
 
               <div className="bg-black/20 border border-white/10 rounded-xl p-3">
-                <div className="text-[11px] text-text-muted font-medium mb-2">Predictions</div>
-                {preSemanticData?.hints || preSemanticData?.lens ? (
+                <div className="text-[11px] text-text-muted font-medium mb-2">Model Ordering</div>
+                {preSemanticData?.modelOrdering ? (
                   <div className="space-y-1 text-[11px] text-text-muted">
-                    {preSemanticData?.lens?.regime && (
-                      <div>Regime: <span className="text-text-primary">{String(preSemanticData.lens.regime)}</span></div>
+                    {Array.isArray(preSemanticData.modelOrdering?.orderedModelIndices) && preSemanticData.modelOrdering.orderedModelIndices.length > 0 ? (
+                      <div>
+                        Outside-in:{" "}
+                        <span className="text-text-primary">
+                          {preSemanticData.modelOrdering.orderedModelIndices.map((x: any) => String(x)).join(" → ")}
+                        </span>
+                      </div>
+                    ) : (
+                      <div>Outside-in: <span className="text-text-primary">—</span></div>
                     )}
-                    {typeof preSemanticData?.lens?.confidence === "number" && (
-                      <div>Lens confidence: <span className="text-text-primary">{Math.round(preSemanticData.lens.confidence * 100)}%</span></div>
-                    )}
-                    {typeof preSemanticData?.lens?.shouldRunClustering === "boolean" && (
-                      <div>Clustering: <span className="text-text-primary">{preSemanticData.lens.shouldRunClustering ? "yes" : "no"}</span></div>
-                    )}
-                    {preSemanticData?.hints?.predictedShape?.predicted && (
-                      <div>Predicted shape: <span className="text-text-primary">{String(preSemanticData.hints.predictedShape.predicted)}</span></div>
-                    )}
-                    {typeof preSemanticData?.hints?.predictedShape?.confidence === "number" && (
-                      <div>Shape confidence: <span className="text-text-primary">{Math.round(preSemanticData.hints.predictedShape.confidence * 100)}%</span></div>
-                    )}
-                    {Array.isArray(preSemanticData?.hints?.expectedClaimCount) && (
-                      <div>Expected claims: <span className="text-text-primary">{String(preSemanticData.hints.expectedClaimCount[0])}–{String(preSemanticData.hints.expectedClaimCount[1])}</span></div>
-                    )}
-                    {typeof preSemanticData?.hints?.expectedConflicts === "number" && (
-                      <div>Expected conflicts: <span className="text-text-primary">{String(preSemanticData.hints.expectedConflicts)}</span></div>
-                    )}
-                    {typeof preSemanticData?.hints?.expectedDissent === "boolean" && (
-                      <div>Expected dissent: <span className="text-text-primary">{preSemanticData.hints.expectedDissent ? "yes" : "no"}</span></div>
+                    {Array.isArray(preSemanticData.modelOrdering?.scores) && preSemanticData.modelOrdering.scores.length > 0 && (
+                      <div className="pt-1 space-y-0.5">
+                        {preSemanticData.modelOrdering.scores.slice(0, 6).map((s: any, idx: number) => (
+                          <div key={`model-score-${idx}`} className="text-[11px] text-text-muted">
+                            <span className="text-text-primary">m{s?.modelIndex}</span>{" "}
+                            <span className="text-text-muted">ir={typeof s?.irreplaceability === "number" ? s.irreplaceability.toFixed(4) : "—"}</span>
+                          </div>
+                        ))}
+                        {preSemanticData.modelOrdering.scores.length > 6 && (
+                          <div className="text-[11px] text-text-muted">+{preSemanticData.modelOrdering.scores.length - 6} more</div>
+                        )}
+                      </div>
                     )}
                   </div>
                 ) : (
-                  <div className="text-[11px] text-text-muted">No prediction data available.</div>
+                  <div className="text-[11px] text-text-muted">No model ordering data available.</div>
                 )}
               </div>
 

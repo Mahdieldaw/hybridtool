@@ -23,3 +23,7 @@ export const RENAME_SESSION = "RENAME_SESSION";
 
 export const REFRESH_AUTH_STATUS = "REFRESH_AUTH_STATUS";
 export const RETRY_PROVIDERS = "RETRY_PROVIDERS";
+
+// Survey test: one-shot survey mapper call for debug/measurement overlay
+export const RUN_SURVEY_TEST = "RUN_SURVEY_TEST";
+export const SURVEY_TEST_RESULT = "SURVEY_TEST_RESULT";

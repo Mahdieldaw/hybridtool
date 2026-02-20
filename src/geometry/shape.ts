@@ -14,11 +14,6 @@ export interface ShapeClassification {
         bimodalityScore: number;      // 0 = unimodal, 1 = perfect bimodal
         parallelScore: number;        // 0 = single track, 1 = multiple tracks
     };
-    recommendation: {
-        expectClusterCount: [number, number];  // [min, max]
-        expectConflicts: boolean;
-        expectDissent: boolean;
-    };
 }
 
 export function classifyShape(
@@ -78,13 +73,6 @@ export function classifyShape(
         confidence = scores[0].score;
     }
 
-    // Recommendations
-    const recommendation = {
-        expectClusterCount: getExpectedClusterRange(prior, nodeCount),
-        expectConflicts: prior === 'bimodal_fork',
-        expectDissent: prior === 'fragmented' || parallelScore > 0.3,
-    };
-
     return {
         prior,
         confidence,
@@ -93,22 +81,5 @@ export function classifyShape(
             bimodalityScore,
             parallelScore,
         },
-        recommendation,
     };
-}
-
-function getExpectedClusterRange(
-    prior: ShapePrior,
-    nodeCount: number
-): [number, number] {
-    switch (prior) {
-        case 'fragmented':
-            return [nodeCount * 0.5, nodeCount]; // Many singletons expected
-        case 'convergent_core':
-            return [1, 3]; // 1-3 major clusters
-        case 'bimodal_fork':
-            return [2, 4]; // 2 main + possibly 1-2 minor
-        case 'parallel_components':
-            return [3, 8]; // Multiple independent tracks
-    }
 }

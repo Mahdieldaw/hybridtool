@@ -1328,6 +1328,37 @@ export function parseSemanticMapperOutput(
         finalConditionals = [...finalConditionals, ...derivedConditionals];
     }
 
+    if ((edges == null || edges.length === 0) && claims.length > 0) {
+        const derived: any[] = [];
+        const seen = new Set<string>();
+        const hasClaim = (id: string) => claimIds.has(id);
+
+        for (let i = 0; i < claims.length; i++) {
+            const c = claims[i] as any;
+            const from = String(c?.id || '').trim();
+            if (!from || !hasClaim(from)) continue;
+
+            const raw = c?.challenges;
+            const targets = Array.isArray(raw)
+                ? raw.map((x: any) => String(x || '').trim()).filter(Boolean)
+                : typeof raw === 'string'
+                    ? [String(raw).trim()].filter(Boolean)
+                    : [];
+
+            for (const to of targets) {
+                if (!to || to === from || !hasClaim(to)) continue;
+                const a = from < to ? from : to;
+                const b = from < to ? to : from;
+                const key = `${a}::${b}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                derived.push({ from, to, type: 'conflicts' });
+            }
+        }
+
+        finalEdges = [...finalEdges, ...derived];
+    }
+
     const sanitizedEdges: any[] = [];
     for (let i = 0; i < finalEdges.length; i++) {
         const e = finalEdges[i];

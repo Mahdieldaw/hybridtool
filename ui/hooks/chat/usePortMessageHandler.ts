@@ -20,6 +20,7 @@ import {
   activeSplitPanelAtom,
   isSplitOpenAtom,
   hasAutoOpenedPaneAtom,
+  surveyTestAtom,
 
 } from "../../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../../state/atoms";
@@ -118,6 +119,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
   const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
+  const setSurveyTest = useSetAtom(surveyTestAtom);
 
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
@@ -944,6 +946,19 @@ export function usePortMessageHandler(enabled: boolean = true) {
           });
           break;
         }
+
+        case "SURVEY_TEST_RESULT": {
+          const { turnId: surveyTurnId, gates, rationale, errors, rawText, error } = message as any;
+          setSurveyTest((prev: any) => {
+            if (!prev || prev.turnId !== surveyTurnId) return prev;
+            return {
+              ...prev,
+              loading: false,
+              result: { gates: gates ?? [], rationale: rationale ?? null, errors: errors ?? [], rawText: rawText ?? '', error },
+            };
+          });
+          break;
+        }
       }
     },
     [
@@ -969,6 +984,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
       setActiveRecomputeState,
       setLastStreamingProvider,
       hasAutoOpenedPane,
+      setSurveyTest,
 
     ],
   );
