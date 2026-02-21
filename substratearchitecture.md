@@ -31,7 +31,7 @@ text
     │  + Interpret      │   regions → profiles → shape prior
     │                   │
     │                   │   OUT: substrate + regions + profiles +
-    │                   │        shape + geometric hints
+    │                   │        pipeline gate + model ordering
     └────────┬──────────┘
              │
     ┌────────▼──────────┐          ┌────────┐
@@ -39,7 +39,8 @@ text
     │   PARTITION       │   ──────►│ANSWERS │
     │                   │          └────────┘
     │  Mapper + Traverse│
-    │                   │   Mapper finds claims + traversal graph;
+    │                   │   Semantic mapper finds claims + edges;
+    │                   │   survey mapper produces gates;
     │                   │   user resolves forcing points
     │                   │
     │                   │   OUT: traversal state (claim statuses)
@@ -49,7 +50,7 @@ text
     │                   │
     │   SYNTHESIS       │   "What survives your reality?"
     │                   │
-    │  Prune + Concierge│   Dual-regime carving → chewed text →
+    │  Prune + Concierge│   Faithful evidence pruning → reconstruction →
     │                   │   final answer from surviving evidence
     │                   │
     │                   │   OUT: recommendation grounded in
@@ -59,20 +60,20 @@ text
 
 ### Main Path
 
-The mapper LLM is the single authority for claim identification and traversal question generation. Geometric hints from the Landscape module inform the mapper's context but do not mechanically generate gates or forcing points. The pipeline pauses for user interaction only when the mapper emits a traversal graph with forcing points.
+The semantic mapper is the single authority for claim identification (claims + edges). The survey mapper is the single authority for generating forcing-point questions (survey gates). Geometry does not mechanically generate forcing points, and does not feed a “hints” object into the semantic mapper prompt. The pipeline pauses for user interaction only when forcing points exist.
 
-### Auxiliary Calculations
+### Supplementary Calculations
 
-Four supplementary computations exist alongside the main path. They are derived from evidence and landscape data but **do not gate or drive** the main flow. Each is its own cleanly separated object with defined inputs and outputs:
+Several computations exist alongside the main path. They are derived from evidence and landscape data. Some are explicit **pipeline decisions** (e.g., whether to run geometry), but none of them replace claim-finding or gate-authoring.
 
 |Auxiliary|What it computes|Where it lives|Relationship to main path|
 |---|---|---|---|
-|**Query Relevance**|Per-statement cosine similarity to user query; tiered scoring|`queryRelevance.ts`|Ranking/UI filtering signal; available as boost factor for downstream scoring. Does not filter evidence.|
-|**Conditional Finder**|Conditional clauses (if/when/unless) extracted from statements; clustered and impact-ranked|`conditionalFinder.ts`, `deriveConditionalGates.ts`|Supplements mapper context; available for enrichment but mapper generates its own conditional forcing points.|
-|**Conflict Deriver**|Opposition pairs between regions based on stance conflicts and geometric proximity|`interpretation/opposition.ts`|Supplements mapper context; available for validation but mapper identifies its own conflicts.|
-|**Inter-Regional Analysis**|Signals between region pairs (conflict/support/tradeoff/independent) + region profiles|`interpretation/profiles.ts`, `interpretation/guidance.ts`|Supplements mapper context; powers UI visualization; available for structural validation.|
+|**Query Relevance**|Per-statement cosine similarity to the user query + “recusant” (isolation proxy)|`src/geometry/queryRelevance.ts`|Ranking/UI signal; does not filter evidence.|
+|**Pipeline Gate**|Topology-based verdict (proceed/skip/trivial/insufficient) + evidence string|`src/geometry/interpretation/pipelineGates.ts`|Decision gate for whether geometry interpretation should run. Does not make semantic decisions.|
+|**Model Ordering**|Per-model irreplaceability scoring + ordered indices|`src/geometry/interpretation/modelOrdering.ts`|Display/ordering signal; can be used to order context presentation.|
+|**Geometry Diagnostics**|Observations + measurements (claim coherence/spread, edge separation, etc.)|`src/geometry/interpretation/diagnostics.ts`|Observability and validation; advisory text, not a gate.|
 
-These calculations can be consumed by the main path (e.g., the mapper can see geometric hints that include opposition data) but they do not **replace** the mapper's claim-finding and question-generation responsibilities. There are no mechanical gates.
+These calculations can be consumed by the main path, but they do not replace the mapper's claim-finding and question-generation responsibilities.
 
 ---
 
@@ -297,7 +298,7 @@ These signals are used in multiple places:
 
 - UI filtering/labels (SEQ / TENS / COND)
 - Shadow delta ranking (high-signal orphan statements are prioritized)
-- Downstream analysis as "mechanical hints" about structure
+- Downstream analysis as measurable structure signals (pooling weights, clustering uncertainty, diagnostics)
 
 #### 1.1.9 Extraction limits and early termination
 
@@ -513,64 +514,46 @@ Embeddings are made deterministic enough for downstream thresholding via two mec
 
 Source: [normalizeEmbedding + truncation](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
-#### 1.2.5 Two embedding paths (paragraph-direct vs statement→paragraph pooling)
+#### 1.2.5 Two independent embedding passes
 
-There are two compatible ways to get `Map<paragraphId, Float32Array>`:
+The pipeline runs two separate embedding passes — neither is derived from the other.
 
-**Paragraph-direct embeddings**
+**Pass 1: Statement embeddings**
+
+`generateStatementEmbeddings(statements, config)` returns:
+
+- `embeddings: Map<statementId, Float32Array>`
+- `dimensions`, `statementCount`, `timeMs`
+
+Each statement is embedded individually. Used by: carrier detection (TriageEngine), paraphrase sweep, claim centroids (diagnostics), query relevance.
+
+**Pass 2: Paragraph embeddings (direct text)**
 
 `generateEmbeddings(paragraphs, shadowStatements, config)`:
 
-- builds one text per paragraph by concatenating statement texts
+- builds one text per paragraph by concatenating statement texts (unclipped, from `ShadowStatement.text` via `statementIds` order)
 - calls offscreen inference once for the paragraph batch
-- rehydrates `Float32Array` from JSON-serialized `number[]`
-- truncates → renormalizes → stores in `Map<paragraphId, Float32Array>`
+- rehydrates `Float32Array` from binary buffer
+- truncates → renormalizes → stores in `Map<paragraphId, Float32Array>`
 
 Failure behavior:
 
-- if a response entry is missing/malformed: reject with `Missing or malformed embedding for paragraph p_*`
+- if a response entry is missing/malformed: reject with `Missing or malformed embedding for paragraph p_*`
 
-Source: [generateEmbeddings](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
+The paragraph embedding reflects whole-paragraph meaning as the model sees it in one pass — not an average of decomposed fragments. This matters for geometry: regions built on paragraph embeddings describe what paragraphs are about, not the statistical mean of their constituent sentences.
 
-**Statement embeddings + pooled paragraph embeddings**
+**Why two passes, not one derived from the other**
 
-This route makes the embedding space more "evidence-shaped" by letting high-signal statements contribute more.
+The mean of individual statement embeddings is not the same as embedding the concatenated paragraph text — the model cannot see cross-statement context in statement-level inference. Deriving paragraph geometry from pooled statement vectors shapes terrain based on how statement vectors combine rather than what the paragraph text actually says. Two independent passes eliminates this bridge. The pooling step (`poolToParagraphEmbeddings`) has been deleted.
 
-Step A: embed statements
+**Threading through the pipeline**
 
-`generateStatementEmbeddings(statements, config)` returns:
-
-- `embeddings: Map<statementId, Float32Array>`
-- `dimensions`
-- `statementCount`
-- `timeMs`
-
-Step B: pool into paragraph vectors
-
-`poolToParagraphEmbeddings(paragraphs, statements, statementEmbeddings, dimensions)`:
-
-- for each paragraph, collect the statement vectors that exist
-- compute a weighted mean vector
-- normalize the pooled vector
-
-Weights:
-
-- base weight is statement confidence with a floor: `weight = max(0.1, stmt.confidence)`
-- signal boosts:
-    - `tension` → ×1.3
-    - `conditional` → ×1.2
-    - `sequence` → ×1.1
-
-If a paragraph has zero embeddable statements:
-
-- it is assigned a zero vector, which stays zero after normalization
-- this makes it "geometrically isolated" downstream
+Both maps are first-class in-memory intermediates passed explicitly to all consumers. Statement embeddings go to: TriageEngine (carrier detection, paraphrase sweep), diagnostics (claim centroid coherence). Paragraph embeddings go to: KNN graph building, region profiling, TriageEngine (paragraph-first carrier triangulation), claim provenance (paragraph spatial anchor). Both are garbage-collected when the pipeline step finishes.
 
 Sources:
 
 - [generateStatementEmbeddings](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
-- [poolToParagraphEmbeddings](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
-
+- [generateEmbeddings](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 #### 1.2.6 Similarity and distance (what "close" means)
 
 Everything downstream of embeddings relies on cosine similarity of normalized vectors.
@@ -608,7 +591,7 @@ TypeScript
   paragraphs: ShadowParagraph[];           // ALL — nothing filtered
   embeddings: {
     statements: Map<string, Float32Array>; // per-statement vectors
-    paragraphs: Map<string, Float32Array>; // per-paragraph vectors (pooled or direct)
+    paragraphs: Map<string, Float32Array>; // per-paragraph vectors (direct text embedding)
   };
   meta: {
     extraction: ExtractionMeta;            // statement/paragraph counts, diagnostics
@@ -629,7 +612,7 @@ This module takes the embedded evidence from Module 1 and produces:
 
 - paragraph clusters (HAC) for compression and "what belongs together"
 - a geometric substrate (kNN / mutual / strong graphs, topology, shape prior)
-- an interpretation layer (regions, profiles, oppositions, mapper hints)
+- a pre-semantic interpretation layer (regions, region profiles, pipeline gate, model ordering)
 
 ---
 
@@ -906,49 +889,39 @@ Source: [buildGeometricSubstrate + buildDegenerateSubstrate](https://arena.ai/c
 
 ### 2.3 Pre-Semantic Interpretation
 
-Once the substrate exists, the interpretation layer converts raw geometry into mapper-facing expectations and audit surfaces.
+Once the substrate exists, the interpretation layer converts raw geometry into a stable measurement bundle plus conservative pipeline decisions.
 
 Entry point:
 
-- `buildPreSemanticInterpretation(substrate, paragraphs, clusters?)` in [interpretation/index.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
+- `buildPreSemanticInterpretation(substrate, paragraphs, paragraphEmbeddings?, queryRelevanceBoost?)` in [interpretation/index.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
 It produces a `PreSemanticInterpretation` bundle ([types.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)):
 
-- `lens`: an adaptive "regime" + whether clustering should be used
-- `regionization`: a partition of nodes into named regions (`r_*`)
-- `regionProfiles`: tiering + purity/geometry summaries per region
-- `oppositions`: high-similarity region pairs with stance conflict signals
-- `hints`: mapper guidance (expected claim count, conflicts, dissent, attention regions)
+- `lens`: derived thresholds + confidence + evidence strings (for observability)
+- `pipelineGate`: proceed/skip/trivial/insufficient verdict for whether interpretation is worth running
+- `regionization`: a partition of nodes into regions (`r_*`)
+- `regionProfiles`: L1 measurements per region (mass + geometry)
+- `modelOrdering`: a computed model ordering that can reorder source texts before mapping
 
-This is where "sparse / convergent / forked / parallel" semantics become explicit for downstream prompts:
-
-- substrate prior uses `fragmented / convergent_core / bimodal_fork / parallel_components` ([shape.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d))
-- mapper-facing shape uses `sparse / convergent / forked / parallel` via a mapping step ([guidance.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d))
-
-#### 2.3.1 Adaptive lens (regime + clustering decision)
+#### 2.3.1 Adaptive lens (thresholds + evidence)
 
 `deriveLens(substrate)` ([lens.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)) converts substrate topology + similarity stats into an `AdaptiveLens`:
 
-- `regime`: directly mapped from `substrate.shape.prior`
-- `hardMergeThreshold`: `clamp(p95 - 0.03, 0.65, 0.85)` (a suggested strict threshold for merges/claims)
-- `shouldRunClustering`: true only if geometry looks structurally meaningful:
-    - `globalStrongDensity >= 0.1`
-    - `isolationRatio < 0.7`
-    - `nodeCount >= 3`
-    - `shape.confidence >= 0.35`
+- `hardMergeThreshold`: `clamp(p95 - 0.03, 0.65, 0.85)`
+- `softThreshold`: the substrate strong-edge threshold used to build the strong graph
+- `k`: the substrate kNN parameter
 - `confidence`: `clamp(0.35 + 0.6 * shape.confidence, 0.35, 0.95)`
-- `evidence[]`: string breadcrumbs (prior/confidence/density/isolation/p95, plus skip reason if clustering is skipped)
+- `evidence[]`: breadcrumbs for UI/logging (shape prior/confidence, density, isolation, p95)
 
-Important: this lens is not building graphs; it's deciding how much we should trust the geometry, and whether cluster-based region naming is appropriate.
+Important: this lens does not gate semantics. It is a measurement/observability surface.
 
 #### 2.3.2 Regionization (naming regions as r_*)
 
-`buildRegions(substrate, paragraphs, lens, clusters?)` ([regions.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)) builds a set of `Region` objects:
+`buildRegions(substrate, paragraphs, lens)` ([regions.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)) builds a set of `Region` objects:
 
 - `Region.kind` is one of:
-    - `cluster`: derived from paragraph clusters
-    - `component`: derived from strong-graph components for uncovered nodes
-    - `patch`: derived from each node's mutual-neighborhood "patch" for still-uncovered nodes
+    - `component`: derived from connected components (size ≥ 2)
+    - `patch`: derived from mutual-neighborhood patch signatures (covers remaining nodes)
 - each region has:
     - `nodeIds: string[]` paragraph ids
     - `statementIds: string[]` provenance union (stable order, no duplicates)
@@ -957,129 +930,74 @@ Important: this lens is not building graphs; it's deciding how much we should tr
 
 Construction order (and why it matters):
 
-1. **Cluster regions** (only if `lens.shouldRunClustering` and there are usable clusters)
-    - usable cluster = `paragraphIds.length >= 2`
-    - each multi-member cluster becomes a region
-2. **Component regions** (fallback coverage)
-    - for each strong component, take uncovered nodes within that component
+1. **Component regions**
+    - for each component, take uncovered nodes within that component
     - only emits a component region if uncovered set has size ≥ 2
-3. **Patch regions** (last resort to avoid leaving nodes ungrouped)
+2. **Patch regions**
     - remaining uncovered nodes are grouped by identical `mutualNeighborhoodPatch` signatures
 
 Finally:
 
-- regions are sorted deterministically (kind order cluster→component→patch, then size desc) and renumbered `r_0..r_n`
-- `RegionizationResult.meta` records `kindCounts` and whether fallback was used:
-    - `fallbackUsed = kindCounts.cluster === 0`
-    - `fallbackReason = clustering_skipped_by_lens | no_multi_member_clusters`
+- regions are sorted deterministically (components first by size, then patches) and renumbered `r_0..r_n`
+- `RegionizationResult.meta` records `regionCount`, `kindCounts`, `coveredNodes`, `totalNodes`
 
-#### 2.3.3 Region profiling (peak / hill / floor)
+#### 2.3.3 Region profiling (measurements only)
 
 `profileRegions(regions, substrate, paragraphs)` ([profiles.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)) produces a `RegionProfile` per region with three major blocks:
 
-Mass:
+Mass (L1):
 
 - `nodeCount`
 - `modelDiversity` (unique `modelIndex` values in the region)
 - `modelDiversityRatio` relative to observed model count across the whole substrate
 
-Purity (stance + contestation):
-
-- per-node stance counts from `NodeLocalStats.dominantStance`
-- `dominantStance`, `stanceUnanimity`, `contestedRatio`, `stanceVariety`
-
-Geometry:
+Geometry (L1):
 
 - `internalDensity`: computed from strong edges internal to the region (edges/maxPossible)
 - `avgInternalSimilarity`: average similarity of internal edges (prefers strong edges, falls back to mutual edges)
 - `isolation`: mean node `isolationScore` inside the region
 
-Tier assignment:
+Tier labels and stance-derived purity metrics have been removed from the measurement layer. Region profiles now expose L1 measurements only (diversity, density, isolation, centroid similarity).
 
-- thresholds are deterministic and depend on:
-    - model diversity (absolute and ratio)
-    - internal density
-- tiers:
-    - `peak` = high cross-model coverage and dense enough internally
-    - `hill` = moderate cross-model coverage and moderate density
-    - `floor` = everything else
+#### 2.3.4 Geometry→mapping coupling (minimal)
 
-The profile also produces a coarse prediction surface:
+Geometry does not emit semantic “predictions” (expected claim counts, oppositions-as-facts, etc.). Any influence on mapping is indirect (primarily via model ordering), and any post-hoc comparison is expressed as diagnostics/observations.
 
-- `predicted.likelyClaims` is a heuristic: contested-heavy or stance-diverse regions tend to imply more than one claim.
+#### 2.3.5 Diagnostics (post-hoc observations, not verdicts)
 
-#### 2.3.4 Mapper geometric hints (expected claim counts, dissent, attention)
+After semantic mapping runs, `validateStructuralMapping(preSemantic, postSemantic, ...)` is a thin wrapper over `computeDiagnostics(...)` ([validation.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d), [diagnostics.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)). It emits a `DiagnosticsResult`:
 
-`buildMapperGeometricHints(substrate, regions, profiles, oppositions)` ([guidance.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)) converts region profiles into a mapper-facing expectation surface:
+- `observations[]` (e.g. uncovered peaks, overclaimed floors, topology/mapper divergence)
+- `measurements` (per-claim and per-edge geometric measurements)
+- `summary` (human-readable)
 
-Predicted shape:
-
-- maps `substrate.shape.prior` → `PrimaryShape`:
-    - `fragmented` → `sparse`
-    - `convergent_core` → `convergent`
-    - `bimodal_fork` → `forked`
-    - `parallel_components` → `parallel`
-- carries `confidence = substrate.shape.confidence` and evidence strings (counts of peaks/hills, oppositions, high isolation)
-
-Expected claim count:
-
-- min = `max(1, peaks.length)`
-- max = `peaks.length + hills.length + contestedRegions`
-
-Expected conflicts + dissent:
-
-- `expectedConflicts = ceil(oppositions.length / 2)`
-- `expectedDissent` is true when a `hill` region is opposed to a `peak` region (dissent pattern)
-
-Attention regions (what to focus on):
-
-- emits up to 8 `attentionRegions`, prioritized high→medium→low
-- reasons are categorical: `stance_inversion`, `semantic_opposition`, `high_isolation`, `uncertain`, `low_cohesion`
-- each includes a short `guidance` string intended to steer the semantic mapper
-
-#### 2.3.5 Structural validation (compare geometry expectations to semantic output)
-
-After semantic mapping runs, `validateStructuralMapping(preSemantic, postSemantic)` ([validation.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)) checks fidelity between:
-
-- what geometry "predicted" (`preSemantic.hints`)
-- what semantics actually produced (`postSemantic` structural analysis)
-
-It emits a `StructuralValidation` summary with:
-
-- `shapeMatch`, `tierAlignmentScore`, conflict precision/recall, `overallFidelity`
-- `violations[]` such as:
-    - `shape_mismatch`
-    - `claim_count_mismatch` (too few/too many)
-    - `missed_conflict` (geometry expected conflicts, semantics created none)
-    - `embedding_quality_suspect` (notably: predicted `sparse` but semantic shape is `convergent`)
-
-This is the "truth check" layer that turns geometry into a measurable contract with the mapper.
+These diagnostics are for UI/debugging only. They do not feed back into the pipeline.
 
 #### 2.3.6 Coverage + fate tracking (did the mapper use the evidence?)
 
 These utilities live in `src/geometry/interpretation/*` but operate as post-hoc audits using `sourceStatementIds` provenance and statement geometric coordinates.
 
-**Statement fate tracking:**
+**Statement fate tracking (L1):**
 
 - `buildStatementFates(statements, claims)` assigns each statement:
     - `primary` / `supporting` if referenced by claim provenance
     - `orphan` if geometrically placed (region/component) but referenced by no claim
     - `noise` if isolated or has no geometric coordinates
-- "high-signal orphans" are prioritized by `signalWeight` (conditional>sequence>tension)
+- each fate also records shadow metadata (stance, confidence, signalWeight) plus optional `querySimilarity` for “unaddressed” promotion
 - source: [fateTracking.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
-**Unattended region audit:**
+**Unattended region audit (Observation):**
 
 - `findUnattendedRegions(substrate, paragraphs, claims, regions, statements)` finds regions with zero claimed paragraphs and tags why they might hide missed claims:
     - stance diversity, high connectivity, bridge regions, isolated noise
 - it also reports which existing claims the region "bridges to" via mutual neighbors
 - source: [coverageAudit.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
-**Completeness report:**
+**Completeness report (L1 + Observation):**
 
-- `buildCompletenessReport(statementFates, unattendedRegions, statements, totalRegions)` computes statement/region coverage ratios and a verdict:
-    - complete if statement coverage > 0.85 AND region coverage > 0.8
-    - estimates missed claims from unattended likely-claim regions + high-signal orphans
+- `buildCompletenessReport(statementFates, unattendedRegions, statements, totalRegions)` computes statement/region coverage ratios and recovery previews:
+    - top unaddressed statements are sorted by `querySimilarity` descending
+    - unattended region previews include a few representative statement texts
 - source: [completenessReport.ts](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
 ### 2.4 Landscape Module Output Contract
@@ -1093,7 +1011,7 @@ TypeScript
 {
   substrate: GeometricSubstrate;          // graphs, topology, shape, node stats, layout2d
   clusters: ClusteringResult;             // paragraph clusters with centroids, cohesion, uncertainty
-  interpretation: PreSemanticInterpretation; // lens, regions, profiles, oppositions, hints
+  interpretation: PreSemanticInterpretation; // lens, regionization, regionProfiles, pipelineGate, modelOrdering
   meta: {
     clustering: ClusteringMeta;
     substrate: SubstrateMeta;
@@ -1102,7 +1020,11 @@ TypeScript
 }
 ```
 
-The `interpretation.hints` object is the primary interface to Module 3: it carries the mapper's geometric context (expected claim counts, attention regions, predicted shape, expected conflicts).
+The interpretation object is primarily an observability and coordination surface:
+
+- `pipelineGate` tells the executor whether geometry interpretation is meaningful to run.
+- `modelOrdering` can reorder the model texts before semantic mapping (to surface “edge” models first).
+- `regionization` and `regionProfiles` power UI inspection and diagnostics, not semantic decisions.
 
 ---
 
@@ -1110,9 +1032,9 @@ The `interpretation.hints` object is the primary interface to Module 3: it car
 
 **"Find what needs resolution, ask the user."**
 
-The mapper LLM is the single authority for claim identification and traversal question generation. It consumes geometric hints from the Landscape module and the user query, produces claims and a traversal graph, and the traversal engine processes that graph into forcing points for user resolution.
+The semantic mapper is the authority for identifying claims and edges. Traversal question generation is handled by the survey mapper, which consumes the claim graph and produces survey gates (forcing points) for user resolution.
 
-There are no mechanical gates. The mapper's questions are the questions.
+The only “gate” is whether forcing points exist. If they do, the pipeline pauses for the user; otherwise, synthesis proceeds automatically.
 
 ---
 
@@ -1121,30 +1043,22 @@ There are no mechanical gates. The mapper's questions are the questions.
 The mapper is responsible for:
 
 - Identifying semantic positions (claims) across the multi-model evidence
-- Producing a traversal graph with forcing points (conditionals and conflicts)
-- Generating questions that the user can answer to resolve ambiguity
+- Producing a claim graph (edges: supports/conflicts/tradeoff/prerequisite)
 
-The mapper receives geometric hints from the Landscape module's `PreSemanticInterpretation.hints`, which provide:
+Geometry interpretation is not passed into the semantic mapper prompt as a “hint” object. Geometry can still influence mapping indirectly via model ordering (the executor can reorder source texts using `modelOrdering.orderedModelIndices`).
 
-- expected claim count range
-- expected shape (sparse / convergent / forked / parallel)
-- attention regions with guidance strings
-- expected conflicts and dissent signals
+### 3.2 Traversal (Forcing-Point Driven)
 
-These hints inform but do not constrain the mapper. The mapper may identify claims, conflicts, and conditionals that geometry did not predict, and may also decline to create claims where geometry expected them.
-
-### 3.2 Traversal (Mapper-Driven)
-
-Traversal is optional. The pipeline only pauses when the mapper artifact contains traversal _and_ it contains forcing points.
+Traversal is optional. The pipeline only pauses when the turn has forcing points to ask the user.
 
 #### 3.2.1 Traversal gating (when the pipeline pauses)
 
 Gate condition (backend):
 
-- `hasTraversal = !!mappingArtifact.traversal.graph`
-- `hasForcingPoints = traversal.forcingPoints.length > 0`
-- if both are true and this is not a continuation run, the pipeline stops with `awaiting_traversal`
-- source: [orchestrateSingularityPhase](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
+- `hasTraversalGraph = !!mappingArtifact.traversal.graph` (typically true; an empty graph is still present)
+- `hasForcingPoints = Array.isArray(mappingArtifact.traversal.forcingPoints) && mappingArtifact.traversal.forcingPoints.length > 0`
+- if `hasForcingPoints` and this is not a continuation run, the pipeline stops with `awaiting_traversal`
+- source: [CognitivePipelineHandler.js](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
 When paused, the handler:
 
@@ -1152,9 +1066,9 @@ When paused, the handler:
 - posts `MAPPER_ARTIFACT_READY` and a `TURN_FINALIZED` update so the UI can render traversal immediately
 - source: [CognitivePipelineHandler.js](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
-No conflict, no traversal:
+No forcing points:
 
-- if there are no forcing points (or no traversal graph), the pipeline does **not** pause; Singularity runs automatically.
+- if there are no forcing points, the pipeline does **not** pause; Singularity runs automatically.
 
 #### 3.2.2 Traversal engine (forcing points → user decisions → claim pruning)
 
@@ -1212,7 +1126,6 @@ TraversalState is small and intentionally stable:
 - `claimStatuses: Map<claimId, 'active'|'pruned'>`
 - `resolutions: Map<forcingPointId, Resolution>`
 - `pathSteps: string[]` (human-readable audit trail)
-- `conditionalGateAnswers?: Record<string, 'yes'|'no'|'unsure'>` (optional; gate-level answers driving a parallel pruning channel in skeletonization — distinct from `claimStatuses` but same end effect)
 - source: [TraversalState](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 
 Conditional resolution:
@@ -1477,7 +1390,15 @@ Inputs (key idea):
 
 Carrier detection:
 
-- `detectCarriers(prunedClaim, sourceStatementId, …)` scans _other unprotected statements_ and scores them against:
+When paragraph embeddings are available (passed via `SkeletonizationInput.paragraphEmbeddings`), the TriageEngine first pre-filters candidate statements by paragraph relevance before entering the per-statement carrier loop:
+
+- for each pruned claim centroid, score all paragraphs: `cosineSimilarity(paragraphEmbedding, claimCentroid) > 0.45`
+- collect all statement IDs within matched paragraphs as `candidateStatementIds`
+- carrier detection is then scoped to those candidates only
+
+This paragraph-first triangulation eliminates false carrier matches from semantically distant regions without paying the cost of per-statement scoring across the full statement inventory.
+
+`detectCarriers(prunedClaim, sourceStatementId, …)` scans _candidate statements_ (or all unprotected statements when no paragraph embeddings are available) and scores them against:
     - similarity to the pruned claim embedding
     - similarity to the pruned claim's source statement embedding
 - if any candidates pass thresholds (default 0.6/0.6):
@@ -1563,22 +1484,15 @@ Rendering:
 
 ---
 
-## 5. Auxiliary Calculations
+## 5. Supplementary Computations
 
-These four computations exist in the codebase and produce cleanly separated objects. They are **not on the main happy path** — the pipeline completes without them. They are available for:
-
-- Supplementing the mapper's context
-- Enriching UI visualization and filtering
-- Post-hoc validation and auditing
-- Future scoring or ranking functions
-
-Each is its own object with defined inputs and outputs. They do not generate mechanical gates or forcing points.
+These computations are not the semantic decision-makers. They exist to (a) make conservative pipeline decisions, (b) provide observability, and (c) provide ordering/ranking signals. The pipeline can still run without them, but it becomes less reliable or less inspectable.
 
 ---
 
 ### 5.1 Query Relevance
 
-**What it computes:** Per-statement cosine similarity between statement embeddings and the user query embedding. Produces tiered relevance scores (high / medium / low).
+**What it computes:** Per-statement cosine similarity between statement embeddings and the user query embedding, normalized to `[0,1]`, plus an isolation proxy (`recusant`).
 
 **Inputs:**
 
@@ -1586,148 +1500,54 @@ Each is its own object with defined inputs and outputs. They do not generate mec
 - `statementEmbeddings: Map<string, Float32Array>`
 - `queryEmbedding: Float32Array`
 
-**Output:** `Map<statementId, number>` — relevance scores on every statement. No filtering; all statements proceed to geometry regardless of relevance score.
+**Output:** `QueryRelevanceResult` with `statementScores: Map<statementId, { querySimilarity, recusant }>` for every statement. No filtering; all statements proceed unless pruned by traversal.
 
 **How it relates to the main path:**
 
-- Available as a ranking signal for downstream consumers (e.g., the mapper can see which statements are most query-relevant)
-- Powers UI filtering in SpaceGraph (dropdown: "All evidence" / "Query-relevant")
-- Does NOT exclude evidence from the landscape or mapper
-- The value of multi-model synthesis is precisely that
-models bring perspectives the user didn't anticipate. The content most valuable to surface — the thing the user never would have asked about — has the lowest query similarity. Ranking preserves noise-reduction benefits without excluding structural participation.
+- Can be used as a ranking signal for UI and recovery (e.g., “unaddressed but query-relevant” statements)
+- Does not exclude evidence from the mapper or geometry layers
 
-**Implementation:** `queryRelevance.ts`
-
-**UI surface:** `ParagraphSpaceView.tsx` — dropdown toggles between "All evidence" and "Query-relevant" for display filtering. Disables when no relevance data exists.
+**Implementation:** `src/geometry/queryRelevance.ts`
 
 ---
 
-### 5.2 Conditional Finder
+### 5.2 Pipeline Gates
 
-**What it computes:** Conditional clauses (if/when/unless/etc.) extracted from shadow statements via regex-first pattern matching, then clustered by embedding similarity or normalized string equality, and impact-ranked by affected statement population.
+**What it computes:** A conservative verdict about whether geometry interpretation is worth running for this turn (`proceed | skip_geometry | trivial_convergence | insufficient_structure`), plus evidence strings and simple measurements.
 
-**Inputs:**
-
-- `statements: ShadowStatement[]`
-- `statementEmbeddings: Map<string, Float32Array>`
-- `regions: Region[]` (for population impact scoring)
-
-**Output:** `ConditionalGate[]` — gates with source provenance, affected populations, and templated questions derived from conditional clauses.
-
-**How it relates to the main path:**
-
-- These are context checks ("Do you have X?"), not partition-type forks ("Which approach do you prefer?")
-- The mapper generates its own conditional forcing points as part of the traversal graph
-- Conditional finder output is available as supplementary context — the mapper may see these signals in geometric hints, but they do not mechanically generate forcing points or gates on the main path
-
-
-**Implementation:** `conditionalFinder.ts`, `deriveConditionalGates.ts`
+**Implementation:** `src/geometry/interpretation/pipelineGates.ts`
 
 ---
 
-### 5.3 Conflict Deriver
+### 5.3 Model Ordering
 
-**What it computes:** Opposition pairs between regions based on stance conflicts and geometric proximity. Searches for region pairs that are close in mutual-kNN space but may be semantically opposed or internally conflicted.
+**What it computes:** A model ordering intended to surface “edge” models first (models that carry regions with low redundancy), optionally nudged by lightweight query relevance boosts.
 
-**Inputs:**
-
-- `regions: Region[]`
-- `regionProfiles: RegionProfile[]`
-- `substrate: GeometricSubstrate` (for mutual-edge similarities between regions)
-
-**Output:** `OppositionPair[]` — `{ regionA, regionB, similarity, stanceConflict, reason }`
-
-**Mechanics:**
-
-- Compute inter-region similarity as the maximum mutual-edge similarity crossing two regions
-- Evaluate only the top 10 most similar region pairs
-- Emit an opposition when:
-    - The regions' dominant stances are an opposite pair (`prescriptive` vs `cautionary`, `assertive` vs `uncertain`), OR
-    - Either region has high contested ratio, OR
-    - Either region has high stance variety
-
-**How it relates to the main path:**
-
-- Opposition data feeds into `PreSemanticInterpretation.hints` which the mapper receives as geometric context
-- The mapper decides independently whether these constitute real conflicts worth surfacing as forcing points
-- Opposition pairs do not mechanically generate traversal questions or gates
-- Available for post-hoc structural validation (comparing geometry predictions to mapper output)
-
-**Implementation:** `interpretation/opposition.ts`
+**Implementation:** `src/geometry/interpretation/modelOrdering.ts`
 
 ---
 
-### 5.4 Inter-Regional Analysis
+### 5.4 Post-Semantic Diagnostics
 
-**What it computes:** Signals between region pairs (conflict / support / tradeoff / independent) and per-region profiles including tier assignment (peak / hill / floor), purity metrics, and geometry summaries.
+**What it computes:** Observations and measurements comparing geometry structure (regions/profiles/topology) to the semantic claim graph. These are questions and anomaly flags, not validations.
 
-**Inputs:**
-
-- `regions: Region[]`
-- `substrate: GeometricSubstrate`
-- `paragraphs: ShadowParagraph[]`
-
-**Output:**
-
-- `RegionProfile[]` — per-region tier, purity (stance unanimity, contested ratio, stance variety), geometry (internal density, avg internal similarity, isolation), and `nearestCarrierSimilarity` (max mutual-edge similarity from any node in this region to any node in another region)
-- Inter-region signals characterizing relationships between region pairs
-
-**How it relates to the main path:**
-
-- Region profiles and inter-region signals feed into `PreSemanticInterpretation.hints` for mapper context
-- `nearestCarrierSimilarity` is available for disruption-style scoring if downstream consumers want to rank by uniqueness
-- Powers UI visualization (Space Graph region coloring, Decision Map edges)
-- Available for structural validation (tier alignment between geometry predictions and mapper output)
-- Does not gate or drive the main traversal flow
-
-**Implementation:** `interpretation/profiles.ts`, `interpretation/guidance.ts`, `interpretation/types.ts`
+**Implementation:** `src/geometry/interpretation/diagnostics.ts` (called via `validateStructuralMapping` in `src/geometry/interpretation/validation.ts`)
 
 ---
 
-## 6. Planned Transitions
+## 6. Key Architectural Decisions
 
-### 6.1 Regions as Claims (Pruning Index)
-
-The current pruning index uses mapper-produced claims (`sourceStatementIds` on each claim determine which statements survive or are pruned). Regions are a planned replacement for this index.
-
-**Current state:** Claims are the pruning index. The mapper extracts claims, traversal prunes claims, skeletonization acts on claim-linked statements.
-
-**Planned state:** Regions become the pruning index.
-
-||Claims (current)|Regions (planned)|
-|---|---|---|
-|Source|LLM-extracted positions|Geometrically-derived clusters|
-|Completeness|Lossy — missed = gone|Complete — every statement belongs somewhere|
-|Determinism|LLM variance across runs|Same embeddings → same regions|
-|Auditability|Trust mapper grouping judgment|Visible why statements are grouped (embedding distance)|
-|Pruning|`sourceStatementIds` per claim|Member paragraphs/statements per region|
-
-**What changes:**
-
-- Partition resolved (user chose side A): Side B's region members with aligned stance → REMOVE
-- Region evaluated but user skipped: Region members remain eligible for skeletonization cascade
-- Region never evaluated by mapper: All members UNTRIAGED — pass through intact (conservative default)
-- Conditional gate resolved (user answered NO): Affected region members become pruning targets
-
-**What's lost:**
-
-- Mapper's ability to group geometrically distant statements that make the same point in different language. This is bounded by embedding quality — good embeddings track content similarity closely enough that geometric groupings approximate semantic groupings.
-
----
-
-## 7. Key Architectural Decisions
-
-**The mapper is the question author.**  
-The mapper LLM is the single authority for claim identification and traversal question generation. Mechanical layers (geometry, conditional finder, conflict deriver) identify structural features and fault lines. The mapper names the hinge and writes the question. There are no mechanical gates on the main path.
+**Claims first; questions second.**  
+The semantic mapper identifies claims and edges. The survey mapper consumes the claim graph and generates survey gates (questions) using a strict methodology. Mechanical layers do not author questions.
 
 **Query relevance ranks, never filters.**  
 Models bring perspectives the user didn't anticipate. The content most valuable to surface — the thing the user never would have asked about — has the lowest query similarity. Ranking preserves noise-reduction benefits (downstream scoring can downrank low-relevance positions) without excluding structural participation.
 
-**Auxiliary calculations inform, never drive.**  
-Query relevance, conditional finder, conflict deriver, and inter-regional analysis are cleanly separated objects. They supplement the mapper's context and power UI visualization, but do not generate forcing points, gates, or pruning decisions on the main path. The mapper sees their outputs as hints and decides independently what matters.
+**Measurements inform; they do not decide semantics.**  
+Pipeline gates decide whether geometry interpretation is worth running. Model ordering can reorder source texts. Diagnostics, fate tracking, and query relevance provide observability and recovery surfaces. None of these replace claim-finding or gate-authoring.
 
-**V8 inversion holds through all changes.**  
-Claims (or regions, when transitioned) are the pruning index. Text remains the output. The synthesizer reads evidence, not abstractions. The concierge cannot resurrect pruned material or blend eliminated paths. This principle survived every architectural iteration.
+**Pruning is evidence-level.**  
+Traversal prunes claims; skeletonization applies that pruning to statements across model outputs. The concierge sees the constrained evidence substrate and cannot resurrect pruned material.
 
-**Conditional gates and partition forks are complementary.**  
-Partitions find binary forks — mutually exclusive positions where the user must choose. Conditional gates find contextual dependencies — positions where all models agree but assume different facts about the user's situation. Both can produce traversal questions. Both can prune when answered. Different mechanisms, same user interface. Currently, the mapper is responsible for generating both types as part of its traversal graph.
+**Forced-choice vs conditional-gate are different gate types.**  
+Forced-choice gates prune one side of a conflict/tradeoff fork. Conditional gates prune claims when a contextual assumption does not hold. Both become forcing points and drive the same pruning machinery.

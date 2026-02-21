@@ -39,7 +39,7 @@ export async function triageStatements(
   thresholds: CarrierThresholds = DEFAULT_THRESHOLDS
 ): Promise<TriageResult> {
   const start = nowMs();
-  const { statements, claims, traversalState } = input;
+  const { statements, paragraphs, claims, traversalState } = input;
   const validStatementIds = new Set(statements.map(s => s.id));
 
   const survivingClaims: EnrichedClaim[] = [];
@@ -62,14 +62,29 @@ export async function triageStatements(
     }
   }
 
-  const statementTexts = statements.map(s => s.text);
-  const embeddingStart = nowMs();
-  const rawStatementEmbeddings = await generateTextEmbeddings(statementTexts);
-  const embeddingTimeMs = nowMs() - embeddingStart;
-  const statementEmbeddings = new Map<string, Float32Array>();
-  for (let i = 0; i < statements.length; i++) {
-    const emb = rawStatementEmbeddings.get(String(i));
-    if (emb) statementEmbeddings.set(statements[i].id, emb);
+  let embeddingTimeMs = 0;
+  let statementEmbeddings: Map<string, Float32Array>;
+
+  if (input.statementEmbeddings && input.statementEmbeddings.size > 0) {
+    statementEmbeddings = input.statementEmbeddings;
+  } else {
+    const statementTexts = statements.map(s => s.text);
+    const embeddingStart = nowMs();
+    const rawStatementEmbeddings = await generateTextEmbeddings(statementTexts);
+    embeddingTimeMs = nowMs() - embeddingStart;
+    statementEmbeddings = new Map<string, Float32Array>();
+    for (let i = 0; i < statements.length; i++) {
+      const emb = rawStatementEmbeddings.get(String(i));
+      if (emb) statementEmbeddings.set(statements[i].id, emb);
+    }
+  }
+
+  // Build statement → paragraph lookup for paragraph-first triangulation
+  const statementToParagraphId = new Map<string, string>();
+  for (const para of paragraphs) {
+    for (const sid of para.statementIds) {
+      statementToParagraphId.set(sid, para.id);
+    }
   }
 
   // Build centroid per pruned claim from its source statement embeddings
@@ -97,10 +112,25 @@ export async function triageStatements(
 
   const relevanceMin = 0.55;
 
-  // Phase 2 + 3: relevance gate then carrier detection
+  // Phase 2 + 3: paragraph-first triangulation then carrier detection
+  const paragraphEmbeddings = input.paragraphEmbeddings;
+
   for (const prunedClaim of prunedClaims) {
     const sourceStatementIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
     const claimCentroid = claimEmbeddings.get(prunedClaim.id);
+
+    // Paragraph-first: pre-filter candidate statements by paragraph relevance
+    let candidateStatementIds: Set<string> | undefined;
+    if (paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
+      candidateStatementIds = new Set<string>();
+      for (const para of paragraphs) {
+        const paraEmb = paragraphEmbeddings.get(para.id);
+        if (!paraEmb) continue;
+        if (cosineSimilarity(paraEmb, claimCentroid) > 0.45) {
+          for (const sid of para.statementIds) candidateStatementIds.add(sid);
+        }
+      }
+    }
 
     for (const sourceStatementId of sourceStatementIds) {
       if (!validStatementIds.has(sourceStatementId)) continue;
@@ -139,6 +169,7 @@ export async function triageStatements(
         statementEmbeddings,
         claimEmbeddings,
         thresholds,
+        candidateStatementIds,
       });
 
       if (carrierResult.carriers.length > 0) {

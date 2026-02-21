@@ -397,69 +397,6 @@ export async function generateStatementEmbeddings(
 }
 
 /**
- * Pool statement embeddings into paragraph representations.
- *
- * Strategy: weighted mean of statement vectors within each paragraph.
- * Weights combine statement confidence with stance-based signal boosts.
- *
- * Returns paragraph embeddings in the same Map<paragraphId, Float32Array>
- * format as generateEmbeddings(), so downstream (substrate, knn) is unchanged.
- */
-export function poolToParagraphEmbeddings(
-    paragraphs: ShadowParagraph[],
-    statements: ShadowStatement[],
-    statementEmbeddings: Map<string, Float32Array>,
-    dimensions: number
-): Map<string, Float32Array> {
-    const statementsById = new Map(statements.map(s => [s.id, s]));
-    const result = new Map<string, Float32Array>();
-
-    for (const para of paragraphs) {
-        const vecs: Array<{ vec: Float32Array; weight: number }> = [];
-
-        for (const sid of para.statementIds) {
-            const vec = statementEmbeddings.get(sid);
-            if (!vec) continue;
-            const stmt = statementsById.get(sid);
-            if (!stmt) continue;
-
-            // Weight: base confidence + signal boosts
-            let weight = Math.max(0.1, stmt.confidence);
-            if (stmt.signals.tension) weight *= 1.3;
-            if (stmt.signals.conditional) weight *= 1.2;
-            if (stmt.signals.sequence) weight *= 1.1;
-
-            vecs.push({ vec, weight });
-        }
-
-        if (vecs.length === 0) {
-            // No embeddable statements — zero vector (will appear isolated in substrate)
-            result.set(para.id, normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>);
-            continue;
-        }
-
-        // Weighted mean
-        const pooled = new Float32Array(dimensions);
-        let totalWeight = 0;
-        for (const { vec, weight } of vecs) {
-            for (let d = 0; d < dimensions; d++) {
-                pooled[d] += vec[d] * weight;
-            }
-            totalWeight += weight;
-        }
-        if (totalWeight > 0) {
-            for (let d = 0; d < dimensions; d++) {
-                pooled[d] /= totalWeight;
-            }
-        }
-
-        result.set(para.id, normalizeEmbedding(pooled) as Float32Array<ArrayBuffer>);
-    }
-
-    return result;
-}
-
-/**
  * Preload embedding model (call during idle time).
  */
 export async function preloadModel(config: ClusteringConfig = DEFAULT_CONFIG): Promise<void> {

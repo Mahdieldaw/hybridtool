@@ -71,8 +71,9 @@ Rules:
  * Safely escape user message to prevent formatting breaks / fence termination.
  */
 const escapeUserMessage = (msg: string): string => {
-    // Use fenced code block to safely contain any content
-    return '```\n' + msg.replace(/```/g, '\\`\\`\\`') + '\n```';
+    // Use fenced code block to safely contain any content.
+    // We also defuse </query> to prevent it from breaking XML-like structure in prompts.
+    return '```\n' + msg.replace(/```/g, '\\`\\`\\`').replace(/<\/query>/g, '</ query>') + '\n```';
 };
 
 /**
@@ -144,6 +145,11 @@ export function buildConciergePrompt(
     userMessage: string,
     options?: ConciergePromptOptions
 ): string {
+    // Mirrors buildTurn2Message / buildTurn3PlusMessage by escaping userMessage to prevent 
+    // breakage of the <query> tag or other structure if userMessage contains sequences 
+    // like </query> or markdown fences.
+    const sanitizedUserMessage = escapeUserMessage(userMessage);
+
     // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
     const priorContextSection = options?.priorContext
         ? buildPriorContextSection(options.priorContext)
@@ -167,7 +173,7 @@ The agreements that held up. The advice that still applies. The tensions that ar
 You are not synthesizing six opinions. You are reading a landscape that has already been walked and filtered by the person standing in it. Your job is the simplest and hardest thing: answer their query like it's the only question that matters.
 
 <query>
-${userMessage}
+${sanitizedUserMessage}
 </query>
 
 ${priorContextSection ? `<CONTEXT non_authoritative="true">\n${priorContextSection}</CONTEXT>\n\n` : ''}${evidenceSubstrateSection}

@@ -15,6 +15,7 @@ import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
 import { ParagraphSpaceView } from "./ParagraphSpaceView";
 import { ShadowAuditView } from "./cognitive/ShadowAuditView";
+import { EntityProfilesPanel } from "./entity-profiles/EntityProfilesPanel";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -804,7 +805,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const setToast = useSetAtom(toastAtom);
 
-  const [activeTab, setActiveTab] = useState<'evidence' | 'landscape' | 'partition' | 'synthesis'>('partition');
+  const [activeTab, setActiveTab] = useState<'evidence' | 'landscape' | 'partition' | 'synthesis' | 'entities'>('partition');
   const [evidenceSubTab, setEvidenceSubTab] = useState<'statements' | 'paragraphs' | 'extraction'>('statements');
   const [landscapeSubTab, setLandscapeSubTab] = useState<'space' | 'regions' | 'query' | 'geometry'>('space');
   const [partitionSubTab, setPartitionSubTab] = useState<'graph' | 'narrative' | 'gates' | 'traversal'>('graph');
@@ -825,9 +826,11 @@ export const DecisionMapSheet = React.memo(() => {
     if (openState) {
       const raw = String(openState.tab || 'graph');
       // Map legacy tab names to new 4-module tabs
-      let mainTab: 'evidence' | 'landscape' | 'partition' | 'synthesis' = 'partition';
+      let mainTab: 'evidence' | 'landscape' | 'partition' | 'synthesis' | 'entities' = 'partition';
       if (raw === 'shadow' || raw === 'evidence' || raw === 'json') {
         mainTab = 'evidence';
+      } else if (raw === 'entities') {
+        mainTab = 'entities';
       } else if (raw === 'query' || raw === 'queryRelevance' || raw === 'space') {
         mainTab = 'landscape';
         if (raw === 'space') setLandscapeSubTab('space');
@@ -1615,6 +1618,7 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'landscape' as const, label: 'Landscape', activeClass: 'decision-tab-active-space' },
     { key: 'partition' as const, label: 'Partition', activeClass: 'decision-tab-active-graph' },
     { key: 'synthesis' as const, label: 'Synthesis', activeClass: 'decision-tab-active-narrative' },
+    { key: 'entities' as const, label: 'Entities', activeClass: 'decision-tab-active-entities' },
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
@@ -3043,6 +3047,20 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       </div>
                     )}
+                  </m.div>
+                )}
+
+                {activeTab === 'entities' && (
+                  <m.div
+                    key="entities"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="w-full h-full flex flex-col"
+                  >
+                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                      <EntityProfilesPanel artifact={mappingArtifact} structuralAnalysis={structuralAnalysis} />
+                    </div>
                   </m.div>
                 )}
 

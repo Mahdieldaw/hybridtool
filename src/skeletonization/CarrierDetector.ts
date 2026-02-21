@@ -16,6 +16,7 @@ export interface CarrierDetectionInput {
   statementEmbeddings: Map<string, Float32Array>;
   claimEmbeddings: Map<string, Float32Array>;
   thresholds?: CarrierThresholds;
+  candidateStatementIds?: Set<string>;
 }
 
 export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionResult {
@@ -27,6 +28,7 @@ export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionRe
     statementEmbeddings,
     claimEmbeddings,
     thresholds: providedThresholds,
+    candidateStatementIds,
   } = input;
 
   const thresholds = { ...DEFAULT_THRESHOLDS, ...(providedThresholds || {}) };
@@ -47,6 +49,7 @@ export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionRe
   for (const statement of allStatements) {
     if (statement.id === sourceStatementId) continue;
     if (protectedStatementIds.has(statement.id)) continue;
+    if (candidateStatementIds && !candidateStatementIds.has(statement.id)) continue;
 
     const candidateEmbedding = statementEmbeddings.get(statement.id);
     if (!candidateEmbedding) continue;

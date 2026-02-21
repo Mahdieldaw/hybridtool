@@ -3,19 +3,6 @@ import type { GeometricSubstrate, NodeLocalStats } from '../types';
 import type { Region, RegionProfile } from './types';
 import { cosineSimilarity } from '../../clustering/distance';
 
-export const TIER_THRESHOLDS = {
-    peak: {
-        minModelDiversityRatio: 0.5,
-        minModelDiversityAbsolute: 3,
-        minInternalDensity: 0.25,
-    },
-    hill: {
-        minModelDiversityRatio: 0.25,
-        minModelDiversityAbsolute: 2,
-        minInternalDensity: 0.1,
-    },
-};
-
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
 }

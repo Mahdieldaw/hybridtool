@@ -20,9 +20,9 @@ Every computation in the pipeline is classified by one of four levels. The class
 - ✅ Evidence module
 - ✅ Landscape module — **cleanup complete** (tier/purity removed, query relevance reduced to two measurements, likelyClaim/estimatedMissedClaims removed, `unaddressed` fate added)
 - ✅ Partition: Semantic Mapper, Survey Mapper, Claim Provenance — **claimProvenance wired to debug panel**
-- ⚠️ Partition: Structural Analysis — **not yet audited**
-- ⚠️ Partition: Traversal — **not yet audited**
-- ⚠️ Synthesis — **skeletonization clean** (triage + carrier detection L1, stance/counterevidence removed); reconstruction + concierge handoff not yet audited
+- ✅ Partition: Structural Analysis — **audit complete** (`src/core/structural-analysis/AUDIT.md`)
+- ✅ Partition: Traversal — **audit complete** (single source of truth: `src/utils/cognitive/traversalEngine.ts`)
+- ✅ Synthesis — **audit complete** (faithful pruning: `src/skeletonization/*`, concierge handoff: `src/ConciergeService/*`)
 
 ---
 
@@ -94,7 +94,7 @@ The Evidence module is the purely mechanical layer. After audit, it is clean —
 |---|---|---|
 | Sentence splitting, paragraph grouping | L1 | Pure text manipulation |
 | Substantiveness filter | L1 | Syntactic/length rules only |
-| **Stance classification** | **L2** | Regex-driven pattern matching. Six categories: prescriptive, cautionary, prerequisite, dependent, assertive, uncertain. Tells you which patterns matched, not what the sentence truly means. Downstream consumers must know this is a regex label, not semantic understanding. |
+| **Stance classification** | **L2** | Regex-driven pattern matching. Six operational categories: prescriptive, cautionary, prerequisite, dependent, assertive, uncertain. The `unclassified` stance exists as a type but is not currently emitted by the classifier (default is `assertive` when no patterns match). Tells you which patterns matched, not what the sentence truly means. Downstream consumers must know this is a regex label, not semantic understanding. |
 | **Confidence score** | **L2** | Derived from match count in stance classification. Scales with pattern matches (1→0.65, 2→0.80, 3→0.95). Not semantic confidence. |
 | **Signal detection** (sequence/tension/conditional) | **L2** | Boolean flags from regex families. Presence means the pattern appeared; absence does not mean the signal is absent. These are hints, not facts. |
 | Exclusion rules | L1 | Hard syntactic filters that remove false positive stances. Scoped per stance. |
@@ -376,7 +376,7 @@ It produces `MapperClaim[]` (id, label, text, supporters, challenges) and edges.
 | `exclusivityRatio` per claim (exclusive evidence / total evidence) | L1 | ✅ **Wired to debug panel** (`mapperArtifact.claimProvenance.claimExclusivity`) |
 | Pairwise Jaccard on source statement sets | L1 | ✅ **Wired to debug panel** (`mapperArtifact.claimProvenance.claimOverlap`) |
 
-**First occupants of the Claim entity profile** (`src/profiles/claim.ts` — infrastructure pending). These are the foundational measurements for claim triage: which claims share evidence, which are built from exclusive evidence, which overlap by provenance (independent of semantic content).
+**Claim entity profile (current code):** surfaced directly in the Entities debug panel (`ui/components/entity-profiles/ClaimProfileTab.tsx`) by reading `artifact.claimProvenance.*`. A dedicated `src/profiles/` convergence layer has not been implemented yet in this repo.
 
 ---
 
@@ -397,33 +397,36 @@ It produces `MapperClaim[]` (id, label, text, supporters, challenges) and edges.
 
 ### 3.6 Structural Analysis
 
-⚠️ **NOT YET AUDITED**
+✅ **AUDITED** — see `src/core/structural-analysis/AUDIT.md`
 
-The SA engine computes leverage, roles, patterns, and shape from the semantic claim graph (`artifact.semantic.claims` + edges). It operates entirely independently of `reconstructProvenance` — it reads raw claim fields and recomputes all structural flags via `metrics.ts`.
+Structural Analysis (SA) is an observation layer computed from the semantic claim graph. It does not participate in the happy path; its outputs are consumed by UI rendering and diagnostics.
 
-Known properties of SA engine:
-- Reads `claim.type`, `claim.supporters`, `claim.challenges`, and edges
-- `challenges` field is actively consumed for directed role assignment (challenger pattern)
-- Computes `leverage`, `keystoneScore`, `isContested`, `isConditional`, and all `is*` flags from scratch
-- These fields are not pre-populated by `reconstructProvenance` (removed in v2)
+Current code truth:
+- Entry point: `computeStructuralAnalysis(artifact)` (`src/core/PromptMethods.ts` → `src/core/structural-analysis/engine.ts`)
+- Inputs: `artifact.semantic.claims[]` + `artifact.semantic.edges[]` (or flat `claims/edges` where present)
+- Outputs: `shape`, `claimsWithLeverage`, `patterns`, `landscape`, plus supporting graph/ratio summaries (`src/core/structural-analysis/*`)
 
-Until the SA engine is audited, no determination has been made about which computations are L1/L2/L3. Flag for next audit pass.
+The audit removes dead exports and documents which metrics are LIVE vs HEURISTIC vs DECORATIVE. SA remains allowed to compute heuristics because it is explicitly an observation layer; the constraint is that decorative weight must not masquerade as decision-driving truth.
 
 ---
 
 ### 3.7 Traversal
 
-⚠️ **NOT YET AUDITED**
+✅ **AUDITED** — traversal is explicitly semantic; the audit focus is “no geometry leakage.”
 
-The traversal engine processes forcing points, manages user decisions, and computes claim statuses (active/pruned). The engine's state management, normalization logic, and forcing point extraction have not been audited against the inversion test.
+Traversal is the constraint-resolution state machine: it extracts forcing points from mapper outputs, applies user resolutions, and produces claim statuses (`active`/`pruned`) plus an append-only path summary for synthesis.
 
-The traversal layer is explicitly semantic — user questions, claim pruning, path logging. The inversion test has limited applicability here. Audit pass should focus on: are there any geometry-derived computations inside traversal that should be in the geometry layer?
+Current code truth (`src/utils/cognitive/traversalEngine.ts`):
+- Forcing point extraction is based on mapper conditionals + conflict edges, plus provenance (`sourceStatementIds`) assembled by set-union.
+- State transitions (`resolveConditional`, `resolveConflict`) only flip claim statuses and record path steps.
+- Live forcing point gating is structural (resolved flags, active-claim checks, conditional-blocked conflicts).
+- No stance labels, embeddings, cosine similarity, or geometry computations exist in traversal.
 
 ---
 
 ## Module 4: Synthesis
 
-**Partially audited. Skeletonization is now clean.**
+✅ **AUDITED. Skeletonization + reconstruction now implement faithful pruning.**
 
 Skeletonization uses `claim.sourceStatementIds` as its pruning index — a pure L1 join. The triage pipeline has been simplified to a three-stage L1 pipeline:
 
@@ -435,27 +438,22 @@ Skeletonization uses `claim.sourceStatementIds` as its pruning index — a pure 
 
 Carrier detection (`CarrierDetector.ts`) is now flat cosine: claim similarity + source similarity, both at fixed thresholds. No L2 inputs.
 
-**Remaining audit scope for Synthesis:** substrate reconstruction (`SubstrateReconstructor.ts`) and concierge handoff have not been audited. These are downstream of triage and operate on the already-decided statement fates.
+Substrate reconstruction (`SubstrateReconstructor.ts`) is downstream of triage and is purely a rewrite pass driven by the triage fates (PROTECTED / SKELETONIZE / REMOVE), plus a pathSteps audit trail from traversal state.
+
+Stance-weighted pruning prediction has been intentionally removed and deferred (see `src/ConciergeService/DEFERRED_CONCEPTS.md`) to prevent L2 stance labels from silently acting as destructive pruning inputs.
 
 ---
 
-## Entity Profiles (Planned Architecture)
+## Entity Profiles (Current Observability Surface + Planned Convergence)
 
-The audit revealed that measurements about entities (claims, statements, models, regions, edges) are scattered across pipeline stages. The planned end state consolidates them:
+**Current code truth:** Entity profiles are implemented as a UI observability surface (Entities tab in `DecisionMapSheet`) and read directly from the cognitive artifact plus structural analysis:
+- UI entry: `ui/components/DecisionMapSheet.tsx` → `ui/components/entity-profiles/EntityProfilesPanel.tsx`
+- Data sources: `artifact.claimProvenance`, `artifact.geometry.*` (diagnostics, preSemantic, query relevance), `artifact.completeness`, `artifact.substrateSummary`, and `structuralAnalysis`
+- Artifact passthrough: `shared/cognitive-artifact.ts` includes `claimProvenance`, `completeness`, `substrateSummary`
 
-```
-src/profiles/
-  claim.ts      — claim-level measurements
-  statement.ts  — per-statement measurements
-  model.ts      — per-model measurements
-  region.ts     — per-region measurements (no tier)
-  edge.ts       — per-edge measurements
-  substrate.ts  — run-level globals
-```
+**Planned end state:** a dedicated convergence layer (`src/profiles/`) so measurement passes write once and all consumers read from one canonical board. This repo does not currently contain a `src/profiles/` directory; the UI surface is the current convergence point.
 
-**Why one directory:** Entity profile is read by multiple consumers at different pipeline stages. Distributing measurements to their "most active" consumer recreates the scatter problem. A convergence point (`profiles/`) with a clear import arrow (computation → profile → consumer) is the right structure.
-
-**What belongs in profiles:**
+**What belongs in profiles / entity boards (regardless of whether the data is stored directly on artifact or via `src/profiles/`):**
 
 | Measurement | Entity | Level |
 |---|---|---|
@@ -495,9 +493,9 @@ src/profiles/
 | `regionGates.ts` | Entire file deleted | — | — |
 | Model ordering | — | — | irreplaceability, queryRelevance, adaptiveAlpha, orderedModelIndices |
 | Diagnostics | — | Tier-based observation triggers (rewrite against continuous measurements) | All L1 measurements (coherence, spread, span, diversity, edge separation) |
-| SA engine | — | Not yet audited | — |
-| Traversal | — | Not yet audited | — |
-| Synthesis | — | Not yet audited | — |
+| SA engine | — | — | ✅ Audited (see `src/core/structural-analysis/AUDIT.md`) |
+| Traversal | — | — | ✅ Audited (`src/utils/cognitive/traversalEngine.ts`) |
+| Synthesis | — | — | ✅ Audited (faithful pruning + reconstruction: `src/skeletonization/*`; concierge handoff: `src/ConciergeService/*`) |
 
 ---
 
@@ -513,7 +511,7 @@ Stance, signals, tier, and stance-derived metrics are legitimate as L2 when thei
 `reconstructProvenance` previously restricted statement matching to models that "supported" the claim (mapper's assessment). This let the mapper's semantic opinion constrain what evidence could be linked — passing L3 through the L1 linking step. Now all statements are eligible; coherence measurements expose bad matches downstream.
 
 **Entity profiles have one canonical location.**
-"What do we know about claim X" is one question with one answer. Profiles converge measurements from where they're computed; consumers pull from profiles. Scattered provenance signals computed at different pipeline stages was the structural problem; `profiles/` is the structural answer.
+"What do we know about claim X" is one question with one answer. In current code, the canonical observability surface is the Entities tab (reads directly from the artifact + SA). The planned end state is a `src/profiles/` convergence layer so measurement passes write once and all consumers read from a stable board.
 
 **The mapper is the question author.**
 No computation in the geometry layer generates forcing points, gates, or pruning decisions. Observations (`uncovered_peak`, `splitAlert`) are advisory signals available to consumers. They do not trigger pipeline behavior on their own.

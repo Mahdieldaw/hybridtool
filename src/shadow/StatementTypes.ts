@@ -250,7 +250,7 @@ export function getSignalPatterns(signalType: keyof SignalPatterns): RegExp[] {
  * Classify stance based on pattern matching with priority order
  */
 export function classifyStance(text: string): { stance: Stance; confidence: number } {
-    let bestStance: Stance = 'assertive';
+    let bestStance: Stance = 'unclassified';
     let maxPriority = 0;
     let matchCount = 0;
 
@@ -267,6 +267,8 @@ export function classifyStance(text: string): { stance: Stance; confidence: numb
             }
         }
     }
+
+    if (matchCount === 0) return { stance: 'unclassified', confidence: 0 };
 
     // Confidence based on pattern strength
     // 1 match = 0.65, 2 matches = 0.80, 3+ matches = 0.95

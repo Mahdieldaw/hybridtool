@@ -104,6 +104,8 @@ export interface SkeletonizationInput {
     modelIndex: number;
     text: string;
   }>;
+  statementEmbeddings?: Map<string, Float32Array>;
+  paragraphEmbeddings?: Map<string, Float32Array>;
 }
 
 export interface CarrierThresholds {

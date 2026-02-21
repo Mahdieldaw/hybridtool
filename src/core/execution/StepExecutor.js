@@ -572,7 +572,7 @@ export class StepExecutor {
           clusteringModule = await import('../../clustering');
         }
 
-        const { generateTextEmbeddings, stripInlineMarkdown, poolToParagraphEmbeddings, getEmbeddingStatus, DEFAULT_CONFIG } = clusteringModule;
+        const { generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, getEmbeddingStatus, DEFAULT_CONFIG } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
@@ -601,31 +601,25 @@ export class StepExecutor {
           };
         }
 
-        const pooledParagraphEmbeddings = poolToParagraphEmbeddings(
+        const paragraphEmbeddingResult = await generateEmbeddings(
           paragraphResult.paragraphs,
           shadowResult.statements,
-          statementEmbeddingResult.embeddings,
-          DEFAULT_CONFIG.embeddingDimensions
+          DEFAULT_CONFIG
         );
         geometryDiagnostics.stages.paragraphEmbeddings = {
           status: 'ok',
-          paragraphs: Array.isArray(paragraphResult?.paragraphs) ? paragraphResult.paragraphs.length : 0,
-          statementEmbeddings: statementEmbeddingResult?.embeddings instanceof Map ? statementEmbeddingResult.embeddings.size : 0,
-          paragraphEmbeddings: pooledParagraphEmbeddings instanceof Map ? pooledParagraphEmbeddings.size : 0,
+          paragraphs: paragraphResult.paragraphs.length,
+          paragraphEmbeddings: paragraphEmbeddingResult.embeddings.size,
         };
 
-        const firstParagraphEmbedding = pooledParagraphEmbeddings.values().next().value;
+        const firstParagraphEmbedding = paragraphEmbeddingResult.embeddings.values().next().value;
         if (queryEmbedding && firstParagraphEmbedding && firstParagraphEmbedding.length !== queryEmbedding.length) {
           throw new Error(
             `[StepExecutor] Query/paragraph embedding dimension mismatch: query=${queryEmbedding.length}, paragraph=${firstParagraphEmbedding.length}`
           );
         }
 
-        embeddingResult = {
-          embeddings: pooledParagraphEmbeddings,
-          dimensions: DEFAULT_CONFIG.embeddingDimensions,
-          timeMs: statementEmbeddingResult.timeMs,
-        };
+        embeddingResult = paragraphEmbeddingResult;
 
         /** @type {"none" | "webgpu" | "wasm"} */
         let embeddingBackend = 'none';
@@ -636,7 +630,7 @@ export class StepExecutor {
           }
         } catch (_) { }
 
-        geometryParagraphEmbeddings = pooledParagraphEmbeddings;
+        geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
 
         substrate = buildGeometricSubstrate(
           paragraphResult.paragraphs,

@@ -1164,7 +1164,12 @@ export interface PipelineSubstrateGraph {
 }
 
 export interface CognitivePreSemantic {
-  hint: PrimaryShape;
+  shapeSignals: {
+    fragmentationScore: number;
+    bimodalityScore: number;
+    parallelScore: number;
+    confidence: number;
+  };
   regions: Array<Pick<PipelineRegion, 'id' | 'kind' | 'nodeIds'>>;
 }
 

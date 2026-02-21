@@ -100,7 +100,7 @@ interface CognitiveArtifact {
       strongEdges?: SubstrateEdge[];
       softThreshold?: number;
     };
-    preSemantic?: { hint: string; regions?: PreSemanticRegion[] };
+    preSemantic?: { shapeSignals: { fragmentationScore: number; bimodalityScore: number; parallelScore: number; confidence: number }; regions?: PreSemanticRegion[] };
   };
   semantic: {
     claims: Claim[];

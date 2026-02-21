@@ -27,7 +27,6 @@ export {
     generateEmbeddings,
     generateStatementEmbeddings,
     generateTextEmbeddings,
-    poolToParagraphEmbeddings,
     preloadModel,
     getEmbeddingStatus,
     cleanupPendingEmbeddingsBuffers,

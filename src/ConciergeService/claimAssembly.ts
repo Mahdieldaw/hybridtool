@@ -51,17 +51,37 @@ export async function reconstructProvenance(
         let sourceStatementIds: string[];
 
         if (useStatementMatching && claimEmbedding) {
-            // ── STATEMENT-LEVEL MATCHING ─────────────────────────────────
-            // Match claim against ALL statements (no supporter filter).
-            const scoredStatements: Array<{ statementId: string; similarity: number }> = [];
+            // ── PARAGRAPH-FIRST, STATEMENT-SECOND ────────────────────────
+            // Phase 1: Paragraph-level spatial anchor
+            const scoredParagraphs: Array<{ paragraph: ShadowParagraph; similarity: number }> = [];
+            for (const paragraph of paragraphs) {
+                const paragraphEmbedding = paragraphEmbeddings.get(paragraph.id);
+                if (!paragraphEmbedding) continue;
+                const similarity = cosineSimilarity(claimEmbedding, paragraphEmbedding);
+                if (similarity > 0.45) {
+                    scoredParagraphs.push({ paragraph, similarity });
+                }
+            }
+            scoredParagraphs.sort((a, b) => {
+                if (b.similarity !== a.similarity) return b.similarity - a.similarity;
+                return a.paragraph.id.localeCompare(b.paragraph.id);
+            });
 
-            for (const stmt of statements) {
-                const stmtEmb = statementEmbeddings!.get(stmt.id);
+            // Collect candidate statementIds from matched paragraphs
+            const candidateStatementIds = new Set<string>();
+            for (const { paragraph } of scoredParagraphs) {
+                for (const sid of paragraph.statementIds) candidateStatementIds.add(sid);
+            }
+
+            // Phase 2: Statement-level refinement within candidates
+            const scoredStatements: Array<{ statementId: string; similarity: number }> = [];
+            for (const sid of candidateStatementIds) {
+                const stmtEmb = statementEmbeddings!.get(sid);
                 if (!stmtEmb) continue;
 
                 const similarity = cosineSimilarity(claimEmbedding, stmtEmb);
-                if (similarity > 0.45) {
-                    scoredStatements.push({ statementId: stmt.id, similarity });
+                if (similarity > 0.55) {
+                    scoredStatements.push({ statementId: sid, similarity });
                 }
             }
 
@@ -70,28 +90,12 @@ export async function reconstructProvenance(
                 return a.statementId.localeCompare(b.statementId);
             });
 
-            sourceStatementIds = scoredStatements.slice(0, 12).map(s => s.statementId);
+            sourceStatementIds = scoredStatements.map(s => s.statementId);
 
+            // Fallback: if no statement matches within candidates,
+            // use statement IDs from matched paragraphs directly
             if (sourceStatementIds.length === 0) {
-                // ── PARAGRAPH-LEVEL FALLBACK ─────────────────────────────
-                const scored: Array<{ paragraph: ShadowParagraph; similarity: number }> = [];
-                for (const paragraph of paragraphs) {
-                    const paragraphEmbedding = paragraphEmbeddings.get(paragraph.id);
-                    if (!paragraphEmbedding) continue;
-                    const similarity = cosineSimilarity(claimEmbedding, paragraphEmbedding);
-                    if (similarity > 0.5) {
-                        scored.push({ paragraph, similarity });
-                    }
-                }
-                scored.sort((a, b) => {
-                    if (b.similarity !== a.similarity) return b.similarity - a.similarity;
-                    return a.paragraph.id.localeCompare(b.paragraph.id);
-                });
-                const sourceStatementIdSet = new Set<string>();
-                for (const { paragraph } of scored.slice(0, 5)) {
-                    for (const sid of paragraph.statementIds) sourceStatementIdSet.add(sid);
-                }
-                sourceStatementIds = Array.from(sourceStatementIdSet);
+                sourceStatementIds = Array.from(candidateStatementIds);
             }
         } else {
             // ── PARAGRAPH-LEVEL MATCHING (no statement embeddings) ───────
