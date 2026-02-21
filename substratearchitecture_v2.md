@@ -18,7 +18,7 @@ Every computation in the pipeline is classified by one of four levels. The class
 
 **Audit status:**
 - ✅ Evidence module
-- ✅ Landscape module — **cleanup complete** (tier/purity removed, query relevance reduced to two measurements, likelyClaim/estimatedMissedClaims removed, `unaddressed` fate added)
+- ✅ Landscape module — **cleanup complete** (tier/purity removed, `TIER_THRESHOLDS` deleted, tier-based diagnostic triggers rewritten against continuous thresholds, pooling derivation eliminated — dual independent embedding passes, `CognitivePreSemantic.shapeSignals` replaces categorical `hint`)
 - ✅ Partition: Semantic Mapper, Survey Mapper, Claim Provenance — **claimProvenance wired to debug panel**
 - ✅ Partition: Structural Analysis — **audit complete** (`src/core/structural-analysis/AUDIT.md`)
 - ✅ Partition: Traversal — **audit complete** (single source of truth: `src/utils/cognitive/traversalEngine.ts`)
@@ -122,11 +122,11 @@ The Evidence module is the purely mechanical layer. After audit, it is clean —
 | Computation | Level | Notes |
 |---|---|---|
 | Statement embeddings | L1 | Float vectors from inference |
-| Paragraph embeddings (mean-pooled) | L1 | Weighted mean of statement vectors, L2-normalized |
+| Paragraph embeddings (direct text) | L1 | Concatenated statement texts embedded in one pass. Independent from statement embeddings — no pooling derivation. |
 | Query embedding | L1 | Same |
 | Cosine similarity | L1 | Pure vector math |
 | Quantization (1e-6) | L1 | Determinism, not interpretation |
-| **Pooling weights** (confidence × signal boosts: tension×1.3, conditional×1.2, sequence×1.1) | **L2** | Uses L2 confidence and L2 signals as weights. The weighting is motivated and documented; inputs are still L2. |
+| ~~Pooling weights~~ | ~~L2~~ | ✅ **REMOVED** — `poolToParagraphEmbeddings` deleted. Paragraph embeddings are now direct text embeddings; no L2-weighted pooling step exists. |
 
 ---
 
@@ -138,7 +138,7 @@ The Evidence module is the purely mechanical layer. After audit, it is clean —
   paragraphs: ShadowParagraph[];           // L2 dominantStance/contested for display only
   embeddings: {
     statements: Map<statementId, Float32Array>;  // L1
-    paragraphs: Map<paragraphId, Float32Array>;  // L1 (pooled)
+    paragraphs: Map<paragraphId, Float32Array>;  // L1 (direct text embedding)
   };
 }
 ```
@@ -212,7 +212,7 @@ The region profile is the measurement object for a region. After v2 audit + clea
 | `avgInternalSimilarity` (mean pairwise cosine inside region) | L1 | ✅ |
 | `isolation` (mean `isolationScore` of member nodes) | L1 | ✅ |
 | `nearestCarrierSimilarity` (cosine to nearest other region centroid) | L1 | ✅ |
-| ~~`tier` label (peak/hill/floor)~~ | ~~L2~~ | ✅ **REMOVED** — categorical label encoding policy as data. `TIER_THRESHOLDS` constant retained; consumers (diagnostics.ts) apply thresholds directly on L1 measurements. |
+| ~~`tier` label (peak/hill/floor)~~ | ~~L2~~ | ✅ **REMOVED** — categorical label encoding policy as data. `TIER_THRESHOLDS` constant also deleted; `diagnostics.ts` inlines continuous threshold values directly (`modelDiversity ≥ 3`, `modelDiversityRatio ≥ 0.5`, `internalDensity ≥ 0.25` for peak; negation of `≥ 2 / ≥ 0.25 / ≥ 0.1` for floor). The `isPeakByL1`, `isHillByL1`, `isFloorByL1` label functions have also been deleted. |
 | ~~`tierConfidence`~~ | ~~L2~~ | ✅ **REMOVED** — derived from tier. |
 | ~~`purity.{dominantStance, stanceUnanimity, contestedRatio, stanceVariety}`~~ | ~~L2~~ | ✅ **REMOVED** — distributions of L2 stance labels; not structural measurements. |
 
@@ -298,6 +298,8 @@ Each step is a demotion in structural integration. `unaddressed` breaks out from
 
 `deriveLens` should be documented and named as a configuration function. Shape scores that feed it are L1; the configuration choices that come out are policy.
 
+**`CognitivePreSemantic` artifact shape:** The `hint: PrimaryShape` field (categorical label derived by mapping `shape.prior` to `'convergent'|'forked'|'parallel'|'sparse'`) has been replaced with `shapeSignals: { fragmentationScore, bimodalityScore, parallelScore, confidence }` — the raw continuous L1 scores from `substrate.shape.signals`. The mapper receives geometry’s actual measurements, not a categorical re-labeling of them.
+
 ---
 
 ### 2.10 Landscape Module Output Contract
@@ -356,15 +358,16 @@ It produces `MapperClaim[]` (id, label, text, supporters, challenges) and edges.
 
 | Computation | Level | Notes |
 |---|---|---|
-| Claim text → source statement cosine matching | L1 | Threshold 0.45, top-12, **all statements** (no supporter filter) |
-| Paragraph-level fallback | L1 | Threshold 0.5, top-5 paragraphs, when statement-level yields nothing |
+| **Phase 1: Paragraph spatial anchor** — claim embedding vs paragraph embeddings, threshold 0.45, no cap | L1 | All paragraphs that pass threshold contribute candidate statement IDs via set membership |
+| **Phase 2: Statement refinement within candidates** — claim embedding vs statement embeddings for candidate statements only, threshold 0.55 | L1 | Scoped to paragraph-matched candidates; eliminates false matches from distant regions |
+| Fallback: if no statement passes 0.55 within candidates, use candidate statement IDs directly from matched paragraphs | L1 | Ensures provenance is never empty when a paragraph match exists |
 | `sourceRegionIds` (stmt→para→region set membership) | L1 | |
 | `supportRatio` (supporters.length / totalModelCount) | L1 | |
 | `hasConditionalSignal`, `hasSequenceSignal`, `hasTensionSignal` | L2 | Inherits from statement signals. Used by traversal serialization. |
 
 **`LinkedClaim` output type:** id, label, text, supporters, challenges, support_count, type (placeholder: 'assertive'), role (placeholder: 'supplement'), sourceStatementIds, sourceStatements, sourceRegionIds, supportRatio, signal flags. SA engine overwrites type and role with real values.
 
-**[REMOVED]:** Supporter filter (mapper's opinion was silently constraining L1 evidence linking). Derived type from stance voting (L3). `geometricSignals` object (backedByPeak/Hill/Floor, avgGeometricConfidence — all L2/L3 tier-derived). `isContested` (SA engine's job). All zeroed structural fields (`leverage: 0`, `keystoneScore: 0`, etc. — contract bloat overwritten immediately by SA engine).
+**[REMOVED]:** Supporter filter (mapper's opinion was silently constraining L1 evidence linking). Derived type from stance voting (L3). `geometricSignals` object (backedByPeak/Hill/Floor, avgGeometricConfidence — all L2/L3 tier-derived). `isContested` (SA engine's job). All zeroed structural fields (`leverage: 0`, `keystoneScore: 0`, etc. — contract bloat overwritten immediately by SA engine). Old statement-first loop over all statements (O(n) per claim against the full statement inventory).
 
 ---
 
@@ -391,7 +394,7 @@ It produces `MapperClaim[]` (id, label, text, supporters, challenges) and edges.
 | Dominant region per claim | L1 | ✅ |
 | Edge geographic separation (cross-region boolean) | L1 | ✅ |
 | Edge centroid similarity | L1 | ✅ |
-| Observations (uncovered_peak, overclaimed_floor, etc.) | Observation | ✅ Advisory. Tier-based triggers need rewrite against continuous measurements after tier removal. |
+| Observations (uncovered_peak, overclaimed_floor, etc.) | Observation | ✅ Advisory. Tier-based triggers rewritten against continuous threshold checks directly on \ and \. \/\/\ label functions deleted. \ constant deleted. |
 
 ---
 
@@ -487,12 +490,12 @@ Stance-weighted pruning prediction has been intentionally removed and deferred (
 |---|---|---|---|
 | `reconstructProvenance` | Supporter filter, derivedType, geometricSignals, isContested, zeroed structural fields | — | sourceStatementIds, sourceRegionIds, supportRatio, signal flags |
 | `claimAssembly.ts` | `assembleClaims()`, `formatClaimEvidence()`, `SemanticMapperOutput` import | — | reconstructConditionProvenance, getGateProvenance, getConflictProvenance, validateProvenance |
-| Region profiles | — | `tier`, stanceUnanimity, contestedRatio, stanceVariety, dominantStance, likelyClaims | modelDiversity, internalDensity, isolation, nearestCarrierSimilarity |
+| Region profiles | `tier`, `tierConfidence`, stanceUnanimity, contestedRatio, stanceVariety, dominantStance, likelyClaims, `TIER_THRESHOLDS` constant | — | modelDiversity, internalDensity, isolation, nearestCarrierSimilarity |
 | Query relevance | `compositeRelevance`, `adaptiveWeights`, `adaptiveWeightsActive`, `toJsonSafeQueryRelevance` | `subConsensusCorroboration` | `querySimilarity`, `isolationScore` |
 | Coverage/completeness | — | `signalWeight`, `likelyClaim` on regions, `estimatedMissedClaims` | fates, coverage ratios, unattended detection |
 | `regionGates.ts` | Entire file deleted | — | — |
 | Model ordering | — | — | irreplaceability, queryRelevance, adaptiveAlpha, orderedModelIndices |
-| Diagnostics | — | Tier-based observation triggers (rewrite against continuous measurements) | All L1 measurements (coherence, spread, span, diversity, edge separation) |
+| Diagnostics | Tier-based triggers (\, \, \, \ import) | — | All L1 measurements (coherence, spread, span, diversity, edge separation), continuous threshold checks inlined |
 | SA engine | — | — | ✅ Audited (see `src/core/structural-analysis/AUDIT.md`) |
 | Traversal | — | — | ✅ Audited (`src/utils/cognitive/traversalEngine.ts`) |
 | Synthesis | — | — | ✅ Audited (faithful pruning + reconstruction: `src/skeletonization/*`; concierge handoff: `src/ConciergeService/*`) |

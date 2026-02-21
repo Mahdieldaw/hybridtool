@@ -12,8 +12,8 @@ export function deriveLens(substrate: GeometricSubstrate): AdaptiveLens {
     const hardMergeThreshold = clamp(stats.p95 - 0.03, 0.65, 0.85);
 
     const evidence: string[] = [];
-    evidence.push(`shape.prior=${shape.prior}`);
     evidence.push(`shape.conf=${shape.confidence.toFixed(2)}`);
+    evidence.push(`shape.frag=${shape.signals.fragmentationScore.toFixed(2)},bim=${shape.signals.bimodalityScore.toFixed(2)},par=${shape.signals.parallelScore.toFixed(2)},conv=${shape.signals.convergentScore.toFixed(2)}`);
     evidence.push(`density=${topology.globalStrongDensity.toFixed(3)}`);
     evidence.push(`isolation=${topology.isolationRatio.toFixed(3)}`);
     evidence.push(`p95=${stats.p95.toFixed(3)}`);

@@ -226,11 +226,11 @@ Classification algorithm (`classifyStance(text)`):
 
 Confidence:
 
-- Based on number of matched patterns for the chosen stance:
-    - 1 match → `0.65`
-    - 2 matches → `0.80`
-    - 3 matches → `0.95`
-- Implemented as: `Math.min(1.0, 0.5 + (matchCount * 0.15))`
+- Two-factor score that captures both winner pattern strength and cross-stance contamination:
+    1. **Base confidence** from winner pattern count: 1 match → `0.65`, 2 → `0.80`, 3+ → `0.95` (`Math.min(1.0, 0.5 + winnerMatches × 0.15)`)
+    2. **Dominance ratio** = `winnerMatches / totalMatchesAcrossAllStances` — penalizes statements that fire many other stances simultaneously
+- Final: `confidence = baseConfidence × dominanceRatio`
+- A statement matching 2 cautionary patterns with nothing else gets `0.80 × 1.0 = 0.80`. The same 2 cautionary patterns plus 6 other-stance matches gets `0.80 × 0.25 = 0.20`.
 
 This means stance is not "semantic understanding"; it is a deterministic regex-driven label used to:
 
@@ -815,21 +815,18 @@ Source: [computeTopology](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c8
 
 #### 2.2.6 Shape prior (coarse global classification)
 
-`classifyShape(topology, nodeCount)` converts topology metrics into a coarse prior:
+`classifyShape(topology, nodeCount)` computes four continuous topology signals and derives a single confidence score. No categorical label is produced.
 
-- `fragmented` (high isolation / low density)
-- `convergent_core` (one dominant component with decent density)
-- `bimodal_fork` (two major components)
-- `parallel_components` (several independent tracks)
+Signals (all L1 — pure topology math):
 
-It produces:
+- `fragmentationScore`: `(1 - largestComponentRatio) × 0.5 + isolationRatio × 0.3 + (1 - globalStrongDensity) × 0.2` — 0 = unified, 1 = maximally fragmented
+- `bimodalityScore`: `sizeRatio × combinedCoverage` of the two largest components — 0 = unimodal, 1 = perfect bimodal split
+- `parallelScore`: `min(1, significantComponents / 5)` where significant = size ≥ 3 — 0 = single track, 1 = multiple independent tracks
+- `convergentScore`: `largestComponentRatio` — how dominated the substrate is by a single large component
 
-- `prior` and `confidence`
-- signal scores: `fragmentationScore` / `bimodalityScore` / `parallelScore`
-- "convergent" is not a separate signal score; `convergent_core` is chosen when `largestComponentRatio` is high and `globalStrongDensity` is decent, and its `confidence` is effectively driven by `largestComponentRatio`
-- a recommendation surface:
-    - expected cluster count range
-    - whether to expect conflicts/dissent
+`confidence = Math.max(fragmentationScore, bimodalityScore, parallelScore, convergentScore)` — strength of the dominant topology signal, whichever it is.
+
+The `ShapePrior` categorical label (`fragmented`, `convergent_core`, `bimodal_fork`, `parallel_components`) has been deleted. The signals speak for themselves.
 
 Source: [classifyShape](https://arena.ai/c/019c740f-a0bc-77c6-9674-a9646687c87d)
 

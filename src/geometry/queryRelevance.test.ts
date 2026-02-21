@@ -51,9 +51,8 @@ function makeSubstrate(nodes: NodeLocalStats[]): GeometricSubstrate {
       globalStrongDensity: 0,
     },
     shape: {
-      prior: "fragmented",
       confidence: 0.5,
-      signals: { fragmentationScore: 1, bimodalityScore: 0, parallelScore: 0 },
+      signals: { fragmentationScore: 1, bimodalityScore: 0, parallelScore: 0, convergentScore: 0 },
     },
     meta: {
       embeddingSuccess: true,

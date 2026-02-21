@@ -34,7 +34,7 @@ export { computeSoftThreshold, computeSimilarityStats } from './threshold';
 export { computeTopology } from './topology';
 export { computeNodeStats } from './nodes';
 
-export type { ShapePrior, ShapeClassification } from './shape';
+export type { ShapeClassification } from './shape';
 export { classifyShape } from './shape';
 
 export type {

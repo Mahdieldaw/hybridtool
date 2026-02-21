@@ -252,27 +252,34 @@ export function getSignalPatterns(signalType: keyof SignalPatterns): RegExp[] {
 export function classifyStance(text: string): { stance: Stance; confidence: number } {
     let bestStance: Stance = 'unclassified';
     let maxPriority = 0;
-    let matchCount = 0;
+    let winnerMatches = 0;
+    let totalMatches = 0;
 
     for (const stance of STANCE_PRIORITY) {
         const patterns = STANCE_PATTERNS[stance];
         const matches = patterns.filter(p => p.test(text)).length;
+        totalMatches += matches;
 
         if (matches > 0) {
             const priority = getStancePriority(stance);
             if (priority > maxPriority) {
                 maxPriority = priority;
                 bestStance = stance;
-                matchCount = matches;
+                winnerMatches = matches;
             }
         }
     }
 
-    if (matchCount === 0) return { stance: 'unclassified', confidence: 0 };
+    if (winnerMatches === 0) return { stance: 'unclassified', confidence: 0 };
 
-    // Confidence based on pattern strength
-    // 1 match = 0.65, 2 matches = 0.80, 3+ matches = 0.95
-    const confidence = Math.min(1.0, 0.5 + (matchCount * 0.15));
+    // Base confidence from winner pattern strength: 1 match = 0.65, 2 = 0.80, 3+ = 0.95
+    const baseConfidence = Math.min(1.0, 0.5 + (winnerMatches * 0.15));
+
+    // Dominance ratio: penalize cross-stance contamination.
+    // A statement matching 2 cautionary + 6 other stances is less certain than
+    // one matching 2 cautionary + 0 others. Pure winner gets ratio = 1.0.
+    const dominanceRatio = totalMatches > 0 ? winnerMatches / totalMatches : 1;
+    const confidence = baseConfidence * dominanceRatio;
 
     return { stance: bestStance, confidence };
 }

@@ -701,8 +701,11 @@ export class StepExecutor {
           console.warn(`[StepExecutor] Degenerate substrate: ${substrate.degenerateReason}`);
         } else {
           console.log(
-            `[StepExecutor] Substrate shape: ${substrate.shape.prior} ` +
-            `(${substrate.shape.confidence.toFixed(2)})`
+            `[StepExecutor] Substrate shape confidence: ${substrate.shape.confidence.toFixed(2)} ` +
+            `(frag=${substrate.shape.signals.fragmentationScore.toFixed(2)}, ` +
+            `bim=${substrate.shape.signals.bimodalityScore.toFixed(2)}, ` +
+            `par=${substrate.shape.signals.parallelScore.toFixed(2)}, ` +
+            `conv=${substrate.shape.signals.convergentScore.toFixed(2)})`
           );
         }
 

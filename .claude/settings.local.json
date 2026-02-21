@@ -15,7 +15,9 @@
       "mcp__filesystem__read_file",
       "Bash(python:*)",
       "Bash(python3:*)",
-      "mcp__Desktop_Commander__list_directory"
+      "mcp__Desktop_Commander__list_directory",
+      "Bash(printf %b:*)",
+      "Bash(cat:*)"
     ]
   }
 }
