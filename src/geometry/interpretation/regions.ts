@@ -90,7 +90,6 @@ export function buildRegions(
     // Patch-based regions: group remaining uncovered nodes by mutual neighborhood
     const stillUncovered = substrate.nodes.filter(n => !coveredNodeIds.has(n.paragraphId));
     if (stillUncovered.length > 0) {
-        const stillUncoveredSet = new Set(stillUncovered.map(n => n.paragraphId));
         const patchMap = new Map<string, string[]>();
 
         for (const node of stillUncovered) {
@@ -103,11 +102,9 @@ export function buildRegions(
         }
 
         for (const patchNodeIds of patchMap.values()) {
-            const filteredPatchNodeIds = patchNodeIds.filter(id => stillUncoveredSet.has(id));
-            if (filteredPatchNodeIds.length === 0) continue;
-            const region = patchToRegion(filteredPatchNodeIds, `r_${regionIndex++}`, nodesById);
+            const region = patchToRegion(patchNodeIds, `r_${regionIndex++}`, nodesById);
             regions.push(region);
-            for (const id of filteredPatchNodeIds) coveredNodeIds.add(id);
+            for (const id of patchNodeIds) coveredNodeIds.add(id);
         }
     }
 

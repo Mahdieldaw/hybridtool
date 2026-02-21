@@ -112,11 +112,9 @@ export interface SkeletonizationInput {
 export interface CarrierThresholds {
   claimSimilarity: number;
   sourceSimilarity: number;
-  opposingStancePenalty: number;
 }
 
 export const DEFAULT_THRESHOLDS: CarrierThresholds = {
   claimSimilarity: 0.6,
   sourceSimilarity: 0.6,
-  opposingStancePenalty: 0.08,
 };

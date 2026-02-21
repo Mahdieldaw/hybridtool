@@ -8,6 +8,34 @@ The **inversion test** determines whether a calculation is honest: *can you cons
 
 ---
 
+## Design Decision: Regions Are the Observation Layer, Not the Pruning Index
+
+**Status: closed. This transition will not happen.**
+
+An earlier direction considered moving the skeletonization pruning index from claims to regions — using geometric clustering to define blast zones instead of claim `sourceStatementIds`. The idea was completeness: regions guarantee every statement is assigned somewhere, while the claim index leaves orphans that could survive as UNTRIAGED.
+
+The argument against is asymmetric failure modes.
+
+**Claims as pruning index** fail conservative. Missed targets — statements that express the pruned position but weren't linked by the mapper — survive as UNTRIAGED, pass through intact. Information the user rejected may linger. This is recoverable: the concierge still sees the traversal path and can deprioritize lingering content; the mapper precision is the bottleneck to improve.
+
+**Regions as pruning index** fail aggressive. False hits — statements geometrically proximate to the pruned region but semantically aligned with the surviving position — get destroyed. Information the user *wanted* is gone. This is unrecoverable.
+
+The "completeness" advantage of regions is a liability when the operation is destruction. **Completeness is a virtue for observation, a vice for destruction.** Regions guarantee every statement falls into some blast zone. That guarantee, which makes regions excellent for coverage audits, makes them dangerous as a pruning index.
+
+The correct investment is improving mapper precision in linking statements to claims, so the claim index becomes more complete over time. That path makes pruning more precise without increasing the risk of destroying evidence for the surviving position.
+
+**What regions are for:**
+
+- **Coverage audit** — which regions have no claims linked to them? Those are mapper blind spots. (`coverageAudit.ts` is the implementation.)
+- **Validation / diagnostics** — if a claim's `sourceStatementIds` span three distant regions, something is structurally suspect.
+- **Disruption scoring** — region isolation and density inform how unique a perspective is.
+- **Model ordering** — irreplaceability scoring uses region membership as the geometric signal.
+- **Mapper context** — regions give the mapper a structural prior; the mapper's claims do not have to align 1:1 with regions.
+
+Regions are the observation layer. Claims stay as the pruning index.
+
+---
+
 ## Part 1: Removals
 
 ### 1.1 DELETE: `opposition.ts`

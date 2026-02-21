@@ -9,17 +9,6 @@ function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
 }
 
-function isOpposingStance(a: unknown, b: unknown): boolean {
-  const sa = String(a || '').trim().toLowerCase();
-  const sb = String(b || '').trim().toLowerCase();
-  return (
-    (sa === 'prescriptive' && sb === 'cautionary') ||
-    (sa === 'cautionary' && sb === 'prescriptive') ||
-    (sa === 'assertive' && sb === 'uncertain') ||
-    (sa === 'uncertain' && sb === 'assertive')
-  );
-}
-
 function meanEmbedding(vectors: Float32Array[]): Float32Array | null {
   if (vectors.length === 0) return null;
   const dim = vectors[0].length;
@@ -45,37 +34,6 @@ function normalizeEmbedding(vec: Float32Array): Float32Array {
   return vec;
 }
 
-function dominantClaimStance(claim: EnrichedClaim, statementsById: Map<string, { stance?: unknown; confidence?: unknown }>): string | null {
-  const sourceIds = Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : [];
-  const weights = new Map<string, number>();
-
-  for (const sid of sourceIds) {
-    const st = statementsById.get(String(sid));
-    if (!st) continue;
-    const stance = String(st.stance || '').trim();
-    if (!stance || stance === 'unclassified') continue;
-    const confRaw = st.confidence;
-    const w = typeof confRaw === 'number' && Number.isFinite(confRaw) ? Math.max(0.1, confRaw) : 0.5;
-    weights.set(stance, (weights.get(stance) || 0) + w);
-  }
-
-  let best: { stance: string; weight: number } | null = null;
-  let second: { stance: string; weight: number } | null = null;
-
-  for (const [stance, weight] of weights.entries()) {
-    if (!best || weight > best.weight) {
-      second = best;
-      best = { stance, weight };
-    } else if (!second || weight > second.weight) {
-      second = { stance, weight };
-    }
-  }
-
-  if (!best) return null;
-  if (second && Math.abs(best.weight - second.weight) < 1e-6) return null;
-  return best.stance;
-}
-
 export async function triageStatements(
   input: SkeletonizationInput,
   thresholds: CarrierThresholds = DEFAULT_THRESHOLDS
@@ -93,6 +51,7 @@ export async function triageStatements(
     else survivingClaims.push(claim);
   }
 
+  // Phase 1: protect everything sourced by surviving claims
   const protectedStatementIds = new Set<string>();
   for (const claim of survivingClaims) {
     if (!Array.isArray(claim.sourceStatementIds)) continue;
@@ -113,6 +72,7 @@ export async function triageStatements(
     if (emb) statementEmbeddings.set(statements[i].id, emb);
   }
 
+  // Build centroid per pruned claim from its source statement embeddings
   const claimEmbeddings = new Map<string, Float32Array>();
   for (const claim of prunedClaims) {
     const sourceIds = Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : [];
@@ -135,29 +95,21 @@ export async function triageStatements(
     });
   }
 
-  const statementsById = new Map(statements.map(s => [s.id, s]));
-  const dominantStancesByClaimId = new Map<string, string | null>();
-  for (const claim of prunedClaims) {
-    dominantStancesByClaimId.set(claim.id, dominantClaimStance(claim, statementsById));
-  }
-
   const relevanceMin = 0.55;
-  const removeRelevanceMin = 0.7;
 
+  // Phase 2 + 3: relevance gate then carrier detection
   for (const prunedClaim of prunedClaims) {
     const sourceStatementIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
     const claimCentroid = claimEmbeddings.get(prunedClaim.id);
-    const claimDominantStance = dominantStancesByClaimId.get(prunedClaim.id) ?? null;
 
     for (const sourceStatementId of sourceStatementIds) {
       if (!validStatementIds.has(sourceStatementId)) continue;
       if (protectedStatementIds.has(sourceStatementId)) continue;
       if (statementFates.has(sourceStatementId)) continue;
 
-      const sourceStatement = statementsById.get(sourceStatementId);
       const sourceEmbedding = statementEmbeddings.get(sourceStatementId);
 
-      if (!claimCentroid || !sourceEmbedding || !sourceStatement) {
+      if (!claimCentroid || !sourceEmbedding) {
         statementFates.set(sourceStatementId, {
           statementId: sourceStatementId,
           action: 'PROTECTED',
@@ -168,17 +120,6 @@ export async function triageStatements(
       }
 
       const relevance = cosineSimilarity(sourceEmbedding, claimCentroid);
-      const stance = String(sourceStatement.stance || 'unclassified');
-
-      if (claimDominantStance && isOpposingStance(stance, claimDominantStance)) {
-        statementFates.set(sourceStatementId, {
-          statementId: sourceStatementId,
-          action: 'PROTECTED',
-          reason: `Counterevidence vs pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)})`,
-          triggerClaimId: prunedClaim.id,
-        });
-        continue;
-      }
 
       if (relevance < relevanceMin) {
         statementFates.set(sourceStatementId, {
@@ -205,21 +146,8 @@ export async function triageStatements(
 
         for (const carrier of carrierResult.carriers) {
           if (!statementFates.has(carrier.statementId)) {
-            const carrierStatement = statementsById.get(carrier.statementId);
             const carrierEmbedding = statementEmbeddings.get(carrier.statementId);
             const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
-            const carrierStance = String(carrierStatement?.stance || 'unclassified');
-
-            if (claimDominantStance && isOpposingStance(carrierStance, claimDominantStance)) {
-              statementFates.set(carrier.statementId, {
-                statementId: carrier.statementId,
-                action: 'PROTECTED',
-                reason: `Counterevidence carrier vs pruned ${prunedClaim.id} (relevance: ${carrierRelevance.toFixed(2)})`,
-                triggerClaimId: prunedClaim.id,
-                isSoleCarrier: false,
-              });
-              continue;
-            }
 
             if (carrierRelevance < relevanceMin) {
               statementFates.set(carrier.statementId, {
@@ -243,12 +171,11 @@ export async function triageStatements(
           }
         }
 
+        // REMOVE only when content is demonstrably redundant: 2+ independent carriers exist.
+        // The relevance gate (step 2) already confirms this statement is about the pruned claim.
+        // Carrier count is the only additional signal needed.
         const totalCarriers = carrierResult.carriers.length;
-        const canRemove =
-          totalCarriers > 0 &&
-          !!claimDominantStance &&
-          stance === claimDominantStance &&
-          relevance >= removeRelevanceMin;
+        const canRemove = totalCarriers >= 2;
 
         statementFates.set(sourceStatementId, {
           statementId: sourceStatementId,
@@ -271,9 +198,8 @@ export async function triageStatements(
   }
 
   // ── CROSS-MODEL PARAPHRASE DETECTION ────────────────────────────────────
-  // For each pruning target (REMOVE or SKELETONIZE), find semantic paraphrases
-  // in other models' statements. If a paraphrase is found and unprotected,
-  // add it to the pruning set as well.
+  // For each pruning target, find semantic paraphrases in other statements.
+  // Flat threshold — no stance penalty.
   const pruningTargets = new Set<string>();
   for (const [sid, fate] of statementFates.entries()) {
     if (fate.action === 'REMOVE' || fate.action === 'SKELETONIZE') {
@@ -288,36 +214,21 @@ export async function triageStatements(
     const targetEmb = statementEmbeddings.get(targetSid);
     if (!targetEmb) continue;
 
-    const targetStmt = statementsById.get(targetSid);
-    if (!targetStmt) continue;
-
     for (const stmt of statements) {
       if (stmt.id === targetSid) continue;
       if (protectedStatementIds.has(stmt.id)) continue;
-      if (statementFates.has(stmt.id)) continue; // Already processed
+      if (statementFates.has(stmt.id)) continue;
 
       const emb = statementEmbeddings.get(stmt.id);
       if (!emb) continue;
 
       const similarity = cosineSimilarity(targetEmb, emb);
-      const required = isOpposingStance(targetStmt.stance, stmt.stance) ? paraphraseThreshold + 0.08 : paraphraseThreshold;
-      if (similarity >= required) {
+      if (similarity >= paraphraseThreshold) {
         const triggerClaimId = statementFates.get(targetSid)?.triggerClaimId;
         const claimCentroid = triggerClaimId ? claimEmbeddings.get(triggerClaimId) : null;
-        const claimDominantStance = triggerClaimId ? (dominantStancesByClaimId.get(triggerClaimId) ?? null) : null;
-
         const relevance = claimCentroid ? cosineSimilarity(emb, claimCentroid) : 0;
-        const stance = String(stmt.stance || 'unclassified');
 
-        if (triggerClaimId && claimDominantStance && isOpposingStance(stance, claimDominantStance)) {
-          statementFates.set(stmt.id, {
-            statementId: stmt.id,
-            action: 'PROTECTED',
-            reason: `Counterevidence paraphrase vs pruned ${triggerClaimId} (sim: ${similarity.toFixed(2)}, rel: ${relevance.toFixed(2)})`,
-            triggerClaimId,
-            isSoleCarrier: false,
-          });
-        } else if (triggerClaimId && (!claimCentroid || relevance < relevanceMin)) {
+        if (triggerClaimId && (!claimCentroid || relevance < relevanceMin)) {
           statementFates.set(stmt.id, {
             statementId: stmt.id,
             action: 'PROTECTED',
@@ -342,8 +253,6 @@ export async function triageStatements(
   if (paraphrasesFound.length > 0) {
     console.log(`[TriageEngine] Found ${paraphrasesFound.length} cross-model paraphrases for pruning`);
   }
-
-
 
   for (const statement of statements) {
     if (!statementFates.has(statement.id)) {

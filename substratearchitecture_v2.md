@@ -22,7 +22,7 @@ Every computation in the pipeline is classified by one of four levels. The class
 - ✅ Partition: Semantic Mapper, Survey Mapper, Claim Provenance — **claimProvenance wired to debug panel**
 - ⚠️ Partition: Structural Analysis — **not yet audited**
 - ⚠️ Partition: Traversal — **not yet audited**
-- ⚠️ Synthesis — **not yet audited**
+- ⚠️ Synthesis — **skeletonization clean** (triage + carrier detection L1, stance/counterevidence removed); reconstruction + concierge handoff not yet audited
 
 ---
 
@@ -423,9 +423,19 @@ The traversal layer is explicitly semantic — user questions, claim pruning, pa
 
 ## Module 4: Synthesis
 
-⚠️ **NOT YET AUDITED**
+**Partially audited. Skeletonization is now clean.**
 
-The Synthesis module (skeletonization, carrier detection, substrate reconstruction, concierge handoff) has not been audited. Skeletonization uses `claim.sourceStatementIds` as its pruning index — a pure L1 join. The audit should confirm no L3 computations enter the carrier detection or reconstruction steps.
+Skeletonization uses `claim.sourceStatementIds` as its pruning index — a pure L1 join. The triage pipeline has been simplified to a three-stage L1 pipeline:
+
+1. **Protection** — any statement sourced by a surviving claim is PROTECTED (set membership, pure L1).
+2. **Relevance gate** — cosine similarity to the pruned claim's centroid. Below threshold → PROTECTED (not about this claim). Single measurement, single decision.
+3. **Carrier detection + graduated response** — carrier count drives the outcome: 0 carriers → SKELETONIZE (sole carrier); 1 carrier → SKELETONIZE (some redundancy); ≥2 carriers → REMOVE (demonstrably redundant). No stance labels, no counterevidence logic, no dual centroids.
+
+**Removed from skeletonization:** `isOpposingStance`, `dominantClaimStance`, `opposingStancePenalty`, all counterevidence PROTECTED branches, the conditional gate override block in `index.ts`, and the `removeRelevanceMin` secondary gate (carrier count alone is the redundancy signal). Paraphrase sweep uses flat cosine threshold, no stance exceptions.
+
+Carrier detection (`CarrierDetector.ts`) is now flat cosine: claim similarity + source similarity, both at fixed thresholds. No L2 inputs.
+
+**Remaining audit scope for Synthesis:** substrate reconstruction (`SubstrateReconstructor.ts`) and concierge handoff have not been audited. These are downstream of triage and operate on the already-decided statement fates.
 
 ---
 
@@ -512,4 +522,7 @@ No computation in the geometry layer generates forcing points, gates, or pruning
 `modelDiversity` and `internalDensity` are L1 facts about a region. "Peak/hill/floor" is a label that assigns meaning to threshold-crossings. The measurements survive; the label is removed. Consumers that need tier-equivalent logic apply thresholds appropriate to their decision context, with the threshold choice documented.
 
 **V8 inversion holds.**
-Claims (transitioning to regions as planned) are the pruning index. Text remains the output. The synthesizer reads evidence, not abstractions.
+Claims are the pruning index. Text remains the output. The synthesizer reads evidence, not abstractions.
+
+**Claims are the permanent pruning index. The transition to regions-as-pruning-index is closed.**
+Regions guarantee every statement falls into some blast zone — completeness is their virtue. But completeness is a vice for destruction. The failure modes are asymmetric: a claim-indexed blast zone that misses targets leaves content as UNTRIAGED (recoverable — it lingers but doesn't dominate); a region-indexed blast zone that takes false hits destroys evidence for the surviving position (unrecoverable). For any destructive operation, the index must fail conservative. Claims fail conservative; regions fail aggressive. The planned transition was wrong in its direction. Regions remain the observation layer: coverage audits, model ordering, diagnostic signals. The mapper's precision in linking statements to claims is the correct bottleneck to invest in.

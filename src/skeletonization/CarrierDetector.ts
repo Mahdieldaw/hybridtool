@@ -18,17 +18,6 @@ export interface CarrierDetectionInput {
   thresholds?: CarrierThresholds;
 }
 
-function isOpposingStance(a: unknown, b: unknown): boolean {
-  const sa = String(a || '');
-  const sb = String(b || '');
-  return (
-    (sa === 'prescriptive' && sb === 'cautionary') ||
-    (sa === 'cautionary' && sb === 'prescriptive') ||
-    (sa === 'assertive' && sb === 'uncertain') ||
-    (sa === 'uncertain' && sb === 'assertive')
-  );
-}
-
 export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionResult {
   const {
     prunedClaim,
@@ -54,7 +43,6 @@ export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionRe
   }
 
   const carriers: ConfirmedCarrier[] = [];
-  const sourceStatement = allStatements.find(s => s.id === sourceStatementId);
 
   for (const statement of allStatements) {
     if (statement.id === sourceStatementId) continue;
@@ -67,12 +55,7 @@ export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionRe
     if (claimSimilarity < thresholds.claimSimilarity) continue;
 
     const sourceSimilarity = cosineSimilarity(candidateEmbedding, sourceEmbedding);
-    const opposingStance = sourceStatement ? isOpposingStance(sourceStatement.stance, statement.stance) : false;
-    const requiredSourceSim = opposingStance
-      ? thresholds.sourceSimilarity + thresholds.opposingStancePenalty
-      : thresholds.sourceSimilarity;
-
-    if (sourceSimilarity < requiredSourceSim) continue;
+    if (sourceSimilarity < thresholds.sourceSimilarity) continue;
 
     carriers.push({
       statementId: statement.id,

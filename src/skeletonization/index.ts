@@ -45,44 +45,17 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
   const traversalState = normalizeTraversalState((input as unknown as { traversalState?: unknown }).traversalState);
   const normalizedInput: SkeletonizationInput = { ...input, traversalState };
 
-  const gateAnswers = traversalState.conditionalGateAnswers ?? {};
-  const traversalQuestions: Array<{ id: string; type: string; gateId?: string; answer?: string; affectedStatementIds?: string[] }> =
-    Array.isArray((normalizedInput as any).traversalQuestions) ? (normalizedInput as any).traversalQuestions : [];
-
   const prunedCount = normalizedInput.claims.reduce((acc, claim) => {
     const status = traversalState.claimStatuses.get(claim.id);
     return acc + (status === 'pruned' ? 1 : 0);
   }, 0);
 
-  const hasConditionalGatePruning = Object.values(gateAnswers).some((a) => a === 'no');
-
-  if (prunedCount === 0 && !hasConditionalGatePruning) {
+  if (prunedCount === 0) {
     return createPassthroughSubstrate(normalizedInput);
   }
 
   const triageResultPartial = await triageStatements(normalizedInput);
   const statementFates = new Map<string, StatementFate>(triageResultPartial.statementFates);
-
-  for (const [gateId, answer] of Object.entries(gateAnswers)) {
-    if (answer !== 'no') continue;
-    const question = traversalQuestions.find(q => q.id === gateId || q.gateId === gateId);
-    const affectedIds = question?.affectedStatementIds ?? [];
-    for (const sidRaw of affectedIds) {
-      const sid = String(sidRaw || '').trim();
-      if (!sid) continue;
-
-      const existing = statementFates.get(sid);
-      if (existing?.action === 'PROTECTED') continue;
-      if (existing?.action === 'UNTRIAGED') continue;
-      if (existing?.action === 'REMOVE') continue;
-
-      statementFates.set(sid, {
-        statementId: sid,
-        action: 'REMOVE',
-        reason: `Conditional gate ${gateId} answered no`,
-      });
-    }
-  }
 
   for (const st of normalizedInput.statements) {
     if (!statementFates.has(st.id)) {
