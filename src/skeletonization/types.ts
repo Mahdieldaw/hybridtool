@@ -89,12 +89,9 @@ export interface ChewedSubstrate {
   };
 }
 
-export type ConditionalGateAnswer = 'yes' | 'no' | 'unsure';
-
 export interface NormalizedTraversalState {
   claimStatuses: Map<string, 'active' | 'pruned'>;
   pathSteps: string[];
-  conditionalGateAnswers?: Record<string, ConditionalGateAnswer>;
 }
 
 export interface SkeletonizationInput {

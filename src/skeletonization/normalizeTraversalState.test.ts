@@ -3,17 +3,15 @@ import { formatSubstrateForPrompt } from "./SubstrateReconstructor";
 import type { ChewedSubstrate } from "./types";
 
 describe("normalizeTraversalState", () => {
-  it("normalizes claimStatuses, pathSteps, and conditionalGateAnswers", () => {
+  it("normalizes claimStatuses and pathSteps", () => {
     const state = normalizeTraversalState({
       claimStatuses: { c1: "pruned", c2: "active" },
       pathSteps: ["step1"],
-      conditionalGateAnswers: { g1: "YES", g2: "no", g3: "??" },
     });
 
     expect(state.claimStatuses.get("c1")).toBe("pruned");
     expect(state.claimStatuses.get("c2")).toBe("active");
     expect(state.pathSteps).toEqual(["step1"]);
-    expect(state.conditionalGateAnswers).toEqual({ g1: "yes", g2: "no", g3: "unsure" });
   });
 });
 

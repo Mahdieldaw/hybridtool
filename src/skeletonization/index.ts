@@ -137,7 +137,7 @@ export function getSourceData(
 }
 
 export function normalizeTraversalState(state: unknown): NormalizedTraversalState {
-  if (!state || typeof state !== 'object') return { claimStatuses: new Map(), pathSteps: [], conditionalGateAnswers: {} };
+  if (!state || typeof state !== 'object') return { claimStatuses: new Map(), pathSteps: [] };
   const s = state as Record<string, unknown>;
 
   let claimStatuses: Map<string, 'active' | 'pruned'>;
@@ -160,16 +160,7 @@ export function normalizeTraversalState(state: unknown): NormalizedTraversalStat
     ? (s.pathSteps as unknown[]).filter((p): p is string => typeof p === 'string')
     : [];
 
-  const rawConditionalGateAnswers = s.conditionalGateAnswers;
-  const conditionalGateAnswers: NormalizedTraversalState['conditionalGateAnswers'] = {};
-  if (rawConditionalGateAnswers && typeof rawConditionalGateAnswers === 'object') {
-    for (const [k, v] of Object.entries(rawConditionalGateAnswers as Record<string, unknown>)) {
-      const val = String(v || '').toLowerCase();
-      conditionalGateAnswers[k] = val === 'yes' ? 'yes' : val === 'no' ? 'no' : 'unsure';
-    }
-  }
-
-  return { claimStatuses, pathSteps, conditionalGateAnswers };
+  return { claimStatuses, pathSteps };
 }
 
 function createPassthroughSubstrate(input: SkeletonizationInput): ChewedSubstrate {

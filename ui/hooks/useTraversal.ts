@@ -35,30 +35,9 @@ export function useTraversal(
   claims: EnrichedClaim[],
   initialStateOverride?: TraversalState | null
 ): UseTraversalReturn {
-  useEffect(() => {
-    console.log('=== TRAVERSAL TURN LOADED ===');
-    console.log('Graph:', graph);
-    console.log('Claims count:', Array.isArray(claims) ? claims.length : 0);
-  }, [graph, claims]);
+  const forcingPoints = useMemo(() => extractForcingPoints(graph), [graph]);
 
-  const forcingPoints = useMemo(() => {
-    const fps = extractForcingPoints(graph);
-    console.log('=== EXTRACTED FORCING POINTS ===');
-    console.log('Count:', fps.length);
-    fps.forEach((fp) => {
-      console.log(
-        `  ${fp.id} (${fp.type}):`,
-        (fp as any).affectedClaims || (fp as any).options?.map((o: any) => o.claimId)
-      );
-    });
-    return fps;
-  }, [graph]);
-
-  const initialState = useMemo(() => {
-    console.log('=== INIT STATE ===');
-    console.log('Claims passed in:', (Array.isArray(claims) ? claims : []).map((c) => c.id));
-    return initTraversalState(claims);
-  }, [claims]);
+  const initialState = useMemo(() => initTraversalState(claims), [claims]);
 
   const [state, setState] = useState<TraversalState>(() => initialStateOverride ?? initialState);
 
@@ -94,26 +73,7 @@ export function useTraversal(
 
   const getResolution = useCallback((fpId: string) => state.resolutions.get(fpId), [state.resolutions]);
 
-  const liveForcingPoints = useMemo(() => {
-    console.log('=== GET LIVE FORCING POINTS ===');
-    console.log('Claim statuses:', Array.from(state.claimStatuses.keys()));
-
-    forcingPoints.forEach((fp) => {
-      if (fp.type === 'conditional' && (fp as any).affectedClaims) {
-        const affectedClaims = Array.isArray((fp as any).affectedClaims) ? (fp as any).affectedClaims : [];
-        const statuses = affectedClaims.map((cid: any) => ({
-          cid,
-          status: state.claimStatuses.get(String(cid)),
-          exists: state.claimStatuses.has(String(cid)),
-        }));
-        console.log(`  ${fp.id} affectedClaims:`, statuses);
-      }
-    });
-
-    const live = getLiveForcingPoints(forcingPoints, state);
-    console.log('Live result:', live.map((fp) => fp.id));
-    return live;
-  }, [forcingPoints, state]);
+  const liveForcingPoints = useMemo(() => getLiveForcingPoints(forcingPoints, state), [forcingPoints, state]);
 
   const isComplete = useMemo(() => isTraversalComplete(forcingPoints, state), [forcingPoints, state]);
 

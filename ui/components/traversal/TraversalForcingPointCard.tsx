@@ -16,9 +16,6 @@ interface TraversalForcingPointCardProps {
     question: string;
     condition: string;
     options?: ForcingPointOption[];
-    claimId?: string;
-    prunes?: string[];
-    unlocks?: string[];
   };
   claims: Claim[];
   isResolved: boolean;
