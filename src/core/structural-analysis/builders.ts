@@ -105,6 +105,61 @@ function inferWhatOutlierQuestions(
     return "assumptions underlying the consensus";
 }
 
+// AUDIT: Shape Data Builders — LIVE (structure), PARTIALLY DECORATIVE (detail fields)
+//
+// All builders produce shape.data (ProblemStructure.data), which is stored on the
+// StructuralAnalysis object. The primary consumers are:
+//   - engine.ts itself: extracts floorAssumptions, centralConflict, tradeoffs from
+//     shape.data and hoists them to top-level shape properties (LIVE path).
+//   - UI components: CognitiveOutputRenderer, MetricsRibbon, DecisionMapGraph read
+//     shape.primary / shape.patterns / shape.confidence / shape.evidence but do NOT
+//     appear to drill into shape.data's rich sub-structures (floor arrays, cluster
+//     objects, dimension clusters, etc.) as of this audit.
+//
+// Per-builder status:
+//
+//   buildConvergentData → SettledShapeData
+//     LIVE: floorAssumptions (hoisted to shape, displayed by MetricsRibbon via evidence)
+//     LIVE: floor[] (may be read by DecisionMapGraph for node highlighting — unconfirmed)
+//     HEURISTIC: floorStrength ("strong"/"moderate"/"weak" thresholds: 0.6 and 0.4 are
+//       round-number heuristics, not calibrated)
+//     DECORATIVE (likely): strongestOutlier, challengers[], transferQuestion —
+//       rich fields with no confirmed UI renderer as of this audit
+//
+//   buildForkedData → ContestedShapeData
+//     LIVE: centralConflict (collapsingQuestion hoisted to shape.centralConflict)
+//     HEURISTIC: detectEnrichedConflicts + detectConflictClusters are substantial
+//       computations (~100 lines combined). Cluster structure (ConflictCluster[]) has
+//       no confirmed UI renderer. The individual conflict axis and stakes are rich
+//       data that may only partially reach the screen.
+//     NOTE — FALLBACK EPISTEMIC ISSUE: if classified 'forked' but enrichedConflicts
+//       and conflictClusters are both empty, builder falls back to buildConvergentData.
+//       This silently reclassifies a forked shape as convergent. The primary shape
+//       label then mismatches the data pattern. A forked classification with no
+//       extractable conflicts indicates a classification error upstream (peak analysis
+//       detected conflict edges but enrichedConflicts found none); the fallback masks
+//       this rather than surfacing it.
+//
+//   buildConstrainedData → TradeoffShapeData
+//     LIVE: tradeoffs[] labels (hoisted to shape.tradeoffs as string array)
+//     DECORATIVE (likely): dominatedOptions[], full TradeoffOption objects with text
+//       and supportRatio detail — no confirmed UI renderer
+//
+//   buildParallelData → DimensionalShapeData
+//     DECORATIVE (likely): dimensions[], interactions[], dominantDimension,
+//       hiddenDimension, governingConditions — rich structure with no confirmed
+//       UI renderer. Ghost strings flow in as gaps[].
+//     NOTE — FALLBACK: if graph.componentCount < 2, reclassifies as convergent.
+//       Same epistemic issue as forked fallback: classification says 'parallel'
+//       but data says 'not enough components'. Masks the mismatch.
+//
+//   buildSparseData → ExploratoryShapeData
+//     LIVE: signalStrength (stored, may be rendered by future sparse detail view)
+//     HEURISTIC: sparsityReasons thresholds (componentCount > claims*0.5,
+//       avgSupport < 0.3, ghosts > claims*0.3) are round-number heuristics
+//     DECORATIVE (likely): looseClusters[], outerBoundary, clarifyingQuestions[]
+//       — no confirmed UI renderer for these fields
+//
 export const buildConvergentData = (
     claims: EnrichedClaim[],
     edges: Edge[],

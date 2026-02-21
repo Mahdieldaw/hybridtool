@@ -3,33 +3,11 @@ import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from './Concierg
 
 describe('ConciergeService', () => {
     it('should build prompt without capabilities or signal instructions', () => {
-        const prompt = ConciergeService.buildConciergePrompt('Hello', {
-            isFirstTurn: false
-        });
+        const prompt = ConciergeService.buildConciergePrompt('Hello');
 
         expect(prompt).not.toContain('## Capabilities');
         expect(prompt).not.toContain('## Signal Format');
         expect(prompt).not.toContain('<<<SINGULARITY_BATCH_REQUEST>>>');
-    });
-
-    it('should include active workflow if provided', () => {
-        const prompt = ConciergeService.buildConciergePrompt('Hello', {
-            isFirstTurn: false,
-            activeWorkflow: {
-                goal: 'Test Goal',
-                steps: [{
-                    id: '1',
-                    title: 'Step 1',
-                    description: 'Do it',
-                    doneWhen: 'Done',
-                    status: 'active'
-                }],
-                currentStepIndex: 0
-            }
-        });
-
-        expect(prompt).toContain('## Active Workflow');
-        expect(prompt).toContain('Step 1');
     });
 
     it('should accept missing determinants and edges', () => {

@@ -37,6 +37,38 @@ export const isInBottomPercentile = (value: number, allValues: number[], percent
     return value < threshold;
 };
 
+// AUDIT: computeSignalStrength — HEURISTIC (partially DECORATIVE)
+//
+// Semantic: signal strength estimates "how much structure can be read from this
+// artifact." High signal = confident classifications. Low signal = sparse/uncertain.
+//
+// Formula: edgeSignal*0.4 + supportSignal*0.3 + coverageSignal*0.3
+//
+//   edgeSignal = edges / max(3, claims*0.15) clamped 0-1
+//     Measures edge density relative to a minimum threshold. The 0.15 multiplier
+//     (15% of claims should have edges for "some structure") is heuristic.
+//
+//   supportSignal = variance(normalizedSupportCounts) * 5, clamped 0-1
+//     The *5 multiplier is the key design decision: it assumes that DISAGREEMENT
+//     between models (high variance in support counts) is more informative than
+//     agreement (low variance). The logic: uniform support = models don't distinguish
+//     claims; varying support = models have opinions. This is intentional but
+//     counterintuitive — high signal does NOT mean strong consensus; it means
+//     the artifact has discriminating structure. The *5 amplifier is arbitrary.
+//
+//   coverageSignal = uniqueModels / totalModels
+//     Straightforward coverage measure. LIVE and well-motivated.
+//
+//   Weights (0.4, 0.3, 0.3) are heuristic, not calibrated.
+//
+// CONSUMER CHAIN:
+//   signalStrength is stored on ProblemStructure.signalStrength AND passed to
+//   buildSparseData() where it's stored in ExploratoryShapeData.signalStrength.
+//   As of this audit, no UI component reads shape.signalStrength directly.
+//   buildSparseData renders it into ExploratoryShapeData for potential UI use,
+//   but current UI components don't surface it. PARTIALLY DECORATIVE at the
+//   ProblemStructure level; potentially LIVE inside ExploratoryShapeData if
+//   a future component renders that pattern's detail view.
 export const computeSignalStrength = (
     claimCount: number,
     edgeCount: number,

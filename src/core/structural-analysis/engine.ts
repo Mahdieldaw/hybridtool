@@ -31,16 +31,46 @@ import {
     buildParallelData,
     buildSparseData
 } from "./builders";
-import {
-    executeShadowExtraction,
-    executeShadowDelta,
-    extractReferencedIds,
-    ShadowAudit,
-    UnindexedStatement
-} from "../../shadow";
-
 type ConditionalAffectedClaims = Array<{ affectedClaims: string[] }>;
 
+/*
+ * AUDIT: applyComputedRoles — HEURISTIC
+ *
+ * WHY IT EXISTS:
+ *   The mapper assigns roles (anchor, challenger, branch, supplement) using LLM
+ *   reasoning over the full claim text. This function overrides those assignments
+ *   using graph structure alone (edge types, support ratios). The override exists
+ *   because LLM role assignment is inconsistent across runs and models; structural
+ *   evidence is deterministic and reproducible. The tradeoff: structural evidence
+ *   ignores semantic content that the mapper understood.
+ *
+ * WHAT IT MEASURES:
+ *   Challenger: one side of a conflict edge has ≥50% support, the other doesn't.
+ *   Branch: claim appears in a conditional's affectedClaims or downstream of a
+ *           conditional via prerequisite edges.
+ *   Anchor: score ≥ 2 on (prereqOut*2 + supportIn*1 + conflictTargets*1.5 +
+ *           dependentsArePrereqs*1.5). Threshold and weights are heuristic,
+ *           chosen by design intuition, not calibrated against outcomes.
+ *   Supplement: everything else.
+ *
+ * KNOWN LIMITATIONS:
+ *   1. The 50% consensus threshold is percentage-based (relative to modelCount),
+ *      making it scale-consistent but not calibrated to any quality outcome. With
+ *      3 models, 2 supporters qualifies as consensus; with 10 models, 5 are needed.
+ *      The threshold is reasonable but arbitrary.
+ *   2. Anchor score weights (2, 1, 1.5, 1.5) and the ≥ 2 threshold are invented.
+ *      No empirical validation exists; they encode intuitions about structural
+ *      importance (prerequisite chains outweigh incoming support).
+ *   3. Branch detection is structurally derived but may not match how the traversal
+ *      engine uses branch roles. If traversal doesn't distinguish branch from
+ *      supplement when pruning, branch detection is DECORATIVE for that path.
+ *      (As of this audit, traversal uses edge types, not claim roles, for pruning.)
+ *
+ * FUTURE DIRECTION:
+ *   Consider removing in favor of trusting mapper roles, or making the override
+ *   additive (flag structural contradictions) rather than destructive (silently
+ *   replace LLM reasoning with graph topology).
+ */
 const applyComputedRoles = (
     claims: Claim[],
     edges: Edge[],
@@ -294,44 +324,3 @@ export const computeStructuralAnalysis = (artifact: CognitiveArtifact): Structur
     return analysis;
 };
 
-export const computeProblemStructureFromArtifact = (artifact: CognitiveArtifact): ProblemStructure => {
-    return computeStructuralAnalysis(artifact).shape;
-};
-
-export const computeFullAnalysis = (
-    batchResponses: Array<{ modelIndex: number; content: string }>,
-    primaryArtifact: CognitiveArtifact,
-    userQuery: string
-): StructuralAnalysis & {
-    shadow?: {
-        audit: ShadowAudit;
-        unindexed: UnindexedStatement[];
-        topUnindexed: UnindexedStatement[];
-        processingTime: number;
-    }
-} => {
-    const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
-    try {
-        const shadowExtraction = executeShadowExtraction(batchResponses);
-        const claims = primaryArtifact?.semantic?.claims || [];
-        const referencedIds = extractReferencedIds(claims);
-        const shadowDelta = executeShadowDelta(
-            shadowExtraction,
-            referencedIds,
-            userQuery
-        );
-        const MAX_SHADOW_TOP = 5;
-        return {
-            ...baseAnalysis,
-            shadow: {
-                audit: shadowDelta.audit,
-                unindexed: shadowDelta.unreferenced,
-                topUnindexed: shadowDelta.unreferenced.slice(0, MAX_SHADOW_TOP),
-                processingTime: shadowExtraction.meta.processingTimeMs + shadowDelta.processingTimeMs
-            }
-        };
-    } catch (err) {
-        console.error("[StructuralAnalysis] shadow analysis failed:", err);
-        return baseAnalysis;
-    }
-};

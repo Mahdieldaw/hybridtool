@@ -297,6 +297,33 @@ export const detectOrphanedPattern = (
     };
 };
 
+// AUDIT: Secondary Pattern Renderers
+//
+// shape.patterns (SecondaryPattern[]) flows to:
+//   - StructureGlyph: checks for keystone, chain, dissent, fragile, challenged, conditional
+//     presence (boolean checks — renders an icon or indicator if the pattern exists).
+//     ALL SIX of these types trigger UI output. orphaned is NOT checked by StructureGlyph.
+//   - DecisionMapGraph: reads dissent (strongestVoice.id, voices[].id), keystone
+//     (keystone.id), chain (chain[] ids with position), fragile (fragilities[].peak.id)
+//     for node decoration. Does NOT use challenged, conditional, or orphaned.
+//   - CognitiveOutputRenderer: passes patterns array to StructureGlyph (no direct reads).
+//   - classification.ts: maps pattern types to evidence strings for shape.evidence array.
+//
+// Per-pattern UI rendering status:
+//   dissent    — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node decoration)
+//   keystone   — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node decoration)
+//   chain      — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node sequence)
+//   fragile    — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node decoration)
+//   challenged — LIVE: StructureGlyph (indicator only, no detail rendering confirmed)
+//   conditional — LIVE: StructureGlyph (indicator only, no detail rendering confirmed)
+//   orphaned   — DECORATIVE: not checked by StructureGlyph, not used by DecisionMapGraph.
+//     Detection cost is low (~5 lines) but output has no live consumer. Candidate for
+//     removal or for adding to StructureGlyph's pattern checks.
+//
+// NOTE: For dissent, keystone, chain, fragile — the pattern.data sub-structures are
+//   consumed by DecisionMapGraph for node-level decoration. The rich fields inside
+//   (dissentVoices[], strongestVoice, cascadeSize, weakLinks[], etc.) are accessed.
+//   For challenged and conditional, only the pattern's existence is checked (not data).
 export const detectAllSecondaryPatterns = (
     claims: EnrichedClaim[],
     peaks: EnrichedClaim[],
@@ -517,6 +544,14 @@ export const detectIsolatedClaims = (claims: EnrichedClaim[]): string[] => {
     return claims.filter((c) => c.isIsolated).map((c) => c.id);
 };
 
+// AUDIT: analyzeGhosts — DECORATIVE
+// ghostAnalysis ends up on StructuralAnalysis.ghostAnalysis. As of this audit,
+// no UI component reads structuralAnalysis.ghostAnalysis. The ghost strings
+// themselves flow into shape data builders (buildConvergentData's `blindSpots`,
+// buildParallelData's `gaps`, buildSparseData's clarifyingQuestions) and those
+// fields may be rendered if a component renders shape.data detail views.
+// But the ghostAnalysis summary object itself (count, mayExtendChallenger,
+// challengerIds) has no live consumer. DECORATIVE until wired to UI.
 export const analyzeGhosts = (ghosts: string[], claims: EnrichedClaim[]): StructuralAnalysis["ghostAnalysis"] => {
     const challengers = claims.filter((c) => c.role === "challenger" || c.isChallenger);
     return {

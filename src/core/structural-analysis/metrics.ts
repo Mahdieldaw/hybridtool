@@ -13,6 +13,14 @@ import {
     isHubLoadBearing
 } from "./utils";
 
+// AUDIT: computeCoreRatios — DECORATIVE
+// Returns concentration, alignment, tension, fragmentation, depth.
+// As of this audit, no UI component or downstream consumer reads `ratios` from
+// the StructuralAnalysis object. The context-resolver discards it; StepExecutor
+// diagnostics don't reference it; no UI component destructures it.
+// These ratios are candidates for removal once positionBrief/synthesisPrompt are
+// reconnected — at that point they could feed the synthesis layer meaningfully.
+// DO NOT REMOVE YET: retain as documented placeholders for the reconnection phase.
 export const computeCoreRatios = (
     claims: EnrichedClaim[],
     edges: Edge[],
@@ -106,6 +114,31 @@ export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
     };
 };
 
+// AUDIT: computeClaimRatios — HEURISTIC
+// The leverage score combines four weights into a single number per claim.
+// These weights are heuristic (design intuition), not calibrated against outcomes:
+//   supportWeight  = supportRatio * 2         — HEURISTIC: doubles support's contribution
+//   roleWeight     = { challenger:4, anchor:2, branch:1, supplement:0.5 } — HEURISTIC:
+//     challenger is weighted highest because it structurally constrains the peak;
+//     values are round-number intuitions, not derived from data.
+//   connectivityWeight = prereqOut*2 + prereqIn + conflictEdges*1.5 + degree*0.25 — HEURISTIC:
+//     prerequisite-out is weighted heaviest (you gate others); conflict edges more
+//     than degree edges (conflict is structural not incidental). All multipliers invented.
+//   positionWeight = isChainRoot ? 2 : 0     — HEURISTIC: chain roots get a flat bonus
+//     on the assumption that the first link in a dependency chain is disproportionately
+//     important. The value 2 is not calibrated.
+//
+// keystoneScore = outDegree * supporters.length — HEURISTIC:
+//   Treats outgoing-connection count and supporter count as symmetric contributors to
+//   keystoneness. A claim with 2 out-edges and 6 supporters scores 12; so does one with
+//   6 out-edges and 2 supporters. These are structurally different situations (broad
+//   support vs. broad connectivity) but the formula equates them. The assumption is that
+//   both dimensions independently signal "load-bearing" status. Unvalidated.
+//
+// supportSkew = maxFromSingleModel / supporters.length — HEURISTIC:
+//   Measures whether one model dominates a claim's support. Used only for the isOutlier
+//   flag in assignPercentileFlags. isOutlier is not rendered by any current UI component;
+//   if that remains true, supportSkew and isOutlier are DECORATIVE.
 export const computeClaimRatios = (
     claim: Claim,
     edges: Edge[],

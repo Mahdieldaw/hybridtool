@@ -870,14 +870,14 @@ export class StepExecutor {
         }
 
 
-      } catch (clusteringError) {
+      } catch (geometryError) {
         // Per design: skip geometry entirely on failure, continue without
-        console.warn('[StepExecutor] Geometry pipeline failed, continuing without:', getErrorMessage(clusteringError));
+        console.warn('[StepExecutor] Geometry pipeline failed, continuing without:', getErrorMessage(geometryError));
         geometryDiagnostics.embeddingBackendFailure = true;
         geometryDiagnostics.stages.geometryFailure = {
           startedAtMs: nowMs(),
           timeMs: 0,
-          error: getErrorMessage(clusteringError),
+          error: getErrorMessage(geometryError),
         };
       }
     } else {
@@ -2034,23 +2034,9 @@ export class StepExecutor {
         }
       } catch (_) { }
 
-      let leakageDetected = false;
-      let leakageViolations = [];
-
-      if (ConciergeService && ConciergeService.detectMachineryLeakage) {
-        const leakCheck = ConciergeService.detectMachineryLeakage(cleanedText);
-        leakageDetected = !!leakCheck.leaked;
-        leakageViolations = leakCheck.violations || [];
-        if (leakCheck.leaked) {
-          console.warn("[StepExecutor] Singularity response leaked machinery:", leakCheck.violations);
-        }
-      }
-
       const pipeline = {
         userMessage: payload.originalPrompt,
         prompt: singularityPrompt,
-        leakageDetected,
-        leakageViolations,
         traversal: payload?.traversalMetrics || null,
         chewedSubstrateSummary: payload?.chewedSubstrate?.summary || null,
         parsed: {
@@ -2063,8 +2049,6 @@ export class StepExecutor {
         text: cleanedText,
         providerId: payload.singularityProvider,
         timestamp: Date.now(),
-        leakageDetected,
-        leakageViolations,
         pipeline,
         parsed: {
           signal,
