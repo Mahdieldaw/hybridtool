@@ -70,6 +70,8 @@ export class SimpleIndexedDBAdapter {
           "provider_contexts",
           "metadata",
           "context_bridges",
+          "embeddings",
+          "claim_embeddings",
         ];
         const missingStores = requiredStores.filter(
           (storeName) => !this.db!.objectStoreNames.contains(storeName),
@@ -172,6 +174,55 @@ export class SimpleIndexedDBAdapter {
     } catch (error) {
       console.error(
         `persistence:put(${resolved}, ${key || value.id}) - error:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Put a record containing binary data (ArrayBuffers) into the specified store.
+   * Unlike put(), this skips JSON.parse(JSON.stringify()) cloning which would
+   * destroy ArrayBuffer contents. Uses IndexedDB's native structured clone instead.
+   */
+  async putBinary(
+    storeName: string,
+    value: SimpleRecord,
+  ): Promise<SimpleRecord> {
+    this.ensureReady();
+    const resolved = this.resolveStoreName(storeName);
+    try {
+      const record = { ...value };
+      const now = Date.now();
+      if (!record.createdAt) {
+        record.createdAt = now;
+      }
+      record.updatedAt = now;
+      if (!record.id) {
+        record.id = crypto.randomUUID();
+      }
+
+      const result = await withTransaction(
+        this.db!,
+        [resolved],
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(resolved);
+          return new Promise<SimpleRecord>((resolve, reject) => {
+            const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
+            const request = hasKeyPath
+              ? store.put(record)
+              : store.put(record, record.id as IDBValidKey);
+            request.onsuccess = () => resolve(record);
+            request.onerror = () => reject(request.error);
+          });
+        },
+      );
+
+      return result;
+    } catch (error) {
+      console.error(
+        `persistence:putBinary(${resolved}) - error:`,
         error,
       );
       throw error;

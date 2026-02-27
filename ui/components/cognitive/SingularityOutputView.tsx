@@ -6,6 +6,7 @@ import { ShadowAuditView } from './ShadowAuditView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CopyButton } from '../CopyButton';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
+import { normalizeProviderId } from '../../utils/provider-id-mapper';
 
 interface SingularityOutputViewProps {
     aiTurn: AiTurn;
@@ -64,12 +65,33 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
         ? LLM_PROVIDERS_CONFIG.find(p => p.id === output.providerId)?.name || output.providerId
         : "Concierge";
 
+    const providerHasStoredResponse = (pid: string) => {
+        const desired = normalizeProviderId(String(pid || "").trim());
+        if (!desired) return false;
+
+        const directProvider = String((aiTurn.meta as any)?.singularity || "");
+        if (normalizeProviderId(directProvider) === desired && !!String(aiTurn.singularity?.output || "").trim()) return true;
+
+        const legacy = (aiTurn as any)?.singularityResponses;
+        if (!legacy || typeof legacy !== "object") return false;
+
+        for (const [storedPid, entry] of Object.entries(legacy as any)) {
+            if (normalizeProviderId(String(storedPid || "").trim()) !== desired) continue;
+            const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+            const last = arr.length > 0 ? arr[arr.length - 1] : null;
+            const text = typeof last?.text === "string" ? last.text : "";
+            if (text.trim()) return true;
+            const status = typeof last?.status === "string" ? last.status : "";
+            if (status === "completed") return false;
+            if (status === "error") return false;
+        }
+
+        return false;
+    };
+
     // Unified Handler
     const handleProviderSelect = (pid: string) => {
-        const isCurrentProvider = pid === String((aiTurn.meta as any)?.singularity || "");
-        const hasUsableResponse = isCurrentProvider && !!aiTurn.singularity?.output?.trim();
-
-        if (hasUsableResponse) {
+        if (providerHasStoredResponse(pid)) {
             singularityState.setPinnedProvider(pid);
         } else {
             // New compute, will auto-pin via parent
@@ -107,9 +129,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                                 {LLM_PROVIDERS_CONFIG.map((provider) => {
                                     const isCurrent = output?.providerId === provider.id;
                                     // Only show green dot if we have usable content
-                                    const hasResponse =
-                                        String((aiTurn.meta as any)?.singularity || "") === String(provider.id) &&
-                                        !!aiTurn.singularity?.output?.trim();
+                                    const hasResponse = providerHasStoredResponse(provider.id);
 
                                     return (
                                         <button

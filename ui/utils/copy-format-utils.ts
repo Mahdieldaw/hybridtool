@@ -3,6 +3,7 @@ import { TurnMessage, ParsedTheme } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
 import { parseUnifiedMapperOutput } from "../../shared/parsing-utils";
+import { getProviderArtifact } from "./turn-helpers";
 
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
@@ -305,7 +306,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                     return Array.isArray(arr) && arr.some(r => r.text);
                 });
             }
-            const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
+            const mappingArtifact = getProviderArtifact(aiTurn, (aiTurn as any)?.meta?.mapper) || null;
             if (!decisionMap && mappingArtifact?.semantic) {
                 decisionMap = {
                     narrative: mappingArtifact.semantic.narrative,

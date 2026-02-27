@@ -752,6 +752,469 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 
+      // Reconstruct full per-provider cognitive artifact.
+      // Sources claims from mapping response text (same as graph view), not stale artifacts.
+      // Only embedding model call needed; everything else is deterministic math.
+      case "REGENERATE_EMBEDDINGS":
+        (async () => {
+          const { aiTurnId, providerId } = message.payload || {};
+          if (!aiTurnId || !providerId) { sendResponse({ success: false, error: "Missing aiTurnId or providerId" }); return; }
+          const turnRaw = await sm.adapter.get("turns", aiTurnId);
+          if (!turnRaw) { sendResponse({ success: false, error: "Turn not found" }); return; }
+
+          const { generateStatementEmbeddings, generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, structuredTruncate, DEFAULT_CONFIG } = await import('./clustering');
+          const { generateClaimEmbeddings, reconstructProvenance, computeElbowDiagnosticsFromEmbeddings } = await import('./ConciergeService/claimAssembly');
+          const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('./ConciergeService/claimProvenance');
+          const { parseSemanticMapperOutput } = await import('./ConciergeService/semanticMapper');
+          const { packEmbeddingMap, unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
+          const { buildCognitiveArtifact } = await import('../shared/cognitive-artifact');
+          const { extractForcingPoints } = await import('./utils/cognitive/traversalEngine');
+          const { computeShadowDelta, getTopUnreferenced } = await import('./shadow/ShadowDelta');
+          const dims = DEFAULT_CONFIG.embeddingDimensions;
+
+          const normalizeProvId = (pid) => String(pid || "").trim().toLowerCase();
+
+          const userTurnId = turnRaw.userTurnId;
+          let queryText = "";
+          if (userTurnId) {
+            try {
+              const userTurn = await sm.adapter.get("turns", userTurnId);
+              queryText = userTurn?.text || userTurn?.content || "";
+            } catch (err) {
+              console.error(`[Regenerate] Failed to load user turn for aiTurnId=${aiTurnId}:`, err);
+            }
+          }
+
+          const coerceJson = (value) => {
+            if (!value) return null;
+            if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
+            return value;
+          };
+
+          const readCitationOrderFromMeta = (meta) => {
+            try {
+              const raw = meta?.citationSourceOrder;
+              if (!raw || typeof raw !== "object") return [];
+              const entries = Object.entries(raw)
+                .map(([k, v]) => [Number(k), String(v || "").trim()])
+                .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
+              entries.sort((a, b) => a[0] - b[0]);
+              return entries.map(([, pid]) => normalizeProvId(pid));
+            } catch { return []; }
+          };
+
+          // ── A. Load provider responses and parse claims from mapping text ──
+          let responsesForTurn = [];
+          try {
+            if (sm.adapter?.getResponsesByTurnId) {
+              const resps = await sm.adapter.getResponsesByTurnId(aiTurnId);
+              responsesForTurn = Array.isArray(resps) ? resps : [];
+            }
+          } catch (err) {
+            console.error(`[Regenerate] Failed to load responses for aiTurnId=${aiTurnId}:`, err);
+            sendResponse({ success: false, error: "Failed to load responses for this turn" });
+            return;
+          }
+
+          const mappingResp = responsesForTurn
+            .filter((r) => r && r.responseType === "mapping" && normalizeProvId(r.providerId) === normalizeProvId(providerId))
+            .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0] || null;
+
+          const mappingText = String(mappingResp?.text || "").trim();
+          if (!mappingText) { sendResponse({ success: false, error: "No mapping response text found for this provider" }); return; }
+
+          const parseResult = parseSemanticMapperOutput(mappingText);
+          if (!parseResult?.success || !parseResult?.output) {
+            sendResponse({ success: false, error: "Failed to parse mapping response text into claims/edges" }); return;
+          }
+
+          const parsedClaims = Array.isArray(parseResult.output.claims) ? parseResult.output.claims : [];
+          const parsedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
+          const parsedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+          const parsedNarrative = String(parseResult.output?.narrative || parseResult.narrative || "").trim();
+          if (parsedClaims.length === 0) { sendResponse({ success: false, error: "Parsed 0 claims from mapping text" }); return; }
+
+          console.log(`[Regenerate] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges from provider ${providerId}`);
+
+          // ── B. Load immutable data (shared per turn) ──
+          const mappingFromTurn = coerceJson(turnRaw.mapping);
+          const turnArtifact = mappingFromTurn?.artifact || mappingFromTurn || null;
+
+          // Shadow: reconstruct from batch responses if needed
+          let shadowStatements = turnArtifact?.shadow?.statements;
+          let shadowParagraphs = turnArtifact?.shadow?.paragraphs;
+          const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
+
+          if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+            try {
+              const batchResps = responsesForTurn
+                .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
+                .sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+              const sources = batchResps.map((r, idx) => {
+                const pid = normalizeProvId(r.providerId);
+                const fromCitation = citationOrderArr.length > 0 ? citationOrderArr.indexOf(pid) : -1;
+                const fromMeta = Number(r?.meta?.modelIndex);
+                const modelIndex = fromCitation >= 0 ? fromCitation + 1 : (Number.isFinite(fromMeta) && fromMeta > 0 ? fromMeta : idx + 1);
+                return { modelIndex, content: String(r.text || "") };
+              });
+              if (sources.length > 0) {
+                const { extractShadowStatements, projectParagraphs } = await import('./shadow');
+                const shadowResult = extractShadowStatements(sources);
+                const paragraphResult = projectParagraphs(shadowResult.statements);
+                shadowStatements = shadowResult.statements;
+                shadowParagraphs = paragraphResult.paragraphs;
+              }
+            } catch (err) {
+              console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
+              sendResponse({ success: false, error: "Shadow reconstruction failed" });
+              return;
+            }
+          }
+
+          if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+            sendResponse({ success: false, error: "No shadow statements available" }); return;
+          }
+          if (!Array.isArray(shadowParagraphs)) shadowParagraphs = [];
+
+          // Model count from batch responses
+          const batchResps = responsesForTurn.filter((r) => r && r.responseType === "batch");
+          const modelCount = Math.max(citationOrderArr.length, batchResps.length, 1);
+
+          // Pre-semantic regions (immutable, from geometry)
+          const preSemantic = turnArtifact?.geometry?.preSemantic || null;
+          const regions = Array.isArray(preSemantic?.regions) ? preSemantic.regions
+            : Array.isArray(preSemantic?.regionization?.regions) ? preSemantic.regionization.regions
+            : [];
+
+          // Substrate (immutable)
+          const substrate = turnArtifact?.geometry?.substrate || null;
+
+          // ── C. Geometry embeddings (immutable, generate if missing) ──
+          let geoRecord = await sm.loadEmbeddings(aiTurnId);
+          if (!geoRecord) {
+            const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
+            const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
+            let queryEmbedding = null;
+            if (queryText) {
+              const cleaned = stripInlineMarkdown(String(queryText)).trim();
+              const truncated = structuredTruncate(cleaned, 1740);
+              const prefixed = truncated && !truncated.toLowerCase().startsWith('represent this sentence')
+                ? `Represent this sentence for searching relevant passages: ${truncated}` : truncated;
+              if (prefixed) {
+                const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG);
+                queryEmbedding = batch.get('0') || null;
+              }
+            }
+
+            const packedStatements = packEmbeddingMap(stmtResult.embeddings, dims);
+            const packedParagraphs = packEmbeddingMap(paraResult.embeddings, dims);
+            const queryBuffer = queryEmbedding
+              ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
+              : null;
+
+            await sm.persistEmbeddings(aiTurnId, {
+              statementEmbeddings: packedStatements.buffer,
+              paragraphEmbeddings: packedParagraphs.buffer,
+              queryEmbedding: queryBuffer,
+              meta: {
+                embeddingModelId: DEFAULT_CONFIG.modelId,
+                dimensions: dims,
+                hasQuery: Boolean(queryEmbedding),
+                statementCount: packedStatements.index.length,
+                paragraphCount: packedParagraphs.index.length,
+                statementIndex: packedStatements.index,
+                paragraphIndex: packedParagraphs.index,
+                timestamp: Date.now(),
+              },
+            });
+            geoRecord = await sm.loadEmbeddings(aiTurnId);
+          }
+
+          if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings) {
+            sendResponse({ success: false, error: "Geometry embeddings unavailable" }); return;
+          }
+
+          const statementEmbeddings = unpackEmbeddingMap(geoRecord.statementEmbeddings, geoRecord.meta.statementIndex, geoRecord.meta.dimensions);
+          const paragraphEmbeddings = unpackEmbeddingMap(geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, geoRecord.meta.dimensions);
+
+          // ── D. Claim embeddings (per-provider, from parsed claims) ──
+          const mapperClaimsForProvenance = parsedClaims.map((c) => ({
+            id: c.id, label: c.label, text: c.text,
+            supporters: Array.isArray(c.supporters) ? c.supporters : [],
+            challenges: c?.challenges || null,
+          }));
+
+          const hashString = (input) => {
+            let h = 5381;
+            for (let i = 0; i < input.length; i++) {
+              h = ((h << 5) + h) ^ input.charCodeAt(i);
+            }
+            return (h >>> 0).toString(16);
+          };
+          const claimsHash = hashString(
+            parsedClaims
+              .map((c) => `${String(c?.id || '')}\u001f${String(c?.label || '')}\u001f${String(c?.text || '')}`)
+              .join('\u001e')
+          );
+
+          const claimEmbeddings = await generateClaimEmbeddings(mapperClaimsForProvenance);
+          const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
+          await sm.persistClaimEmbeddings(aiTurnId, providerId, {
+            claimEmbeddings: packedClaims.buffer,
+            meta: {
+              dimensions: dims,
+              claimCount: packedClaims.index.length,
+              claimIndex: packedClaims.index,
+              claimsHash,
+              timestamp: Date.now(),
+            },
+          });
+
+          console.log(`[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${claimEmbeddings?.size || 0} claims`);
+
+          // ── E. Deterministic pipeline (all math, no LLM) ──
+
+          // 1. Reconstruct provenance (cosine math: claims × statements/paragraphs)
+          const enrichedClaims = await reconstructProvenance(
+            mapperClaimsForProvenance,
+            shadowStatements,
+            shadowParagraphs,
+            paragraphEmbeddings,
+            regions,
+            modelCount,
+            statementEmbeddings,
+            claimEmbeddings,
+          );
+
+          // 2. Claim provenance (ownership/exclusivity/overlap)
+          let claimProvenance = null;
+          let claimProvenanceExclusivity = null;
+          let claimProvenanceOverlap = null;
+          try {
+            const ownership = computeStatementOwnership(enrichedClaims);
+            claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
+            claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
+            let elbowDiagnostics = null;
+            try {
+              elbowDiagnostics = computeElbowDiagnosticsFromEmbeddings(
+                claimEmbeddings, paragraphEmbeddings,
+                mapperClaimsForProvenance.map((c) => ({ id: c.id })),
+              );
+            } catch (_) { }
+            claimProvenance = {
+              statementOwnership: Object.fromEntries(Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])),
+              claimExclusivity: Object.fromEntries(claimProvenanceExclusivity),
+              claimOverlap: claimProvenanceOverlap,
+              ...(elbowDiagnostics ? { elbowDiagnostics } : {}),
+            };
+          } catch (err) {
+            console.warn('[Regenerate] Claim provenance failed:', getErrorMessage(err));
+          }
+
+          // 3. Structural analysis
+          let cachedStructuralAnalysis = null;
+          try {
+            const { computeStructuralAnalysis } = await import('./core/PromptMethods');
+            const tempCognitive = buildCognitiveArtifact({
+              claims: enrichedClaims, edges: parsedEdges,
+              conditionals: parsedConditionals, narrative: '', ghosts: null,
+            }, null);
+            cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
+          } catch (err) {
+            console.warn('[Regenerate] Structural analysis failed:', getErrorMessage(err));
+          }
+
+          // 4. Blast radius filter
+          let blastRadiusResult = null;
+          try {
+            if (cachedStructuralAnalysis && claimProvenanceExclusivity && claimProvenanceOverlap) {
+              const { computeBlastRadiusFilter } = await import('./core/blast-radius/blastRadiusFilter');
+              // Query relevance from persisted artifact geometry (immutable)
+              const queryRelevanceScores = turnArtifact?.geometry?.query?.relevance?.statementScores || null;
+              // Convert plain object back to Map if needed
+              const qrMap = queryRelevanceScores instanceof Map ? queryRelevanceScores
+                : (queryRelevanceScores && typeof queryRelevanceScores === 'object') ? new Map(Object.entries(queryRelevanceScores).map(([k, v]) => [k, Number(v)])) : null;
+              blastRadiusResult = computeBlastRadiusFilter({
+                claims: cachedStructuralAnalysis.claimsWithLeverage,
+                edges: parsedEdges,
+                cascadeRisks: cachedStructuralAnalysis.patterns.cascadeRisks,
+                exclusivity: claimProvenanceExclusivity,
+                overlap: claimProvenanceOverlap,
+                articulationPoints: cachedStructuralAnalysis.graph?.articulationPoints || [],
+                queryRelevanceScores: qrMap,
+                modelCount,
+                convergenceRatio: cachedStructuralAnalysis.landscape.convergenceRatio,
+              });
+            }
+          } catch (err) {
+            console.warn('[Regenerate] Blast radius failed:', getErrorMessage(err));
+          }
+
+          const blastRadiusActive = blastRadiusResult && !blastRadiusResult.skipSurvey;
+
+          // 5. Shadow delta
+          let shadowDelta = null;
+          let topUnindexed = [];
+          try {
+            const referencedIds = new Set(enrichedClaims.flatMap((c) => Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : []));
+            shadowDelta = computeShadowDelta({ statements: shadowStatements }, referencedIds, queryText);
+            topUnindexed = getTopUnreferenced(shadowDelta, 10);
+          } catch (_) { }
+
+          // 6. Traversal assembly (mechanical — same as StepExecutor)
+          const foundationClaimIds = enrichedClaims.map((c) => c.id);
+          const tiers = [{ tierIndex: 0, claimIds: foundationClaimIds, gates: [] }];
+          const tierByClaimId = new Map();
+          for (const t of tiers) { for (const id of t.claimIds) { if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex); } }
+
+          const serializedClaims = enrichedClaims.map((c) => {
+            const supporters = Array.isArray(c.supporters) ? c.supporters : [];
+            const sourceStatementIds = Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds.map(String).filter(Boolean) : [];
+            return {
+              id: String(c.id || ''), label: String(c.label || c.id),
+              stance: 'NEUTRAL', gates: { conditionals: [] },
+              enables: [], conflicts: [],
+              sourceStatementIds, supporterModels: supporters,
+              supportRatio: typeof c.supportRatio === 'number' ? c.supportRatio : 0,
+              hasConditionalSignal: Boolean(c.hasConditionalSignal),
+              hasSequenceSignal: Boolean(c.hasSequenceSignal),
+              hasTensionSignal: Boolean(c.hasTensionSignal),
+              tier: tierByClaimId.get(c.id) ?? 0,
+            };
+          });
+
+          const traversalEdges = blastRadiusActive ? [] : parsedEdges
+            .filter((e) => e && e.from && e.to && String(e.type || '').trim() === 'conflicts')
+            .map((e) => ({ ...e, type: 'conflicts' }));
+
+          const traversalGraph = {
+            claims: serializedClaims, edges: traversalEdges,
+            conditionals: parsedConditionals, tiers,
+            maxTier: tiers.length - 1, roots: [], tensions: [], cycles: [],
+          };
+
+          let forcingPoints = [];
+          try { forcingPoints = extractForcingPoints(traversalGraph).map((fp) => ({
+            id: String(fp?.id || ''), type: fp?.type, tier: typeof fp?.tier === 'number' ? fp.tier : 0,
+            question: String(fp?.question || ''), condition: String(fp?.condition || ''),
+            ...(Array.isArray(fp?.options) ? { options: fp.options.map((o) => ({ claimId: String(o?.claimId || ''), label: String(o?.label || '') })).filter((o) => o.claimId && o.label) } : {}),
+            unlocks: [], prunes: [],
+            blockedBy: Array.isArray(fp?.blockedByGateIds) ? fp.blockedByGateIds.map(String).filter(Boolean) : [],
+            sourceStatementIds: Array.isArray(fp?.sourceStatementIds) ? fp.sourceStatementIds.map(String).filter(Boolean) : [],
+          })); } catch (_) { }
+
+          // 7. Completeness
+          let completeness = null;
+          try {
+            if (substrate && regions.length > 0) {
+              const { buildStatementFates } = await import('./geometry/interpretation/fateTracking');
+              const { findUnattendedRegions } = await import('./geometry/interpretation/coverageAudit');
+              const { buildCompletenessReport } = await import('./geometry/interpretation/completenessReport');
+              const qrScores = turnArtifact?.geometry?.query?.relevance?.statementScores || null;
+              const qrMap = qrScores instanceof Map ? qrScores
+                : (qrScores && typeof qrScores === 'object') ? new Map(Object.entries(qrScores).map(([k, v]) => [k, Number(v)])) : null;
+              const statementFates = buildStatementFates(shadowStatements, enrichedClaims, qrMap);
+              const unattendedRegions = findUnattendedRegions(substrate, shadowParagraphs, enrichedClaims, regions, shadowStatements);
+              const completenessReport = buildCompletenessReport(statementFates, unattendedRegions, shadowStatements, regions.length);
+              completeness = { report: completenessReport, statementFates: Object.fromEntries(statementFates), unattendedRegions };
+            }
+          } catch (_) { }
+
+          // 8. Semantic edges (normalize types)
+          const EDGE_SUPPORTS = 'supports';
+          const EDGE_CONFLICTS = 'conflicts';
+          const EDGE_PREREQUISITE = 'prerequisite';
+          const semanticEdges = parsedEdges
+            .filter((e) => e && e.from && e.to)
+            .map((e) => {
+              const t = String(e.type || '').trim();
+              if (t === 'conflicts') return { ...e, type: EDGE_CONFLICTS };
+              if (t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
+              return e;
+            })
+            .filter((e) => [EDGE_SUPPORTS, EDGE_CONFLICTS, 'tradeoff', EDGE_PREREQUISITE].includes(String(e.type || '').trim()));
+
+          // ── F. Assemble mapper artifact (same shape as StepExecutor) ──
+          const mapperArtifact = {
+            id: `artifact-regen-${Date.now()}`,
+            query: queryText,
+            timestamp: new Date().toISOString(),
+            model_count: modelCount,
+            claims: enrichedClaims,
+            edges: semanticEdges,
+            ghosts: null,
+            narrative: parsedNarrative,
+            conditionals: parsedConditionals,
+            traversalGraph,
+            forcingPoints,
+            traversalAnalysis: null,
+            ...(blastRadiusResult ? { blastRadiusFilter: blastRadiusResult } : {}),
+            surveyRationale: null,
+            preSemantic: preSemantic || null,
+            ...(completeness ? { completeness } : {}),
+            shadow: {
+              statements: shadowStatements,
+              audit: shadowDelta?.audit ?? {},
+              topUnreferenced: Array.isArray(topUnindexed) ? topUnindexed.map((u) => u?.statement).filter(Boolean) : [],
+            },
+            ...(claimProvenance ? { claimProvenance } : {}),
+          };
+
+          // ── G. Build full cognitive artifact ──
+          const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
+            shadow: { extraction: { statements: shadowStatements }, delta: shadowDelta || null },
+            paragraphProjection: { paragraphs: shadowParagraphs },
+            substrate: { graph: substrate, shape: null },
+            preSemantic: preSemantic || null,
+            ...(turnArtifact?.geometry?.query?.relevance ? { query: { relevance: turnArtifact.geometry.query.relevance } } : {}),
+          });
+
+          // ── H. Persist as provider-specific artifact ──
+          let artifactPatched = false;
+          if (cognitiveArtifact && mappingResp?.id) {
+            const updated = { ...mappingResp, artifact: cognitiveArtifact, updatedAt: Date.now() };
+            await sm.adapter.put("provider_responses", updated, mappingResp.id);
+            artifactPatched = true;
+            console.log(`[Regenerate] Full artifact persisted for provider ${providerId}: ${enrichedClaims.length} claims, ${semanticEdges.length} edges`);
+          }
+
+          sendResponse({ success: true, data: { artifactPatched, artifact: cognitiveArtifact || null, claimCount: enrichedClaims.length, edgeCount: semanticEdges.length } });
+        })().catch(e => { console.error('[Regenerate] Failed:', e); sendResponse({ success: false, error: getErrorMessage(e) }); });
+        return true;
+
+      case "DERIVE_ELBOW_DIAGNOSTICS":
+        (async () => {
+          const { aiTurnId, providerId } = message.payload || {};
+          if (!aiTurnId || !providerId) {
+            sendResponse({ success: true, data: null });
+            return;
+          }
+          // Load geometry embeddings (turn-level) + claim embeddings (provider-level)
+          const [geoRecord, claimRecord] = await Promise.all([
+            sm.loadEmbeddings(aiTurnId),
+            sm.loadClaimEmbeddings(aiTurnId, providerId),
+          ]);
+          if (!geoRecord?.paragraphEmbeddings || !geoRecord?.meta?.paragraphIndex) {
+            sendResponse({ success: true, data: null });
+            return;
+          }
+          if (!claimRecord?.claimEmbeddings || !claimRecord?.meta?.claimIndex) {
+            sendResponse({ success: true, data: null });
+            return;
+          }
+          const { unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
+          const { computeElbowDiagnosticsFromEmbeddings } = await import('./ConciergeService/claimAssembly');
+          const geoMeta = geoRecord.meta;
+          const claimMeta = claimRecord.meta;
+          // Pure math — all embeddings from cache, zero ONNX calls
+          const paragraphEmbeddings = unpackEmbeddingMap(geoRecord.paragraphEmbeddings, geoMeta.paragraphIndex, geoMeta.dimensions);
+          const claimEmbeddings = unpackEmbeddingMap(claimRecord.claimEmbeddings, claimMeta.claimIndex, claimMeta.dimensions);
+          const claims = claimMeta.claimIndex.map(id => ({ id }));
+          const diagnostics = computeElbowDiagnosticsFromEmbeddings(claimEmbeddings, paragraphEmbeddings, claims);
+          sendResponse({ success: true, data: diagnostics });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+
       case "DEBUG_EXECUTE_SINGLE":
         (async () => {
           const providerId = String(message.payload?.providerId || "").toLowerCase();
@@ -814,6 +1277,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 updatedAt: r.updatedAt || r.createdAt || Date.now(),
                 meta: r.meta || {},
                 responseIndex: r.responseIndex ?? 0,
+                ...(r.artifact ? { artifact: r.artifact } : {}),
               };
 
               if (r.responseType === "batch") {

@@ -16,8 +16,6 @@ export interface StatementFate {
     };
 }
 
-const UNADDRESSED_QUERY_THRESHOLD = 0.55;
-
 function computeSignalWeight(signals: { sequence: boolean; tension: boolean; conditional: boolean }): number {
     let weight = 0;
     if (signals.conditional) weight += 3;
@@ -26,6 +24,14 @@ function computeSignalWeight(signals: { sequence: boolean; tension: boolean; con
     return weight;
 }
 
+/**
+ * Build statement fates.
+ *
+ * Step 8: Removed elbow gate for orphan → unaddressed promotion.
+ * All orphans with query relevance scores are now classified as 'unaddressed'
+ * and ranked by raw cosine descending. The consumer (completeness report)
+ * presents a continuous list — no binary threshold.
+ */
 export function buildStatementFates(
     statements: ShadowStatement[],
     claims: Array<{ id: string; sourceStatementIds?: string[] }>,
@@ -60,7 +66,8 @@ export function buildStatementFates(
             fate = claimIds.length === 1 ? 'primary' : 'supporting';
             reason = `Referenced by ${claimIds.length} claim(s): ${claimIds.join(', ')}`;
         } else {
-            // Classify as orphan or noise first, then promote orphans to unaddressed
+            // Classify as orphan or noise first, then promote ALL orphans with
+            // query relevance to unaddressed (Step 8: no elbow gate)
             let baseOrphan = false;
             if (coords?.regionId) {
                 baseOrphan = true;
@@ -76,7 +83,9 @@ export function buildStatementFates(
 
             if (baseOrphan && queryRelevanceScores !== null) {
                 const qScore = queryRelevanceScores.get(stmt.id);
-                if (qScore && qScore.querySimilarity > UNADDRESSED_QUERY_THRESHOLD) {
+                if (qScore) {
+                    // Step 8: all orphans with query relevance become unaddressed
+                    // Ranked by raw cosine descending — continuous list, no binary gate
                     fate = 'unaddressed';
                     querySimilarity = qScore.querySimilarity;
                     reason = `${reason}; query-relevant (querySimilarity=${qScore.querySimilarity.toFixed(3)})`;

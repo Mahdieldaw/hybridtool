@@ -24,6 +24,7 @@ type StatementRow = {
   stance: string;
   signals: string;
   claimCount: number | null;
+  claimIds: string;
   fate: string;
   regionId: string;
   querySimilarity: number | null;
@@ -61,7 +62,9 @@ export function StatementProfileTab({ artifact }: StatementProfileTabProps) {
     return statements.map((st: any) => {
       const id = safeStr(st?.id);
       const ownership = ownershipById.get(id);
-      const claimCount = Array.isArray(ownership) ? ownership.length : ownership instanceof Set ? ownership.size : null;
+      const ownershipArr = Array.isArray(ownership) ? ownership : ownership instanceof Set ? Array.from(ownership) : [];
+      const claimCount = ownershipArr.length > 0 ? ownershipArr.length : null;
+      const claimIds = ownershipArr.join(",");
       const fate = statementFates?.[id]?.fate ? safeStr(statementFates[id].fate) : "";
       const regionId = statementFates?.[id]?.regionId ? safeStr(statementFates[id].regionId) : "";
       const score = statementScores.get(id);
@@ -83,6 +86,7 @@ export function StatementProfileTab({ artifact }: StatementProfileTabProps) {
         stance: safeStr(st?.stance || st?.dominantStance || ""),
         signals,
         claimCount,
+        claimIds,
         fate,
         regionId,
         querySimilarity,
@@ -157,6 +161,13 @@ export function StatementProfileTab({ artifact }: StatementProfileTabProps) {
           level: "L1",
           cell: (r) => formatNum(r.claimCount, 0),
           sortValue: (r) => r.claimCount,
+        },
+        {
+          key: "claimIds",
+          header: "Claim",
+          level: "L1",
+          cell: (r) => <span className="font-mono text-text-muted">{r.claimIds || "—"}</span>,
+          sortValue: (r) => r.claimIds,
         },
         {
           key: "fate",

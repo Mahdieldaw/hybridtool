@@ -57,6 +57,7 @@ export interface PipelineGateResult {
         isolationRatio: number;
         maxComponentSize: number;
         nodeCount: number;
+        participationRate?: number; // fraction of nodes with ≥1 mutual recognition edge
     };
 }
 

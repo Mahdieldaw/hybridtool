@@ -103,7 +103,7 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                     )}
                     {substrate && (
                         <div>
-                            <span className="text-text-secondary">Substrate:</span> {substrate.shape.prior} ({Math.round(substrate.shape.confidence * 100)}%) · {substrate.topology.componentCount} components · {Math.round(substrate.topology.isolationRatio * 100)}% isolated · {substrate.meta.embeddingBackend}
+                            <span className="text-text-secondary">Substrate:</span> conf={Math.round(substrate.shape.confidence * 100)}% · {substrate.topology.componentCount} components · {Math.round(substrate.topology.isolationRatio * 100)}% isolated · {substrate.meta.embeddingBackend}
                         </div>
                     )}
                     {paragraphClustering && (

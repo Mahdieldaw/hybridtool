@@ -4,7 +4,11 @@ import type { GeometricSubstrate } from './types';
 import { cosineSimilarity } from '../clustering/distance';
 
 export interface QueryRelevanceStatementScore {
-    querySimilarity: number;
+    querySimilarity: number;          // [-1,1] raw cosine (CANONICAL for pipeline decisions). Do NOT normalize this field — it's the source of truth for all threshold comparisons.
+    querySimilarityNormalized: number; // [0,1] (cos+1)/2 — for UI display only, never used for logic
+    simRaw: number;                   // [-1,1] deprecated alias for querySimilarity (kept for compatibility)
+    embeddingSource: 'statement' | 'paragraph' | 'none';
+    paragraphSimRaw: number;          // [-1,1] raw cosine at paragraph level (always paragraph embedding)
     recusant: number;
 }
 
@@ -72,21 +76,29 @@ export function computeQueryRelevance(input: {
 
     for (const st of statements) {
         const pid = statementToParagraph.get(st.id);
-        const emb =
-            (statementEmbeddings && statementEmbeddings.get(st.id)) ||
-            (pid && paragraphEmbeddings && paragraphEmbeddings.get(pid)) ||
-            null;
+        const stmtEmb = statementEmbeddings ? statementEmbeddings.get(st.id) ?? null : null;
+        const paraEmb = pid && paragraphEmbeddings ? paragraphEmbeddings.get(pid) ?? null : null;
 
-        // querySimilarity: cosine similarity with query, normalized to [0,1]
+        // Pick best available embedding (statement > paragraph > none)
+        const emb = stmtEmb || paraEmb || null;
+        const embeddingSource: 'statement' | 'paragraph' | 'none' =
+            stmtEmb ? 'statement' : paraEmb ? 'paragraph' : 'none';
+
+        // querySimilarity: raw cosine similarity with query [-1,1]
+        // CANONICAL VALUE for all downstream threshold comparisons (blast radius, skeletonization, etc.)
         const simRaw = emb ? cosineSimilarity(queryEmbedding, emb) : 0;
-        const querySimilarity = clamp01((simRaw + 1) / 2);
+        const querySimilarity = simRaw; // [-1,1] raw — use this for all pipeline logic
+        const querySimilarityNormalized = clamp01((simRaw + 1) / 2); // [0,1] normalized — UI display only
+
+        // paragraph-level raw cosine (always uses paragraph embedding, independent of statement)
+        const paragraphSimRaw = paraEmb ? cosineSimilarity(queryEmbedding, paraEmb) : 0;
 
         // recusant: inverse of normalized mutual degree (1 = isolated, 0 = hub)
         const degree = perStatementDegree.get(st.id) ?? 0;
         const normalizedDensity = maxDegree > minDegree ? clamp01((degree - minDegree) / (maxDegree - minDegree)) : 0;
         const recusant = clamp01(1 - normalizedDensity);
 
-        statementScores.set(st.id, { querySimilarity, recusant });
+        statementScores.set(st.id, { querySimilarity, querySimilarityNormalized, simRaw, embeddingSource, paragraphSimRaw, recusant });
     }
 
     return { statementScores };

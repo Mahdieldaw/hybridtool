@@ -11,6 +11,14 @@ export function buildCognitiveArtifact(
 
   const substrateGraph = pipeline?.substrate?.graph;
   const traversalGraph = mapper?.traversalGraph;
+  const pipelineQuery = pipeline?.query ? { ...pipeline.query } : undefined;
+  const rawScores = pipelineQuery?.relevance?.statementScores;
+  if (rawScores instanceof Map) {
+    pipelineQuery.relevance = {
+      ...(pipelineQuery.relevance ?? {}),
+      statementScores: Object.fromEntries(rawScores),
+    };
+  }
 
   return {
     paragraphClustering: mapper?.paragraphClustering ?? undefined,
@@ -32,8 +40,11 @@ export function buildCognitiveArtifact(
         mutualEdges: substrateGraph?.mutualEdges ?? [],
         strongEdges: substrateGraph?.strongEdges ?? [],
         softThreshold: substrateGraph?.softThreshold,
+        similarityStats: substrateGraph?.similarityStats ?? null,
+        extendedSimilarityStats: substrateGraph?.extendedSimilarityStats ?? null,
+        allPairwiseSimilarities: substrateGraph?.allPairwiseSimilarities ?? null,
       },
-      query: pipeline?.query ? { ...pipeline.query } : undefined,
+      query: pipelineQuery,
       preSemantic: pipeline?.preSemantic
         ? {
           ...pipeline.preSemantic,
@@ -41,6 +52,7 @@ export function buildCognitiveArtifact(
             fragmentationScore: pipeline?.substrate?.shape?.signals?.fragmentationScore ?? 1,
             bimodalityScore: pipeline?.substrate?.shape?.signals?.bimodalityScore ?? 0,
             parallelScore: pipeline?.substrate?.shape?.signals?.parallelScore ?? 0,
+            convergentScore: pipeline?.substrate?.shape?.signals?.convergentScore ?? 0,
             confidence: pipeline?.substrate?.shape?.confidence ?? 0,
           },
           regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
@@ -95,6 +107,9 @@ export function buildCognitiveArtifact(
       timestamp: mapper?.timestamp ?? undefined,
     },
     claimProvenance: mapper?.claimProvenance ?? undefined,
+    blastRadiusFilter: mapper?.blastRadiusFilter ?? undefined,
+    surveyGates: mapper?.surveyGates ?? undefined,
+    surveyRationale: mapper?.surveyRationale ?? undefined,
     completeness: mapper?.completeness ?? undefined,
     substrateSummary: mapper?.substrate ?? undefined,
   };

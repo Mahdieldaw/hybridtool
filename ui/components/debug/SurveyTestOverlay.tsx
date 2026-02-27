@@ -9,53 +9,47 @@ import { surveyTestAtom } from "../../state/atoms";
 
 type SurveyGate = {
   id: string;
-  claims: string[];
-  construct: string;
-  classification: "forced_choice" | "conditional_gate";
-  fork: string;
-  hinge: string;
   question: string;
+  reasoning: string;
   affectedClaims: string[];
+  blastRadius: number;
 };
 
 function GateCard({ gate }: { gate: SurveyGate }) {
-  const isForcedChoice = gate.classification === "forced_choice";
+  const br = typeof gate.blastRadius === "number" ? gate.blastRadius : null;
   return (
     <div
       style={{
-        border: `1px solid ${isForcedChoice ? "#7c3aed" : "#0ea5e9"}`,
+        border: "1px solid #f59e0b",
         borderRadius: 8,
         padding: "14px 16px",
-        background: isForcedChoice ? "rgba(124,58,237,0.06)" : "rgba(14,165,233,0.06)",
+        background: "rgba(245,158,11,0.06)",
         display: "flex",
         flexDirection: "column",
         gap: 10,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: isForcedChoice ? "#a78bfa" : "#38bdf8",
-            background: isForcedChoice ? "rgba(124,58,237,0.15)" : "rgba(14,165,233,0.15)",
-            padding: "2px 7px",
-            borderRadius: 4,
-          }}
-        >
-          {isForcedChoice ? "Forced Choice" : "Conditional Gate"}
-        </span>
         <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "monospace" }}>{gate.id}</span>
+        {br !== null && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "#fbbf24",
+              background: "rgba(245,158,11,0.15)",
+              padding: "2px 7px",
+              borderRadius: 4,
+            }}
+          >
+            BR {br.toFixed(2)}
+          </span>
+        )}
         <span style={{ marginLeft: "auto", fontSize: 11, color: "#6b7280" }}>
-          claims: {gate.claims.join(", ")}
+          affects: {gate.affectedClaims.join(", ")}
         </span>
-      </div>
-
-      <div>
-        <Label>Construct</Label>
-        <Value>{gate.construct || <em style={{ color: "#6b7280" }}>—</em>}</Value>
       </div>
 
       <div
@@ -70,16 +64,12 @@ function GateCard({ gate }: { gate: SurveyGate }) {
         <Value style={{ fontSize: 14, color: "#f3f4f6", fontWeight: 500 }}>{gate.question}</Value>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      {gate.reasoning && (
         <div>
-          <Label>Hinge</Label>
-          <Value>{gate.hinge || <em style={{ color: "#6b7280" }}>—</em>}</Value>
+          <Label>Reasoning</Label>
+          <Value>{gate.reasoning}</Value>
         </div>
-        <div>
-          <Label>Fork (system)</Label>
-          <Value style={{ color: "#6b7280" }}>{gate.fork || <em style={{ color: "#6b7280" }}>—</em>}</Value>
-        </div>
-      </div>
+      )}
 
       {gate.affectedClaims.length > 0 && (
         <div>
@@ -231,14 +221,11 @@ export function SurveyTestOverlay() {
                   <strong style={{ color: "#f3f4f6" }}>{gates.length}</strong> gate{gates.length !== 1 ? "s" : ""} produced
                 </span>
                 <span>
-                  <strong style={{ color: "#a78bfa" }}>
-                    {gates.filter(g => g.classification === "forced_choice").length}
-                  </strong> forced choice
-                </span>
-                <span>
-                  <strong style={{ color: "#38bdf8" }}>
-                    {gates.filter(g => g.classification === "conditional_gate").length}
-                  </strong> conditional
+                  avg BR: <strong style={{ color: "#fbbf24" }}>
+                    {gates.length > 0
+                      ? (gates.reduce((s, g) => s + (g.blastRadius || 0), 0) / gates.length).toFixed(2)
+                      : "—"}
+                  </strong>
                 </span>
                 {result.errors.length > 0 && (
                   <span style={{ color: "#fbbf24" }}>

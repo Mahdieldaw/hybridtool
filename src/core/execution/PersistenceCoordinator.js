@@ -57,6 +57,7 @@ export class PersistenceCoordinator {
             text: result?.text || "",
             status: result?.status || "completed",
             meta: result?.meta || {},
+            ...(result?.mapping?.artifact ? { artifact: result.mapping.artifact } : {}),
           };
           return;
         }

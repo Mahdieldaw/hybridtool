@@ -9,15 +9,17 @@ import type {
     DegenerateReason,
     NodeLocalStats
 } from './types';
-import { buildTwoGraphs } from './knn';
+import { buildTwoGraphs, buildPairwiseField } from './knn';
 import {
     computeSoftThreshold,
     buildStrongGraph,
     computeSimilarityStats,
+    computeExtendedSimilarityStats,
     DEFAULT_THRESHOLD_CONFIG,
     ThresholdConfig
 } from './threshold';
-import { computeTopology } from './topology';
+import { computeMutualRankTopology } from './topology';
+import { buildMutualRankGraph } from './mutualRank';
 import { computeNodeStats } from './nodes';
 import { computeUmapLayout } from './layout';
 
@@ -81,11 +83,16 @@ export function buildGeometricSubstrate(
     // ─────────────────────────────────────────────────────────────────────────
     // BUILD TWO-GRAPH STRUCTURE
     // ─────────────────────────────────────────────────────────────────────────
-    const { knn, mutual, top1Sims, topKSims } = buildTwoGraphs(
+    const { knn, mutual, top1Sims, topKSims, allPairwiseSimilarities } = buildTwoGraphs(
         paragraphIds,
         embeddings,
         config.k
     );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BUILD PAIRWISE FIELD (full N×N matrix)
+    // ─────────────────────────────────────────────────────────────────────────
+    const pairwiseField = buildPairwiseField(paragraphIds, embeddings);
 
     // ─────────────────────────────────────────────────────────────────────────
     // DEGENERATE CASE 3: All embeddings identical (all similarities = 1.0)
@@ -103,25 +110,35 @@ export function buildGeometricSubstrate(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // COMPUTE SOFT THRESHOLD
+    // BUILD MUTUAL RANK GRAPH (μ+σ mutual recognition — the structural backbone)
     // ─────────────────────────────────────────────────────────────────────────
-    const softThreshold = computeSoftThreshold(top1Sims, config.threshold);
+    const mutualRankGraph = buildMutualRankGraph(pairwiseField);
+    const mutualRankTopology = computeMutualRankTopology(mutualRankGraph, paragraphIds);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // BUILD STRONG GRAPH
+    // PRIMARY TOPOLOGY — from mutual recognition graph (Step 7: replaces strong graph)
     // ─────────────────────────────────────────────────────────────────────────
+    const topology: import('./types').TopologyMetrics = {
+        components: mutualRankTopology.components,
+        componentCount: mutualRankTopology.componentCount,
+        largestComponentRatio: mutualRankTopology.largestComponentRatio,
+        isolationRatio: mutualRankTopology.isolationRatio,
+        globalStrongDensity: paragraphIds.length > 1
+            ? mutualRankGraph.edges.length / ((paragraphIds.length * (paragraphIds.length - 1)) / 2)
+            : 0,
+        convergentField: mutualRankTopology.convergentField,
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LEGACY: soft threshold + strong graph (diagnostic only, not structural backbone)
+    // ─────────────────────────────────────────────────────────────────────────
+    const softThreshold = computeSoftThreshold(top1Sims, config.threshold);
     const strong = buildStrongGraph(
         mutual,
         paragraphIds,
         softThreshold,
         config.threshold.method
     );
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMPUTE TOPOLOGY (on strong graph)
-    // ─────────────────────────────────────────────────────────────────────────
-    const topology = computeTopology(strong, paragraphIds);
-
 
     const shape = classifyShape(topology, n);
 
@@ -136,16 +153,19 @@ export function buildGeometricSubstrate(
         mutual,
         strong,
         top1Sims,
-        topKSims
+        topKSims,
+        mutualRankGraph,
     );
 
     const similarityStats = computeSimilarityStats(topKSims);
-    if (similarityStats.p95 < softThreshold) {
+    const extendedSimilarityStats = computeExtendedSimilarityStats(topKSims);
+    // Discrimination range check (from pairwise field, not top-K)
+    const discriminationRange = pairwiseField.stats.discriminationRange;
+    if (discriminationRange < 0.10) {
         console.warn(
-            `[Substrate] Sparse regime detected: ` +
-            `p95 similarity (${similarityStats.p95.toFixed(3)}) < ` +
-            `soft threshold (${softThreshold.toFixed(3)}). ` +
-            `Expect fragmented structure with many isolated nodes.`
+            `[Substrate] Insufficient embedding discrimination: ` +
+            `range P90-P10 = ${discriminationRange.toFixed(3)} < 0.10. ` +
+            `Downstream thresholds may not be meaningful.`
         );
     }
     if (similarityStats.max < 0.7) {
@@ -178,6 +198,9 @@ export function buildGeometricSubstrate(
         topology,
         shape,
         layout2d,
+        pairwiseField,
+        mutualRankGraph,
+        mutualRankTopology,
         meta: {
             embeddingSuccess: true,
             embeddingBackend,
@@ -188,6 +211,8 @@ export function buildGeometricSubstrate(
             strongEdgeCount: strong.edges.length,
 
             similarityStats,
+            extendedSimilarityStats,
+            allPairwiseSimilarities,
 
             quantization: '1e-6',
             tieBreaker: 'lexicographic',

@@ -137,7 +137,7 @@ export function DataTable<Row extends { id?: string }>({
         <div className="px-4 py-4 text-sm text-text-muted">{emptyMessage || "No rows."}</div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-[12px]">
+          <table className="min-w-full text-[13px]">
             <thead className="bg-black/10 border-b border-border-subtle">
               <tr>
                 {columns.map((c) => {

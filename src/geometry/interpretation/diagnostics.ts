@@ -235,17 +235,17 @@ export function computeDiagnostics(
 
     const peakRegions = regionProfiles
         .filter(p =>
-            p.mass.modelDiversity >= 3 &&
-            p.mass.modelDiversityRatio >= 0.5 &&
-            p.geometry.internalDensity >= 0.25
+            (p?.mass?.modelDiversity ?? 0) >= 3 &&
+            (p?.mass?.modelDiversityRatio ?? 0) >= 0.5 &&
+            (p?.geometry?.internalDensity ?? 0) >= 0.25
         )
         .map(p => String(p.regionId || '').trim()).filter(Boolean);
 
     const floorRegions = regionProfiles
         .filter(p => !(
-            p.mass.modelDiversity >= 2 &&
-            p.mass.modelDiversityRatio >= 0.25 &&
-            p.geometry.internalDensity >= 0.1
+            (p?.mass?.modelDiversity ?? 0) >= 2 &&
+            (p?.mass?.modelDiversityRatio ?? 0) >= 0.25 &&
+            (p?.geometry?.internalDensity ?? 0) >= 0.1
         ))
         .map(p => String(p.regionId || '').trim()).filter(Boolean);
 

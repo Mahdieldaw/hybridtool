@@ -110,3 +110,46 @@ export const determineTensionDynamics = (
     const diff = Math.abs(claimA.supportRatio - claimB.supportRatio);
     return diff < 0.15 ? 'symmetric' : 'asymmetric';
 };
+
+// ── ELBOW DETECTION ──────────────────────────────────────────────────────
+// Finds the natural boundary in a descending-sorted similarity distribution.
+// Used to replace static cosine thresholds with per-distribution adaptive cuts.
+
+export interface ElbowResult {
+    index: number;          // last index to INCLUDE (boundary position)
+    boundaryFound: boolean; // true if a significant gap was detected
+}
+
+export function findElbow(values: number[]): ElbowResult {
+    if (values.length === 0) {
+        return { index: 0, boundaryFound: false };
+    }
+    if (values.length === 1) {
+        return { index: 0, boundaryFound: false };
+    }
+
+    // Consecutive gaps
+    const gaps: number[] = [];
+    for (let i = 0; i < values.length - 1; i++) {
+        gaps.push(values[i] - values[i + 1]);
+    }
+
+    // Median gap
+    const sortedGaps = [...gaps].sort((a, b) => a - b);
+    const mid = Math.floor(sortedGaps.length / 2);
+    const medianGap = sortedGaps.length % 2 === 0
+        ? (sortedGaps[mid - 1] + sortedGaps[mid]) / 2
+        : sortedGaps[mid];
+
+    const MIN_GAP = 0.01;
+    const gapThreshold = (values.length > 3) ? 2.0 * medianGap : medianGap;
+
+    // First position where the drop is anomalously large
+    for (let i = 0; i < gaps.length; i++) {
+        if (gaps[i] > gapThreshold && gaps[i] > MIN_GAP) {
+            return { index: i, boundaryFound: true };
+        }
+    }
+
+    return { index: values.length - 1, boundaryFound: false };
+}

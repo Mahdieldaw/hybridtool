@@ -2,6 +2,7 @@ import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } fr
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
+import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
 const DecisionMapGraph = safeLazy(() => import("./DecisionMapGraph"));
@@ -22,10 +23,12 @@ import { EntityProfilesPanel } from "./entity-profiles/EntityProfilesPanel";
 // ============================================================================
 
 import { computeStructuralAnalysis } from "../../src/core/PromptMethods";
+import { extractShadowStatements, projectParagraphs } from "../../src/shadow";
 import type { GraphTopology, ProblemStructure, StructuralAnalysis } from "../../shared/contract";
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
+import { getProviderArtifact } from "../utils/turn-helpers";
 
 import { StructuralInsight } from "./StructuralInsight";
 
@@ -47,6 +50,15 @@ function normalizeArtifactCandidate(input: unknown): any | null {
   } catch {
     return null;
   }
+}
+
+function normalizeCitationSourceOrder(candidate: any): string[] {
+  if (!candidate || typeof candidate !== "object") return [];
+  const entries = Object.entries(candidate)
+    .map(([k, v]) => [Number(k), String(v || "")] as const)
+    .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid.trim().length > 0)
+    .sort((a, b) => a[0] - b[0]);
+  return entries.map(([, pid]) => pid);
 }
 
 
@@ -802,6 +814,7 @@ export const DecisionMapSheet = React.memo(() => {
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const sessionId = useAtomValue(currentSessionIdAtom);
   const lastSessionIdRef = useRef<string | null>(sessionId);
+  const { runMappingForAiTurn } = useRoundActions();
 
   const setToast = useSetAtom(toastAtom);
 
@@ -919,19 +932,16 @@ export const DecisionMapSheet = React.memo(() => {
   }, [mappingProvider, aiTurn?.meta?.mapper]);
 
   const mappingArtifact = useMemo(() => {
-    const raw = (aiTurn as any)?.mapping?.artifact ?? null;
-    const parsed = normalizeArtifactCandidate(raw);
-    const picked = parsed || raw;
-    return picked && typeof picked === "object" ? picked : null;
-  }, [aiTurn]);
+    const picked = getProviderArtifact(aiTurn, activeMappingPid);
+    if (!picked) return null;
+    const parsed = normalizeArtifactCandidate(picked);
+    return (parsed || picked) && typeof (parsed || picked) === "object" ? (parsed || picked) : null;
+  }, [aiTurn, activeMappingPid]);
 
   const providerContexts = useAtomValue(providerContextsAtom);
 
   const rawMappingText = useMemo(() => {
-    const pid = activeMappingPid ? String(activeMappingPid) : null;
-    const ctx = pid ? providerContexts?.[pid] : null;
-    const v = ctx?.rawMappingText;
-    if (typeof v === 'string' && v.trim()) return v;
+    const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : null;
     const mappingResponses = (aiTurn as any)?.mappingResponses;
     if (pid && mappingResponses && typeof mappingResponses === 'object') {
       const entry = (mappingResponses as any)[pid];
@@ -940,6 +950,9 @@ export const DecisionMapSheet = React.memo(() => {
       const t = typeof last?.text === 'string' ? last.text : typeof last === 'string' ? last : '';
       if (typeof t === 'string' && t.trim()) return t;
     }
+    const ctx = pid ? providerContexts?.[pid] : null;
+    const v = ctx?.rawMappingText;
+    if (typeof v === 'string' && v.trim()) return v;
     const narrative = (mappingArtifact as any)?.semantic?.narrative;
     if (typeof narrative === 'string') return narrative;
     if (narrative && typeof narrative === 'object') {
@@ -952,19 +965,37 @@ export const DecisionMapSheet = React.memo(() => {
     return '';
   }, [activeMappingPid, providerContexts, mappingArtifact, aiTurn]);
 
+  const parsedSemanticFromText = useMemo(() => {
+    const raw = String(rawMappingText || '').trim();
+    if (!raw || !/<map\b/i.test(raw)) return null;
+    try {
+      const parsed = parseSemanticMapperOutput(raw);
+      if (parsed?.success && parsed?.output) return parsed;
+      return null;
+    } catch {
+      return null;
+    }
+  }, [rawMappingText]);
+
   const parsedMapping = useMemo(() => {
-    const claims = Array.isArray(mappingArtifact?.semantic?.claims)
-      ? mappingArtifact.semantic.claims
-      : [];
-    const edges = Array.isArray(mappingArtifact?.semantic?.edges)
-      ? mappingArtifact.semantic.edges
-      : [];
-    const conditionals = Array.isArray(mappingArtifact?.semantic?.conditionals)
-      ? mappingArtifact.semantic.conditionals
-      : [];
+    const claims = Array.isArray(parsedSemanticFromText?.output?.claims)
+      ? parsedSemanticFromText.output.claims
+      : Array.isArray(mappingArtifact?.semantic?.claims)
+        ? mappingArtifact.semantic.claims
+        : [];
+    const edges = Array.isArray(parsedSemanticFromText?.output?.edges)
+      ? parsedSemanticFromText.output.edges
+      : Array.isArray(mappingArtifact?.semantic?.edges)
+        ? mappingArtifact.semantic.edges
+        : [];
+    const conditionals = Array.isArray(parsedSemanticFromText?.output?.conditionals)
+      ? parsedSemanticFromText.output.conditionals
+      : Array.isArray(mappingArtifact?.semantic?.conditionals)
+        ? mappingArtifact.semantic.conditionals
+        : [];
     const topology = mappingArtifact?.traversal?.graph || null;
     return { claims, edges, conditionals, topology, map: { claims, edges } } as any;
-  }, [mappingArtifact]);
+  }, [mappingArtifact, parsedSemanticFromText]);
 
   const graphTopology = useMemo(() => {
     const fromMeta = normalizeGraphTopologyCandidate(mappingArtifact?.traversal?.graph) || null;
@@ -980,6 +1011,16 @@ export const DecisionMapSheet = React.memo(() => {
   }, [mappingArtifact, parsedMapping.topology]);
 
   const graphData = useMemo(() => {
+    const textClaims = Array.isArray(parsedSemanticFromText?.output?.claims) ? parsedSemanticFromText!.output!.claims : null;
+    const textEdges = Array.isArray(parsedSemanticFromText?.output?.edges) ? parsedSemanticFromText!.output!.edges : null;
+    if ((textClaims && textClaims.length > 0) || (textEdges && textEdges.length > 0)) {
+      return {
+        claims: textClaims || [],
+        edges: textEdges || [],
+        source: "parsed_text" as const,
+      };
+    }
+
     const artifactClaims = Array.isArray(mappingArtifact?.semantic?.claims) ? mappingArtifact!.semantic!.claims : null;
     const artifactEdges = Array.isArray(mappingArtifact?.semantic?.edges) ? mappingArtifact!.semantic!.edges : null;
     if ((artifactClaims && artifactClaims.length > 0) || (artifactEdges && artifactEdges.length > 0)) {
@@ -1011,7 +1052,7 @@ export const DecisionMapSheet = React.memo(() => {
       edges: 0,
     });
     return { ...adaptGraphTopology(graphTopology), source: "traversal" as const };
-  }, [mappingArtifact, parsedMapping, graphTopology]);
+  }, [mappingArtifact, parsedMapping, graphTopology, parsedSemanticFromText]);
 
   const derivedMapperArtifact = useMemo(() => {
     if (!mappingArtifact) return null;
@@ -1033,12 +1074,14 @@ export const DecisionMapSheet = React.memo(() => {
 
 
   const semanticClaims = useMemo<any[]>(() => {
+    const parsedClaims = parsedSemanticFromText?.output?.claims;
+    if (Array.isArray(parsedClaims)) return parsedClaims;
     const semantic = mappingArtifact?.semantic;
     if (Array.isArray(semantic?.claims)) return semantic?.claims;
     if (derivedMapperArtifact?.claims) return derivedMapperArtifact.claims;
     if (Array.isArray((parsedMapping as any)?.claims)) return (parsedMapping as any)?.claims;
     return graphData.claims.length > 0 ? graphData.claims : [];
-  }, [mappingArtifact, derivedMapperArtifact, parsedMapping, graphData]);
+  }, [mappingArtifact, derivedMapperArtifact, parsedMapping, graphData, parsedSemanticFromText]);
 
   const preSemanticRegions = useMemo(() => {
     const ps = mappingArtifact?.geometry?.preSemantic;
@@ -1072,7 +1115,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const artifactForStructure = useMemo(() => {
     const artifact =
-      aiTurn?.mapping?.artifact ||
+      getProviderArtifact(aiTurn, activeMappingPid) ||
       derivedMapperArtifact ||
       (parsedMapping as any)?.artifact ||
       (graphData.claims.length > 0 || graphData.edges.length > 0
@@ -1088,14 +1131,15 @@ export const DecisionMapSheet = React.memo(() => {
     const claims = Array.isArray(flatClaims) ? flatClaims : Array.isArray(nestedClaims) ? nestedClaims : null;
     if (!artifact || !claims || claims.length === 0) return null;
     return artifact;
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData]);
+  }, [aiTurn, activeMappingPid, derivedMapperArtifact, parsedMapping, graphData]);
 
   const structuralAnalysis: StructuralAnalysis | null = useMemo(() => {
     if (!artifactForStructure) return null;
     try {
       return computeStructuralAnalysis(artifactForStructure as any);
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') {
+      const nodeEnv = (globalThis as any)?.process?.env?.NODE_ENV;
+      if (typeof nodeEnv === 'string' && nodeEnv !== 'production') {
         console.error("[DecisionMapSheet] structuralAnalysis failed:", err);
       }
       return null;
@@ -1115,16 +1159,10 @@ export const DecisionMapSheet = React.memo(() => {
 
   const mappingText = useMemo(() => {
     const fromArtifact = (mappingArtifact as any)?.semantic?.narrative ?? (parsedMapping as any)?.narrative ?? '';
-    const raw = String(rawMappingText || '').trim();
-    if (raw && (/<map\b/i.test(raw) || /<narrative\b/i.test(raw))) {
-      try {
-        const parsed = parseSemanticMapperOutput(raw);
-        const narrative = typeof parsed?.narrative === 'string' ? parsed.narrative.trim() : '';
-        if (parsed?.success && narrative) return narrative;
-      } catch { }
-    }
+    const fromParsed = typeof parsedSemanticFromText?.output?.narrative === 'string' ? parsedSemanticFromText.output.narrative.trim() : '';
+    if (fromParsed) return fromParsed;
     return typeof fromArtifact === 'string' ? fromArtifact : String(fromArtifact || '');
-  }, [mappingArtifact, parsedMapping, rawMappingText]);
+  }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
 
   const optionsText = useMemo(() => {
     return (parsedMapping as any)?.options ?? null;
@@ -1247,11 +1285,45 @@ export const DecisionMapSheet = React.memo(() => {
     return t;
   }, []);
 
-  // CLEAN: Read directly from mappingArtifact (CognitiveArtifact shape)
-  // No need for resolvedPipelineArtifacts adapter anymore
+  const derivedShadow = useMemo(() => {
+    const existingStatements = mappingArtifact?.shadow?.statements;
+    const existingParagraphs = mappingArtifact?.shadow?.paragraphs;
+    if (Array.isArray(existingStatements) && existingStatements.length > 0 && Array.isArray(existingParagraphs) && existingParagraphs.length > 0) {
+      return { statements: existingStatements, paragraphs: existingParagraphs };
+    }
+    if (!aiTurn?.batch?.responses) return { statements: [], paragraphs: [] };
+
+    const pid = activeMappingPid ? String(activeMappingPid) : null;
+    const mappingResponses = (aiTurn as any)?.mappingResponses;
+    const entry = pid && mappingResponses && typeof mappingResponses === "object" ? (mappingResponses as any)[pid] : null;
+    const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+    const last = arr.length > 0 ? arr[arr.length - 1] : null;
+    const citationOrderArr = normalizeCitationSourceOrder(last?.meta?.citationSourceOrder);
+
+    const sources = Object.entries(aiTurn.batch.responses)
+      .map(([providerId, r]: [string, any], idx) => {
+        const text = typeof r?.text === "string" ? r.text : "";
+        if (!text.trim()) return null;
+        const fromOrder = citationOrderArr.length > 0 ? citationOrderArr.indexOf(providerId) : -1;
+        const modelIndex = fromOrder >= 0 ? fromOrder + 1 : idx + 1;
+        return { providerId, modelIndex, text };
+      })
+      .filter(Boolean) as Array<{ providerId: string; modelIndex: number; text: string }>;
+
+    if (sources.length === 0) return { statements: [], paragraphs: [] };
+
+    try {
+      const shadowInput = sources.map((s) => ({ modelIndex: s.modelIndex, content: s.text }));
+      const shadowResult = extractShadowStatements(shadowInput);
+      const paragraphResult = projectParagraphs(shadowResult.statements);
+      return { statements: shadowResult.statements, paragraphs: paragraphResult.paragraphs };
+    } catch {
+      return { statements: [], paragraphs: [] };
+    }
+  }, [aiTurn, mappingArtifact, activeMappingPid]);
 
   const paragraphProjection = useMemo(() => {
-    const paragraphs = mappingArtifact?.shadow?.paragraphs;
+    const paragraphs = derivedShadow.paragraphs;
     if (!Array.isArray(paragraphs) || paragraphs.length === 0) return null;
 
     // Compute meta from CognitiveArtifact - NO fallbacks to old shapes
@@ -1267,7 +1339,7 @@ export const DecisionMapSheet = React.memo(() => {
         processingTimeMs: 0,
       },
     } as any; // Type assertion to satisfy PipelineParagraphProjectionResult
-  }, [mappingArtifact]);
+  }, [derivedShadow.paragraphs]);
 
   const stringifyForDebug = useMemo(() => {
     return (value: any) => {
@@ -1290,12 +1362,12 @@ export const DecisionMapSheet = React.memo(() => {
   }, []);
 
   const shadowStatements = useMemo(() => {
-    return Array.isArray(mappingArtifact?.shadow?.statements) ? mappingArtifact.shadow.statements : [];
-  }, [mappingArtifact]);
+    return Array.isArray(derivedShadow.statements) ? derivedShadow.statements : [];
+  }, [derivedShadow.statements]);
 
   const shadowParagraphs = useMemo(() => {
-    return Array.isArray(mappingArtifact?.shadow?.paragraphs) ? mappingArtifact.shadow.paragraphs : [];
-  }, [mappingArtifact]);
+    return Array.isArray(derivedShadow.paragraphs) ? derivedShadow.paragraphs : [];
+  }, [derivedShadow.paragraphs]);
 
   const shadowDeltaForView = useMemo(() => {
     const delta = (mappingArtifact as any)?.shadow?.delta;
@@ -1328,10 +1400,10 @@ export const DecisionMapSheet = React.memo(() => {
   const [evidenceContestedOnly, setEvidenceContestedOnly] = useState(false);
   const [evidenceCoverageOpen, setEvidenceCoverageOpen] = useState(false);
   const [narrativeMode, setNarrativeMode] = useState<"formatted" | "raw">("formatted");
-  const [promptOpen, setPromptOpen] = useState(false);
+
   const [queryRelevanceSearch, setQueryRelevanceSearch] = useState("");
   const [queryRelevanceTier, setQueryRelevanceTier] = useState<"all" | "high" | "medium" | "low">("all");
-  const [queryRelevanceSortKey, setQueryRelevanceSortKey] = useState<QueryRelevanceSortKey>("composite");
+  const [queryRelevanceSortKey, setQueryRelevanceSortKey] = useState<QueryRelevanceSortKey>("querySim");
   const [queryRelevanceSortDir, setQueryRelevanceSortDir] = useState<"asc" | "desc">("desc");
 
   const evidenceModelIndices = useMemo(() => {
@@ -1347,7 +1419,15 @@ export const DecisionMapSheet = React.memo(() => {
 
   const queryRelevanceRows = useMemo<QueryRelevanceRow[]>(() => {
     const relevance = (mappingArtifact as any)?.geometry?.query?.relevance;
-    const statementScores = relevance?.statementScores && typeof relevance.statementScores === "object" ? relevance.statementScores : null;
+    const rawScores = relevance?.statementScores;
+    const scoreMap: Map<string, any> =
+      rawScores instanceof Map
+        ? rawScores
+        : Array.isArray(rawScores)
+          ? new Map(rawScores as any)
+        : rawScores && typeof rawScores === "object"
+          ? new Map(Object.entries(rawScores))
+          : new Map();
     const tiers = relevance?.tiers && typeof relevance.tiers === "object" ? relevance.tiers : null;
     const tierById = new Map<string, "high" | "medium" | "low">();
     if (tiers?.high && Array.isArray(tiers.high)) for (const id of tiers.high) tierById.set(String(id), "high");
@@ -1358,7 +1438,7 @@ export const DecisionMapSheet = React.memo(() => {
 
     const rows: QueryRelevanceRow[] = (shadowStatements || []).map((s: any) => {
       const id = String(s?.id || "").trim();
-      const score = id && statementScores ? statementScores[id] : null;
+      const score = id ? scoreMap.get(id) : null;
       const tier = id ? (tierById.get(id) || "low") : "low";
       return {
         id,
@@ -1663,6 +1743,13 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, [aiTurn, activeMappingPid, mappingArtifact, mappingArtifactJson, rawMappingText, mappingText, optionsText, graphData, graphTopology, semanticClaims, shadowStatements, shadowParagraphs, shadowDeltaForView, shadowUnreferencedIdSet, paragraphProjection, preSemanticRegions, shape, providerContexts, traversalAnalysis]);
 
+  const handleRetryActiveMapper = useCallback(() => {
+    if (!aiTurn) return;
+    const providerId = activeMappingPid ? String(activeMappingPid) : "";
+    if (!providerId) return;
+    runMappingForAiTurn(aiTurn.id, providerId);
+  }, [aiTurn, activeMappingPid, runMappingForAiTurn]);
+
   return (
     <AnimatePresence>
       {openState && (
@@ -1721,6 +1808,15 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Right: Spacer/Close (keeps tabs centered) */}
               <div className="w-1/3 flex justify-end items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRetryActiveMapper}
+                  disabled={!aiTurn || !activeMappingPid}
+                  className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-highlight rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Retry mapping for current mapper"
+                >
+                  <span className="text-sm leading-none">↻</span>
+                </button>
                 <CopyButton
                   text={formatDecisionMapForMd(
                     mappingText,
@@ -2002,44 +2098,156 @@ export const DecisionMapSheet = React.memo(() => {
                     {partitionSubTab === 'gates' && (
                       <div className="p-6 flex-1 overflow-y-auto relative custom-scrollbar">
                         <div className="mb-4">
-                          <div className="text-lg font-bold text-text-primary">Mapper Gates</div>
+                          <div className="text-lg font-bold text-text-primary">Blast Radius Filter + Survey Mapper</div>
                           <div className="text-xs text-text-muted mt-1">
-                            Structural decision points derived from conflict and tradeoff edges
+                            Math-driven filter selects high-impact claims, LLM generates yes/no questions
                           </div>
                         </div>
                         {(() => {
-                          const gates = (mappingArtifact as any)?.gates || (mappingArtifact as any)?.output?.gates || [];
-                          if (!Array.isArray(gates) || gates.length === 0) {
-                            return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No gates found for this turn. This may mean all claims coexist peacefully.</div>;
-                          }
+                          const gates = (mappingArtifact as any)?.surveyGates || [];
+                          const brFilter = (mappingArtifact as any)?.blastRadiusFilter;
+                          const rationale = (mappingArtifact as any)?.surveyRationale;
+                          const scores: any[] = brFilter?.scores || [];
+
                           return (
-                            <div className="space-y-3">
-                              {gates.map((g: any) => {
-                                const classification = String(g?.classification || '');
-                                const badgeClass = classification === 'forced_choice'
-                                  ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                                  : 'bg-sky-500/15 text-sky-400 border-sky-500/30';
-                                return (
-                                  <div key={String(g?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
-                                    <div className="flex items-center justify-between gap-3 mb-3">
-                                      <div className="text-sm font-semibold text-text-primary">{String(g?.id || '')}</div>
-                                      <span className={clsx("text-[11px] px-2 py-1 rounded-full border font-semibold", badgeClass)}>
-                                        {classification === 'forced_choice' ? 'FORCED CHOICE' : 'CONDITIONAL GATE'}
-                                      </span>
+                            <div className="space-y-4">
+                              {/* ── Blast Radius Filter Summary ── */}
+                              {brFilter ? (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4 space-y-3">
+                                  <div className="text-xs font-semibold text-text-primary uppercase tracking-wider">Blast Radius Filter</div>
+                                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-text-muted">
+                                    <span>Claims: <strong className="text-text-primary">{brFilter.meta?.totalClaims || 0}</strong></span>
+                                    <span>Suppressed: <strong className="text-text-primary">{brFilter.meta?.suppressedCount || 0}</strong></span>
+                                    <span>Candidates: <strong className="text-text-primary">{brFilter.meta?.candidateCount || 0}</strong></span>
+                                    <span>Conflict edges: <strong className="text-text-primary">{brFilter.meta?.conflictEdgeCount || 0}</strong></span>
+                                    <span>Axes: <strong className="text-text-primary">{brFilter.meta?.axisCount || 0}</strong></span>
+                                    <span>Ceiling: <strong className="text-text-primary">{brFilter.questionCeiling}</strong></span>
+                                    <span>Skip survey: <strong className={brFilter.skipSurvey ? "text-emerald-400" : "text-text-primary"}>{brFilter.skipSurvey ? 'yes' : 'no'}</strong></span>
+                                    <span>Convergence: <strong className="text-text-primary">{typeof brFilter.meta?.convergenceRatio === 'number' ? (brFilter.meta.convergenceRatio * 100).toFixed(0) + '%' : '—'}</strong></span>
+                                    {typeof brFilter.meta?.processingTimeMs === 'number' && (
+                                      <span>{brFilter.meta.processingTimeMs.toFixed(0)}ms</span>
+                                    )}
+                                  </div>
+                                  {brFilter.skipReason && (
+                                    <div className="text-xs text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+                                      Skip reason: {brFilter.skipReason}
                                     </div>
-                                    <div className="space-y-2 text-xs">
-                                      <div><span className="text-text-muted">Construct:</span> <span className="text-text-primary">{String(g?.construct || '—')}</span></div>
-                                      <div><span className="text-text-muted">Claims:</span> <span className="text-text-primary font-mono">{Array.isArray(g?.claims) ? g.claims.join(', ') : '—'}</span></div>
-                                      <div><span className="text-text-muted">Fork:</span> <span className="text-text-secondary">{String(g?.fork || '—')}</span></div>
-                                      <div><span className="text-text-muted">Hinge:</span> <span className="text-text-primary">{String(g?.hinge || '—')}</span></div>
-                                      <div className="mt-2 p-3 bg-black/20 border border-border-subtle rounded-lg">
-                                        <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Question</div>
-                                        <div className="text-sm text-text-primary">{String(g?.question || '—')}</div>
+                                  )}
+
+                                  {/* ── Per-Claim Scores ── */}
+                                  {scores.length > 0 && (
+                                    <details>
+                                      <summary className="cursor-pointer text-[11px] text-text-muted select-none hover:text-text-secondary">
+                                        Per-claim blast radius scores ({scores.length})
+                                      </summary>
+                                      <div className="mt-2 space-y-1">
+                                        {[...scores].sort((a: any, b: any) => (b.composite || 0) - (a.composite || 0)).map((s: any) => (
+                                          <div key={s.claimId} className={clsx(
+                                            "flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-md",
+                                            s.suppressed ? "bg-black/20 text-text-muted line-through" : "bg-surface text-text-secondary"
+                                          )}>
+                                            <span className="font-mono w-20 shrink-0 text-text-primary font-medium">
+                                              {(s.composite || 0).toFixed(3)}
+                                              {s.rawComposite != null && s.rawComposite !== s.composite && (
+                                                <span className="text-text-muted text-[9px]"> raw:{(s.rawComposite || 0).toFixed(3)}</span>
+                                              )}
+                                            </span>
+                                            <span className="truncate flex-1">{s.claimLabel || s.claimId}</span>
+                                            <span className="shrink-0 font-mono text-[10px] text-text-muted">
+                                              C:{(s.components?.cascadeBreadth || 0).toFixed(2)}
+                                              {' '}E:{(s.components?.exclusiveEvidence || 0).toFixed(2)}
+                                              {' '}L:{(s.components?.leverage || 0).toFixed(2)}
+                                              {' '}Q:{(s.components?.queryRelevance || 0).toFixed(2)}
+                                              {' '}A:{s.components?.articulationPoint || 0}
+                                            </span>
+                                            {s.suppressionReason && (
+                                              <span className={clsx("shrink-0 text-[10px]", s.suppressed ? "text-amber-400/70" : "text-blue-400/60")}>{s.suppressionReason}</span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+
+                                  {/* ── Axes ── */}
+                                  {Array.isArray(brFilter.axes) && brFilter.axes.length > 0 && (
+                                    <details>
+                                      <summary className="cursor-pointer text-[11px] text-text-muted select-none hover:text-text-secondary">
+                                        Decision axes ({brFilter.axes.length})
+                                      </summary>
+                                      <div className="mt-2 space-y-1">
+                                        {brFilter.axes.map((axis: any) => (
+                                          <div key={axis.id} className="flex items-center gap-2 text-[11px] px-2 py-1.5 bg-surface rounded-md">
+                                            <span className="font-mono font-medium text-amber-400">{axis.id}</span>
+                                            <span className="text-text-muted">BR {(axis.maxBlastRadius || 0).toFixed(3)}</span>
+                                            <span className="text-text-secondary font-mono">{(axis.claimIds || []).join(', ')}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
+                                  Blast radius filter did not run for this turn.
+                                </div>
+                              )}
+
+                              {/* ── Survey Mapper Gates ── */}
+                              <div className="space-y-3">
+                                <div className="text-xs font-semibold text-text-primary uppercase tracking-wider">
+                                  Survey Mapper Output
+                                  <span className="ml-2 font-normal text-text-muted normal-case">
+                                    {Array.isArray(gates) && gates.length > 0 ? `${gates.length} gate(s)` : 'no gates'}
+                                  </span>
+                                </div>
+
+                                {(!Array.isArray(gates) || gates.length === 0) && (
+                                  <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">
+                                    {brFilter?.skipSurvey
+                                      ? 'Survey mapper was skipped (blast radius filter: zero questions needed).'
+                                      : 'Survey mapper produced no gates.'}
+                                  </div>
+                                )}
+
+                                {Array.isArray(gates) && gates.map((g: any) => {
+                                  const br = typeof g?.blastRadius === 'number' ? g.blastRadius : null;
+                                  return (
+                                    <div key={String(g?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                      <div className="flex items-center justify-between gap-3 mb-3">
+                                        <div className="text-sm font-semibold text-text-primary">{String(g?.id || '')}</div>
+                                        {br !== null && (
+                                          <span className="text-[11px] px-2 py-1 rounded-full border font-semibold bg-amber-500/15 text-amber-400 border-amber-500/30">
+                                            BR {br.toFixed(2)}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="space-y-2 text-xs">
+                                        <div className="p-3 bg-black/20 border border-border-subtle rounded-lg">
+                                          <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Question</div>
+                                          <div className="text-sm text-text-primary">{String(g?.question || '—')}</div>
+                                        </div>
+                                        {g?.reasoning && (
+                                          <div><span className="text-text-muted">Reasoning:</span> <span className="text-text-secondary">{String(g.reasoning)}</span></div>
+                                        )}
+                                        <div><span className="text-text-muted">Affected Claims:</span> <span className="text-text-primary font-mono">{Array.isArray(g?.affectedClaims) ? g.affectedClaims.join(', ') : '—'}</span></div>
                                       </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
+                              </div>
+
+                              {/* ── Survey Rationale (LLM debug text) ── */}
+                              {rationale && (
+                                <details>
+                                  <summary className="cursor-pointer text-[11px] text-text-muted select-none hover:text-text-secondary">
+                                    Survey mapper rationale / debug note
+                                  </summary>
+                                  <pre className="mt-2 p-3 bg-black/30 border border-border-subtle rounded-lg text-[11px] text-text-muted whitespace-pre-wrap break-words leading-relaxed max-h-[300px] overflow-y-auto">
+                                    {rationale}
+                                  </pre>
+                                </details>
+                              )}
                             </div>
                           );
                         })()}
@@ -2347,23 +2555,62 @@ export const DecisionMapSheet = React.memo(() => {
                           <div className="text-xs text-text-muted mt-1">Pre-semantic region profiles</div>
                         </div>
                         {(() => {
-                          const regions = sheetData.preSemanticRegions;
-                          if (!Array.isArray(regions) || regions.length === 0) {
+                          const preSemantic = (sheetData.mappingArtifact as any)?.geometry?.preSemantic;
+                          const regionization = preSemantic?.regionization;
+                          const rawRegions = Array.isArray(regionization?.regions) ? regionization.regions : Array.isArray(preSemantic?.regions) ? preSemantic.regions : sheetData.preSemanticRegions;
+                          const regionProfiles: any[] = Array.isArray(preSemantic?.regionProfiles) ? preSemantic.regionProfiles : [];
+                          const profileById = new Map(regionProfiles.map((p: any) => [String(p?.regionId || ''), p]));
+
+                          if (!Array.isArray(rawRegions) || rawRegions.length === 0) {
                             return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No region data available for this turn.</div>;
                           }
                           return (
                             <div className="space-y-3">
-                              {regions.map((r: any) => (
-                                <div key={String(r?.id || Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
-                                  <div className="flex items-center justify-between gap-3 mb-2">
-                                    <div className="text-sm font-semibold text-text-primary">{String(r?.id || 'Region')}</div>
+                              {rawRegions.map((r: any) => {
+                                const rid = String(r?.id || '');
+                                const profile = profileById.get(rid);
+                                const nodeCount = Array.isArray(r?.nodeIds) ? r.nodeIds.length : null;
+                                const statementCount = Array.isArray(r?.statementIds) ? r.statementIds.length : null;
+                                const density = typeof profile?.geometry?.internalDensity === 'number' ? profile.geometry.internalDensity : null;
+                                const isolation = typeof profile?.geometry?.isolation === 'number' ? profile.geometry.isolation : null;
+                                const modelDiv = typeof profile?.mass?.modelDiversity === 'number' ? profile.mass.modelDiversity : null;
+                                const divRatio = typeof profile?.mass?.modelDiversityRatio === 'number' ? profile.mass.modelDiversityRatio : null;
+                                const nearestSim = typeof profile?.geometry?.nearestCarrierSimilarity === 'number' ? profile.geometry.nearestCarrierSimilarity : null;
+                                return (
+                                  <div key={rid || String(Math.random())} className="bg-surface border border-border-subtle rounded-xl p-4">
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                      <div className="flex items-center gap-3">
+                                        <div className="text-sm font-semibold text-text-primary">{rid || 'Region'}</div>
+                                        {r?.kind && (
+                                          <span className="text-[11px] px-2 py-0.5 rounded-full border border-border-subtle bg-surface-highlight/20 text-text-muted">{String(r.kind)}</span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-4 text-xs text-text-muted">
+                                        {nodeCount != null && <span>{nodeCount} nodes</span>}
+                                        {statementCount != null && <span>{statementCount} statements</span>}
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-text-muted uppercase tracking-wider">Density</span>
+                                        <span className="text-text-primary font-semibold">{density != null ? density.toFixed(3) : '—'}</span>
+                                      </div>
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-text-muted uppercase tracking-wider">Isolation</span>
+                                        <span className="text-text-primary font-semibold">{isolation != null ? isolation.toFixed(3) : '—'}</span>
+                                      </div>
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-text-muted uppercase tracking-wider">Model Diversity</span>
+                                        <span className="text-text-primary font-semibold">{modelDiv != null ? modelDiv.toFixed(0) : '—'}{divRatio != null ? ` (${Math.round(divRatio * 100)}%)` : ''}</span>
+                                      </div>
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-text-muted uppercase tracking-wider">Nearest Carrier</span>
+                                        <span className="text-text-primary font-semibold">{nearestSim != null ? nearestSim.toFixed(3) : '—'}</span>
+                                      </div>
+                                    </div>
                                   </div>
-                                  {r?.profile && <div className="text-xs text-text-secondary mb-2">{String(r.profile)}</div>}
-                                  {Array.isArray(r?.memberIds) && r.memberIds.length > 0 && (
-                                    <div className="text-[11px] text-text-muted">Members: {r.memberIds.length} paragraphs</div>
-                                  )}
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           );
                         })()}
@@ -2436,7 +2683,7 @@ export const DecisionMapSheet = React.memo(() => {
                             <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-border-subtle text-[10px] uppercase tracking-wider text-text-muted font-semibold">
                               <button
                                 type="button"
-                                className={clsx("col-span-2 text-left", "hover:text-text-secondary")}
+                                className={clsx("col-span-3 text-left", "hover:text-text-secondary")}
                                 onClick={() => {
                                   const nextKey: QueryRelevanceSortKey = "id";
                                   if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
@@ -2455,17 +2702,6 @@ export const DecisionMapSheet = React.memo(() => {
                                 }}
                               >
                                 Tier
-                              </button>
-                              <button
-                                type="button"
-                                className={clsx("col-span-1 text-right", "hover:text-text-secondary")}
-                                onClick={() => {
-                                  const nextKey: QueryRelevanceSortKey = "composite";
-                                  if (queryRelevanceSortKey === nextKey) setQueryRelevanceSortDir(queryRelevanceSortDir === "asc" ? "desc" : "asc");
-                                  else { setQueryRelevanceSortKey(nextKey); setQueryRelevanceSortDir("desc"); }
-                                }}
-                              >
-                                Composite
                               </button>
                               <button
                                 type="button"
@@ -2527,11 +2763,8 @@ export const DecisionMapSheet = React.memo(() => {
                             <div className="divide-y divide-border-subtle">
                               {queryRelevanceRows.map((r) => (
                                 <div key={r.id} className="grid grid-cols-12 gap-2 px-4 py-3 text-xs">
-                                  <div className="col-span-2 font-mono text-[11px] text-text-secondary break-all">{r.id}</div>
+                                  <div className="col-span-3 font-mono text-[11px] text-text-secondary break-all">{r.id}</div>
                                   <div className="col-span-1 text-[11px] text-text-muted">{r.tier}</div>
-                                  <div className="col-span-1 text-right tabular-nums text-text-primary">
-                                    {typeof r.composite === "number" ? r.composite.toFixed(3) : "—"}
-                                  </div>
                                   <div className="col-span-1 text-right tabular-nums text-text-muted">
                                     {typeof r.querySim === "number" ? r.querySim.toFixed(3) : "—"}
                                   </div>
@@ -2559,38 +2792,75 @@ export const DecisionMapSheet = React.memo(() => {
                       <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
                         <div className="mb-4">
                           <div className="text-lg font-bold text-text-primary">Geometry</div>
-                          <div className="text-xs text-text-muted mt-1">Clustering summary, substrate topology, and shape classification</div>
+                          <div className="text-xs text-text-muted mt-1">Substrate topology, shape signals, and embedding stats</div>
                         </div>
                         {(() => {
                           const geo = (sheetData.mappingArtifact as any)?.geometry;
                           const substrate = geo?.substrate;
-                          const shapeVal = sheetData.shape;
+                          const preSemantic = geo?.preSemantic;
+                          const shapeSignals = preSemantic?.shapeSignals;
                           if (!geo) {
                             return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No geometry data available for this turn.</div>;
                           }
                           return (
                             <div className="space-y-4">
-                              {shapeVal && (
+                              {shapeSignals && (
                                 <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Shape classification</div>
-                                  <div className="text-sm text-text-primary">{typeof shapeVal === 'string' ? shapeVal : JSON.stringify(shapeVal)}</div>
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Shape Signals</div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {[
+                                      { label: 'Fragmentation', value: shapeSignals.fragmentationScore },
+                                      { label: 'Bimodality', value: shapeSignals.bimodalityScore },
+                                      { label: 'Parallel', value: shapeSignals.parallelScore },
+                                      { label: 'Convergent', value: shapeSignals.convergentScore },
+                                    ].map(({ label, value }) => (
+                                      <div key={label} className="flex flex-col gap-1">
+                                        <span className="text-[11px] text-text-muted uppercase tracking-wider">{label}</span>
+                                        <span className="text-sm font-semibold text-text-primary">
+                                          {typeof value === 'number' ? value.toFixed(3) : '—'}
+                                        </span>
+                                        {typeof value === 'number' && (
+                                          <div className="h-1.5 rounded-full bg-black/20 overflow-hidden mt-1">
+                                            <div className="h-full rounded-full bg-brand-500/60" style={{ width: `${Math.min(100, Math.round(value * 100))}%` }} />
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {typeof shapeSignals.confidence === 'number' && (
+                                    <div className="mt-3 pt-3 border-t border-border-subtle flex items-center gap-2">
+                                      <span className="text-xs text-text-muted">Shape confidence:</span>
+                                      <span className="text-xs font-semibold text-text-primary">{(shapeSignals.confidence * 100).toFixed(0)}%</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               {substrate && (
                                 <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Substrate</div>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                                    <div><span className="text-text-muted">kNN edges:</span> <span className="text-text-primary">{substrate.knnEdges?.length ?? '—'}</span></div>
-                                    <div><span className="text-text-muted">Mutual edges:</span> <span className="text-text-primary">{substrate.mutualEdges?.length ?? '—'}</span></div>
-                                    <div><span className="text-text-muted">Strong edges:</span> <span className="text-text-primary">{substrate.strongEdges?.length ?? '—'}</span></div>
-                                    <div><span className="text-text-muted">Density:</span> <span className="text-text-primary">{typeof substrate.density === 'number' ? substrate.density.toFixed(3) : '—'}</span></div>
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Substrate</div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {[
+                                      { label: 'kNN Edges', value: substrate.knnEdges?.length ?? null },
+                                      { label: 'Mutual Edges', value: substrate.mutualEdges?.length ?? null },
+                                      { label: 'Strong Edges', value: substrate.strongEdges?.length ?? null },
+                                      { label: 'Density', value: typeof substrate.density === 'number' ? Number(substrate.density.toFixed(4)) : null, raw: true },
+                                    ].map(({ label, value, raw }) => (
+                                      <div key={label} className="flex flex-col gap-0.5">
+                                        <span className="text-[11px] text-text-muted uppercase tracking-wider">{label}</span>
+                                        <span className="text-sm font-semibold text-text-primary">
+                                          {value != null ? (raw ? String(value) : value.toLocaleString()) : '—'}
+                                        </span>
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
                               )}
                               {geo.embeddingStatus && (
                                 <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Embedding status</div>
-                                  <pre className="text-[11px] text-text-secondary whitespace-pre-wrap">{JSON.stringify(geo.embeddingStatus, null, 2)}</pre>
+                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Embedding</div>
+                                  <div className="text-sm text-text-primary">
+                                    {typeof geo.embeddingStatus === 'string' ? geo.embeddingStatus : 'Computed'}
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -3059,7 +3329,7 @@ export const DecisionMapSheet = React.memo(() => {
                     className="w-full h-full flex flex-col"
                   >
                     <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                      <EntityProfilesPanel artifact={mappingArtifact} structuralAnalysis={structuralAnalysis} />
+                      <EntityProfilesPanel artifact={mappingArtifact} structuralAnalysis={structuralAnalysis} aiTurnId={aiTurn?.id} providerId={activeMappingPid ? String(activeMappingPid) : undefined} />
                     </div>
                   </m.div>
                 )}
@@ -3135,33 +3405,51 @@ export const DecisionMapSheet = React.memo(() => {
                           <div className="text-xs text-text-muted mt-1">Skeletonization debug info: protected, skeletonized, and removed counts</div>
                         </div>
                         {(() => {
-                          const chewed = (aiTurn?.singularity as any)?.chewedSubstrate || (mappingArtifact as any)?.chewedSubstrate;
+                          const chewed = (aiTurn?.singularity as any)?.chewedSubstrateSummary;
                           if (!chewed) {
                             return <div className="bg-surface border border-border-subtle rounded-xl p-4 text-sm text-text-muted">No chewed substrate data available for this turn.</div>;
                           }
                           return (
                             <div className="space-y-4">
                               <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Summary</div>
-                                <div className="grid grid-cols-3 gap-3 text-xs">
-                                  <div><span className="text-text-muted">Protected:</span> <span className="text-emerald-400">{chewed.protectedCount ?? '—'}</span></div>
-                                  <div><span className="text-text-muted">Skeletonized:</span> <span className="text-amber-400">{chewed.skeletonizedCount ?? '—'}</span></div>
-                                  <div><span className="text-text-muted">Removed:</span> <span className="text-red-400">{chewed.removedCount ?? '—'}</span></div>
-                                </div>
-                              </div>
-                              {Array.isArray(chewed.pathSteps) && chewed.pathSteps.length > 0 && (
-                                <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Path steps</div>
-                                  <div className="space-y-1">
-                                    {chewed.pathSteps.map((step: any, i: number) => (
-                                      <div key={i} className="text-[11px] text-text-secondary font-mono">{JSON.stringify(step)}</div>
-                                    ))}
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Claims</div>
+                                <div className="grid grid-cols-3 gap-3 text-sm">
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[11px] text-text-muted uppercase tracking-wider">Surviving</span>
+                                    <span className="text-emerald-400 font-semibold">{chewed.survivingClaimCount ?? '—'}</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[11px] text-text-muted uppercase tracking-wider">Pruned</span>
+                                    <span className="text-red-400 font-semibold">{chewed.prunedClaimCount ?? '—'}</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[11px] text-text-muted uppercase tracking-wider">Total Models</span>
+                                    <span className="text-text-primary font-semibold">{chewed.totalModels ?? '—'}</span>
                                   </div>
                                 </div>
-                              )}
+                              </div>
                               <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Raw data</div>
-                                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap max-h-[400px] overflow-y-auto">{JSON.stringify(chewed, null, 2)}</pre>
+                                <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Statements</div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[11px] text-text-muted uppercase tracking-wider">Protected</span>
+                                    <span className="text-emerald-400 font-semibold">{chewed.protectedStatementCount ?? '—'}</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[11px] text-text-muted uppercase tracking-wider">Skeletonized</span>
+                                    <span className="text-amber-400 font-semibold">{chewed.skeletonizedStatementCount ?? '—'}</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[11px] text-text-muted uppercase tracking-wider">Removed</span>
+                                    <span className="text-red-400 font-semibold">{chewed.removedStatementCount ?? '—'}</span>
+                                  </div>
+                                  {chewed.untriagedStatementCount != null && (
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-[11px] text-text-muted uppercase tracking-wider">Untriaged</span>
+                                      <span className="text-text-secondary font-semibold">{chewed.untriagedStatementCount}</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           );
@@ -3173,30 +3461,6 @@ export const DecisionMapSheet = React.memo(() => {
               </AnimatePresence>
             </div>
 
-            {aiTurn?.singularity?.prompt && (
-              <div className="border-t border-white/10 bg-black/10">
-                <button
-                  type="button"
-                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-white/5 transition-colors"
-                  onClick={() => setPromptOpen((v) => !v)}
-                >
-                  <div className="text-xs text-text-muted font-medium">Singularity prompt sent</div>
-                  <div className={clsx("text-text-muted", promptOpen && "rotate-180")}>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                </button>
-                {promptOpen && (
-                  <div className="px-6 pb-5">
-                    <div className="flex items-center justify-end mb-2">
-                      <CopyButton text={String(aiTurn?.singularity?.prompt || "")} label="Copy singularity prompt" variant="icon" />
-                    </div>
-                    <pre className="text-[11px] leading-snug whitespace-pre-wrap bg-black/20 border border-border-subtle rounded-xl p-4">{String(aiTurn?.singularity?.prompt || "")}</pre>
-                  </div>
-                )}
-              </div>
-            )}
           </m.div>
         </LazyMotion>
       )}

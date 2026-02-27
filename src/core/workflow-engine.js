@@ -9,6 +9,42 @@ import { parseMapperArtifact } from '../../shared/parsing-utils';
 import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';
 import { classifyError } from './error-classifier';
 
+function minifyMappingArtifactForPersistence(artifact) {
+  if (!artifact || typeof artifact !== "object") return null;
+  const semantic = artifact.semantic && typeof artifact.semantic === "object" ? artifact.semantic : {};
+  const traversal = artifact.traversal && typeof artifact.traversal === "object" ? artifact.traversal : {};
+  const meta = artifact.meta && typeof artifact.meta === "object" ? artifact.meta : {};
+  return {
+    semantic: {
+      claims: Array.isArray(semantic.claims) ? semantic.claims : [],
+      edges: Array.isArray(semantic.edges) ? semantic.edges : [],
+      conditionals: Array.isArray(semantic.conditionals) ? semantic.conditionals : [],
+      narrative: semantic.narrative,
+      ...(Array.isArray(semantic.ghosts) ? { ghosts: semantic.ghosts } : {}),
+    },
+    traversal: {
+      forcingPoints: Array.isArray(traversal.forcingPoints) ? traversal.forcingPoints : [],
+      ...(Array.isArray(traversal.traversalQuestions) ? { traversalQuestions: traversal.traversalQuestions } : {}),
+      graph: traversal.graph || {
+        claims: [],
+        edges: [],
+        conditionals: [],
+        tensions: [],
+        tiers: [],
+        maxTier: 0,
+        roots: [],
+        cycles: [],
+      },
+    },
+    meta: {
+      modelCount: meta.modelCount,
+      query: meta.query,
+      turn: meta.turn,
+      timestamp: meta.timestamp,
+    },
+  };
+}
+
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
   constructor(orchestrator, sessionManager, port, _options = {}) {
@@ -518,7 +554,8 @@ export class WorkflowEngine {
       : undefined;
 
     const cognitiveArtifact = context?.mappingArtifact || null;
-    const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact } : undefined;
+    const persistedMappingArtifact = cognitiveArtifact ? minifyMappingArtifactForPersistence(cognitiveArtifact) : null;
+    const mappingPhase = persistedMappingArtifact ? { artifact: persistedMappingArtifact } : undefined;
     const singularity = context?.singularityData || context?.singularityOutput;
     const singularityPhase = singularity
       ? {

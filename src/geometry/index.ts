@@ -15,6 +15,12 @@ export type {
     GeometricSubstrate,
     DegenerateSubstrate,
     DegenerateReason,
+    PairwiseField,
+    PairwiseFieldStats,
+    MutualRankEdge,
+    MutualRankNodeStats,
+    MutualRankGraph,
+    MutualRankTopologyMetrics,
 } from './types';
 
 export { isDegenerate } from './types';
@@ -29,9 +35,10 @@ export { DEFAULT_THRESHOLD_CONFIG } from './threshold';
 export { buildGeometricSubstrate } from './substrate';
 
 // Utilities (for testing/debugging)
-export { quantize, buildTwoGraphs } from './knn';
-export { computeSoftThreshold, computeSimilarityStats } from './threshold';
-export { computeTopology } from './topology';
+export { quantize, buildTwoGraphs, buildPairwiseField } from './knn';
+export { computeSoftThreshold, computeSimilarityStats, computeExtendedStatsFromArray } from './threshold';
+export { computeTopology, computeMutualRankTopology } from './topology';
+export { buildMutualRankGraph } from './mutualRank';
 export { computeNodeStats } from './nodes';
 
 export type { ShapeClassification } from './shape';

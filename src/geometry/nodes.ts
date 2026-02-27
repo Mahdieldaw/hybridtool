@@ -3,13 +3,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
-import type { NodeLocalStats, KnnGraph, MutualKnnGraph, StrongGraph } from './types';
+import type { NodeLocalStats, KnnGraph, MutualKnnGraph, StrongGraph, MutualRankGraph } from './types';
 import { quantize } from './knn';
 
 /**
  * Compute local stats for each paragraph node.
- * 
- * These primitives enable later region profiling without refactors.
+ *
+ * Step 7: mutualNeighborhoodPatch now uses mutual recognition (μ+σ) neighbors
+ * when available, falling back to mutual kNN neighbors for backward compat.
  */
 export function computeNodeStats(
     paragraphs: ShadowParagraph[],
@@ -17,7 +18,8 @@ export function computeNodeStats(
     mutual: MutualKnnGraph,
     strong: StrongGraph,
     top1Sims: Map<string, number>,
-    topKSims: Map<string, number[]>
+    topKSims: Map<string, number[]>,
+    mutualRankGraph?: MutualRankGraph,
 ): NodeLocalStats[] {
     const nodes: NodeLocalStats[] = [];
 
@@ -39,9 +41,18 @@ export function computeNodeStats(
         // Isolation score (higher = more isolated)
         const isolationScore = quantize(1 - t1);
 
-        // Mutual neighborhood patch: self + all mutual neighbors
-        const mutualNeighbors = mutual.adjacency.get(id)?.map(e => e.target) ?? [];
-        const patch = [id, ...mutualNeighbors].sort((a, b) => a.localeCompare(b));
+        // Mutual neighborhood patch: use mutual recognition (μ+σ) neighbors when available
+        let patch: string[];
+        const mrStats = mutualRankGraph?.nodeStats.get(id);
+        if (mrStats) {
+            patch = mrStats.mutualRankNeighborhood; // Already [self + neighbors], sorted
+        } else {
+            // Fallback to mutual kNN neighbors
+            const mutualNeighbors = mutual.adjacency.get(id)?.map(e => e.target) ?? [];
+            patch = [id, ...mutualNeighbors].sort((a, b) => a.localeCompare(b));
+        }
+
+        const mutualRankDegree = mrStats?.mutualRankDegree;
 
         nodes.push({
             paragraphId: id,
@@ -59,6 +70,7 @@ export function computeNodeStats(
 
             isolationScore,
             mutualNeighborhoodPatch: patch,
+            mutualRankDegree,
         });
     }
 

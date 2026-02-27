@@ -4,6 +4,7 @@
 
 import type { Stance } from '../shadow/StatementTypes';
 import type { ShapeClassification } from './shape';
+import type { ExtendedSimilarityStats } from './threshold';
 
 // ───────────────────────────────────────────────────────────────────────────
 // EDGES
@@ -63,13 +64,17 @@ export interface NodeLocalStats {
     // Connectivity stats
     knnDegree: number;            // Degree in kNN graph (usually K due to symmetric union)
     mutualDegree: number;         // Degree in mutual graph
-    strongDegree: number;         // Degree in strong graph
+    /** @deprecated Strong graph removed (Step 7). Kept for backward compat. */
+    strongDegree: number;         // Degree in strong graph (legacy, always 0 for new builds)
 
     // Derived
     isolationScore: number;       // 1 - top1Sim (higher = more isolated)
 
-    // Neighborhood patch (mutual neighbors + self)
+    // Neighborhood patch — now from mutual recognition graph (μ+σ)
     mutualNeighborhoodPatch: string[];
+
+    // Mutual rank degree (from mutual recognition graph)
+    mutualRankDegree?: number;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -87,8 +92,64 @@ export interface TopologyMetrics {
     components: Component[];
     componentCount: number;
     largestComponentRatio: number;   // largest.size / total nodes
-    isolationRatio: number;          // nodes with strongDegree=0 / total
-    globalStrongDensity: number;     // strong edges / max possible
+    isolationRatio: number;          // nodes with zero mutual recognition edges / total
+    globalStrongDensity: number;     // mutual recognition edges / max possible (renamed from strong for compat)
+    convergentField?: boolean;       // largest component > 70%
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// PAIRWISE FIELD (full N×N similarity matrix)
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface PairwiseFieldStats extends ExtendedSimilarityStats {
+    discriminationRange: number;  // p90 - p10
+}
+
+export interface PairwiseField {
+    matrix: Map<string, Map<string, number>>;
+    perNode: Map<string, Array<{ nodeId: string; similarity: number }>>;
+    stats: PairwiseFieldStats;
+    nodeCount: number;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// MUTUAL RECOGNITION GRAPH (μ+σ mutual recognition, no parameters)
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface MutualRankEdge {
+    source: string;
+    target: string;
+    similarity: number;
+}
+
+export interface MutualRecognitionThresholdStats {
+    paragraphId: string;
+    mean: number;
+    stddev: number;
+    threshold: number; // mean + stddev
+    notableNeighborCount: number;
+}
+
+export interface MutualRankNodeStats {
+    paragraphId: string;
+    mutualRankDegree: number;
+    isolated: boolean;
+    mutualRankNeighborhood: string[];  // [self + neighbors], sorted
+}
+
+export interface MutualRankGraph {
+    edges: MutualRankEdge[];
+    adjacency: Map<string, MutualRankEdge[]>;
+    nodeStats: Map<string, MutualRankNodeStats>;
+    thresholdStats: Map<string, MutualRecognitionThresholdStats>;
+}
+
+export interface MutualRankTopologyMetrics {
+    components: Component[];
+    componentCount: number;
+    largestComponentRatio: number;
+    isolationRatio: number;
+    convergentField: boolean;  // largest component > 70%
 }
 
 export interface Layout2D {
@@ -119,6 +180,13 @@ export interface GeometricSubstrate {
 
     layout2d?: Layout2D;
 
+    // Pairwise field (full N×N matrix)
+    pairwiseField?: PairwiseField;
+
+    // Mutual rank graph (top-τ% mutual recognition)
+    mutualRankGraph?: MutualRankGraph;
+    mutualRankTopology?: MutualRankTopologyMetrics;
+
     // Provenance
     meta: {
         embeddingSuccess: boolean;
@@ -138,6 +206,10 @@ export interface GeometricSubstrate {
             p50: number;
             mean: number;
         };
+        extendedSimilarityStats?: ExtendedSimilarityStats;
+
+        // Full pairwise distribution (pre-kNN truncation, canonical pairs only)
+        allPairwiseSimilarities?: number[];
 
         // Determinism proof
         quantization: '1e-6';

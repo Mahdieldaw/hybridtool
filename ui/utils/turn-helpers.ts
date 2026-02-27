@@ -3,6 +3,7 @@ import type { ProviderResponse, UserTurn, ProviderKey } from "../../shared/contr
 import type { AiTurnWithUI } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 import { DEFAULT_THREAD } from "../../shared/messaging";
+import { normalizeProviderId } from "./provider-id-mapper";
 
 /**
  * Normalize a response value to ProviderResponse[]
@@ -199,4 +200,44 @@ export function normalizeBackendRoundsToTurns(
   });
 
   return normalized;
+}
+
+/**
+ * Resolve the active provider's artifact.
+ * Per-provider artifacts are stored in mappingResponses[pid][].artifact.
+ * The shared slot (aiTurn.mapping.artifact) is only used when no specific
+ * provider is requested — never as a cross-provider fallback.
+ */
+export function getProviderArtifact(aiTurn: any, activePid?: string | null): any | null {
+  if (activePid != null) {
+    const pid = normalizeProviderId(String(activePid));
+    const responses = aiTurn?.mappingResponses;
+    if (responses && typeof responses === 'object') {
+      const entry = responses[pid];
+      const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+      const last = arr.length > 0 ? arr[arr.length - 1] : null;
+      if (last?.artifact && typeof last.artifact === 'object') {
+        return last.artifact;
+      }
+      // Provider entry exists but has no artifact — return null.
+      // Do NOT fall back to the shared slot (it belongs to a different provider).
+      if (arr.length > 0) {
+        return null;
+      }
+    }
+    // No entry at all for this provider — fall through to shared slot
+    // only if it actually belongs to this provider.
+    const mapperRaw = aiTurn?.meta?.mapper;
+    if (mapperRaw != null && String(mapperRaw).trim() !== '') {
+      const mapperPid = normalizeProviderId(String(mapperRaw));
+      if (mapperPid === pid) {
+        const raw = aiTurn?.mapping?.artifact ?? null;
+        return raw && typeof raw === 'object' ? raw : null;
+      }
+    }
+    return null;
+  }
+  // No specific provider requested — use shared slot
+  const raw = aiTurn?.mapping?.artifact ?? null;
+  return raw && typeof raw === 'object' ? raw : null;
 }

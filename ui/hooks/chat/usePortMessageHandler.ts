@@ -637,6 +637,31 @@ export function usePortMessageHandler(enabled: boolean = true) {
                     if (artifact) {
                       aiTurn.mapping = { artifact, timestamp: now } as any;
                     }
+                    try {
+                      const entry = {
+                        providerId: normalizedId,
+                        text: String(data?.text || ""),
+                        artifact: artifact || null,
+                        status: String(data?.status || "completed"),
+                        createdAt: now,
+                        updatedAt: now,
+                        meta: data?.meta || {},
+                        responseIndex: 0,
+                      };
+                      const next = { ...(aiTurn as any).mappingResponses } as any;
+                      const existingArr = next?.[normalizedId];
+                      const arr = Array.isArray(existingArr)
+                        ? existingArr.slice()
+                        : existingArr
+                          ? [existingArr]
+                          : [];
+                      entry.responseIndex = arr.length;
+                      arr.push(entry);
+                      next[normalizedId] = arr;
+                      (aiTurn as any).mappingResponses = next;
+                      if (!(aiTurn as any)?.meta) (aiTurn as any).meta = {};
+                      if (!(aiTurn as any).meta?.mapper) (aiTurn as any).meta.mapper = normalizedId;
+                    } catch { }
                     aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
                   } else if (stepType === "singularity") {
                     const out = data?.output || data?.meta?.singularityOutput;
@@ -929,7 +954,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
             const aiTurn = existing as AiTurnWithUI;
 
             // Update with cognitive artifacts
-            draft.set(aiTurnId, {
+            const updatedTurn = {
               ...aiTurn,
               ...(artifact ? { mapping: { artifact, timestamp: Date.now() } } : {}),
               ...(singularityOutput
@@ -942,7 +967,26 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 }
                 : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
-            });
+            };
+
+            // Also store artifact on per-provider entry for provider-aware resolution
+            const mapperPid = aiTurn.meta?.mapper;
+            if (mapperPid && artifact) {
+              const responses = { ...(aiTurn as any).mappingResponses } as any;
+              const pid = normalizeProviderId(String(mapperPid));
+              const existingArr = responses[pid];
+              const arr = Array.isArray(existingArr) ? existingArr.slice() : existingArr ? [existingArr] : [];
+              if (arr.length > 0) {
+                arr[arr.length - 1] = { ...arr[arr.length - 1], artifact };
+              } else {
+                arr.push({ providerId: pid, text: '', artifact, status: 'completed', createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
+              }
+              responses[pid] = arr;
+              (updatedTurn as any).mappingResponses = responses;
+            }
+
+            (updatedTurn as any).mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
+            draft.set(aiTurnId, updatedTurn);
           });
           break;
         }

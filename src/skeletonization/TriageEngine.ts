@@ -3,10 +3,31 @@ import { generateTextEmbeddings } from '../clustering/embeddings';
 import { cosineSimilarity } from '../clustering/distance';
 import { detectCarriers } from './CarrierDetector';
 import { DEFAULT_THRESHOLDS } from './types';
+import { findElbow } from '../core/structural-analysis/utils';
 import type { CarrierThresholds, SkeletonizationInput, StatementFate, TriageResult } from './types';
 
 function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+/**
+ * Token Jaccard similarity — Step 11.
+ * Tokenizes by splitting on whitespace and lowercasing, then computes
+ * |intersection| / |union| on the token sets.
+ * Guards against stance-flipped near-duplicates ("Drug X is safe" vs "Drug X is lethal")
+ * which have high cosine similarity but low token overlap.
+ */
+function tokenJaccard(a: string, b: string): number {
+  const tokensA = new Set(a.toLowerCase().split(/\s+/).filter(t => t.length > 0));
+  const tokensB = new Set(b.toLowerCase().split(/\s+/).filter(t => t.length > 0));
+  if (tokensA.size === 0 && tokensB.size === 0) return 1;
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersection++;
+  }
+  const union = tokensA.size + tokensB.size - intersection;
+  return union > 0 ? intersection / union : 0;
 }
 
 function meanEmbedding(vectors: Float32Array[]): Float32Array | null {
@@ -110,25 +131,68 @@ export async function triageStatements(
     });
   }
 
-  const relevanceMin = 0.55;
-
   // Phase 2 + 3: paragraph-first triangulation then carrier detection
   const paragraphEmbeddings = input.paragraphEmbeddings;
+
+  // Pre-compute dynamic relevance threshold via elbow on all source-to-centroid similarities
+  const allRelevances: Array<{ relevance: number }> = [];
+  for (const prunedClaim of prunedClaims) {
+    const sourceIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
+    const centroid = claimEmbeddings.get(prunedClaim.id);
+    if (!centroid) continue;
+    for (const sid of sourceIds) {
+      if (!validStatementIds.has(sid)) continue;
+      if (protectedStatementIds.has(sid)) continue;
+      const emb = statementEmbeddings.get(sid);
+      if (!emb) continue;
+      allRelevances.push({ relevance: cosineSimilarity(emb, centroid) });
+    }
+  }
+  allRelevances.sort((a, b) => b.relevance - a.relevance);
+  const relevanceSims = allRelevances.map(r => r.relevance);
+  const relevanceElbow = findElbow(relevanceSims);
+  // dynamicRelevanceMin: raw cosine threshold for "is this statement about the pruned claim?"
+  // Computed via elbow detection on source-to-centroid similarities. Fallback: 0.55 (raw cosine, ~0.77 normalized)
+  const dynamicRelevanceMin = (() => {
+    if (relevanceSims.length === 0) return 0.55; // fallback: raw cosine [-1,1]
+    const safeIndex = Number.isFinite(relevanceElbow.index)
+      ? Math.max(0, Math.min(relevanceSims.length - 1, Math.floor(relevanceElbow.index)))
+      : -1;
+    if (relevanceElbow.boundaryFound && safeIndex >= 0) {
+      return relevanceSims[safeIndex]; // elbow value: raw cosine
+    }
+    return 0.55; // fallback: raw cosine [-1,1]
+  })();
 
   for (const prunedClaim of prunedClaims) {
     const sourceStatementIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
     const claimCentroid = claimEmbeddings.get(prunedClaim.id);
 
-    // Paragraph-first: pre-filter candidate statements by paragraph relevance
+    // Paragraph-first: pre-filter candidate statements via elbow detection
     let candidateStatementIds: Set<string> | undefined;
     if (paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
+      const paraScores = paragraphs
+        .map(para => {
+          const paraEmb = paragraphEmbeddings.get(para.id);
+          if (!paraEmb) return null;
+          return { para, sim: cosineSimilarity(paraEmb, claimCentroid) };
+        })
+        .filter((x): x is { para: typeof paragraphs[0]; sim: number } => x !== null)
+        .sort((a, b) => b.sim - a.sim);
+
+      const paraSims = paraScores.map(s => s.sim);
+      const paraElbow = findElbow(paraSims);
+      const paragraphCount = paraScores.length;
+      const safeIndex = Number.isFinite(paraElbow.index)
+        ? Math.max(0, Math.min(paragraphCount - 1, Math.floor(paraElbow.index)))
+        : -1;
+      const paraCutoff = paraElbow.boundaryFound && safeIndex >= 0
+        ? Math.max(safeIndex + 1, Math.min(2, paragraphCount))
+        : Math.min(3, paragraphCount);
+
       candidateStatementIds = new Set<string>();
-      for (const para of paragraphs) {
-        const paraEmb = paragraphEmbeddings.get(para.id);
-        if (!paraEmb) continue;
-        if (cosineSimilarity(paraEmb, claimCentroid) > 0.45) {
-          for (const sid of para.statementIds) candidateStatementIds.add(sid);
-        }
+      for (const { para } of paraScores.slice(0, paraCutoff)) {
+        for (const sid of para.statementIds) candidateStatementIds.add(sid);
       }
     }
 
@@ -151,7 +215,7 @@ export async function triageStatements(
 
       const relevance = cosineSimilarity(sourceEmbedding, claimCentroid);
 
-      if (relevance < relevanceMin) {
+      if (relevance < dynamicRelevanceMin) {
         statementFates.set(sourceStatementId, {
           statementId: sourceStatementId,
           action: 'PROTECTED',
@@ -180,7 +244,7 @@ export async function triageStatements(
             const carrierEmbedding = statementEmbeddings.get(carrier.statementId);
             const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
 
-            if (carrierRelevance < relevanceMin) {
+            if (carrierRelevance < dynamicRelevanceMin) {
               statementFates.set(carrier.statementId, {
                 statementId: carrier.statementId,
                 action: 'PROTECTED',
@@ -239,7 +303,11 @@ export async function triageStatements(
   }
 
   const paraphraseThreshold = 0.85;
+  const paraphraseJaccardThreshold = 0.5; // Step 11: guards against stance-flipped near-duplicates
   const paraphrasesFound: Array<{ original: string; paraphrase: string; similarity: number }> = [];
+
+  // Step 11: Build text lookup for Jaccard computation
+  const stmtTextById = new Map(statements.map(s => [s.id, s.text]));
 
   for (const targetSid of pruningTargets) {
     const targetEmb = statementEmbeddings.get(targetSid);
@@ -255,11 +323,16 @@ export async function triageStatements(
 
       const similarity = cosineSimilarity(targetEmb, emb);
       if (similarity >= paraphraseThreshold) {
+        // Step 11: Jaccard gate — reject stance-flipped near-duplicates
+        const targetText = stmtTextById.get(targetSid) ?? '';
+        const candidateText = stmt.text;
+        const jaccard = tokenJaccard(targetText, candidateText);
+        if (jaccard < paraphraseJaccardThreshold) continue;
         const triggerClaimId = statementFates.get(targetSid)?.triggerClaimId;
         const claimCentroid = triggerClaimId ? claimEmbeddings.get(triggerClaimId) : null;
         const relevance = claimCentroid ? cosineSimilarity(emb, claimCentroid) : 0;
 
-        if (triggerClaimId && (!claimCentroid || relevance < relevanceMin)) {
+        if (triggerClaimId && (!claimCentroid || relevance < dynamicRelevanceMin)) {
           statementFates.set(stmt.id, {
             statementId: stmt.id,
             action: 'PROTECTED',

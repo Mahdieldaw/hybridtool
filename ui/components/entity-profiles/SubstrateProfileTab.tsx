@@ -22,11 +22,14 @@ export function SubstrateProfileTab({ artifact }: SubstrateProfileTabProps) {
   }, [substrateSummary]);
 
   const shapeCards = useMemo(() => {
+    const signals = (substrateSummary?.shape as any)?.signals;
     return [
-      { label: "Shape Prior", value: substrateSummary?.shape?.prior ?? "—" },
       { label: "Shape Confidence", value: formatNum(substrateSummary?.shape?.confidence ?? null, 2) },
+      { label: "Fragmentation", value: formatNum(safeNum(signals?.fragmentationScore ?? null), 3) },
+      { label: "Bimodality", value: formatNum(safeNum(signals?.bimodalityScore ?? null), 3) },
+      { label: "Parallel", value: formatNum(safeNum(signals?.parallelScore ?? null), 3) },
+      { label: "Convergent", value: formatNum(safeNum(signals?.convergentScore ?? null), 3) },
       { label: "Node Count", value: formatInt(substrateSummary?.meta?.nodeCount ?? null) },
-      { label: "Embedding Backend", value: substrateSummary?.meta?.embeddingBackend ?? "—" },
     ];
   }, [substrateSummary]);
 

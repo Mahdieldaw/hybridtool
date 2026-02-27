@@ -59,6 +59,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   const [submissionError, setSubmissionError] = React.useState<string | null>(null);
   const isAwaitingTraversal = pipelineStatus === 'awaiting_traversal';
   const isReadOnly = !isAwaitingTraversal && !!hasReceivedSingularityResponse;
+  const canViewGuidance = isReadOnly && typeof onComplete === 'function';
 
   const hydrationTurnIdRef = React.useRef<string | null>(null);
   const hydratedOverrideRef = React.useRef<TraversalState | null>(null);
@@ -177,13 +178,24 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 ? 'Personalized guidance already generated for this traversal.'
                 : 'Ready to generate your personalized synthesis based on your choices'}
             </p>
-            <button
-              onClick={handleSubmitToConcierge}
-              disabled={isSubmitting || isReadOnly}
-              className="px-8 py-3 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors"
-            >
-              {isReadOnly ? 'Guidance Generated' : (isSubmitting ? 'Generating...' : 'Generate Personalized Guidance')}
-            </button>
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={handleSubmitToConcierge}
+                disabled={isSubmitting || isReadOnly}
+                className="px-8 py-3 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors"
+              >
+                {isReadOnly ? 'Guidance Generated' : (isSubmitting ? 'Generating...' : 'Generate Personalized Guidance')}
+              </button>
+              {canViewGuidance && (
+                <button
+                  type="button"
+                  onClick={() => onComplete?.()}
+                  className="px-4 py-2 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-bold text-text-secondary transition-colors"
+                >
+                  View Guidance
+                </button>
+              )}
+            </div>
             {submissionError && (
               <div className="mt-2">
                 <div className="text-xs text-red-500 font-bold">

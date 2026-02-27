@@ -158,6 +158,46 @@ export interface MetadataRecord {
   updatedAt: number;
 }
 
+// 10. Embeddings Store
+// Geometry-layer embeddings: immutable per turn, independent of mapper
+export interface EmbeddingRecord {
+  id: string;                          // alias of aiTurnId for generic utilities
+  aiTurnId: string;                    // primary key
+  statementEmbeddings?: ArrayBuffer;   // packed Float32Array rows
+  paragraphEmbeddings?: ArrayBuffer;   // packed Float32Array rows
+  queryEmbedding?: ArrayBuffer | null; // single vector (may be absent)
+  meta: {
+    embeddingModelId: string;          // "bge-base-en-v1.5"
+    dimensions: number;                // 768
+    statementCount?: number;
+    paragraphCount?: number;
+    statementIndex?: string[];         // ordered statement IDs → row mapping
+    paragraphIndex?: string[];         // ordered paragraph IDs → row mapping
+    hasStatements?: boolean;
+    hasParagraphs?: boolean;
+    hasQuery?: boolean;
+    timestamp: number;
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Mapper-layer claim embeddings: per provider per turn
+export interface ClaimEmbeddingRecord {
+  id: string;                          // "{aiTurnId}:{providerId}"
+  aiTurnId: string;
+  providerId: string;
+  claimEmbeddings: ArrayBuffer;        // packed Float32Array rows
+  meta: {
+    dimensions: number;
+    claimCount: number;
+    claimIndex: string[];              // ordered claim IDs → row mapping
+    timestamp: number;
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
 // Utility types for operations
 export interface VersionConflictResult {
   success: boolean;

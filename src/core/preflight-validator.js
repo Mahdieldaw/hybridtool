@@ -63,8 +63,11 @@ export async function runPreflight(request, authStatus, availableProviders) {
     }
 
     // === Filter batch providers ===
+    // Only block if explicitly false (not authorized)
+    // Allow undefined/null (unknown - will verify on actual use)
     let providers = (request.providers || []).filter(pid => {
-        if (!isProviderAuthorized(pid, authStatus)) {
+        const status = authStatus[pid.toLowerCase()];
+        if (status === false) {
             warnings.push(`Provider "${pid}" is not authorized and was removed from batch`);
             return false;
         }
@@ -72,15 +75,21 @@ export async function runPreflight(request, authStatus, availableProviders) {
     });
 
     // If no providers left, pick smart defaults
+    // Only exclude if explicitly false, allow undefined
     if (providers.length === 0) {
         providers = PROVIDER_PRIORITIES.batch
-            .filter(pid => isProviderAuthorized(pid, authStatus) && availableProviders.includes(pid))
+            .filter(pid => {
+                const status = authStatus[pid.toLowerCase()];
+                const notExplicitlyFalse = status !== false;
+                return notExplicitlyFalse && availableProviders.includes(pid);
+            })
             .slice(0, 3);
     }
 
     // === Mapper ===
     let mapper = request.mapper || null;
-    if (mapper && !isProviderAuthorized(mapper, authStatus)) {
+    // Only block if explicitly false, not if undefined
+    if (mapper && authStatus[mapper.toLowerCase()] === false) {
         const candidate = selectBestProvider('mapping', authStatus, availableProviders);
         if (locks.mapping === mapper) {
             if (candidate) {
@@ -99,7 +108,8 @@ export async function runPreflight(request, authStatus, availableProviders) {
 
     // === Singularity ===
     let singularity = request.singularity || null;
-    if (singularity && !isProviderAuthorized(singularity, authStatus)) {
+    // Only block if explicitly false, not if undefined
+    if (singularity && authStatus[singularity.toLowerCase()] === false) {
         // Check singularity lock to determine fallback behavior
         const candidate = selectBestProvider('singularity', authStatus, availableProviders);
         if (locks.singularity) {

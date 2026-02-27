@@ -15,6 +15,82 @@ import type { ShadowStatement } from '../shadow/ShadowExtractor';
 import type { EmbeddingResult, StatementEmbeddingResult } from './types';
 import { ClusteringConfig, DEFAULT_CONFIG } from './config';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STRUCTURED TRUNCATION (query relevance embedding path)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const STRUCTURAL_LINE_RE = /^\s*(?:[-*•]\s+|\d+[.)]\s+|#{1,6}\s+|(?:you must|ensure that|do not|always|never|important|note|warning|requirement)[:\s])/i;
+
+interface TextRange { start: number; end: number; }
+
+/**
+ * Intelligently truncate long text to fit within a character budget while
+ * preserving the highest-signal content for embedding quality.
+ *
+ * Strategy:
+ * 1. Extract structural elements (bullets, numbered lists, headers, directives)
+ *    — cap at 60% of budget
+ * 2. Split remaining budget 50/50 between head (framing/context) and tail
+ *    (closing instructions)
+ * 3. Deduplicate overlapping ranges
+ * 4. Reassemble in original document order (local coherence matters)
+ */
+export function structuredTruncate(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+
+    const lines = text.split('\n');
+    const structuralRanges: TextRange[] = [];
+    let offset = 0;
+
+    for (const line of lines) {
+        if (STRUCTURAL_LINE_RE.test(line)) {
+            structuralRanges.push({ start: offset, end: offset + line.length });
+        }
+        offset += line.length + 1; // +1 for newline
+    }
+
+    // Cap structural content at 60% of budget
+    const structuralBudget = Math.floor(maxChars * 0.6);
+    let structuralChars = 0;
+    const keptStructural: TextRange[] = [];
+    for (const range of structuralRanges) {
+        const len = range.end - range.start;
+        const joinCost = keptStructural.length > 0 ? 1 : 0;
+        if (structuralChars + joinCost + len > structuralBudget) break;
+        keptStructural.push(range);
+        structuralChars += joinCost + len;
+    }
+
+    // Remaining budget split 50/50 head/tail
+    const newlineBudget = keptStructural.length + 1;
+    const remaining = Math.max(0, maxChars - structuralChars - newlineBudget);
+    const headBudget = Math.floor(remaining * 0.5);
+    const tailBudget = remaining - headBudget;
+
+    const headRange: TextRange = { start: 0, end: Math.min(headBudget, text.length) };
+    const tailRange: TextRange = {
+        start: Math.max(0, text.length - tailBudget),
+        end: text.length,
+    };
+
+    // Merge all ranges, deduplicate overlaps, sort by start position
+    const allRanges = [...keptStructural, headRange, tailRange]
+        .sort((a, b) => a.start - b.start);
+
+    const merged: TextRange[] = [];
+    for (const r of allRanges) {
+        const last = merged[merged.length - 1];
+        if (last && r.start <= last.end) {
+            last.end = Math.max(last.end, r.end);
+        } else {
+            merged.push({ start: r.start, end: r.end });
+        }
+    }
+
+    const assembled = merged.map(r => text.slice(r.start, r.end)).join('\n');
+    return assembled.length > maxChars ? assembled.slice(0, maxChars) : assembled;
+}
+
 /**
  * Ensure offscreen document exists for embedding inference.
  */

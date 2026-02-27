@@ -2,10 +2,17 @@
 // SURVEY MAPPER - PROMPT BUILDER + PARSER
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Runs after the semantic mapper. Receives claims + edges + original batch
-// texts and produces traversal gates using strict survey methodology.
+// Runs after the blast radius filter. Receives ONLY the pre-filtered
+// high-blast-radius claims and generates per-claim yes/no questions.
 //
-// The semantic mapper finds positions. This mapper asks the right questions.
+// The blast radius filter decides WHICH claims matter.
+// This mapper translates each into a human-readable question about the
+// user's real-world situation.
+//
+// The LLM's job is narrow: for each claim independently, identify the
+// hidden real-world assumption and write one yes/no question testing it.
+// It does NOT reason across claims or detect conflicts — the math already
+// did that.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { extractJsonFromContent } from '../../shared/parsing-utils';
@@ -21,6 +28,7 @@ type ClaimSummary = {
   label: string;
   text?: string;
   supporters?: number[];
+  blastRadius?: number;
 };
 
 type EdgeSummary = {
@@ -35,17 +43,12 @@ function formatClaimsForPrompt(claims: ClaimSummary[]): string {
       const supporters = Array.isArray(c.supporters) && c.supporters.length > 0
         ? ` [Models: ${c.supporters.join(', ')}]`
         : '';
-      return `[${c.id}] ${c.label}${supporters}\n${c.text || ''}`.trim();
+      const br = typeof c.blastRadius === 'number'
+        ? ` [blast_radius: ${c.blastRadius.toFixed(2)}]`
+        : '';
+      return `[${c.id}] ${c.label}${supporters}${br}\n${c.text || ''}`.trim();
     })
     .join('\n\n');
-}
-
-function formatEdgesForPrompt(edges: EdgeSummary[]): string {
-  const relevant = edges.filter((e) => e.type === 'conflicts' || e.type === 'tradeoff');
-  if (relevant.length === 0) return '(none)';
-  return relevant
-    .map((e) => `${e.from} ←[${e.type}]→ ${e.to}`)
-    .join('\n');
 }
 
 function formatBatchTexts(responses: RawModelResponse[]): string {
@@ -73,50 +76,29 @@ function formatBatchTexts(responses: RawModelResponse[]): string {
 export function buildSurveyMapperPrompt(
   userQuery: string,
   claims: ClaimSummary[],
-  edges: EdgeSummary[],
+  _edges: EdgeSummary[],
   batchTexts: RawModelResponse[]
 ): string {
   const claimsBlock = formatClaimsForPrompt(claims);
-  const edgesBlock = formatEdgesForPrompt(edges);
   const sourcesBlock = formatBatchTexts(batchTexts);
 
-  return `You are a Survey Methodologist. A semantic analysis has produced claims and edges from multiple model responses to:
+  return `You are a Survey Methodologist. The user asked:
 
 <original_query>${userQuery}</original_query>
 
-Your job: determine which conflict or tradeoff edges are genuine gates — decision points where the user's observable reality resolves the tension. Most edges are not gates. Zero gates is the expected baseline.
+A structural analysis identified the following claims as HIGH-IMPACT: removing any of them would significantly alter the synthesis. Your job: for EACH claim independently, identify the hidden real-world assumption that must be true for this claim to matter to this specific user.
 
-Two instruments. No others exist.
-
-**forced_choice**: The user's situation cannot accommodate both claims. Not "prefers one" — *cannot act on both*. If a user with sufficient time, resources, and intent could pursue both, even sequentially, it is not a forced choice. Name the physical constraint that forecloses one path when the other is taken. If you cannot name it, you do not have a forced choice.
-
-**conditional_gate**: One claim applies only if a specific condition is true about the user's situation. Not preference — *applicability*. The claim is either relevant to this person or structurally irrelevant. If the claim applies regardless, there is no gate.
-
-The litmus: if the user's answer cannot cause a claim to become inapplicable to their situation — not less preferred, not lower priority, but structurally irrelevant — you do not have a gate. Do not output it.
-
-If the question requires the user to report on more than one fact about their situation, you have two gates or zero gates, not one. Split or discard.
-
----
-
-For each gate, complete these fields in this order. The order is load-bearing — each field constrains the next:
-
-1. **construct**: The measurable property of the user's reality this question operationalizes. Name something observable about their world — not a feature of the solution space, not a technical concept from the claims. If you cannot name a real-world construct, you do not have a gate.
-
-2. **fork**: The technical reason the claims are in tension. System-facing only — the user never sees this.
-
-3. **hinge**: The observable fact about the user's world that resolves the fork. The thing you could verify by visiting their workplace, checking their calendar, watching their last five decisions. Must be answerable by someone who has never encountered any technical term in the claims.
-
-4. **question**: Derived from the hinge. Never from the fork. A single binary or forced-choice question about one observable fact. The user reports reality. The system maps to claims.
-
-5. **affectedClaims**: Claim ids pruned when the user's answer indicates inapplicability. For forced_choice: both sides listed — the answer determines which side is pruned. For conditional_gate: claims irrelevant when the condition is false.
+Rules:
+1. Treat each claim independently. Do NOT reason about relationships between claims.
+2. For each claim, ask: "What real-world condition about the user's situation must be true for this claim to be relevant?"
+3. Write a yes/no question about ONE observable fact the user can report — something you could verify by visiting their workplace, checking their calendar, or watching their last five decisions.
+4. The question must be about the user's reality (their constraints, context, goals), NOT about the solution space or technical preferences.
+5. If no meaningful condition exists — the claim applies universally regardless of the user's situation — do NOT generate a gate for that claim. Fewer gates is better. Zero gates is valid.
+6. If the user's answer cannot cause a claim to become *inapplicable* (not less preferred, not lower priority, but structurally irrelevant), you do not have a gate. Do not output it.
 
 <claims>
 ${claimsBlock}
 </claims>
-
-<conflict_and_tradeoff_edges>
-${edgesBlock}
-</conflict_and_tradeoff_edges>
 
 <source_responses>
 ${sourcesBlock}
@@ -131,19 +113,15 @@ Output JSON:
   "gates": [
     {
       "id": "gate_1",
-      "claims": ["claim_A", "claim_B"],
-      "construct": "...",
-      "classification": "forced_choice | conditional_gate",
-      "fork": "...",
-      "hinge": "...",
-      "question": "...",
-      "affectedClaims": ["claim_A", "claim_B"]
+      "question": "Do you have [observable real-world condition]?",
+      "reasoning": "This claim assumes [hidden assumption]. If false, the claim is structurally irrelevant because [explanation].",
+      "affectedClaims": ["claim_X"]
     }
   ]
 }
 \`\`\`
 
-If no edge qualifies — and most will not — output \`{ "gates": [] }\` and explain briefly outside the JSON block which edges you evaluated and why each failed. This explanation is for debugging only.`;
+If no claim has a meaningful hidden assumption — and many will not — output \`{ "gates": [] }\` and explain briefly outside the JSON block which claims you evaluated and why each lacks a gate. This explanation is for debugging only.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -168,26 +146,22 @@ function extractRationale(rawText: string, jsonStart: number, jsonEnd: number): 
   return stripped.length > 0 ? stripped : null;
 }
 
-function validateGate(gate: unknown, errors: string[]): gate is SurveyGate {
+function validateGate(gate: unknown, errors: string[]): boolean {
   if (!gate || typeof gate !== 'object') {
     errors.push('Gate is not an object');
     return false;
   }
   const g = gate as Record<string, unknown>;
   if (!g.id || typeof g.id !== 'string') {
-    errors.push(`Gate missing id`);
-    return false;
-  }
-  if (!Array.isArray(g.claims) || g.claims.length < 2) {
-    errors.push(`Gate ${g.id}: claims must be an array with at least 2 entries`);
-    return false;
-  }
-  if (g.classification !== 'forced_choice' && g.classification !== 'conditional_gate') {
-    errors.push(`Gate ${g.id}: classification must be 'forced_choice' or 'conditional_gate'`);
+    errors.push('Gate missing id');
     return false;
   }
   if (!g.question || typeof g.question !== 'string' || !g.question.trim()) {
     errors.push(`Gate ${g.id}: question is empty`);
+    return false;
+  }
+  if (!Array.isArray(g.affectedClaims) || g.affectedClaims.length === 0) {
+    errors.push(`Gate ${g.id}: affectedClaims must be a non-empty array`);
     return false;
   }
   return true;
@@ -208,7 +182,7 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
     jsonStart = text.indexOf(fenceMatch[0]);
     jsonEnd = jsonStart + fenceMatch[0].length;
   } else {
-    // Fall back to extractJsonFromContent
+    // Fall back to bare object extraction
     const firstBrace = text.indexOf('{');
     const lastBrace = text.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -240,17 +214,15 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
   const gates: SurveyGate[] = [];
   for (const raw of obj.gates) {
     if (validateGate(raw, errors)) {
+      const r = raw as Record<string, unknown>;
       gates.push({
-        id: String(raw.id).trim(),
-        claims: (raw.claims || []).map((c) => String(c).trim()).filter(Boolean),
-        construct: String(raw.construct || '').trim(),
-        classification: raw.classification,
-        fork: String(raw.fork || '').trim(),
-        hinge: String(raw.hinge || '').trim(),
-        question: String(raw.question || '').trim(),
-        affectedClaims: Array.isArray(raw.affectedClaims)
-          ? raw.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
-          : (raw.claims || []).map((c) => String(c).trim()).filter(Boolean),
+        id: String(r.id).trim(),
+        question: String(r.question || '').trim(),
+        reasoning: String(r.reasoning || '').trim(),
+        affectedClaims: Array.isArray(r.affectedClaims)
+          ? r.affectedClaims.map((c: unknown) => String(c).trim()).filter(Boolean)
+          : [],
+        blastRadius: typeof r.blastRadius === 'number' ? r.blastRadius : 0,
       });
     }
   }

@@ -13,6 +13,7 @@ import {
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
 import { formatSubstrateForPrompt } from '../../skeletonization';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
+import { DEFAULT_CONFIG } from '../../clustering';
 // computeExplore import removed (unused)
 // persona signal injections removed (absorbed by Concierge)
 
@@ -572,7 +573,7 @@ export class StepExecutor {
           clusteringModule = await import('../../clustering');
         }
 
-        const { generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, getEmbeddingStatus, DEFAULT_CONFIG } = clusteringModule;
+        const { generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, structuredTruncate, getEmbeddingStatus, DEFAULT_CONFIG } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
@@ -580,21 +581,31 @@ export class StepExecutor {
           (payload && typeof payload.originalPrompt === 'string' && payload.originalPrompt) ||
           (context && typeof context.userMessage === 'string' && context.userMessage) ||
           '';
-        const cleanedQuery = stripInlineMarkdown(String(rawQuery || ''));
+        const cleanedQuery = stripInlineMarkdown(String(rawQuery || '')).trim();
+        // BGE-base-en-v1.5: 512 token limit ≈ 1800 chars. Reserve 60 for the query prefix.
+        const truncatedQuery = structuredTruncate(cleanedQuery, 1740);
+        const queryTextForEmbedding =
+          truncatedQuery && !truncatedQuery.toLowerCase().startsWith('represent this sentence for searching relevant passages:')
+            ? `Represent this sentence for searching relevant passages: ${truncatedQuery}`
+            : truncatedQuery;
         try {
-          const queryEmbeddingBatch = await generateTextEmbeddings([cleanedQuery], DEFAULT_CONFIG);
+          console.log(`[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`);
+          const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG);
+          console.log(`[StepExecutor] Query embedding batch: size=${queryEmbeddingBatch?.size ?? 'null'}, keys=[${queryEmbeddingBatch ? Array.from(queryEmbeddingBatch.keys()).join(',') : 'null'}]`);
           queryEmbedding = queryEmbeddingBatch.get('0') || null;
           if (queryEmbedding && queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
             throw new Error(
               `[StepExecutor] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${queryEmbedding.length}`
             );
           }
+          console.log(`[StepExecutor] Query embedding: ${queryEmbedding ? `ok (dim=${queryEmbedding.length})` : 'FAILED - null result from batch.get("0")'}`);
           geometryDiagnostics.stages.queryEmbedding = {
             status: queryEmbedding ? 'ok' : 'failed',
             dimensions: queryEmbedding ? queryEmbedding.length : null,
           };
         } catch (err) {
           queryEmbedding = null;
+          console.warn(`[StepExecutor] Query embedding THREW:`, getErrorMessage(err));
           geometryDiagnostics.stages.queryEmbedding = {
             status: 'failed',
             error: getErrorMessage(err),
@@ -668,8 +679,13 @@ export class StepExecutor {
 
           substrateSummary = {
             shape: {
-              prior: String(substrate?.shape?.prior || 'unknown'),
               confidence: typeof substrate?.shape?.confidence === 'number' ? substrate.shape.confidence : 0,
+              signals: {
+                fragmentationScore: typeof substrate?.shape?.signals?.fragmentationScore === 'number' ? substrate.shape.signals.fragmentationScore : 0,
+                bimodalityScore: typeof substrate?.shape?.signals?.bimodalityScore === 'number' ? substrate.shape.signals.bimodalityScore : 0,
+                parallelScore: typeof substrate?.shape?.signals?.parallelScore === 'number' ? substrate.shape.signals.parallelScore : 0,
+                convergentScore: typeof substrate?.shape?.signals?.convergentScore === 'number' ? substrate.shape.signals.convergentScore : 0,
+              },
             },
             topology: {
               componentCount: typeof substrate?.topology?.componentCount === 'number' ? substrate.topology.componentCount : 0,
@@ -758,15 +774,20 @@ export class StepExecutor {
               regionization: preSemanticInterpretation?.regionization || null,
               regionProfiles: preSemanticInterpretation?.regionProfiles || null,
             });
+            const qrCount = queryRelevance?.statementScores?.size ?? 0;
+            console.log(`[StepExecutor] Query relevance computed: ${qrCount} statements scored`);
             geometryDiagnostics.stages.queryRelevance = {
               status: queryRelevance ? 'ok' : 'failed',
+              statementCount: qrCount,
               ...(queryRelevance?.meta ? { meta: queryRelevance.meta } : {}),
             };
           } else {
             queryRelevance = null;
+            const skipReason = !queryEmbedding ? 'queryEmbedding=null' : !substrate ? 'substrate=null' : 'substrateDegenerate=true';
+            console.warn(`[StepExecutor] Query relevance SKIPPED: ${skipReason}`);
             geometryDiagnostics.stages.queryRelevance = {
               status: 'skipped',
-              reason: 'missing_query_embedding_or_geometry',
+              reason: skipReason,
             };
           }
         } catch (err) {
@@ -833,6 +854,20 @@ export class StepExecutor {
                 rank: e.rank,
               })),
               softThreshold: substrate.graphs?.strong?.softThreshold,
+              similarityStats: substrate.meta?.similarityStats || null,
+              extendedSimilarityStats: substrate.meta?.extendedSimilarityStats || null,
+              allPairwiseSimilarities: (() => {
+                const sims = substrate.meta?.allPairwiseSimilarities;
+                if (!Array.isArray(sims)) return null;
+                const cap = 20000;
+                if (sims.length <= cap) return sims;
+                const step = Math.ceil(sims.length / cap);
+                const sampled = [];
+                for (let i = 0; i < sims.length && sampled.length < cap; i += step) {
+                  sampled.push(sims[i]);
+                }
+                return sampled;
+              })(),
             };
           } else {
             substrateGraph = null;
@@ -887,6 +922,53 @@ export class StepExecutor {
         timeMs: 0,
         reason,
       };
+    }
+
+    // 2.7 PERSIST EMBEDDINGS (fire-and-forget)
+    try {
+      if (options.sessionManager && context.canonicalAiTurnId) {
+        const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
+        const stmtDim = statementEmbeddingResult?.embeddings?.values?.().next?.().value?.length;
+        const paraDim = geometryParagraphEmbeddings?.values?.().next?.().value?.length;
+        const queryDim = queryEmbedding?.length;
+        const dims = Number.isFinite(queryDim) && queryDim > 0
+          ? queryDim
+          : Number.isFinite(paraDim) && paraDim > 0
+            ? paraDim
+            : Number.isFinite(stmtDim) && stmtDim > 0
+              ? stmtDim
+              : DEFAULT_CONFIG.embeddingDimensions;
+
+        const packedStatements = statementEmbeddingResult?.embeddings
+          ? packEmbeddingMap(statementEmbeddingResult.embeddings, dims)
+          : null;
+        const packedParagraphs = geometryParagraphEmbeddings
+          ? packEmbeddingMap(geometryParagraphEmbeddings, dims)
+          : null;
+        const queryBuffer = queryEmbedding
+          ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
+          : null;
+
+        if (packedStatements || packedParagraphs || queryBuffer) {
+          options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
+            ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
+            ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
+            ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
+            meta: {
+              embeddingModelId: DEFAULT_CONFIG.modelId,
+              dimensions: dims,
+              hasStatements: Boolean(packedStatements),
+              hasParagraphs: Boolean(packedParagraphs),
+              hasQuery: Boolean(queryBuffer),
+              ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
+              ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
+              timestamp: Date.now(),
+            },
+          }).catch((err) => console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err));
+        }
+      }
+    } catch (err) {
+      console.warn('[StepExecutor] Embedding persistence setup failed (non-blocking):', err);
     }
 
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
@@ -959,6 +1041,7 @@ export class StepExecutor {
             let topUnindexed = null;
             let referencedIds = null;
             let structuralValidation = null;
+            const paragraphClusteringSummary = null; // clustering not implemented in this path
 
             if (finalResult?.text) {
               // 4. Parse (New Parser)
@@ -989,6 +1072,50 @@ export class StepExecutor {
                   challenges: c?.challenges || null,
                 }));
 
+                // Generate claim embeddings ONCE — reused by provenance + elbow diagnostics
+                let claimEmbeddings = null;
+                try {
+                  const { generateClaimEmbeddings } = await import('../../ConciergeService/claimAssembly');
+                  claimEmbeddings = await generateClaimEmbeddings(mapperClaimsForProvenance);
+                } catch (claimEmbErr) {
+                  console.warn('[StepExecutor] Claim embedding generation failed:', getErrorMessage(claimEmbErr));
+                }
+
+                // Persist claim embeddings keyed by provider (mapper-layer, not geometry-layer)
+                try {
+                  if (claimEmbeddings && claimEmbeddings.size > 0 && options.sessionManager && context.canonicalAiTurnId) {
+                    const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
+                    let dims = 0;
+                    for (const v of claimEmbeddings.values()) {
+                      const n = v?.length;
+                      if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
+                        dims = n;
+                        break;
+                      }
+                    }
+                    if (dims > 0) {
+                      const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
+                      options.sessionManager.persistClaimEmbeddings(
+                        context.canonicalAiTurnId,
+                        payload.mappingProvider,
+                        {
+                          claimEmbeddings: packedClaims.buffer,
+                          meta: {
+                            dimensions: dims,
+                            claimCount: packedClaims.index.length,
+                            claimIndex: packedClaims.index,
+                            timestamp: Date.now(),
+                          },
+                        },
+                      ).catch((err) => console.warn('[StepExecutor] Claim embedding persistence failed:', err));
+                    } else {
+                      console.warn(`[StepExecutor] Claim embedding persistence skipped: invalid dimensions (aiTurnId=${context.canonicalAiTurnId}, provider=${payload.mappingProvider})`);
+                    }
+                  }
+                } catch (err) {
+                  console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
+                }
+
                 enrichedClaims = await reconstructProvenance(
                   mapperClaimsForProvenance,
                   shadowResult.statements,
@@ -996,27 +1123,138 @@ export class StepExecutor {
                   embeddingResult?.embeddings || new Map(),
                   regions,
                   citationOrder.length,
-                  statementEmbeddingResult?.embeddings || null
+                  statementEmbeddingResult?.embeddings || null,
+                  claimEmbeddings,
                 );
 
-                // ── SURVEY MAPPER ─────────────────────────────────────────
-                // Runs after enrichedClaims are ready. Produces gates (forced_choice /
-                // conditional_gate) using strict survey methodology. Toggle useSurveyMapper
-                // to false to bypass entirely and flow straight to Singularity with no gates.
+                // ── CLAIM PROVENANCE (moved before blast radius filter) ────
+                let mapperArtifact_claimProvenance = null;
+                let claimProvenanceOwnership = null;
+                let claimProvenanceExclusivity = null;
+                let claimProvenanceOverlap = null;
+                try {
+                  const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
+                  claimProvenanceOwnership = computeStatementOwnership(enrichedClaims);
+                  claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, claimProvenanceOwnership);
+                  claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
+                  // Compute elbow diagnostics from pre-computed embeddings (pure math, no ONNX)
+                  let elbowDiagnostics = null;
+                  try {
+                    const { computeElbowDiagnostics } = await import('../../ConciergeService/claimAssembly');
+                    elbowDiagnostics = computeElbowDiagnostics(
+                      mapperClaimsForProvenance,
+                      embeddingResult?.embeddings || new Map(),
+                      claimEmbeddings || new Map(),
+                    );
+                  } catch (elbowErr) {
+                    console.warn('[StepExecutor] Elbow diagnostics failed:', getErrorMessage(elbowErr));
+                  }
+
+                  let competitiveAssignmentDiagnostics = null;
+                  try {
+                    const { computeCompetitiveAssignmentDiagnostics } = await import('../../ConciergeService/claimAssembly');
+                    competitiveAssignmentDiagnostics = computeCompetitiveAssignmentDiagnostics(
+                      mapperClaimsForProvenance,
+                      embeddingResult?.embeddings || new Map(),
+                      claimEmbeddings || new Map(),
+                      paragraphResult.paragraphs,
+                    );
+                  } catch (cadErr) {
+                    console.warn('[StepExecutor] Competitive assignment diagnostics failed:', getErrorMessage(cadErr));
+                  }
+
+                  mapperArtifact_claimProvenance = {
+                    statementOwnership: Object.fromEntries(
+                      Array.from(claimProvenanceOwnership.entries()).map(([k, v]) => [k, Array.from(v)])
+                    ),
+                    claimExclusivity: Object.fromEntries(claimProvenanceExclusivity),
+                    claimOverlap: claimProvenanceOverlap,
+                    ...(elbowDiagnostics ? { elbowDiagnostics } : {}),
+                    ...(competitiveAssignmentDiagnostics ? { competitiveAssignmentDiagnostics } : {}),
+                  };
+                } catch (err) {
+                  console.warn('[StepExecutor] Claim provenance (pre-filter) failed:', getErrorMessage(err));
+                }
+
+                // ── STRUCTURAL ANALYSIS (moved before blast radius filter) ──
+                let cachedStructuralAnalysis = null;
+                try {
+                  if (enrichedClaims.length > 0) {
+                    const { computeStructuralAnalysis } = await import('../PromptMethods');
+                    const tempCognitive = buildCognitiveArtifact({
+                      claims: enrichedClaims,
+                      edges: unifiedEdges,
+                      conditionals: unifiedConditionals,
+                      narrative: '',
+                      ghosts: null,
+                    }, null);
+                    cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
+                  }
+                } catch (err) {
+                  console.warn('[StepExecutor] Structural analysis (pre-filter) failed:', getErrorMessage(err));
+                }
+
+                // ── BLAST RADIUS FILTER ─────────────────────────────────────
+                let blastRadiusResult = null;
+                try {
+                  if (cachedStructuralAnalysis && claimProvenanceExclusivity && claimProvenanceOverlap) {
+                    const { computeBlastRadiusFilter } = await import('../blast-radius/blastRadiusFilter');
+                    blastRadiusResult = computeBlastRadiusFilter({
+                      claims: cachedStructuralAnalysis.claimsWithLeverage,
+                      edges: unifiedEdges,
+                      cascadeRisks: cachedStructuralAnalysis.patterns.cascadeRisks,
+                      exclusivity: claimProvenanceExclusivity,
+                      overlap: claimProvenanceOverlap,
+                      articulationPoints: cachedStructuralAnalysis.graph?.articulationPoints || [],
+                      queryRelevanceScores: queryRelevance?.statementScores || null,
+                      modelCount: citationOrder.length,
+                      convergenceRatio: cachedStructuralAnalysis.landscape.convergenceRatio,
+                    });
+                    console.log(`[BlastRadius] ceiling=${blastRadiusResult.questionCeiling}, skip=${blastRadiusResult.skipSurvey}, axes=${blastRadiusResult.axes.length}, suppressed=${blastRadiusResult.meta.suppressedCount}/${blastRadiusResult.meta.totalClaims}`);
+                  }
+                } catch (err) {
+                  console.warn('[BlastRadius] Filter failed, falling back to full survey mapper:', getErrorMessage(err));
+                  blastRadiusResult = null;
+                }
+
+                // ── SURVEY MAPPER (gated by blast radius filter) ────────────
+                // When the blast radius filter says skipSurvey, no LLM call is made.
+                // When the filter provides axes, only those claims are sent.
+                // Fallback: if filter failed (null), runs the mapper on all claims.
                 let surveyRationale = null;
                 const useSurveyMapper = true;
+                const shouldRunSurvey = useSurveyMapper
+                  && enrichedClaims.length > 0
+                  && (!blastRadiusResult || !blastRadiusResult.skipSurvey);
 
-                if (useSurveyMapper && enrichedClaims.length > 0) {
+                if (shouldRunSurvey) {
                   try {
                     const { buildSurveyMapperPrompt, parseSurveyMapperOutput: parseSurveyOutput } =
                       await import('../../ConciergeService/surveyMapper');
 
-                    const claimsForSurvey = enrichedClaims.map((c) => ({
-                      id: String(c?.id || ''),
-                      label: String(c?.label || ''),
-                      text: String(c?.text || ''),
-                      supporters: Array.isArray(c?.supporters) ? c.supporters : [],
-                    }));
+                    // If blast radius filter provided axes, scope to those claims only.
+                    // Otherwise fall back to all enriched claims.
+                    let claimsForSurvey;
+                    if (blastRadiusResult && blastRadiusResult.axes.length > 0) {
+                      const axisClaims = new Set(blastRadiusResult.axes.flatMap(a => a.claimIds));
+                      const scoreMap = new Map(blastRadiusResult.scores.map(s => [s.claimId, s.composite]));
+                      claimsForSurvey = enrichedClaims
+                        .filter(c => axisClaims.has(c.id))
+                        .map((c) => ({
+                          id: String(c?.id || ''),
+                          label: String(c?.label || ''),
+                          text: String(c?.text || ''),
+                          supporters: Array.isArray(c?.supporters) ? c.supporters : [],
+                          blastRadius: scoreMap.get(c.id) || 0,
+                        }));
+                    } else {
+                      claimsForSurvey = enrichedClaims.map((c) => ({
+                        id: String(c?.id || ''),
+                        label: String(c?.label || ''),
+                        text: String(c?.text || ''),
+                        supporters: Array.isArray(c?.supporters) ? c.supporters : [],
+                      }));
+                    }
 
                     const surveyPrompt = buildSurveyMapperPrompt(
                       payload.originalPrompt,
@@ -1053,37 +1291,28 @@ export class StepExecutor {
                       }
                       console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
 
-                      // Rebuild unifiedConditionals and gateQuestionByClaimPair from survey gates
+                      // Rebuild unifiedConditionals from survey gates.
+                      // With the blast radius filter, all gates are conditional —
+                      // the forced_choice/conditional_gate distinction is removed.
                       unifiedConditionals = [];
                       gateQuestionByClaimPair = new Map();
 
                       for (const gate of rawGates) {
                         if (!gate || !gate.id) continue;
-                        const gClaims = Array.isArray(gate.claims)
-                          ? gate.claims.map((c) => String(c).trim()).filter(Boolean)
+                        const affected = Array.isArray(gate.affectedClaims)
+                          ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
                           : [];
-                        if (gClaims.length === 0) continue;
+                        if (affected.length === 0) continue;
 
-                        if (gate.classification === 'conditional_gate') {
-                          const affected = Array.isArray(gate.affectedClaims) && gate.affectedClaims.length > 0
-                            ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
-                            : gClaims;
-                          unifiedConditionals.push({
-                            id: gate.id,
-                            question: String(gate.question || '').trim(),
-                            affectedClaims: affected,
-                            construct: gate.construct || null,
-                            hinge: gate.hinge || null,
-                            classification: 'conditional_gate',
-                          });
-                        } else if (gate.classification === 'forced_choice' && gClaims.length >= 2) {
-                          for (let i = 0; i < gClaims.length; i++) {
-                            for (let j = i + 1; j < gClaims.length; j++) {
-                              const key = [gClaims[i], gClaims[j]].sort().join('::');
-                              gateQuestionByClaimPair.set(key, String(gate.question || '').trim());
-                            }
-                          }
-                        }
+                        unifiedConditionals.push({
+                          id: gate.id,
+                          question: String(gate.question || '').trim(),
+                          affectedClaims: affected,
+                          construct: null,
+                          hinge: null,
+                          classification: 'conditional_gate',
+                        });
+
                       }
                     }
                   } catch (err) {
@@ -1168,21 +1397,38 @@ export class StepExecutor {
                   if (id) claimOrder.set(id, i);
                 }
 
+                // ── CONFLICT TIERING ──────────────────────────────────────
+                // When the blast radius filter ran successfully, conflict edges
+                // are NOT used for tiering or forcing points. The filter already
+                // analyzed all structural tensions and routed the important ones
+                // through the survey mapper as conditional gates. All claims go
+                // to tier 0 (foundation) and conflict forcing points are suppressed.
+                // Blast radius is "active" whenever the filter ran successfully (not null).
+                // Whether it skipped the survey (zero questions) or produced axes, the
+                // filter has already analyzed all tensions. The mechanical conflict path
+                // is only needed as fallback when the filter itself failed.
+                const blastRadiusActive = blastRadiusResult != null;
+
                 const conflictClaimIdSet = new Set();
                 const conflictAdj = new Map();
-                for (const e of unifiedEdges) {
-                  if (!e || e.type !== 'conflicts') continue;
-                  const from = String(e.from || '').trim();
-                  const to = String(e.to || '').trim();
-                  if (!from || !to) continue;
 
-                  conflictClaimIdSet.add(from);
-                  conflictClaimIdSet.add(to);
+                if (!blastRadiusActive) {
+                  // Legacy path: blast radius filter failed or wasn't computed.
+                  // Build conflict tiering from semantic mapper edges.
+                  for (const e of unifiedEdges) {
+                    if (!e || e.type !== 'conflicts') continue;
+                    const from = String(e.from || '').trim();
+                    const to = String(e.to || '').trim();
+                    if (!from || !to) continue;
 
-                  if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
-                  if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
-                  conflictAdj.get(from).add(to);
-                  conflictAdj.get(to).add(from);
+                    conflictClaimIdSet.add(from);
+                    conflictClaimIdSet.add(to);
+
+                    if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
+                    if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
+                    conflictAdj.get(from).add(to);
+                    conflictAdj.get(to).add(from);
+                  }
                 }
 
                 const foundationClaimIds = [];
@@ -1191,32 +1437,34 @@ export class StepExecutor {
                 }
 
                 const conflictComponents = [];
-                const visited = new Set();
-                for (const id of Array.from(conflictClaimIdSet)) {
-                  if (visited.has(id)) continue;
-                  const stack = [id];
-                  const component = [];
-                  visited.add(id);
-                  while (stack.length > 0) {
-                    const cur = stack.pop();
-                    component.push(cur);
-                    const neighbors = conflictAdj.get(cur);
-                    if (!neighbors) continue;
-                    for (const n of Array.from(neighbors)) {
-                      if (visited.has(n)) continue;
-                      visited.add(n);
-                      stack.push(n);
+                if (!blastRadiusActive) {
+                  const visited = new Set();
+                  for (const id of Array.from(conflictClaimIdSet)) {
+                    if (visited.has(id)) continue;
+                    const stack = [id];
+                    const component = [];
+                    visited.add(id);
+                    while (stack.length > 0) {
+                      const cur = stack.pop();
+                      component.push(cur);
+                      const neighbors = conflictAdj.get(cur);
+                      if (!neighbors) continue;
+                      for (const n of Array.from(neighbors)) {
+                        if (visited.has(n)) continue;
+                        visited.add(n);
+                        stack.push(n);
+                      }
                     }
+                    component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
+                    conflictComponents.push(component);
                   }
-                  component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
-                  conflictComponents.push(component);
-                }
 
-                conflictComponents.sort((a, b) => {
-                  const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
-                  const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
-                  return amin - bmin;
-                });
+                  conflictComponents.sort((a, b) => {
+                    const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
+                    const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
+                    return amin - bmin;
+                  });
+                }
 
                 const tiers = [
                   { tierIndex: 0, claimIds: foundationClaimIds, gates: [] },
@@ -1238,24 +1486,27 @@ export class StepExecutor {
                 const enablesById = new Map();
                 const conflictsById = new Map();
 
-                for (const e of unifiedEdges) {
-                  if (!e) continue;
-                  const edgeType = String(e.type || '').trim();
-                  if (edgeType === 'conflicts') {
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-                    if (!conflictsById.has(from)) conflictsById.set(from, []);
-                    const fromLabel = claimLabelById.get(from) || from;
-                    const toLabel = claimLabelById.get(to) || to;
-                    // Use gate question if a forced_choice gate exists for this claim pair
-                    const gateKey = [from, to].sort().join('::');
-                    const gateQuestion = gateQuestionByClaimPair.get(gateKey) || '';
-                    conflictsById.get(from).push({
-                      claimId: to,
-                      question: gateQuestion || String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
-                      sourceStatementIds: [],
-                    });
+                // Only build per-claim conflict data when blast radius filter is NOT active.
+                // When active, conflicts are handled via conditional gates, not mechanical forcing points.
+                if (!blastRadiusActive) {
+                  for (const e of unifiedEdges) {
+                    if (!e) continue;
+                    const edgeType = String(e.type || '').trim();
+                    if (edgeType === 'conflicts') {
+                      const from = String(e.from || '').trim();
+                      const to = String(e.to || '').trim();
+                      if (!from || !to) continue;
+                      if (!conflictsById.has(from)) conflictsById.set(from, []);
+                      const fromLabel = claimLabelById.get(from) || from;
+                      const toLabel = claimLabelById.get(to) || to;
+                      const gateKey = [from, to].sort().join('::');
+                      const gateQuestion = gateQuestionByClaimPair.get(gateKey) || '';
+                      conflictsById.get(from).push({
+                        claimId: to,
+                        question: gateQuestion || String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
+                        sourceStatementIds: [],
+                      });
+                    }
                   }
                 }
 
@@ -1289,16 +1540,14 @@ export class StepExecutor {
                   };
                 });
 
-                const conflictEdges = unifiedEdges.filter((e) => {
-                  if (!e || !e.from || !e.to) return false;
-                  const t = String(e.type || '').trim();
-                  return t === 'conflicts';
-                });
-
-                const traversalEdges = conflictEdges.map((e) => ({
-                  ...e,
-                  type: 'conflicts',
-                }));
+                // When blast radius filter is active, no conflict edges go into
+                // the traversal graph — the filter already routed important tensions
+                // through conditional gates. Only the legacy path uses conflict edges.
+                const traversalEdges = blastRadiusActive
+                  ? []
+                  : unifiedEdges
+                    .filter((e) => e && e.from && e.to && String(e.type || '').trim() === 'conflicts')
+                    .map((e) => ({ ...e, type: 'conflicts' }));
 
                 const traversalGraph = {
                   claims: serializedClaims,
@@ -1417,6 +1666,7 @@ export class StepExecutor {
                     traversalGraph,
                     forcingPoints,
                     traversalAnalysis,
+                    ...(blastRadiusResult ? { blastRadiusFilter: blastRadiusResult } : {}),
                     ...(rawGates.length > 0 ? { surveyGates: rawGates, surveyRationale } : { surveyRationale }),
                     preSemantic: preSemanticInterpretation || null,
                     ...(completeness ? { completeness } : {}),
@@ -1438,11 +1688,15 @@ export class StepExecutor {
                   let diagnosticsResult = null;
                   try {
                     if (preSemanticInterpretation && mapperArtifact) {
-                      const { computeStructuralAnalysis } = await import('../PromptMethods');
                       const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                      // Convert to cognitive shape for structural analysis
-                      const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
-                      const postSemantic = computeStructuralAnalysis(tempCognitive);
+                      // Reuse cached structural analysis (computed before blast radius filter)
+                      // instead of recomputing — same input data, same result.
+                      let postSemantic = cachedStructuralAnalysis;
+                      if (!postSemantic) {
+                        const { computeStructuralAnalysis } = await import('../PromptMethods');
+                        const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
+                        postSemantic = computeStructuralAnalysis(tempCognitive);
+                      }
                       diagnosticsResult = validateStructuralMapping(
                         preSemanticInterpretation,
                         postSemantic,
@@ -1474,21 +1728,9 @@ export class StepExecutor {
                       console.error('[StepExecutor] Diagnostics stamp failed', err);
                     }
 
-                    // Claim Provenance (debug panel — first entries of Claim entity profile)
-                    try {
-                      const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
-                      const ownership = computeStatementOwnership(enrichedClaims);
-                      const exclusivity = computeClaimExclusivity(enrichedClaims, ownership);
-                      const overlap = computeClaimOverlap(enrichedClaims);
-                      mapperArtifact.claimProvenance = {
-                        statementOwnership: Object.fromEntries(
-                          Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
-                        ),
-                        claimExclusivity: Object.fromEntries(exclusivity),
-                        claimOverlap: overlap,
-                      };
-                    } catch (err) {
-                      console.warn('[StepExecutor] Claim provenance failed:', getErrorMessage(err));
+                    // Claim Provenance — reuse pre-computed data from blast radius filter stage
+                    if (mapperArtifact_claimProvenance) {
+                      mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
                     }
                   }
 

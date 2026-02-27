@@ -31,4 +31,5 @@ export {
     getEmbeddingStatus,
     cleanupPendingEmbeddingsBuffers,
     stripInlineMarkdown,
+    structuredTruncate,
 } from './embeddings';

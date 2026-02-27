@@ -3,8 +3,8 @@
 import { StoreConfig, MetadataRecord } from "./types";
 
 export const DB_NAME = "OpusDeusDB";
-export const DB_VERSION = 7;
-export const SCHEMA_VERSION = 7;
+export const DB_VERSION = 9;
+export const SCHEMA_VERSION = 9;
 
 // Store configurations - conversation-only architecture
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -105,6 +105,24 @@ export const STORE_CONFIGS: StoreConfig[] = [
     keyPath: "turnId",
     indices: [
       { name: "bySessionId", keyPath: "sessionId", unique: false },
+    ],
+  },
+
+  // 8. Embeddings Store (geometry-layer: statements, paragraphs, query — immutable per turn)
+  {
+    name: "embeddings",
+    keyPath: "aiTurnId",
+    indices: [
+      { name: "byTimestamp", keyPath: "createdAt", unique: false },
+    ],
+  },
+
+  // 9. Claim Embeddings Store (mapper-layer: per provider per turn)
+  {
+    name: "claim_embeddings",
+    keyPath: "id",  // "{aiTurnId}:{providerId}"
+    indices: [
+      { name: "byAiTurnId", keyPath: "aiTurnId", unique: false },
     ],
   },
 ];
@@ -225,6 +243,44 @@ export async function openDatabase(): Promise<IDBDatabase> {
           metadataStore.put(rec);
         } catch (e) {
           console.warn("Failed to complete v7 migration:", e);
+        }
+      }
+
+      // Migration to v8/v9: Add embeddings + claim_embeddings stores
+      if (oldVersion < 9) {
+        try {
+          if (!db.objectStoreNames.contains("embeddings")) {
+            const embeddingsStore = db.createObjectStore("embeddings", {
+              keyPath: "aiTurnId",
+            });
+            embeddingsStore.createIndex("byTimestamp", "createdAt", {
+              unique: false,
+            });
+            console.log("Created embeddings store during v8 migration");
+          }
+
+          if (!db.objectStoreNames.contains("claim_embeddings")) {
+            const claimEmbStore = db.createObjectStore("claim_embeddings", {
+              keyPath: "id",
+            });
+            claimEmbStore.createIndex("byAiTurnId", "aiTurnId", {
+              unique: false,
+            });
+            console.log("Created claim_embeddings store during v8 migration");
+          }
+
+          const metadataStore = transaction.objectStore("metadata");
+          const now = Date.now();
+          const rec: MetadataRecord = {
+            id: "schema_version_record",
+            key: "schema_version",
+            value: SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now,
+          };
+          metadataStore.put(rec);
+        } catch (e) {
+          console.warn("Failed to complete v8 migration:", e);
         }
       }
     };

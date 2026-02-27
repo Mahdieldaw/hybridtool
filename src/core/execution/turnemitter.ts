@@ -367,6 +367,7 @@ export class TurnEmitter {
               if (!mappingResponses[providerId]) {
                 mappingResponses[providerId] = [];
               }
+              const mappingArtifact = (result as any)?.mapping?.artifact;
               mappingResponses[providerId].push({
                 providerId,
                 text: result?.text ?? '',
@@ -374,6 +375,7 @@ export class TurnEmitter {
                 createdAt: timestamp,
                 updatedAt: timestamp,
                 meta: result?.meta ?? {},
+                ...(mappingArtifact ? { artifact: mappingArtifact } : {}),
               });
               primaryMapper = providerId;
               break;
@@ -533,6 +535,7 @@ export class TurnEmitter {
         ...(batchPhase ? { batch: batchPhase } : {}),
         ...(mappingPhase ? { mapping: mappingPhase } : {}),
         ...(singularityPhase ? { singularity: singularityPhase } : {}),
+        ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
         meta: {
           mapper: primaryMapper,
           requestedFeatures: {

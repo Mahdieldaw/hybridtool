@@ -14,6 +14,7 @@ import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { TraversalGraphView } from '../traversal/TraversalGraphView';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
+import { getProviderArtifact } from '../../utils/turn-helpers';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
@@ -32,7 +33,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 }) => {
     const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
-    const mappingArtifact = aiTurn.mapping?.artifact || null;
+    const activeMappingPid = useAtomValue(mappingProviderAtom);
+    const mappingArtifact = getProviderArtifact(aiTurn, activeMappingPid || aiTurn.meta?.mapper) || null;
 
     // Derived transition state
     const isTransitioning = singularityState.isLoading;
@@ -180,11 +182,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
     const canShowTraversal = hasTraversalGraph && !!effectiveSessionId;
-    const canShowResponse = isPipelineComplete && (hasSingularityText || singularityState.isLoading || singularityState.isError);
+    const canShowResponse = hasSingularityText || singularityState.isLoading || singularityState.isError;
 
     const currentView: 'loading' | 'traverse' | 'response' = useMemo(() => {
-        if (isAwaitingTraversal && canShowTraversal) return 'traverse';
         if (viewOverride === 'traverse' && canShowTraversal) return 'traverse';
+        if (isAwaitingTraversal && canShowTraversal) return 'traverse';
         if (viewOverride === 'response' && canShowResponse) return 'response';
         if (canShowResponse) return 'response';
         return 'loading';

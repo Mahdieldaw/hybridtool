@@ -105,8 +105,8 @@ describe("computeQueryRelevance", () => {
     expect(s2).toBeDefined();
     // s0 aligned with query → querySimilarity near 1
     expect(s0!.querySimilarity).toBeGreaterThan(0.9);
-    // s2 orthogonal to query → querySimilarity near 0.5
-    expect(s2!.querySimilarity).toBeCloseTo(0.5, 1);
+    // s2 orthogonal to query → querySimilarity near 0.0 (raw cosine)
+    expect(s2!.querySimilarity).toBeCloseTo(0.0, 1);
     // s2 has degree 0 (max isolation) → recusant should be 1
     expect(s2!.recusant).toBe(1);
     // s0 has higher degree → lower recusant

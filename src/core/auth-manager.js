@@ -92,7 +92,7 @@ class AuthManager {
             return this._cookieStatus;
         }
 
-        // Otherwise refresh
+        // Otherwise refresh from cookies
         await this.checkAllCookies();
         return this._cookieStatus;
     }
@@ -112,23 +112,36 @@ class AuthManager {
                     name: config.name
                 });
                 const isAuthenticated = !!cookie;
-                status[config.provider] = isAuthenticated;
 
-                // Handle Gemini variants
-                if (config.provider === "gemini") {
-                    GEMINI_VARIANTS.forEach(variant => {
-                        status[variant] = isAuthenticated;
-                    });
+                // If cookie exists, mark as authenticated
+                // If cookie is missing, leave as undefined (don't mark false yet)
+                // Let the actual request determine the canonical state
+                if (isAuthenticated) {
+                    status[config.provider] = true;
+
+                    // Handle Gemini variants
+                    if (config.provider === "gemini") {
+                        GEMINI_VARIANTS.forEach(variant => {
+                            status[variant] = true;
+                        });
+                    }
+                    console.log(`[AuthManager] ${config.provider}: authenticated`);
+                } else {
+                    // Cookie missing: invalidate cache but don't set status to false
+                    // Provider stays "open" until it actually tries and fails
+                    this._verificationCache.delete(config.provider);
+                    console.log(`[AuthManager] ${config.provider}: cookie missing - keeping open, will verify on use`);
                 }
-
-                console.log(`[AuthManager] ${config.provider}: ${isAuthenticated ? 'authenticated' : 'not authenticated'}`);
             } catch (e) {
                 console.warn(`[AuthManager] Failed to check ${config.provider}`, e);
-                status[config.provider] = false;
+                // On error, also keep it open (don't mark false)
+                this._verificationCache.delete(config.provider);
 
+                // Handle Gemini variants for error case too
                 if (config.provider === "gemini") {
                     GEMINI_VARIANTS.forEach(variant => {
-                        status[variant] = false;
+                        // Also clear their verification caches
+                        this._verificationCache.delete(variant);
                     });
                 }
             }

@@ -150,17 +150,18 @@ export interface MapperGate {
   question: string;
 }
 
-/** Gate produced by the Survey Mapper (runs after semantic mapper). */
+/**
+ * Gate produced by the Survey Mapper (runs after blast radius filter).
+ * Each gate tests one hidden real-world assumption about the user's situation.
+ * If the user answers "no", the affectedClaims are pruned from the synthesis.
+ */
 export interface SurveyGate {
   id: string;
-  claims: string[];
-  construct: string;
-  classification: 'forced_choice' | 'conditional_gate';
-  fork: string;
-  hinge: string;
   question: string;
-  /** Claim ids to prune when the gate resolves against them. */
+  reasoning: string;
   affectedClaims: string[];
+  /** Composite blast radius score from the filter, 0-1. */
+  blastRadius: number;
 }
 
 export interface UnifiedMapperOutput {
@@ -772,7 +773,60 @@ export interface CascadeRiskInfo {
 }
 export type CascadeRisk = CascadeRiskInfo;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BLAST RADIUS FILTER
+// Pure-math filter that identifies which claims, if removed, would most
+// drastically alter the synthesis. Consumes structural analysis + claim
+// provenance. Output gates the survey mapper.
+// ═══════════════════════════════════════════════════════════════════════════
 
+export interface BlastRadiusScore {
+  claimId: string;
+  claimLabel: string;
+  /** Final adjusted composite after continuous modifiers (consensus, redundancy, etc.). 0-1. */
+  composite: number;
+  /** Raw composite before modifiers. Same five-dimension weighted sum. For debug comparison. */
+  rawComposite: number;
+  components: {
+    cascadeBreadth: number;      // dependentIds.length / (totalClaims - 1), clamped [0,1]
+    exclusiveEvidence: number;   // exclusivityRatio from claimProvenance, [0,1]
+    leverage: number;            // min-max normalized leverage from structural analysis
+    queryRelevance: number;      // avg querySimilarity of source statements, [0,1]
+    articulationPoint: number;   // 1 if graph cut vertex, 0 otherwise
+  };
+  suppressed: boolean;
+  suppressionReason: string | null;
+  /** Step 12: Geometric source model diversity disagrees with mapper supporters count */
+  fragileConsensus?: {
+    mapperSupporterCount: number;
+    geometricModelDiversity: number;
+  };
+}
+
+export interface BlastRadiusAxis {
+  id: string;
+  claimIds: string[];
+  representativeClaimId: string;
+  maxBlastRadius: number;
+}
+
+export interface BlastRadiusFilterResult {
+  scores: BlastRadiusScore[];
+  axes: BlastRadiusAxis[];
+  /** 0, 1, 2, or 3. Determines how many axes are forwarded to the survey mapper. */
+  questionCeiling: number;
+  skipSurvey: boolean;
+  skipReason: string | null;
+  meta: {
+    totalClaims: number;
+    suppressedCount: number;
+    candidateCount: number;
+    conflictEdgeCount: number;
+    axisCount: number;
+    convergenceRatio: number;
+    processingTimeMs: number;
+  };
+}
 
 export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
@@ -819,7 +873,10 @@ export interface MapperArtifact extends MapperOutput {
   preSemantic?: PreSemanticInterpretation | null;
   structuralValidation?: any | null;
 
-  // Survey Mapper output (runs after semantic mapper; null when survey mapper is disabled or found no gates)
+  // Blast Radius Filter (runs before survey mapper; null when filter fails or is bypassed)
+  blastRadiusFilter?: BlastRadiusFilterResult | null;
+
+  // Survey Mapper output (runs after blast radius filter; null when skipped or found no gates)
   surveyGates?: SurveyGate[];
   surveyRationale?: string | null;
 
@@ -1103,8 +1160,13 @@ export interface PipelineClusteringResult {
 
 export interface GeometricSubstrateSummary {
   shape: {
-    prior: string;
     confidence: number;
+    signals: {
+      fragmentationScore: number;
+      bimodalityScore: number;
+      parallelScore: number;
+      convergentScore: number;
+    };
   };
   topology: {
     componentCount: number;
@@ -1168,6 +1230,7 @@ export interface CognitivePreSemantic {
     fragmentationScore: number;
     bimodalityScore: number;
     parallelScore: number;
+    convergentScore: number;
     confidence: number;
   };
   regions: Array<Pick<PipelineRegion, 'id' | 'kind' | 'nodeIds'>>;
@@ -1457,11 +1520,22 @@ export interface MappingPhase {
   timestamp: number;
 }
 
+export interface ChewedSubstrateSummary {
+  totalModels: number;
+  survivingClaimCount: number;
+  prunedClaimCount: number;
+  protectedStatementCount: number;
+  untriagedStatementCount?: number;
+  skeletonizedStatementCount: number;
+  removedStatementCount: number;
+}
+
 export interface SingularityPhase {
   prompt?: string;
   output: string;
   traversalState?: any;
   timestamp: number;
+  chewedSubstrateSummary?: ChewedSubstrateSummary | null;
 }
 
 // Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
@@ -1478,6 +1552,9 @@ export interface AiTurn {
   batch?: BatchPhase;
   mapping?: MappingPhase;
   singularity?: SingularityPhase;
+
+  /** Per-provider mapping responses with full artifacts for provider-aware resolution */
+  mappingResponses?: Record<string, any[]>;
 
   pipelineStatus?: PipelineStatus;
 

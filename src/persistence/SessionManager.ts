@@ -940,7 +940,7 @@ export class SessionManager {
     // 2. Mapping (idempotent/singleton per provider)
     for (const [providerId, output] of Object.entries(result?.mappingOutputs || {})) {
       const existing = existingResponses.find(
-        (r) => r.providerId === providerId && r.responseType === "mapping" && r.responseIndex === 0,
+        (r: any) => r.providerId === providerId && r.responseType === "mapping" && r.responseIndex === 0,
       );
 
       const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
@@ -953,9 +953,10 @@ export class SessionManager {
         providerId,
         responseType: "mapping",
         responseIndex: 0,
-        text: output?.text || existing?.text || "",
-        status: normalizeStatus(output?.status ?? existing?.status),
-        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
+        text: (output as any)?.text || existing?.text || "",
+        status: normalizeStatus((output as any)?.status ?? existing?.status),
+        meta: this._safeMeta((output as any)?.meta ?? existing?.meta ?? {}),
+        ...((output as any)?.artifact ? { artifact: (output as any).artifact } : {}),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
@@ -1254,6 +1255,8 @@ export class SessionManager {
           "provider_responses",
           "provider_contexts",
           "metadata",
+          "embeddings",
+          "claim_embeddings",
         ],
         "readwrite",
         async (tx: IDBTransaction) => {
@@ -1309,6 +1312,30 @@ export class SessionManager {
               req.onsuccess = () => resolve(true);
               req.onerror = () => reject(req.error);
             });
+          }
+
+          // 3.1) Embeddings + claim embeddings for turns
+          const embeddingsStore = tx.objectStore("embeddings");
+          const claimEmbeddingsStore = tx.objectStore("claim_embeddings");
+          for (const turn of turns) {
+            await new Promise<boolean>((resolve, reject) => {
+              const req = embeddingsStore.delete(turn.id);
+              req.onsuccess = () => resolve(true);
+              req.onerror = () => reject(req.error);
+            });
+
+            const claimRecords = await getAllByIndex<{ id: string }>(
+              claimEmbeddingsStore,
+              "byAiTurnId",
+              turn.id,
+            );
+            for (const rec of claimRecords) {
+              await new Promise<boolean>((resolve, reject) => {
+                const req = claimEmbeddingsStore.delete(rec.id);
+                req.onsuccess = () => resolve(true);
+                req.onerror = () => reject(req.error);
+              });
+            }
           }
 
           // 4) Provider responses by sessionId
@@ -1627,6 +1654,101 @@ export class SessionManager {
   _buildContextSummary(_result: PersistenceResult, _request: PersistRequest): string {
     // Context summary now derived from phase data, not legacy fields
     return "";
+  }
+
+  /**
+   * Persist packed embedding data for a turn.
+   * Uses putBinary to avoid destroying ArrayBuffer contents.
+   */
+  async persistEmbeddings(
+    aiTurnId: string,
+    record: {
+      statementEmbeddings?: ArrayBuffer;
+      paragraphEmbeddings?: ArrayBuffer;
+      queryEmbedding?: ArrayBuffer | null;
+      meta: {
+        embeddingModelId: string;
+        dimensions: number;
+        statementCount?: number;
+        paragraphCount?: number;
+        statementIndex?: string[];
+        paragraphIndex?: string[];
+        hasStatements?: boolean;
+        hasParagraphs?: boolean;
+        hasQuery?: boolean;
+        timestamp: number;
+      };
+    },
+  ): Promise<void> {
+    try {
+      const adapter = this._requireAdapter();
+      const now = Date.now();
+      await adapter.putBinary("embeddings", {
+        id: aiTurnId,
+        aiTurnId,
+        ...record,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] persistEmbeddings failed", err);
+    }
+  }
+
+  /**
+   * Load cached geometry embeddings for a turn.
+   * Returns null if no embeddings are stored for this turn.
+   */
+  async loadEmbeddings(aiTurnId: string): Promise<Record<string, unknown> | null> {
+    try {
+      const adapter = this._requireAdapter();
+      const record = await adapter.get("embeddings", aiTurnId);
+      return record || null;
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] loadEmbeddings failed", err);
+      return null;
+    }
+  }
+
+  /**
+   * Persist claim embeddings for a specific mapper provider.
+   */
+  async persistClaimEmbeddings(
+    aiTurnId: string,
+    providerId: string,
+    record: {
+      claimEmbeddings: ArrayBuffer;
+      meta: { dimensions: number; claimCount: number; claimIndex: string[]; timestamp: number };
+    },
+  ): Promise<void> {
+    try {
+      const adapter = this._requireAdapter();
+      const now = Date.now();
+      await adapter.putBinary("claim_embeddings", {
+        id: `${aiTurnId}:${providerId}`,
+        aiTurnId,
+        providerId,
+        ...record,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] persistClaimEmbeddings failed", err);
+    }
+  }
+
+  /**
+   * Load cached claim embeddings for a specific mapper provider.
+   */
+  async loadClaimEmbeddings(aiTurnId: string, providerId: string): Promise<Record<string, unknown> | null> {
+    try {
+      const adapter = this._requireAdapter();
+      const record = await adapter.get("claim_embeddings", `${aiTurnId}:${providerId}`);
+      return record || null;
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] loadClaimEmbeddings failed", err);
+      return null;
+    }
   }
 
   async persistContextBridge(sessionId: string, turnId: string, bridge: Record<string, unknown>): Promise<void> {

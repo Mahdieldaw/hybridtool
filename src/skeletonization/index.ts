@@ -45,12 +45,30 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
   const traversalState = normalizeTraversalState((input as unknown as { traversalState?: unknown }).traversalState);
   const normalizedInput: SkeletonizationInput = { ...input, traversalState };
 
+  const skeletonizationDebug = (globalThis as any)?.process?.env?.SKELETONIZATION_DEBUG;
+  if (skeletonizationDebug === '1') {
+    const claimIdSet = new Set(normalizedInput.claims.map(c => c.id));
+    const traversalPrunedCount = Array.from(traversalState.claimStatuses.values())
+      .filter(v => v === 'pruned').length;
+    console.log('[Skeletonization] ID check (counts only):', {
+      claimCount: claimIdSet.size,
+      traversalStateKeyCount: traversalState.claimStatuses.size,
+      prunedInTraversalCount: traversalPrunedCount,
+      overlapCount: normalizedInput.claims.filter(c => traversalState.claimStatuses.has(c.id)).length,
+    });
+  }
+
   const prunedCount = normalizedInput.claims.reduce((acc, claim) => {
     const status = traversalState.claimStatuses.get(claim.id);
     return acc + (status === 'pruned' ? 1 : 0);
   }, 0);
 
   if (prunedCount === 0) {
+    const traversalPrunedCount = Array.from(traversalState.claimStatuses.values())
+      .filter(v => v === 'pruned').length;
+    if (traversalPrunedCount > 0) {
+      console.warn('[Skeletonization] prunedCount=0 but traversal reports', traversalPrunedCount, 'pruned entries — possible claim ID mismatch');
+    }
     return createPassthroughSubstrate(normalizedInput);
   }
 

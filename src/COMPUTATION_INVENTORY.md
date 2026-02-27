@@ -20,7 +20,7 @@ Stances and signals are **L1 keyword observations labeled with L2 inference tags
 Stances and signals do not gate any geometry decision after the previous cleanup. Their impact is now limited to:
 1. `ShadowDelta.ts` — `signalWeight` used for advisory ranking of unreferenced statements
 2. `claimAssembly.ts` — `has*Signal` boolean flags on `LinkedClaim` (display only)
-3. `coverageAudit.ts` — `reason` label on unattended regions (display annotation only)
+3. `fateTracking.ts` — `signalWeight` included in `StatementFate.shadowMetadata` (display/debug only)
 
 A false positive produces a wrong label or a slightly re-ranked advisory list — cosmetic, not structural.
 
@@ -103,8 +103,7 @@ A false positive produces a wrong label or a slightly re-ranked advisory list �
 
 | Computation | Output | Consumer | Status |
 |---|---|---|---|
-| `profileRegions(regions, substrate, paragraphs, paragraphEmbeddings?)` | `RegionProfile[]` each with: **mass.{nodeCount, modelDiversity, modelDiversityRatio}**, **geometry.{internalDensity, isolation, nearestCarrierSimilarity, avgInternalSimilarity}** | modelOrdering, diagnostics (L1 tier checks via TIER_THRESHOLDS) | active |
-| `TIER_THRESHOLDS` constant | Numeric thresholds: peak/hill minModelDiversityRatio, minModelDiversityAbsolute, minInternalDensity | diagnostics.ts L1 peak/floor classification | active |
+| `profileRegions(regions, substrate, paragraphs, paragraphEmbeddings?)` | `RegionProfile[]` each with: **mass.{nodeCount, modelDiversity, modelDiversityRatio}**, **geometry.{internalDensity, isolation, nearestCarrierSimilarity, avgInternalSimilarity}** | modelOrdering, diagnostics | active |
 
 *Removed (Phase 1): `tier`, `tierConfidence`, `purity.*` — categorical labels encoding policy as data.*
 
@@ -214,11 +213,10 @@ A false positive produces a wrong label or a slightly re-ranked advisory list �
 
 | Computation | Output | Consumer | Status |
 |---|---|---|---|
-| `reconstructProvenance(claims, statements, paragraphs, paragraphEmbeddings, regions, totalModelCount, statementEmbeddings?)` | `LinkedClaim[]` each with: sourceStatementIds (cosine-matched, top-12), sourceStatements[], sourceRegionIds (stmt→para→region lookup), supportRatio, hasConditional/Sequence/TensionSignal | surveyMapper, fateTracking, alignment, traversal serialization | active |
-| Statement-level cosine matching | Threshold 0.45, **all statements** (no supporter filter), top-12 | sourceStatementIds | active |
-| Paragraph-level cosine fallback | Threshold 0.5, top-5 paragraphs, absorb all their statements | sourceStatementIds when stmt-level returns empty | active |
-| `reconstructConditionProvenance(conditions, statements, statementEmbeddings)` | `ConditionProvenance[]` — links gate questions to statements by cosine (threshold 0.45, top-12) | **Not wired** — survey gates parsed in StepExecutor but conditions not passed to this function | not wired |
-| `getGateProvenance`, `getConflictProvenance`, `validateProvenance` | Utility helpers | Not called from StepExecutor | needs check |
+| `reconstructProvenance(claims, statements, paragraphs, paragraphEmbeddings, regions, totalModelCount, statementEmbeddings?)` | `LinkedClaim[]` each with: sourceStatementIds (cosine-matched by thresholds), sourceStatements[], sourceRegionIds (stmt→para→region lookup), supportRatio, hasConditional/Sequence/TensionSignal | surveyMapper, fateTracking, alignment, traversal serialization | active |
+| Provenance matching (paragraph-first, statement-second) | Paragraph similarity > 0.45 → candidate statements → statement similarity > 0.55 → collect statement IDs; final list sorted by statement ID | sourceStatementIds | active |
+| Statement-match fallback (no stmt-level matches) | Use union of all statementIds from the paragraph-anchor candidate set | sourceStatementIds when stmt-level returns empty | active |
+| Paragraph-only matching (no statement embeddings) | Paragraph similarity > 0.5; take top-5 paragraphs and union their statementIds | sourceStatementIds | active |
 
 **File:** `src/ConciergeService/claimProvenance.ts`
 
@@ -229,6 +227,29 @@ A false positive produces a wrong label or a slightly re-ranked advisory list �
 | `computeClaimOverlap(claims)` | `ClaimOverlapEntry[]` — pairwise Jaccard on full sourceStatementIds, sorted descending, jaccard > 0 only | **Wired to debug panel** (`mapperArtifact.claimProvenance.claimOverlap`) | diagnostic |
 
 *These are the first entries of the Claim entity profile (`src/profiles/` — infrastructure pending).*
+
+---
+
+## Layer 5.5 — Blast Radius Filter (Survey Gating)
+
+**File:** `src/core/blast-radius/blastRadiusFilter.ts`
+
+| Computation | Output | Consumer | Status |
+|---|---|---|---|
+| `computeBlastRadiusFilter(input)` | `BlastRadiusFilterResult`: scores[] (per-claim composite + components + suppressionReason), axes[] (clustered claim groups), questionCeiling (0–3), skipSurvey | StepExecutor survey-mapper scoping + zero-question skip | active |
+| Per-claim base composite | `0.30*cascadeBreadth + 0.25*exclusiveEvidence + 0.20*normalizedLeverage + 0.15*queryRelevance + 0.10*articulationPoint` | Drives axes ordering + gate priority | active |
+| Modifiers (continuous) + floor suppression | Consensus discount; sole-source off-topic discount; redundancy discount; **floor** `composite < 0.20` → suppressed | Candidate set for axes | active |
+| Axis clustering (provenance overlap) | Connected components over claim pairs with Jaccard > 0.30 | One axis ≈ one question target | active |
+| Question ceiling (hard cap 3) | Depends on conflict cluster count + sole-source outliers | Limits axes passed to survey mapper | active |
+
+**Blast radius inputs (what must already exist upstream):**
+
+| Input | Source | Notes |
+|---|---|---|
+| `claims` (enriched claims) | `computeStructuralAnalysis(...)` output in `PromptMethods` | Must include fields: leverage, supportRatio, supporters, sourceStatementIds, isLeverageInversion, isKeystone |
+| `cascadeRisks`, `articulationPoints`, `convergenceRatio` | Structural analysis (`computeStructuralAnalysis`) | Used for cascade breadth, articulation signal, and zero-question gate |
+| `exclusivity`, `overlap` | Claim provenance (`computeClaimExclusivity`, `computeClaimOverlap`) | Used for exclusive evidence loss + redundancy clustering/discount |
+| `queryRelevanceScores` | Query relevance (`computeQueryRelevance`) | Map of statementId → querySimilarity, aggregated to claim-level mean |
 
 ---
 
@@ -248,8 +269,6 @@ A false positive produces a wrong label or a slightly re-ranked advisory list �
 | Item | File | Reason |
 |---|---|---|
 | ~~`deriveRegionConditionalGates()`~~ | ~~`regionGates.ts`~~ | **DELETED** — file removed |
-| `assembleClaims()` | `claimAssembly.ts` | Zero callers outside file |
-| `getGateProvenance`, `getConflictProvenance`, `validateProvenance` | `claimAssembly.ts` | Not called from StepExecutor — needs verification |
 
 ---
 
@@ -259,5 +278,4 @@ A false positive produces a wrong label or a slightly re-ranked advisory list �
 |---|---|---|
 | ~~`orderedModelIndices` never controls prompt order~~ | `StepExecutor.js` | **FIXED** — `indexedSourceData` now sorted by `orderedModelIndices` before mapper prompt build. Falls back to `citationOrder` if geometry didn't run. |
 | Geometric hints never reach semantic mapper | `semanticMapper.ts` | `buildSemanticMapperPrompt` has no hints param; architecture §3.1 said they would |
-| `reconstructConditionProvenance` not wired | `claimAssembly.ts` | Confirmed: survey gates produced, but conditions not passed to this function. Deferred. |
 | `src/profiles/` directory | Post-audit infrastructure | `claimProvenance.ts` is its first content — wired to debug panel as interim |

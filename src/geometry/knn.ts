@@ -2,7 +2,8 @@
 // TWO-GRAPH BUILDER: kNN + Mutual kNN
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { KnnEdge, MutualKnnEdge, KnnGraph, MutualKnnGraph } from './types';
+import type { KnnEdge, MutualKnnEdge, KnnGraph, MutualKnnGraph, PairwiseField, PairwiseFieldStats } from './types';
+import { computeExtendedStatsFromArray } from './threshold';
 
 const QUANTIZATION = 1e6;
 
@@ -46,7 +47,7 @@ export function buildTwoGraphs(
     paragraphIds: string[],
     embeddings: Map<string, Float32Array>,
     k: number = 5
-): { knn: KnnGraph; mutual: MutualKnnGraph; top1Sims: Map<string, number>; topKSims: Map<string, number[]> } {
+): { knn: KnnGraph; mutual: MutualKnnGraph; top1Sims: Map<string, number>; topKSims: Map<string, number[]>; allPairwiseSimilarities: number[] } {
     const n = paragraphIds.length;
 
     // Step 1: For each node, compute ranked neighbors
@@ -54,6 +55,9 @@ export function buildTwoGraphs(
     const rankedNeighbors = new Map<string, Array<{ targetId: string; similarity: number; rank: number }>>();
     const top1Sims = new Map<string, number>();
     const topKSims = new Map<string, number[]>();
+
+    // Collect every unique pairwise similarity (canonical: i < j only)
+    const allPairwiseSimilarities: number[] = [];
 
     for (let i = 0; i < n; i++) {
         const nodeId = paragraphIds[i];
@@ -77,6 +81,11 @@ export function buildTwoGraphs(
 
             const sim = quantize(cosineSimilarity(embI, embJ));
             sims.push({ targetId, similarity: sim });
+
+            // Only record each pair once (when i < j)
+            if (i < j) {
+                allPairwiseSimilarities.push(sim);
+            }
         }
 
         // Sort by similarity desc, then lex for ties (deterministic)
@@ -192,5 +201,74 @@ export function buildTwoGraphs(
         },
         top1Sims,
         topKSims,
+        allPairwiseSimilarities,
     };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAIRWISE FIELD: Full N×N similarity matrix
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build the full pairwise similarity field.
+ *
+ * Stores both directions in the matrix, builds sorted per-node neighbor lists,
+ * and computes extended distribution stats with discrimination range.
+ *
+ * At N=102 this is ~5K unique pairs — trivial cost.
+ */
+export function buildPairwiseField(
+    paragraphIds: string[],
+    embeddings: Map<string, Float32Array>,
+): PairwiseField {
+    const n = paragraphIds.length;
+    const matrix = new Map<string, Map<string, number>>();
+    const allSims: number[] = [];
+
+    // Initialize matrix rows
+    for (const id of paragraphIds) {
+        matrix.set(id, new Map());
+    }
+
+    // Compute all pairwise similarities
+    for (let i = 0; i < n; i++) {
+        const idI = paragraphIds[i];
+        const embI = embeddings.get(idI);
+        if (!embI) continue;
+
+        for (let j = i + 1; j < n; j++) {
+            const idJ = paragraphIds[j];
+            const embJ = embeddings.get(idJ);
+            if (!embJ) continue;
+
+            const sim = quantize(cosineSimilarity(embI, embJ));
+            matrix.get(idI)!.set(idJ, sim);
+            matrix.get(idJ)!.set(idI, sim);
+            allSims.push(sim);
+        }
+    }
+
+    // Build per-node sorted neighbor lists (descending similarity, lexicographic tie-break)
+    const perNode = new Map<string, Array<{ nodeId: string; similarity: number }>>();
+    for (const id of paragraphIds) {
+        const row = matrix.get(id)!;
+        const neighbors: Array<{ nodeId: string; similarity: number }> = [];
+        for (const [neighborId, sim] of row) {
+            neighbors.push({ nodeId: neighborId, similarity: sim });
+        }
+        neighbors.sort((a, b) => {
+            if (a.similarity !== b.similarity) return b.similarity - a.similarity;
+            return a.nodeId.localeCompare(b.nodeId);
+        });
+        perNode.set(id, neighbors);
+    }
+
+    // Compute stats
+    const baseStats = computeExtendedStatsFromArray(allSims);
+    const stats: PairwiseFieldStats = {
+        ...baseStats,
+        discriminationRange: baseStats.p90 - baseStats.p10,
+    };
+
+    return { matrix, perNode, stats, nodeCount: n };
 }

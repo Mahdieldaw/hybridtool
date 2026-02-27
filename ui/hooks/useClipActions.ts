@@ -3,14 +3,87 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { turnsMapAtom, alertTextAtom, mappingProviderAtom, singularityProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./chat/useRoundActions";
 import type { AiTurnWithUI } from "../types";
-import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
+import { normalizeProviderId } from "../utils/provider-id-mapper";
+
+export function hasStoredClipResponse(
+  aiTurn: AiTurnWithUI,
+  type: "mapping" | "singularity",
+  providerId: string,
+): boolean {
+  const desiredProviderId = normalizeProviderId(String(providerId || "").trim());
+  if (!desiredProviderId) return false;
+  const matchesDesired = (pid: string) =>
+    normalizeProviderId(String(pid || "").trim()) === desiredProviderId;
+
+  if (type === "mapping") {
+    const raw = (aiTurn as any)?.mappingResponses;
+
+    if (raw && typeof raw === "object") {
+      for (const [pid, entry] of Object.entries(raw as any)) {
+        if (!matchesDesired(pid)) continue;
+        const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+        const last = arr.length > 0 ? arr[arr.length - 1] : null;
+        const text =
+          typeof last?.text === "string"
+            ? last.text
+            : typeof last === "string"
+              ? last
+              : "";
+        if (String(text || "").trim()) return true;
+        if (last?.artifact && typeof last.artifact === "object") return true;
+        const status = typeof last?.status === "string" ? last.status : "";
+        if (status === "completed") return false;
+        if (status === "error") return false;
+      }
+    }
+
+    const mapperFromMeta = String((aiTurn.meta as any)?.mapper || "");
+    if (
+      mapperFromMeta &&
+      matchesDesired(mapperFromMeta) &&
+      aiTurn.mapping?.artifact
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  if (type === "singularity") {
+    const singularityProviderFromMeta = String((aiTurn.meta as any)?.singularity || "");
+    if (
+      singularityProviderFromMeta &&
+      matchesDesired(singularityProviderFromMeta) &&
+      String(aiTurn.singularity?.output || "").trim()
+    ) {
+      return true;
+    }
+
+    const legacy = (aiTurn as any)?.singularityResponses;
+    if (legacy && typeof legacy === "object") {
+      for (const [pid, entry] of Object.entries(legacy as any)) {
+        if (!matchesDesired(pid)) continue;
+        const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+        const last = arr.length > 0 ? arr[arr.length - 1] : null;
+        const text = typeof last?.text === "string" ? last.text : "";
+        if (String(text || "").trim()) return true;
+        const status = typeof last?.status === "string" ? last.status : "";
+        if (status === "completed") return false;
+        if (status === "error") return false;
+      }
+    }
+
+    return false;
+  }
+
+  return false;
+}
 
 export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
   const setMappingProvider = useSetAtom(mappingProviderAtom);
   const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
-  const setTurnsMap = useSetAtom(turnsMapAtom);
   const { runMappingForAiTurn, runSingularityForAiTurn } = useRoundActions();
 
   const handleClipClick = useCallback(
@@ -40,42 +113,13 @@ export function useClipActions() {
           return;
         }
 
-        const hasValidExisting =
-          type === "mapping"
-            ? !!aiTurn.mapping?.artifact
-            : type === "singularity"
-              ? !!aiTurn.singularity?.output?.trim()
-              : false;
+        const hasValidExisting = hasStoredClipResponse(aiTurn, type, providerId);
 
         // Update global provider preference (Crown Move / Mapper Select)
         if (type === "mapping") {
           setMappingProvider(providerId);
         } else if (type === "singularity") {
           setSingularityProvider(providerId);
-        }
-
-        if (!aiTurn.batch?.responses || !aiTurn.batch.responses[providerId]) {
-          setTurnsMap((draft) => {
-            const turn = draft.get(aiTurnId) as AiTurnWithUI | undefined;
-            if (!turn || turn.type !== "ai") return;
-            const initialStatus: "streaming" | "pending" =
-              PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId)
-                ? "streaming"
-                : "pending";
-            if (!turn.batch) {
-              turn.batch = { responses: {}, timestamp: Date.now() };
-            }
-            if (!turn.batch.responses) {
-              turn.batch.responses = {} as any;
-            }
-            if (!turn.batch.responses[providerId]) {
-              (turn.batch.responses as any)[providerId] = {
-                text: "",
-                status: initialStatus,
-              };
-              turn.batchVersion = (turn.batchVersion ?? 0) + 1;
-            }
-          });
         }
 
         if (hasValidExisting) return;
@@ -94,7 +138,6 @@ export function useClipActions() {
       turnsMap,
       runMappingForAiTurn,
       setAlertText,
-      setTurnsMap,
       setMappingProvider,
       setSingularityProvider,
       runSingularityForAiTurn,

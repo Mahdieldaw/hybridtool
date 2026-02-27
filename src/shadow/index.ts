@@ -46,7 +46,8 @@ export function initializeShadowMapper(): void {
     }
 
     _initialized = true;
-    if (process.env.NODE_ENV !== 'production') {
+    const nodeEnv = (globalThis as any)?.process?.env?.NODE_ENV;
+    if (typeof nodeEnv === 'string' && nodeEnv !== 'production') {
         console.log('[Shadow] Pattern definitions locked. Guardrail 1 active.');
     }
 }

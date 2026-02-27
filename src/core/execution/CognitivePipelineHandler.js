@@ -721,6 +721,76 @@ export class CognitivePipelineHandler {
             if (Array.isArray(sourceData) && sourceData.length > 0) {
               let statements = mappingArtifact?.shadow?.statements || [];
               let paragraphs = mappingArtifact?.shadow?.paragraphs || [];
+              const hasStatements = Array.isArray(statements) && statements.length > 0;
+              const hasParagraphs = Array.isArray(paragraphs) && paragraphs.length > 0;
+
+              if (!hasStatements && !hasParagraphs) {
+                try {
+                  const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
+                  const shadowInput = sourceData.map((s, idx) => ({
+                    modelIndex: typeof s?.modelIndex === 'number' && s.modelIndex > 0 ? s.modelIndex : idx + 1,
+                    content: String(s?.text || ''),
+                  }));
+
+                  const shadowResult = extractShadowStatements(shadowInput);
+                  const paragraphResult = projectParagraphs(shadowResult.statements);
+                  statements = shadowResult.statements;
+                  paragraphs = paragraphResult.paragraphs;
+
+                  mappingArtifact.shadow = {
+                    ...(mappingArtifact.shadow || {}),
+                    ...(Array.isArray(statements) ? { statements } : {}),
+                    ...(Array.isArray(paragraphs) ? { paragraphs } : {}),
+                  };
+                } catch (e) {
+                  console.warn('[CognitiveHandler] Shadow reconstruction failed, falling back to empty arrays:', e);
+                  statements = Array.isArray(statements) ? statements : [];
+                  paragraphs = Array.isArray(paragraphs) ? paragraphs : [];
+                }
+              } else if (hasStatements && !hasParagraphs) {
+                try {
+                  const { projectParagraphs } = await import('../../shadow');
+                  const paragraphResult = projectParagraphs(statements);
+                  paragraphs = paragraphResult.paragraphs;
+                  mappingArtifact.shadow = {
+                    ...(mappingArtifact.shadow || {}),
+                    statements,
+                    paragraphs,
+                  };
+                } catch (e) {
+                  console.warn('[CognitiveHandler] Paragraph reconstruction failed, falling back to empty paragraphs:', e);
+                  paragraphs = [];
+                }
+              } else if (!hasStatements && hasParagraphs) {
+                try {
+                  const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
+                  const shadowInput = sourceData.map((s, idx) => ({
+                    modelIndex: typeof s?.modelIndex === 'number' && s.modelIndex > 0 ? s.modelIndex : idx + 1,
+                    content: String(s?.text || ''),
+                  }));
+                  const shadowResult = extractShadowStatements(shadowInput);
+                  statements = shadowResult.statements;
+
+                  const statementIdSet = new Set(Array.isArray(statements) ? statements.map((s) => String(s?.id || '')).filter(Boolean) : []);
+                  const paragraphsCompatible = paragraphs.every((p) => {
+                    const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
+                    return ids.every((sid) => statementIdSet.has(String(sid)));
+                  });
+                  if (!paragraphsCompatible) {
+                    const paragraphResult = projectParagraphs(statements);
+                    paragraphs = paragraphResult.paragraphs;
+                  }
+
+                  mappingArtifact.shadow = {
+                    ...(mappingArtifact.shadow || {}),
+                    statements,
+                    paragraphs,
+                  };
+                } catch (e) {
+                  console.warn('[CognitiveHandler] Statement reconstruction failed, falling back to empty statements:', e);
+                  statements = [];
+                }
+              }
               const normalizedTraversalState = normalizeTraversalState(payload.traversalState);
 
               chewedSubstrate = await buildChewedSubstrate({
@@ -845,6 +915,7 @@ export class CognitivePipelineHandler {
             output: singularityOutput.text,
             traversalState: payload?.traversalState,
             timestamp: singularityOutput.timestamp,
+            chewedSubstrateSummary: singularityOutput.pipeline?.chewedSubstrateSummary || null,
           }
           : undefined;
 
@@ -888,6 +959,7 @@ export class CognitivePipelineHandler {
             updatedAt: r.updatedAt || r.createdAt || Date.now(),
             meta: r.meta || {},
             responseIndex: r.responseIndex ?? 0,
+            ...(r.artifact ? { artifact: r.artifact } : {}),
           };
 
           const target =
