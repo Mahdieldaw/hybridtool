@@ -1299,10 +1299,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             } else {
               // Try to blindly extract values if it's an object with numeric keys, handle edge cases
               const vals = Object.values(safeBuffer).filter(v => typeof v === 'number');
-              if (vals.length > 0) {
+
+              const expectedLength = meta.paragraphIndex.length * meta.dimensions;
+
+              if (vals.length > 0 && vals.length === expectedLength) {
                 safeBuffer = new Float32Array(vals).buffer;
               } else {
-                console.warn("[sw-entry] Invalid paragraphEmbeddings format:", typeof safeBuffer);
+                console.warn(`[sw-entry] Invalid paragraphEmbeddings format or length mismatch. Expected ${expectedLength} floats, got ${vals.length}. Format was:`, typeof safeBuffer);
                 safeBuffer = null;
               }
             }

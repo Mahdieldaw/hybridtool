@@ -159,8 +159,8 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
             pctValleyZone: null,
             basinCount: 1,
             largestBasinRatio: nodeCount > 0 ? 1 : null,
-            basinByNodeId: Object.fromEntries(ids.slice(0, nodeCount).map((id) => [id, 0])),
-            basins: [{ basinId: 0, nodeIds: ids.slice(0, nodeCount), trenchDepth: null }],
+            basinByNodeId: Object.fromEntries(ids.map((id) => [id, 0])),
+            basins: [{ basinId: 0, nodeIds: ids, trenchDepth: null }],
             bridgePairs: [],
             meta: { processingTimeMs: Date.now() - startMs }
         };
@@ -273,7 +273,7 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     }
 
     if (status !== "ok") {
-        basinByNodeId = Object.fromEntries(ids.slice(0, nodeCount).map((id) => [id, 0]));
+        basinByNodeId = Object.fromEntries(ids.map((id) => [id, 0]));
         basinCount = 1;
     }
 

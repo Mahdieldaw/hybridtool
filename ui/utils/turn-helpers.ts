@@ -192,8 +192,8 @@ export function normalizeBackendRoundsToTurns(
         ...(batch ? { batch } : {}),
         ...(mapping ? { mapping } : {}),
         ...(singularity ? { singularity } : {}),
-        mappingResponses: round.mappingResponses,
-        singularityResponses: round.singularityResponses,
+        ...(round.mappingResponses ? { mappingResponses: round.mappingResponses } : {}),
+        ...(round.singularityResponses ? { singularityResponses: round.singularityResponses } : {}),
         pipelineStatus: round.pipelineStatus || undefined,
         meta: round.meta || {},
       };

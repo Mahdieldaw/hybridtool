@@ -148,7 +148,8 @@ export const turnByIdAtom = atom(
     (turnId: string): TurnMessage | undefined =>
       get(turnsMapAtom).get(turnId),
 );
-
+/**Atom family: Get a single turn by ID with isolated subscriptions.
+ * Prefer this over turnByIdAtom when you need per-turn render isolation.*/
 export const turnAtomFamily = atomFamily(
   (turnId: string) =>
     atom((get) => {
