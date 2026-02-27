@@ -2,6 +2,7 @@
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter";
+import { dehydrateArtifact } from "./artifact-hydration";
 import { DEFAULT_THREAD } from "../../shared/messaging";
 import type {
   PersistRequest,
@@ -957,7 +958,7 @@ export class SessionManager {
         text: (output as any)?.text || existing?.text || "",
         status: normalizeStatus((output as any)?.status ?? existing?.status),
         meta: this._safeMeta((output as any)?.meta ?? existing?.meta ?? {}),
-        ...((output as any)?.artifact ? { artifact: (output as any).artifact } : {}),
+        ...((output as any)?.artifact ? { artifact: dehydrateArtifact((output as any).artifact) } : {}),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,

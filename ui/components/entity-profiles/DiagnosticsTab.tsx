@@ -13,6 +13,28 @@ import { clearElbowCache } from "../../hooks/useElbowDiagnostics";
 import { turnsMapAtom } from "../../state/atoms";
 import { normalizeProviderId } from "../../utils/provider-id-mapper";
 
+function mergeArtifacts(base: any, patch: any): any {
+  if (!patch || typeof patch !== "object") return base;
+  if (!base || typeof base !== "object") return patch;
+  if (Array.isArray(base) || Array.isArray(patch)) {
+    if (Array.isArray(patch) && patch.length > 0) return patch;
+    return base;
+  }
+  const out: any = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined || v === null) continue;
+    const prev = out[k];
+    if (prev && typeof prev === "object" && !Array.isArray(prev) && typeof v === "object" && !Array.isArray(v)) {
+      out[k] = mergeArtifacts(prev, v);
+    } else if (Array.isArray(v)) {
+      out[k] = v.length > 0 ? v : prev;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 type DiagnosticsTabProps = {
   artifact: any;
   structuralAnalysis: StructuralAnalysis | null;
@@ -63,7 +85,8 @@ export function DiagnosticsTab({ artifact, structuralAnalysis, aiTurnId, provide
             const existing = turn.mappingResponses[pid];
             const arr = Array.isArray(existing) ? existing : existing ? [existing] : [];
             if (arr.length > 0) {
-              arr[arr.length - 1] = { ...arr[arr.length - 1], artifact: newArtifact };
+              const prevArtifact = arr[arr.length - 1]?.artifact;
+              arr[arr.length - 1] = { ...arr[arr.length - 1], artifact: mergeArtifacts(prevArtifact, newArtifact) };
             } else {
               arr.push({ providerId: pid, text: "", artifact: newArtifact, status: "completed", createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
             }
@@ -114,7 +137,7 @@ export function DiagnosticsTab({ artifact, structuralAnalysis, aiTurnId, provide
       </div>
 
       {stage === "embeddings" && (
-        <EmbeddingDistributionPanel artifact={artifact} structuralAnalysis={structuralAnalysis} />
+        <EmbeddingDistributionPanel artifact={artifact} structuralAnalysis={structuralAnalysis} aiTurnId={aiTurnId} />
       )}
       {stage === "basin-inversion" && (
         <InversionValleyPanel artifact={artifact} aiTurnId={aiTurnId} retrigger={regenTick} />

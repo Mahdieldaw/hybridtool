@@ -31,6 +31,7 @@ import type {
 import { DEFAULT_THREAD } from "../../../shared/messaging";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { computeThinkFlag } from "../../../src/think/computeThinkFlag.js";
+import { hydrateArtifact } from "../../../src/persistence/artifact-hydration";
 
 import type {
   HistorySessionSummary,
@@ -293,7 +294,7 @@ export function useChat() {
                 updatedAt,
                 meta: resp?.meta || {},
                 ...(resp?.artifacts ? { artifacts: resp.artifacts } : {}),
-                ...(resp?.artifact ? { artifact: resp.artifact } : {}),
+                ...(resp?.artifact ? { artifact: hydrateArtifact(resp.artifact) } : {}),
               } as ProviderResponse;
             };
 

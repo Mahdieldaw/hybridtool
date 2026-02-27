@@ -14,9 +14,38 @@ function minifyMappingArtifactForPersistence(artifact) {
   const semantic = artifact.semantic && typeof artifact.semantic === "object" ? artifact.semantic : {};
   const traversal = artifact.traversal && typeof artifact.traversal === "object" ? artifact.traversal : {};
   const meta = artifact.meta && typeof artifact.meta === "object" ? artifact.meta : {};
+  const claims = Array.isArray(semantic.claims)
+    ? semantic.claims.map((c) => {
+      if (!c || typeof c !== "object") return c;
+      const cc = { ...c };
+      if (cc.sourceStatements !== undefined) {
+        const existingIds = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
+        if (existingIds.length === 0 && Array.isArray(cc.sourceStatements)) {
+          const ids = cc.sourceStatements
+            .map((s) => s?.id ?? s?.statementId ?? s?.sid ?? null)
+            .filter((x) => x != null && String(x).trim().length > 0)
+            .map((x) => String(x));
+          if (ids.length > 0) cc.sourceStatementIds = ids;
+        }
+        delete cc.sourceStatements;
+      }
+      if (cc.sourceRegions !== undefined) {
+        const existingIds = Array.isArray(cc.sourceRegionIds) ? cc.sourceRegionIds : [];
+        if (existingIds.length === 0 && Array.isArray(cc.sourceRegions)) {
+          const ids = cc.sourceRegions
+            .map((r) => r?.id ?? r?.regionId ?? null)
+            .filter((x) => x != null && String(x).trim().length > 0)
+            .map((x) => String(x));
+          if (ids.length > 0) cc.sourceRegionIds = ids;
+        }
+        delete cc.sourceRegions;
+      }
+      return cc;
+    })
+    : [];
   return {
     semantic: {
-      claims: Array.isArray(semantic.claims) ? semantic.claims : [],
+      claims,
       edges: Array.isArray(semantic.edges) ? semantic.edges : [],
       conditionals: Array.isArray(semantic.conditionals) ? semantic.conditionals : [],
       narrative: semantic.narrative,

@@ -1197,15 +1197,46 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           });
 
           // ── H. Persist as provider-specific artifact ──
+          const mergeArtifacts = (base, patch) => {
+            if (!patch || typeof patch !== "object") return base;
+            if (!base || typeof base !== "object") return patch;
+            if (Array.isArray(base) || Array.isArray(patch)) {
+              if (Array.isArray(patch) && patch.length > 0) return patch;
+              return base;
+            }
+            const out = { ...base };
+            for (const [k, v] of Object.entries(patch)) {
+              if (v === undefined || v === null) continue;
+              const prev = out[k];
+              if (prev && typeof prev === "object" && !Array.isArray(prev) && typeof v === "object" && !Array.isArray(v)) {
+                out[k] = mergeArtifacts(prev, v);
+              } else if (Array.isArray(v)) {
+                out[k] = v.length > 0 ? v : prev;
+              } else {
+                out[k] = v;
+              }
+            }
+            return out;
+          };
+
           let artifactPatched = false;
+          let artifactForUi = cognitiveArtifact || null;
           if (cognitiveArtifact && mappingResp?.id) {
-            const updated = { ...mappingResp, artifact: cognitiveArtifact, updatedAt: Date.now() };
+            const existingArtifact =
+              mappingResp?.artifact && typeof mappingResp.artifact === "object" ? mappingResp.artifact : null;
+            const mergedArtifact = mergeArtifacts(existingArtifact, cognitiveArtifact);
+            artifactForUi = mergedArtifact;
+
+            const { dehydrateArtifact } = await import('./persistence/artifact-hydration');
+            const dehydrated = dehydrateArtifact(mergedArtifact);
+
+            const updated = { ...mappingResp, artifact: dehydrated, updatedAt: Date.now() };
             await sm.adapter.put("provider_responses", updated, mappingResp.id);
             artifactPatched = true;
             console.log(`[Regenerate] Full artifact persisted for provider ${providerId}: ${enrichedClaims.length} claims, ${semanticEdges.length} edges`);
           }
 
-          sendResponse({ success: true, data: { artifactPatched, artifact: cognitiveArtifact || null, claimCount: enrichedClaims.length, edgeCount: semanticEdges.length } });
+          sendResponse({ success: true, data: { artifactPatched, artifact: artifactForUi, claimCount: enrichedClaims.length, edgeCount: semanticEdges.length } });
         })().catch(e => { console.error('[Regenerate] Failed:', e); sendResponse({ success: false, error: getErrorMessage(e) }); });
         return true;
 

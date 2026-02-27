@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { StructuralAnalysis } from "../../../../shared/contract";
 import {
   SummaryCardsRow,
@@ -13,6 +13,7 @@ import {
 type Props = {
   artifact: any;
   structuralAnalysis: StructuralAnalysis | null;
+  aiTurnId?: string;
 };
 
 // ─── Known thresholds ────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ function TextHistogram({
 
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
-export function EmbeddingDistributionPanel({ artifact }: Props) {
+export function EmbeddingDistributionPanel({ artifact, aiTurnId }: Props) {
   const substrate = artifact?.geometry?.substrate;
   const nodes = safeArr(substrate?.nodes);
   const knnEdges = safeArr(substrate?.edges);
@@ -177,6 +178,107 @@ export function EmbeddingDistributionPanel({ artifact }: Props) {
   const basicStats = substrate?.similarityStats;
   const rawAllPairwise: number[] | null = substrate?.allPairwiseSimilarities ?? null;
   const observations = safeArr(artifact?.geometry?.diagnostics?.observations);
+  const [computedAllPairwise, setComputedAllPairwise] = useState<number[] | null>(null);
+  const [computeError, setComputeError] = useState<string | null>(null);
+  const [isComputing, setIsComputing] = useState(false);
+  const requestedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const shouldCompute = (!rawAllPairwise || rawAllPairwise.length === 0) && !!aiTurnId;
+    if (!shouldCompute) {
+      setComputedAllPairwise(null);
+      setComputeError(null);
+      setIsComputing(false);
+      requestedRef.current = null;
+      return;
+    }
+
+    const reqKey = String(aiTurnId || "").trim();
+    if (!reqKey) return;
+    if (requestedRef.current === reqKey) return;
+    requestedRef.current = reqKey;
+    setIsComputing(true);
+    setComputeError(null);
+    setComputedAllPairwise(null);
+
+    chrome.runtime.sendMessage(
+      { type: "GET_PARAGRAPH_EMBEDDINGS_RECORD", payload: { aiTurnId: reqKey } },
+      (response) => {
+        if (requestedRef.current !== reqKey) return;
+        setIsComputing(false);
+        if (chrome.runtime.lastError) {
+          setComputeError(chrome.runtime.lastError.message || "Runtime messaging error");
+          return;
+        }
+        if (!response?.success) {
+          setComputeError(response?.error || "Failed to load cached paragraph embeddings");
+          return;
+        }
+
+        const data = response?.data as any;
+        if (!data || data.ok === false) {
+          setComputeError("Cached paragraph embeddings not found for this turn");
+          return;
+        }
+
+        const buffer = data.buffer as ArrayBuffer | null;
+        const index = Array.isArray(data.index) ? (data.index as string[]) : [];
+        const dims = typeof data.dimensions === "number" ? data.dimensions : 0;
+        if (!buffer || dims <= 0 || index.length === 0) {
+          setComputeError("Unexpected embeddings payload shape");
+          return;
+        }
+
+        const view = new Float32Array(buffer);
+        const idToRow = new Map<string, number>();
+        for (let i = 0; i < index.length; i++) {
+          const id = String(index[i] || "").trim();
+          if (!id) continue;
+          if (!idToRow.has(id)) idToRow.set(id, i);
+        }
+
+        const paragraphIds = nodes
+          .map((n: any) => String(n?.paragraphId || "").trim())
+          .filter(Boolean);
+        const uniq = Array.from(new Set(paragraphIds));
+        const rows: number[] = [];
+        for (const id of uniq) {
+          const r = idToRow.get(id);
+          if (typeof r === "number" && r >= 0) rows.push(r);
+        }
+
+        const n = rows.length;
+        if (n < 2) {
+          setComputeError("Not enough paragraph embeddings to compute pairwise field");
+          return;
+        }
+
+        const expectedFloats = index.length * dims;
+        if (view.length < expectedFloats) {
+          setComputeError("Cached embedding buffer is shorter than expected");
+          return;
+        }
+
+        const sims: number[] = [];
+        for (let a = 0; a < n; a++) {
+          const rowA = rows[a];
+          const baseA = rowA * dims;
+          for (let b = a + 1; b < n; b++) {
+            const rowB = rows[b];
+            const baseB = rowB * dims;
+            let dot = 0;
+            for (let k = 0; k < dims; k++) {
+              dot += view[baseA + k] * view[baseB + k];
+            }
+            const q = Math.round(dot * 1e6) / 1e6;
+            sims.push(q);
+          }
+        }
+
+        setComputedAllPairwise(sims);
+      },
+    );
+  }, [aiTurnId, rawAllPairwise, nodes]);
 
   // ─── A. Distribution Summary Cards ───────────────────────────────────────
 
@@ -217,11 +319,12 @@ export function EmbeddingDistributionPanel({ artifact }: Props) {
 
   const sortedKnnSims = useMemo(() => collectSortedSimilarities(knnEdges), [knnEdges]);
   const sortedAllPairwise = useMemo(() => {
-    if (!rawAllPairwise || rawAllPairwise.length === 0) return [];
-    const copy = rawAllPairwise.filter((s) => typeof s === "number" && Number.isFinite(s));
+    const arr = rawAllPairwise && rawAllPairwise.length > 0 ? rawAllPairwise : computedAllPairwise;
+    if (!arr || arr.length === 0) return [];
+    const copy = arr.filter((s) => typeof s === "number" && Number.isFinite(s));
     copy.sort((a, b) => a - b);
     return copy;
-  }, [rawAllPairwise]);
+  }, [rawAllPairwise, computedAllPairwise]);
   const hasFullPairwise = sortedAllPairwise.length > 0;
 
   type ThresholdRow = {
@@ -426,6 +529,16 @@ export function EmbeddingDistributionPanel({ artifact }: Props) {
       <DataTable spec={thresholdTableSpec} />
 
       {/* C. Histograms */}
+      {isComputing && !hasFullPairwise && (
+        <div className="rounded-xl border border-border-subtle bg-surface px-4 py-3 text-xs text-text-muted">
+          Computing full pairwise similarity field from cached paragraph embeddings…
+        </div>
+      )}
+      {computeError && !hasFullPairwise && (
+        <div className="rounded-xl border border-border-subtle bg-surface px-4 py-3 text-xs text-text-muted">
+          Full pairwise similarity field unavailable: {computeError}
+        </div>
+      )}
       <div className={`grid grid-cols-1 gap-3 ${hasFullPairwise ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
         {hasFullPairwise && (
           <TextHistogram title="All Pairwise (full distribution)" similarities={sortedAllPairwise} softThreshold={softThreshold} />
