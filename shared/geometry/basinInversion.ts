@@ -42,7 +42,7 @@ function nearestOdd(n: number): number {
 function smoothMovingAverage(counts: number[], kernelWidth: number): number[] {
     const n = counts.length;
     if (n === 0) return [];
-    const w = Math.max(3, Math.min(kernelWidth, n % 2 === 1 ? n : Math.max(1, n - 1)));
+    const w = Math.max(3, Math.min(kernelWidth, n));
     const r = Math.floor(w / 2);
     const out = new Array<number>(n);
     for (let i = 0; i < n; i++) {
@@ -94,11 +94,17 @@ class UnionFind {
         }
     }
     find(x: number): number {
-        let p = this.parent[x];
-        if (p === x) return x;
-        p = this.find(p);
-        this.parent[x] = p;
-        return p;
+        let root = x;
+        while (this.parent[root] !== root) {
+            root = this.parent[root];
+        }
+        let curr = x;
+        while (this.parent[curr] !== root) {
+            let next = this.parent[curr];
+            this.parent[curr] = root;
+            curr = next;
+        }
+        return root;
     }
     union(a: number, b: number) {
         let ra = this.find(a);

@@ -326,34 +326,50 @@ export function ParagraphSpaceView({
         const idx: string[] = Array.isArray(response?.data?.index) ? response.data.index : [];
         const dims: number = typeof response?.data?.dimensions === "number" ? response.data.dimensions : 0;
 
-        let validBuf = null;
+        let validBuf: ArrayBuffer | null = null;
         if (rawBuf instanceof ArrayBuffer) {
           validBuf = rawBuf;
         } else if (rawBuf?.buffer instanceof ArrayBuffer) {
           validBuf = rawBuf.buffer;
         } else if (rawBuf && typeof rawBuf === "object") {
-          validBuf = new Uint8Array(Object.values(rawBuf)).buffer;
-        } else if (Array.isArray(rawBuf)) {
-          validBuf = new Uint8Array(rawBuf).buffer;
+          const vals = Array.isArray(rawBuf) ? rawBuf : Object.values(rawBuf);
+          const allNumeric = vals.every(v => typeof v === "number" && !Number.isNaN(v));
+          if (allNumeric) {
+            validBuf = new Uint8Array(vals).buffer;
+          } else {
+            console.error("[ParagraphSpaceView] Non-numeric values found in raw buffer array/object");
+          }
         }
 
-        if (!validBuf || idx.length === 0 || !(dims > 0)) {
-          console.error("[ParagraphSpaceView] Invalid basin buffer structure", { hasBuf: !!rawBuf, idxLength: idx.length, dims });
+        if (!validBuf || validBuf.byteLength % 4 !== 0 || idx.length === 0 || !(dims > 0)) {
+          console.error("[ParagraphSpaceView] Invalid basin buffer structure or length", {
+            hasBuf: !!validBuf,
+            byteLength: validBuf?.byteLength,
+            validAlignment: validBuf ? validBuf.byteLength % 4 === 0 : false,
+            idxLength: idx.length,
+            dims
+          });
           setBasinResult(null);
           return;
         }
-        const view = new Float32Array(validBuf);
-        const maxRows = Math.floor(view.length / dims);
-        const rowCount = Math.min(idx.length, maxRows);
-        const ids: string[] = [];
-        const vectors: Float32Array[] = [];
-        for (let i = 0; i < rowCount; i++) {
-          const id = String(idx[i] || "").trim();
-          if (!id) continue;
-          ids.push(id);
-          vectors.push(view.subarray(i * dims, (i + 1) * dims));
+
+        try {
+          const view = new Float32Array(validBuf);
+          const maxRows = Math.floor(view.length / dims);
+          const rowCount = Math.min(idx.length, maxRows);
+          const ids: string[] = [];
+          const vectors: Float32Array[] = [];
+          for (let i = 0; i < rowCount; i++) {
+            const id = String(idx[i] || "").trim();
+            if (!id) continue;
+            ids.push(id);
+            vectors.push(view.subarray(i * dims, (i + 1) * dims));
+          }
+          setBasinResult(computeBasinInversion(ids, vectors));
+        } catch (e) {
+          console.error("[ParagraphSpaceView] Error constructing Float32Array from validBuf", e);
+          setBasinResult(null);
         }
-        setBasinResult(computeBasinInversion(ids, vectors));
       },
     );
     return () => {

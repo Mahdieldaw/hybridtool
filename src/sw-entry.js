@@ -1286,7 +1286,26 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           let safeBuffer = geoRecord.paragraphEmbeddings;
           if (safeBuffer && !(safeBuffer instanceof ArrayBuffer)) {
-            safeBuffer = safeBuffer.buffer || Array.from(safeBuffer);
+            if (ArrayBuffer.isView(safeBuffer)) {
+              if (safeBuffer.byteOffset === 0 && safeBuffer.byteLength === safeBuffer.buffer.byteLength) {
+                safeBuffer = safeBuffer.buffer;
+              } else {
+                safeBuffer = safeBuffer.buffer.slice(safeBuffer.byteOffset, safeBuffer.byteOffset + safeBuffer.byteLength);
+              }
+            } else if (Array.isArray(safeBuffer)) {
+              safeBuffer = new Float32Array(safeBuffer).buffer;
+            } else if (typeof safeBuffer === "object" && safeBuffer.type === "Buffer" && Array.isArray(safeBuffer.data)) {
+              safeBuffer = new Uint8Array(safeBuffer.data).buffer;
+            } else {
+              // Try to blindly extract values if it's an object with numeric keys, handle edge cases
+              const vals = Object.values(safeBuffer).filter(v => typeof v === 'number');
+              if (vals.length > 0) {
+                safeBuffer = new Float32Array(vals).buffer;
+              } else {
+                console.warn("[sw-entry] Invalid paragraphEmbeddings format:", typeof safeBuffer);
+                safeBuffer = null;
+              }
+            }
           }
 
           const payload = {
