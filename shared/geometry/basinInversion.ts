@@ -100,7 +100,7 @@ class UnionFind {
         }
         let curr = x;
         while (this.parent[curr] !== root) {
-            let next = this.parent[curr];
+            const next = this.parent[curr];
             this.parent[curr] = root;
             curr = next;
         }

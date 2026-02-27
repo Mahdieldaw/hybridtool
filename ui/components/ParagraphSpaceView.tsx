@@ -334,10 +334,20 @@ export function ParagraphSpaceView({
         } else if (rawBuf && typeof rawBuf === "object") {
           const vals = Array.isArray(rawBuf) ? rawBuf : Object.values(rawBuf);
           const allNumeric = vals.every(v => typeof v === "number" && !Number.isNaN(v));
-          if (allNumeric) {
+          const allInByteRange = allNumeric && vals.every(v => v >= 0 && v <= 255 && Number.isInteger(v));
+
+          if (allInByteRange) {
             validBuf = new Uint8Array(vals).buffer;
           } else {
-            console.error("[ParagraphSpaceView] Non-numeric values found in raw buffer array/object");
+            console.error("[ParagraphSpaceView] Invalid raw buffer values: expected byte array (0-255 integers)", {
+              hasBuf: !!rawBuf,
+              type: typeof rawBuf,
+              isArray: Array.isArray(rawBuf),
+              hasBufferField: "buffer" in (rawBuf || {}),
+              firstValue: vals[0],
+              allNumeric,
+              allInByteRange
+            });
           }
         }
 
