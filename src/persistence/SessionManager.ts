@@ -880,48 +880,16 @@ export class SessionManager {
       existingResponses = await this._getExistingResponsesByTurnId(aiTurnId);
     } catch (_) { }
 
-    const getNextIndex = (providerId: string, type: ProviderResponseType): number => {
-      const persisted = existingResponses.filter(
-        (r) => r.providerId === providerId && r.responseType === type,
-      );
-      const pending = recordsToSave.filter(
-        (r) => r.providerId === providerId && r.responseType === type,
-      );
-
-      const maxPersisted = persisted.length > 0
-        ? Math.max(...persisted.map((r) => (typeof r.responseIndex === "number" ? r.responseIndex : 0)))
-        : -1;
-
-      const maxPending = pending.length > 0
-        ? Math.max(...pending.map((r) => (typeof r.responseIndex === "number" ? r.responseIndex : 0)))
-        : -1;
-
-      return Math.max(maxPersisted, maxPending) + 1;
-    };
-
     let count = 0;
 
-    // 1. Batch Responses (versioned)
+    // 1. Batch Responses (singleton per provider — frozen outputs, no versioning needed)
     for (const [providerId, output] of Object.entries(result?.batchOutputs || {})) {
-      let existingForRun: ExistingProviderResponse | null = null;
-      if (runId) {
-        const matching = existingResponses
-          .filter(
-            (r) =>
-              r &&
-              r.providerId === providerId &&
-              r.responseType === "batch" &&
-              r.meta?.["runId"] === runId,
-          )
-          .sort((a, b) => (b.responseIndex ?? 0) - (a.responseIndex ?? 0));
-        existingForRun = matching.length > 0 ? matching[0] : null;
-      }
+      const existing = existingResponses.find(
+        (r) => r.providerId === providerId && r.responseType === "batch" && r.responseIndex === 0,
+      );
 
-      const responseIndex = typeof existingForRun?.responseIndex === "number"
-        ? existingForRun.responseIndex
-        : getNextIndex(providerId, "batch");
-      const respId = existingForRun?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-batch-${responseIndex}-${now}-${count++}`;
-      const createdAtKeep = existingForRun?.createdAt || now;
+      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-batch-0-${now}-${count++}`;
+      const createdAtKeep = existing?.createdAt || now;
 
       recordsToSave.push({
         id: respId,
@@ -929,10 +897,10 @@ export class SessionManager {
         aiTurnId,
         providerId,
         responseType: "batch",
-        responseIndex,
-        text: output?.text || "",
-        status: normalizeStatus(output?.status),
-        meta: this._safeMeta({ ...(output?.meta || {}), ...(runId ? { runId } : {}) }),
+        responseIndex: 0,
+        text: output?.text || existing?.text || "",
+        status: normalizeStatus(output?.status ?? existing?.status),
+        meta: this._safeMeta({ ...(existing?.meta || {}), ...(output?.meta || {}), ...(runId ? { runId } : {}) }),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,

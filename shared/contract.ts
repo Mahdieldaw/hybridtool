@@ -1506,6 +1506,26 @@ export interface BasinInversionResult {
 
   meta?: {
     processingTimeMs: number;
+    peakDetection?: {
+      bandwidth: number | null;
+      bandwidthSigma: number | null;
+      bandwidthN: number;
+      selectedPeaks: Array<{
+        center: number;
+        height: number;
+        prominenceSigma: number;
+      }>;
+      valley:
+        | {
+          T_v: number;
+          depthSigma: number;
+          localMu: number;
+          localSigma: number;
+        }
+        | null;
+      binnedSamplingDiffers: boolean | null;
+      binnedPeakCenters: number[] | null;
+    };
   };
 }
 

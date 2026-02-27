@@ -29,6 +29,7 @@ interface Props {
   preSemantic?: any;
   embeddingStatus?: any;
   shape?: ProblemStructure | null | undefined;
+  basinResult?: BasinInversionResult | null | undefined;
 }
 
 /* ── colour constants ─────────────────────────────────────────── */
@@ -159,8 +160,6 @@ export function ParagraphSpaceView({
   const [showClaims, setShowClaims] = useState(true);
   const [showFates, setShowFates] = useState(true);
   const [showBasinView, setShowBasinView] = useState(false);
-  const [basinResult, setBasinResult] = useState<BasinInversionResult | null>(null);
-  const [basinLoading, setBasinLoading] = useState(false);
   const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
   const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
@@ -298,94 +297,6 @@ export function ParagraphSpaceView({
     for (let i = 0; i < modelIndices.length; i++) map.set(modelIndices[i], MODEL_COLORS[i % MODEL_COLORS.length]);
     return map;
   }, [modelIndices]);
-
-  useEffect(() => {
-    if (!showBasinView || !aiTurnId) {
-      setBasinResult(null);
-      setBasinLoading(false);
-      return;
-    }
-    if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
-      setBasinResult(null);
-      setBasinLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setBasinLoading(true);
-    chrome.runtime.sendMessage(
-      { type: "GET_PARAGRAPH_EMBEDDINGS_RECORD", payload: { aiTurnId } },
-      (response) => {
-        if (cancelled) return;
-        setBasinLoading(false);
-        if (chrome.runtime.lastError) {
-          console.warn("[ParagraphSpaceView]", chrome.runtime.lastError.message);
-          setBasinResult(null);
-          return;
-        }
-        const rawBuf = response?.data?.buffer || null;
-        const idx: string[] = Array.isArray(response?.data?.index) ? response.data.index : [];
-        const dims: number = typeof response?.data?.dimensions === "number" ? response.data.dimensions : 0;
-
-        let validBuf: ArrayBuffer | null = null;
-        if (rawBuf instanceof ArrayBuffer) {
-          validBuf = rawBuf;
-        } else if (rawBuf?.buffer instanceof ArrayBuffer) {
-          validBuf = rawBuf.buffer;
-        } else if (rawBuf && typeof rawBuf === "object") {
-          const vals = Array.isArray(rawBuf) ? rawBuf : Object.values(rawBuf);
-          const allNumeric = vals.every(v => typeof v === "number" && !Number.isNaN(v));
-          const allInByteRange = allNumeric && vals.every(v => v >= 0 && v <= 255 && Number.isInteger(v));
-
-          if (allInByteRange) {
-            validBuf = new Uint8Array(vals).buffer;
-          } else {
-            console.error("[ParagraphSpaceView] Invalid raw buffer values: expected byte array (0-255 integers)", {
-              hasBuf: !!rawBuf,
-              type: typeof rawBuf,
-              isArray: Array.isArray(rawBuf),
-              hasBufferField: "buffer" in (rawBuf || {}),
-              firstValue: vals[0],
-              allNumeric,
-              allInByteRange
-            });
-          }
-        }
-
-        if (!validBuf || validBuf.byteLength % 4 !== 0 || idx.length === 0 || !(dims > 0)) {
-          console.error("[ParagraphSpaceView] Invalid basin buffer structure or length", {
-            hasBuf: !!validBuf,
-            byteLength: validBuf?.byteLength,
-            validAlignment: validBuf ? validBuf.byteLength % 4 === 0 : false,
-            idxLength: idx.length,
-            dims
-          });
-          setBasinResult(null);
-          return;
-        }
-
-        try {
-          const view = new Float32Array(validBuf);
-          const maxRows = Math.floor(view.length / dims);
-          const rowCount = Math.min(idx.length, maxRows);
-          const ids: string[] = [];
-          const vectors: Float32Array[] = [];
-          for (let i = 0; i < rowCount; i++) {
-            const id = String(idx[i] || "").trim();
-            if (!id) continue;
-            ids.push(id);
-            vectors.push(view.subarray(i * dims, (i + 1) * dims));
-          }
-          setBasinResult(computeBasinInversion(ids, vectors));
-        } catch (e) {
-          console.error("[ParagraphSpaceView] Error constructing Float32Array from validBuf", e);
-          setBasinResult(null);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [showBasinView, aiTurnId, embeddingStatus]);
 
   /** Provider names keyed by model index */
   const modelProviders = useMemo(() => {
@@ -864,16 +775,9 @@ export function ParagraphSpaceView({
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showMutualEdges} onChange={(e) => setShowMutualEdges(e.target.checked)} />Mutual</label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showStrongEdges} onChange={(e) => setShowStrongEdges(e.target.checked)} />Strong</label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showRegionHulls} onChange={(e) => setShowRegionHulls(e.target.checked)} />Hulls</label>
-              <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none", (!aiTurnId || basinLoading) && "opacity-60")}>
-                <input type="checkbox" className="rounded" checked={showBasinView} onChange={(e) => setShowBasinView(e.target.checked)} disabled={!aiTurnId || basinLoading} />
-                {basinLoading ? (
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 border border-white/20 border-t-white/60 rounded-full animate-spin" />
-                    <span className="opacity-70">Loading...</span>
-                  </span>
-                ) : (
-                  "Basin"
-                )}
+              <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none", (!basinResult || basinResult.basinCount < 1) && "opacity-40")}>
+                <input type="checkbox" className="rounded" checked={showBasinView} onChange={(e) => setShowBasinView(e.target.checked)} disabled={!basinResult || basinResult.basinCount < 1} />
+                Basin
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showClaims} onChange={(e) => setShowClaims(e.target.checked)} />Claims</label>
               <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none", (!hasTraversal || mode !== "post") && "opacity-40")}>

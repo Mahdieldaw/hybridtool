@@ -28,6 +28,7 @@ import type { GraphTopology, ProblemStructure, StructuralAnalysis } from "../../
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
+import { mergeArtifacts } from "../utils/merge-artifacts";
 import { getProviderArtifact } from "../utils/turn-helpers";
 
 import { StructuralInsight } from "./StructuralInsight";
@@ -979,15 +980,16 @@ export const DecisionMapSheet = React.memo(() => {
     // Check if the given provider ID has actual data in this turn
     const hasData = (pid: string | null | undefined) => {
       if (!pid || !aiTurnSafe?.mappingResponses) return false;
-      const resp = (aiTurnSafe.mappingResponses as any)[pid];
+      const normalized = normalizeProviderId(String(pid));
+      const resp = (aiTurnSafe.mappingResponses as any)[normalized];
       return Array.isArray(resp) && resp.length > 0;
     };
 
     // 3. If the global preferred mapper has data, use it.
-    if (preferred && hasData(preferred)) return preferred;
+    if (preferred && hasData(preferred)) return normalizeProviderId(String(preferred));
 
     // 4. Otherwise, fallback to the historical mapper if it has data.
-    if (historical && hasData(historical)) return historical;
+    if (historical && hasData(historical)) return normalizeProviderId(String(historical));
 
     // 5. Pick ANY available mapper that has data.
     const availableMappers = Object.keys(aiTurnSafe?.mappingResponses || {});
@@ -1029,8 +1031,10 @@ export const DecisionMapSheet = React.memo(() => {
       { type: "REGENERATE_EMBEDDINGS", payload: { aiTurnId, providerId: pid, persist: false } },
       (response) => {
         if (viewArtifactRequestRef.current !== key) return;
-        if (chrome.runtime.lastError) return;
-        if (!response?.success) return;
+        if (chrome.runtime.lastError || !response?.success) {
+          viewArtifactRequestRef.current = null;  // allow retry
+          return;
+        }
         const artifact = response?.data?.artifact;
         if (!artifact || typeof artifact !== "object") return;
 
@@ -1041,11 +1045,13 @@ export const DecisionMapSheet = React.memo(() => {
           const existing = turn.mappingResponses[pid];
           const arr = Array.isArray(existing) ? existing : existing ? [existing] : [];
           if (arr.length > 0) {
-            arr[arr.length - 1] = { ...arr[arr.length - 1], artifact };
+            const prev = arr[arr.length - 1];
+            arr[arr.length - 1] = { ...prev, artifact: mergeArtifacts(prev?.artifact, artifact) };
           } else {
             arr.push({ providerId: pid, text: "", artifact, status: "completed", createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
           }
           turn.mappingResponses[pid] = arr;
+          turn.mappingVersion = (turn.mappingVersion ?? 0) + 1;
         });
       },
     );
@@ -2659,6 +2665,7 @@ export const DecisionMapSheet = React.memo(() => {
                           })()}
                           completeness={null}
                           shape={sheetData.shape}
+                          basinResult={(sheetData.mappingArtifact as any)?.geometry?.basinInversion || null}
                         />
                       </div>
                     )}

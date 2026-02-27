@@ -240,6 +240,7 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
   const summaryCards = useMemo<SummaryCard[]>(() => {
     if (!result) return [];
     const D = safeNum(result.discriminationRange);
+    const pd = result.meta?.peakDetection;
     const emphasis: SummaryCard["emphasis"] =
       result.status === "ok" ? "good" : result.status === "undifferentiated" ? "bad" : "warn";
     return [
@@ -252,6 +253,11 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
       { label: "D = P90-P10", value: formatNum(D, 6), emphasis },
       { label: "Peaks", value: formatInt(result.peaks.length) },
       { label: "T_v", value: result.status === "ok" ? formatNum(result.T_v, 6) : "—" },
+      { label: "Bandwidth", value: pd ? formatNum(pd.bandwidth, 6) : "—" },
+      { label: "Peak A prom/σ", value: pd?.selectedPeaks?.[0] ? formatNum(pd.selectedPeaks[0].prominenceSigma, 2) : "—" },
+      { label: "Peak B prom/σ", value: pd?.selectedPeaks?.[1] ? formatNum(pd.selectedPeaks[1].prominenceSigma, 2) : "—" },
+      { label: "Valley depth/σ", value: pd?.valley ? formatNum(pd.valley.depthSigma, 2) : "—" },
+      { label: "Binned differs", value: pd?.binnedSamplingDiffers == null ? "—" : pd.binnedSamplingDiffers ? "yes" : "no" },
       { label: "Basins", value: formatInt(result.basinCount) },
       { label: "Largest Basin", value: result.largestBasinRatio == null ? "—" : formatPct(result.largestBasinRatio, 1) },
       { label: "Field Status", value: result.statusLabel },
@@ -391,6 +397,7 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
       : result.status === "undifferentiated"
         ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
         : "bg-amber-500/10 border-amber-500/30 text-amber-300";
+  const binnedDiffers = result.meta?.peakDetection?.binnedSamplingDiffers === true;
 
   return (
     <div className="flex flex-col gap-4">
@@ -399,6 +406,7 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
         <div className="opacity-90 mt-1">
           Low similarity is reliable for semantic non-relatedness; it is not logical incompatibility or causal independence.
         </div>
+        {binnedDiffers && <div className="opacity-90 mt-1">Diagnostic: peak detection differs under binned sampling.</div>}
       </div>
 
       {summaryCards.length > 0 && (

@@ -31,55 +31,171 @@ function meanAndStddev(values: number[]): { mu: number | null; sigma: number | n
     return { mu, sigma };
 }
 
-function nearestOdd(n: number): number {
-    if (!Number.isFinite(n)) return 3;
-    let k = Math.round(n);
-    if (k < 3) k = 3;
-    if (k % 2 === 0) k += 1;
-    return k;
+function meanAndStddevInRange(
+    values: number[],
+    lo: number,
+    hi: number
+): { mu: number | null; sigma: number | null; n: number } {
+    if (!(hi >= lo)) return { mu: null, sigma: null, n: 0 };
+    let n = 0;
+    let mean = 0;
+    let m2 = 0;
+    for (const x of values) {
+        if (!(x >= lo && x <= hi)) continue;
+        n += 1;
+        const delta = x - mean;
+        mean += delta / n;
+        const delta2 = x - mean;
+        m2 += delta * delta2;
+    }
+    if (n === 0) return { mu: null, sigma: null, n: 0 };
+    const sigma = Math.sqrt(m2 / n);
+    return { mu: mean, sigma, n };
 }
 
-function smoothMovingAverage(counts: number[], kernelWidth: number): number[] {
-    const n = counts.length;
+function bandwidthFromSigma(sigma: number | null): number | null {
+    if (sigma == null || !Number.isFinite(sigma) || !(sigma > 0)) return null;
+    return 2 * sigma;
+}
+
+function buildBandwidthGrid(minS: number, maxS: number, bandwidth: number): number[] {
+    if (!Number.isFinite(minS) || !Number.isFinite(maxS) || !Number.isFinite(bandwidth)) return [];
+    if (!(maxS > minS) || !(bandwidth > 0)) return [minS];
+    const span = maxS - minS;
+    const approxCount = Math.floor(span / bandwidth);
+    const xs: number[] = new Array(approxCount + 2);
+    let m = 0;
+    for (let i = 0; i <= approxCount + 1; i++) {
+        const x = minS + i * bandwidth;
+        if (x > maxS) break;
+        xs[m++] = x;
+    }
+    if (m === 0) return [minS];
+    if (xs[m - 1] < maxS) xs[m++] = maxS;
+    xs.length = m;
+    return xs;
+}
+
+function kdeAtPoints(similarities: number[], xs: number[], bandwidth: number): number[] {
+    const n = similarities.length;
     if (n === 0) return [];
-    const w = Math.max(3, Math.min(kernelWidth, n));
-    const r = Math.floor(w / 2);
-    const out = new Array<number>(n);
-    for (let i = 0; i < n; i++) {
+    if (!(bandwidth > 0) || !Number.isFinite(bandwidth)) return new Array(xs.length).fill(0);
+    const invH = 1 / bandwidth;
+    const out = new Array<number>(xs.length).fill(0);
+    for (let i = 0; i < xs.length; i++) {
+        const x = xs[i];
         let sum = 0;
-        let c = 0;
-        const start = Math.max(0, i - r);
-        const end = Math.min(n - 1, i + r);
-        for (let j = start; j <= end; j++) {
-            sum += counts[j];
-            c += 1;
+        for (let j = 0; j < n; j++) {
+            const u = (x - similarities[j]) * invH;
+            sum += Math.exp(-0.5 * u * u);
         }
-        out[i] = c > 0 ? sum / c : 0;
+        out[i] = sum;
     }
     return out;
 }
 
-function detectPeaks(smoothed: number[], binMin: number, binWidth: number): BasinInversionPeak[] {
-    if (smoothed.length < 3) return [];
-    const maxH = Math.max(0, ...smoothed);
-    const minProminence = maxH * 0.05;
-    const out: BasinInversionPeak[] = [];
-    for (let i = 1; i < smoothed.length - 1; i++) {
-        const a = smoothed[i - 1];
-        const b = smoothed[i];
-        const c = smoothed[i + 1];
-        if (!(b > a && b >= c)) continue;
-        const prom = b - Math.max(a, c);
-        if (prom < minProminence) continue;
-        out.push({
-            index: i,
-            center: binMin + (i + 0.5) * binWidth,
-            height: b,
-            prominence: prom,
-        });
+function localMaximaIndices(ys: number[]): number[] {
+    const out: number[] = [];
+    if (ys.length < 3) return out;
+    for (let i = 1; i < ys.length - 1; i++) {
+        const a = ys[i - 1];
+        const b = ys[i];
+        const c = ys[i + 1];
+        if (b > a && b >= c) out.push(i);
     }
-    out.sort((p, q) => (q.prominence - p.prominence) || (q.height - p.height) || (p.index - q.index));
     return out;
+}
+
+function localMinIndexBetween(ys: number[], lo: number, hi: number): number | null {
+    if (!(hi > lo + 1)) return null;
+    let best = lo + 1;
+    let bestVal = ys[best];
+    for (let i = lo + 1; i <= hi - 1; i++) {
+        const v = ys[i];
+        if (v < bestVal) {
+            bestVal = v;
+            best = i;
+        }
+    }
+    return best;
+}
+
+type PeakCandidate = { index: number; center: number; height: number };
+
+function candidatesFromCurve(xs: number[], ys: number[]): PeakCandidate[] {
+    const idxs = localMaximaIndices(ys);
+    const out: PeakCandidate[] = [];
+    for (const index of idxs) out.push({ index, center: xs[index], height: ys[index] });
+    out.sort((a, b) => b.height - a.height);
+    return out;
+}
+
+type SelectedValley = {
+    peakA: PeakCandidate;
+    peakB: PeakCandidate;
+    T_v: number;
+    promSigmaA: number;
+    promSigmaB: number;
+    localMu: number;
+    localSigma: number;
+    valleyDepthSigma: number;
+};
+
+function selectValleyFromPeaks(
+    peaks: PeakCandidate[],
+    xs: number[],
+    ys: number[],
+    similarities: number[],
+    sigma: number | null
+): SelectedValley | null {
+    if (peaks.length < 2) return null;
+    if (sigma == null || !Number.isFinite(sigma) || !(sigma > 0)) return null;
+    let best: SelectedValley | null = null;
+
+    for (let a = 0; a < peaks.length; a++) {
+        for (let b = a + 1; b < peaks.length; b++) {
+            const pA = peaks[a];
+            const pB = peaks[b];
+            const loIdx = Math.min(pA.index, pB.index);
+            const hiIdx = Math.max(pA.index, pB.index);
+            const valleyIdx = localMinIndexBetween(ys, loIdx, hiIdx);
+            if (valleyIdx == null) continue;
+
+            const T_v = xs[valleyIdx];
+            const promSigmaA = Math.abs(pA.center - T_v) / sigma;
+            const promSigmaB = Math.abs(pB.center - T_v) / sigma;
+            if (!(promSigmaA >= 1 && promSigmaB >= 1)) continue;
+
+            const loS = Math.min(pA.center, pB.center);
+            const hiS = Math.max(pA.center, pB.center);
+            const local = meanAndStddevInRange(similarities, loS, hiS);
+            if (local.mu == null || local.sigma == null) continue;
+            if (!Number.isFinite(local.mu) || !Number.isFinite(local.sigma) || !(local.sigma > 0)) continue;
+            if (!(T_v <= local.mu - local.sigma)) continue;
+
+            const valleyDepthSigma = (local.mu - T_v) / local.sigma;
+            if (!Number.isFinite(valleyDepthSigma)) continue;
+
+            if (
+                best == null ||
+                valleyDepthSigma > best.valleyDepthSigma ||
+                (valleyDepthSigma === best.valleyDepthSigma && (pA.height + pB.height) > (best.peakA.height + best.peakB.height))
+            ) {
+                best = {
+                    peakA: pA,
+                    peakB: pB,
+                    T_v,
+                    promSigmaA,
+                    promSigmaB,
+                    localMu: local.mu,
+                    localSigma: local.sigma,
+                    valleyDepthSigma,
+                };
+            }
+        }
+    }
+
+    return best;
 }
 
 class UnionFind {
@@ -196,29 +312,60 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     const p90 = quantile(sorted, 0.9);
     const discriminationRange = (p10 != null && p90 != null) ? (p90 - p10) : null;
 
-    const binCount = Math.max(3, Math.ceil(Math.sqrt(pairCount)));
-    const spread = Math.max(1e-9, maxS - minS);
+    const binCount = Math.max(1, Math.ceil(Math.sqrt(pairCount)));
+    const spread = maxS - minS;
     const binMin = minS;
     const binMax = maxS;
-    const binWidth = spread / binCount;
+    const binWidth = spread > 0 ? spread / binCount : 0;
 
     const histogram = new Array<number>(binCount).fill(0);
-    for (const s of similarities) {
-        const raw = Math.floor((s - binMin) / binWidth);
-        const idx = raw < 0 ? 0 : raw >= binCount ? binCount - 1 : raw;
-        histogram[idx] += 1;
+    if (binWidth > 0) {
+        for (const s of similarities) {
+            const raw = Math.floor((s - binMin) / binWidth);
+            const idx = raw < 0 ? 0 : raw >= binCount ? binCount - 1 : raw;
+            histogram[idx] += 1;
+        }
+    } else {
+        histogram[0] = pairCount;
     }
 
-    const kernelWidth = nearestOdd(Math.max(3, binCount * 0.1));
-    const histogramSmoothed = smoothMovingAverage(histogram, kernelWidth);
-    const peaks = detectPeaks(histogramSmoothed, binMin, binWidth);
+    const histogramSmoothed = histogram.slice();
+    const bandwidth = bandwidthFromSigma(sigma);
+    const xs = bandwidth != null ? buildBandwidthGrid(minS, maxS, bandwidth) : [];
+    const ys = bandwidth != null ? kdeAtPoints(similarities, xs, bandwidth) : [];
+    const peakCandidates = candidatesFromCurve(xs, ys);
+    const selected = selectValleyFromPeaks(peakCandidates, xs, ys, similarities, sigma);
+
+    const peaks: BasinInversionPeak[] = peakCandidates.map((p) => ({
+        index: p.index,
+        center: p.center,
+        height: p.height,
+        prominence: sigma != null && sigma > 0 ? (() => {
+            const leftMin = (() => {
+                for (let i = p.index - 1; i > 0; i--) {
+                    if (ys[i] <= ys[i - 1] && ys[i] <= ys[i + 1]) return i;
+                }
+                return 0;
+            })();
+            const rightMin = (() => {
+                for (let i = p.index + 1; i < ys.length - 1; i++) {
+                    if (ys[i] <= ys[i - 1] && ys[i] <= ys[i + 1]) return i;
+                }
+                return ys.length - 1;
+            })();
+            const dL = Math.abs(p.center - xs[leftMin]);
+            const dR = Math.abs(xs[rightMin] - p.center);
+            const d = dL <= dR ? dL : dR;
+            return d / sigma;
+        })() : 0,
+    }));
 
     const T_low = (mu != null && sigma != null) ? mu - sigma : null;
     const T_high = (mu != null && sigma != null) ? mu + sigma : null;
 
     let status: BasinInversionStatus = "ok";
     let statusLabel = "Basin Structure Detected";
-    let T_v: number | null = null;
+    let T_v: number | null = selected ? selected.T_v : null;
     let basinByNodeId: Record<string, number> = {};
     let basinCount = 1;
 
@@ -226,29 +373,12 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     if (!dOk) {
         status = "undifferentiated";
         statusLabel = "Undifferentiated Field";
-    } else if (peaks.length < 2) {
+        T_v = null;
+    } else if (!selected) {
         status = "no_basin_structure";
         statusLabel = "Continuous Field / No Basin Structure Detected";
+        T_v = null;
     } else {
-        const pA = peaks[0];
-        const pB = peaks[1];
-        const lo = Math.min(pA.index, pB.index);
-        const hi = Math.max(pA.index, pB.index);
-        if (hi === lo + 1) {
-            T_v = binMin + (lo + 1) * binWidth;
-        } else {
-            let troughIdx = lo + 1;
-            let troughVal = histogramSmoothed[lo + 1];
-            for (let i = lo + 1; i <= hi - 1; i++) {
-                const v = histogramSmoothed[i];
-                if (v < troughVal) {
-                    troughVal = v;
-                    troughIdx = i;
-                }
-            }
-            T_v = binMin + (troughIdx + 0.5) * binWidth;
-        }
-
         const uf = new UnionFind(nodeCount);
         for (let p = 0; p < pairCount; p++) {
             if (similarities[p] >= (T_v as number)) uf.union(pairI[p], pairJ[p]);
@@ -344,6 +474,30 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     }
     const pctValleyZone = T_v != null ? (valleyCount / pairCount) * 100 : null;
 
+    let binnedSamplingDiffers: boolean | null = null;
+    let binnedPeakCenters: number[] | null = null;
+    if (bandwidth != null && bandwidth > 0 && binWidth > 0) {
+        const binCenters = new Array<number>(binCount);
+        for (let i = 0; i < binCount; i++) binCenters[i] = binMin + (i + 0.5) * binWidth;
+        const yb = kdeAtPoints(similarities, binCenters, bandwidth);
+        const binnedCandidates = candidatesFromCurve(binCenters, yb);
+        const binnedSelected = selectValleyFromPeaks(binnedCandidates, binCenters, yb, similarities, sigma);
+        binnedPeakCenters = binnedSelected ? [binnedSelected.peakA.center, binnedSelected.peakB.center] : null;
+
+        if ((selected == null) !== (binnedSelected == null)) {
+            binnedSamplingDiffers = true;
+        } else if (selected == null && binnedSelected == null) {
+            binnedSamplingDiffers = false;
+        } else if (selected != null && binnedSelected != null) {
+            const rawBins = [
+                Math.round((selected.peakA.center - binMin) / binWidth),
+                Math.round((selected.peakB.center - binMin) / binWidth),
+            ].sort((a, b) => a - b);
+            const binnedBins = [binnedSelected.peakA.index, binnedSelected.peakB.index].sort((a, b) => a - b);
+            binnedSamplingDiffers = rawBins[0] !== binnedBins[0] || rawBins[1] !== binnedBins[1];
+        }
+    }
+
     return {
         status,
         statusLabel,
@@ -373,6 +527,24 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
         basinByNodeId,
         basins,
         bridgePairs: valleyZonePairs,
-        meta: { processingTimeMs: Date.now() - startMs }
+        meta: {
+            processingTimeMs: Date.now() - startMs,
+            peakDetection: {
+                bandwidth,
+                bandwidthSigma: sigma,
+                bandwidthN: pairCount,
+                selectedPeaks: selected
+                    ? [
+                        { center: selected.peakA.center, height: selected.peakA.height, prominenceSigma: selected.promSigmaA },
+                        { center: selected.peakB.center, height: selected.peakB.height, prominenceSigma: selected.promSigmaB },
+                    ]
+                    : [],
+                valley: selected
+                    ? { T_v: selected.T_v, depthSigma: selected.valleyDepthSigma, localMu: selected.localMu, localSigma: selected.localSigma }
+                    : null,
+                binnedSamplingDiffers,
+                binnedPeakCenters,
+            }
+        }
     };
 }

@@ -853,8 +853,18 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
             try {
-              const batchResps = responsesForTurn
+              // Deduplicate by provider ID: if a pipeline ran multiple times, the db
+              // may have multiple batch entries for the same provider. Keep only the
+              // latest response per provider to prevent statement duplication.
+              const allBatchResps = responsesForTurn
                 .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
+                .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+              const seenBatchProviders = new Map();
+              for (const r of allBatchResps) {
+                const pid = normalizeProvId(r.providerId);
+                if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
+              }
+              const batchResps = Array.from(seenBatchProviders.values())
                 .sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
               const sources = batchResps.map((r, idx) => {
                 const pid = normalizeProvId(r.providerId);
@@ -885,9 +895,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
           }
 
-          // Model count from batch responses
-          const batchResps = responsesForTurn.filter((r) => r && r.responseType === "batch");
-          const modelCount = Math.max(citationOrderArr.length, batchResps.length, 1);
+          // Model count from batch responses (deduplicated per provider)
+          const uniqueBatchProviders = new Set(
+            responsesForTurn
+              .filter((r) => r && r.responseType === "batch")
+              .map((r) => normalizeProvId(r.providerId))
+          );
+          const modelCount = Math.max(citationOrderArr.length, uniqueBatchProviders.size, 1);
 
           // ── C. Geometry embeddings (immutable, generate if missing) ──
           let geoRecord = await sm.loadEmbeddings(aiTurnId);
