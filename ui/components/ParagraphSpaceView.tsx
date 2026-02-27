@@ -10,9 +10,12 @@ import type {
   ProblemStructure,
 } from "../../shared/contract";
 import { computeParagraphFates, type ParagraphFate } from "../../src/utils/cognitive/fateComputation";
+import { computeBasinInversion } from "../../shared/geometry/basinInversion";
+import type { BasinInversionResult } from "../../shared/contract";
 
 interface Props {
   graph: PipelineSubstrateGraph | null | undefined;
+  aiTurnId?: string;
   paragraphProjection?: PipelineParagraphProjectionResult | null | undefined;
   claims: Claim[] | null | undefined;
   shadowStatements: PipelineShadowStatement[] | null | undefined;
@@ -31,6 +34,7 @@ interface Props {
 /* ── colour constants ─────────────────────────────────────────── */
 
 const MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+const BASIN_COLORS = ["#34d399", "#60a5fa", "#fbbf24", "#fb7185", "#a78bfa", "#22d3ee", "#f472b6", "#c084fc", "#f97316", "#4ade80"];
 
 const FATE_NODE_STYLE: Record<ParagraphFate, { fill: string; stroke: string; strokeWidth: number; opacity: number }> = {
   protected: { fill: "rgba(16,185,129,0.85)", stroke: "none", strokeWidth: 0, opacity: 0.9 },
@@ -127,6 +131,7 @@ interface ParagraphEntry {
 
 export function ParagraphSpaceView({
   graph,
+  aiTurnId,
   paragraphProjection,
   claims,
   shadowStatements,
@@ -153,6 +158,9 @@ export function ParagraphSpaceView({
   const [showRegionHulls, setShowRegionHulls] = useState(true);
   const [showClaims, setShowClaims] = useState(true);
   const [showFates, setShowFates] = useState(true);
+  const [showBasinView, setShowBasinView] = useState(false);
+  const [basinResult, setBasinResult] = useState<BasinInversionResult | null>(null);
+  const [basinLoading, setBasinLoading] = useState(false);
   const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
   const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
@@ -290,6 +298,50 @@ export function ParagraphSpaceView({
     for (let i = 0; i < modelIndices.length; i++) map.set(modelIndices[i], MODEL_COLORS[i % MODEL_COLORS.length]);
     return map;
   }, [modelIndices]);
+
+  useEffect(() => {
+    if (!showBasinView || !aiTurnId) {
+      setBasinResult(null);
+      setBasinLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setBasinLoading(true);
+    chrome.runtime.sendMessage(
+      { type: "GET_PARAGRAPH_EMBEDDINGS_RECORD", payload: { aiTurnId } },
+      (response) => {
+        if (cancelled) return;
+        setBasinLoading(false);
+        if (chrome.runtime.lastError) {
+          console.warn("[ParagraphSpaceView]", chrome.runtime.lastError.message);
+          setBasinResult(null);
+          return;
+        }
+        const buf: ArrayBuffer | null = response?.data?.buffer || null;
+        const idx: string[] = Array.isArray(response?.data?.index) ? response.data.index : [];
+        const dims: number = typeof response?.data?.dimensions === "number" ? response.data.dimensions : 0;
+        if (!buf || !(buf instanceof ArrayBuffer) || idx.length === 0 || !(dims > 0)) {
+          setBasinResult(null);
+          return;
+        }
+        const view = new Float32Array(buf);
+        const maxRows = Math.floor(view.length / dims);
+        const rowCount = Math.min(idx.length, maxRows);
+        const ids: string[] = [];
+        const vectors: Float32Array[] = [];
+        for (let i = 0; i < rowCount; i++) {
+          const id = String(idx[i] || "").trim();
+          if (!id) continue;
+          ids.push(id);
+          vectors.push(view.subarray(i * dims, (i + 1) * dims));
+        }
+        setBasinResult(computeBasinInversion(ids, vectors));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [showBasinView, aiTurnId]);
 
   /** Provider names keyed by model index */
   const modelProviders = useMemo(() => {
@@ -588,6 +640,43 @@ export function ParagraphSpaceView({
     return out;
   }, [showRegionHulls, regionOptions, filteredParagraphIds, paragraphPosition, scaleX, scaleY]);
 
+  const basinRects = useMemo(() => {
+    if (!showBasinView || !basinResult || basinResult.basinCount <= 1) return [];
+    const perBasin = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>();
+    for (const pid of filteredParagraphIds) {
+      const basinId = basinResult.basinByNodeId[pid];
+      if (typeof basinId !== "number" || !Number.isFinite(basinId)) continue;
+      const pos = paragraphPosition.get(pid);
+      if (!pos) continue;
+      const x = scaleX(pos.x);
+      const y = scaleY(pos.y);
+      const bb = perBasin.get(basinId);
+      if (!bb) {
+        perBasin.set(basinId, { minX: x, maxX: x, minY: y, maxY: y });
+      } else {
+        if (x < bb.minX) bb.minX = x;
+        if (x > bb.maxX) bb.maxX = x;
+        if (y < bb.minY) bb.minY = y;
+        if (y > bb.maxY) bb.maxY = y;
+      }
+    }
+    const out: Array<{ basinId: number; x: number; y: number; w: number; h: number; color: string }> = [];
+    const pad = 16;
+    for (const [basinId, bb] of perBasin.entries()) {
+      const color = BASIN_COLORS[((basinId % BASIN_COLORS.length) + BASIN_COLORS.length) % BASIN_COLORS.length];
+      out.push({
+        basinId,
+        x: bb.minX - pad,
+        y: bb.minY - pad,
+        w: (bb.maxX - bb.minX) + pad * 2,
+        h: (bb.maxY - bb.minY) + pad * 2,
+        color,
+      });
+    }
+    out.sort((a, b) => a.basinId - b.basinId);
+    return out;
+  }, [showBasinView, basinResult, filteredParagraphIds, paragraphPosition, scaleX, scaleY]);
+
   /* ── paragraph list grouped by model ─────────────────────────── */
 
   const paragraphList: ParagraphEntry[] = useMemo(() =>
@@ -640,6 +729,13 @@ export function ParagraphSpaceView({
   const useFates = mode === "post" && hasTraversal && showFates;
 
   function nodeStyle(pid: string, pos: { modelIndex: number }) {
+    if (showBasinView && basinResult) {
+      const basinId = basinResult.basinByNodeId[pid];
+      if (typeof basinId === "number" && Number.isFinite(basinId)) {
+        const base = BASIN_COLORS[((basinId % BASIN_COLORS.length) + BASIN_COLORS.length) % BASIN_COLORS.length];
+        return { fill: base, stroke: "none", strokeWidth: 0, opacity: 0.85 };
+      }
+    }
     if (useFates) {
       const fate = paragraphFates.get(pid);
       if (fate && FATE_NODE_STYLE[fate]) return FATE_NODE_STYLE[fate];
@@ -724,6 +820,17 @@ export function ParagraphSpaceView({
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showMutualEdges} onChange={(e) => setShowMutualEdges(e.target.checked)} />Mutual</label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showStrongEdges} onChange={(e) => setShowStrongEdges(e.target.checked)} />Strong</label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showRegionHulls} onChange={(e) => setShowRegionHulls(e.target.checked)} />Hulls</label>
+              <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none", (!aiTurnId || basinLoading) && "opacity-60")}>
+                <input type="checkbox" className="rounded" checked={showBasinView} onChange={(e) => setShowBasinView(e.target.checked)} disabled={!aiTurnId || basinLoading} />
+                {basinLoading ? (
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 border border-white/20 border-t-white/60 rounded-full animate-spin" />
+                    <span className="opacity-70">Loading...</span>
+                  </span>
+                ) : (
+                  "Basin"
+                )}
+              </label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showClaims} onChange={(e) => setShowClaims(e.target.checked)} />Claims</label>
               <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none", (!hasTraversal || mode !== "post") && "opacity-40")}>
                 <input type="checkbox" className="rounded" checked={showFates} onChange={(e) => setShowFates(e.target.checked)} disabled={!hasTraversal || mode !== "post"} />Fates
@@ -754,6 +861,22 @@ export function ParagraphSpaceView({
                   />
                 );
               })}
+
+              {showBasinView && basinRects.map((r) => (
+                <rect
+                  key={`basin-${r.basinId}`}
+                  x={r.x}
+                  y={r.y}
+                  width={r.w}
+                  height={r.h}
+                  rx={18}
+                  fill={r.color}
+                  fillOpacity={0.08}
+                  stroke={r.color}
+                  strokeOpacity={0.25}
+                  strokeWidth={2}
+                />
+              ))}
 
               {/* KNN edges */}
               {showKnnEdges && (graph?.edges || []).map((e, idx) => {
@@ -1171,6 +1294,22 @@ export function ParagraphSpaceView({
           <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm border" style={{ backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.4)" }} /><span>Component</span></div>
           <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm border" style={{ backgroundColor: "rgba(148,163,184,0.12)", borderColor: "rgba(148,163,184,0.35)" }} /><span>Patch</span></div>
         </div>
+
+        {showBasinView && basinResult && basinResult.basinCount > 1 && (
+          <>
+            <div className="w-px h-3 bg-white/10" />
+            <div className="flex items-center gap-2">
+              <span className="text-text-muted/60">Basins:</span>
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                {BASIN_COLORS.slice(0, Math.min(basinResult.basinCount, 6)).map((c, i) => (
+                  <div key={i} className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c }} title={`Basin ${i}`} />
+                ))}
+                {basinResult.basinCount > 6 && <span className="text-[9px] opacity-60">+{basinResult.basinCount - 6}</span>}
+                <span className="ml-0.5 opacity-90">{basinResult.basinCount} fields</span>
+              </div>
+            </div>
+          </>
+        )}
 
         {useFates && (
           <>

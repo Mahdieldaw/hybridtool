@@ -34,6 +34,7 @@ export function buildCognitiveArtifact(
     geometry: {
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',
       labels: pipeline?.labels ?? undefined,
+      basinInversion: mapper?.basinInversion ?? pipeline?.basinInversion ?? undefined,
       substrate: {
         nodes: substrateGraph?.nodes ?? [],
         edges: substrateGraph?.edges ?? [],

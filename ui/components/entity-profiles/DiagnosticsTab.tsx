@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { useSetAtom } from "jotai";
 import type { StructuralAnalysis } from "../../../shared/contract";
 import { EmbeddingDistributionPanel } from "./audit/EmbeddingDistributionPanel";
+import { InversionValleyPanel } from "./audit/InversionValleyPanel";
 import { QueryRelevancePanel } from "./audit/QueryRelevancePanel";
 import { ProvenancePanel } from "./audit/ProvenancePanel";
 import { StructuralAnalysisPanel } from "./audit/StructuralAnalysisPanel";
@@ -21,6 +22,7 @@ type DiagnosticsTabProps = {
 
 const STAGES = [
   { key: "embeddings", label: "Embeddings" },
+  { key: "basin-inversion", label: "Basin Inversion" },
   { key: "query-relevance", label: "Query Relevance" },
   { key: "provenance", label: "Provenance" },
   { key: "structural", label: "Structural" },
@@ -113,6 +115,9 @@ export function DiagnosticsTab({ artifact, structuralAnalysis, aiTurnId, provide
 
       {stage === "embeddings" && (
         <EmbeddingDistributionPanel artifact={artifact} structuralAnalysis={structuralAnalysis} />
+      )}
+      {stage === "basin-inversion" && (
+        <InversionValleyPanel artifact={artifact} aiTurnId={aiTurnId} retrigger={regenTick} />
       )}
       {stage === "query-relevance" && (
         <QueryRelevancePanel artifact={artifact} />

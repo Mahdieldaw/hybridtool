@@ -1439,6 +1439,76 @@ export interface CompletenessReport {
   };
 }
 
+export type BasinInversionStatus =
+  | "ok"
+  | "undifferentiated"
+  | "no_basin_structure"
+  | "insufficient_data"
+  | "failed";
+
+export interface BasinInversionPeak {
+  index: number;
+  center: number;
+  height: number;
+  prominence: number;
+}
+
+export interface BasinInversionBridgePair {
+  a: string;
+  b: string;
+  similarity: number;
+  basinA: number;
+  basinB: number;
+  deltaFromValley: number;
+}
+
+export interface BasinInversionBasin {
+  basinId: number;
+  nodeIds: string[];
+  trenchDepth: number | null;
+}
+
+export interface BasinInversionResult {
+  status: BasinInversionStatus;
+  statusLabel: string;
+  nodeCount: number;
+  pairCount: number;
+
+  mu: number | null;
+  sigma: number | null;
+  p10: number | null;
+  p90: number | null;
+  discriminationRange: number | null;
+
+  binCount: number;
+  binMin: number;
+  binMax: number;
+  binWidth: number;
+  histogram: number[];
+  histogramSmoothed: number[];
+  peaks: BasinInversionPeak[];
+
+  T_low: number | null;
+  T_high: number | null;
+  T_v: number | null;
+
+  pctHigh: number | null;
+  pctLow: number | null;
+  pctMid: number | null;
+  pctValleyZone: number | null;
+
+  basinCount: number;
+  largestBasinRatio: number | null;
+  basinByNodeId: Record<string, number>;
+  basins: BasinInversionBasin[];
+
+  bridgePairs: BasinInversionBridgePair[];
+
+  meta?: {
+    processingTimeMs: number;
+  };
+}
+
 export interface CognitiveArtifact {
   shadow: {
     statements: PipelineShadowStatement[];
@@ -1449,6 +1519,7 @@ export interface CognitiveArtifact {
   geometry: {
     embeddingStatus: "computed" | "failed";
     substrate: PipelineSubstrateGraph;
+    basinInversion?: BasinInversionResult;
     preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
     diagnostics?: PipelineDiagnosticsResult | null;
     structuralValidation?: any | null;

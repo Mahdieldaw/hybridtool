@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
@@ -803,13 +803,12 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   );
 };
 
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
+function isAiTurn(turn: unknown): turn is AiTurnWithUI {
+  return !!turn && typeof turn === "object" && (turn as any).type === "ai";
+}
 
 export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
-  const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const sessionId = useAtomValue(currentSessionIdAtom);
@@ -921,28 +920,30 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, [openState, sheetHeightRatio]);
 
-  const aiTurn: AiTurnWithUI | null = useMemo(() => {
-    const tid = openState?.turnId;
-    const t = tid ? turnGetter(tid) : undefined;
-    return t && (t as any).type === 'ai' ? (t as AiTurnWithUI) : null;
-  }, [openState, turnGetter]);
+  const aiTurn = useAtomValue(
+    useMemo(
+      () => turnAtomFamily(String(openState?.turnId || "")),
+      [openState?.turnId],
+    ),
+  ) as AiTurnWithUI | undefined;
+  const aiTurnSafe: AiTurnWithUI | null = isAiTurn(aiTurn) ? aiTurn : null;
 
   const activeMappingPid = useMemo(() => {
-    return mappingProvider || aiTurn?.meta?.mapper || undefined;
-  }, [mappingProvider, aiTurn?.meta?.mapper]);
+    return mappingProvider || aiTurnSafe?.meta?.mapper || undefined;
+  }, [mappingProvider, aiTurnSafe?.meta?.mapper]);
 
   const mappingArtifact = useMemo(() => {
-    const picked = getProviderArtifact(aiTurn, activeMappingPid);
+    const picked = getProviderArtifact(aiTurnSafe, activeMappingPid);
     if (!picked) return null;
     const parsed = normalizeArtifactCandidate(picked);
     return (parsed || picked) && typeof (parsed || picked) === "object" ? (parsed || picked) : null;
-  }, [aiTurn, activeMappingPid]);
+  }, [aiTurnSafe, activeMappingPid]);
 
   const providerContexts = useAtomValue(providerContextsAtom);
 
   const rawMappingText = useMemo(() => {
     const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : null;
-    const mappingResponses = (aiTurn as any)?.mappingResponses;
+    const mappingResponses = aiTurnSafe?.mappingResponses;
     if (pid && mappingResponses && typeof mappingResponses === 'object') {
       const entry = (mappingResponses as any)[pid];
       const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
@@ -1115,7 +1116,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const artifactForStructure = useMemo(() => {
     const artifact =
-      getProviderArtifact(aiTurn, activeMappingPid) ||
+      getProviderArtifact(aiTurnSafe, activeMappingPid) ||
       derivedMapperArtifact ||
       (parsedMapping as any)?.artifact ||
       (graphData.claims.length > 0 || graphData.edges.length > 0
@@ -1131,7 +1132,7 @@ export const DecisionMapSheet = React.memo(() => {
     const claims = Array.isArray(flatClaims) ? flatClaims : Array.isArray(nestedClaims) ? nestedClaims : null;
     if (!artifact || !claims || claims.length === 0) return null;
     return artifact;
-  }, [aiTurn, activeMappingPid, derivedMapperArtifact, parsedMapping, graphData]);
+  }, [aiTurnSafe, activeMappingPid, derivedMapperArtifact, parsedMapping, graphData]);
 
   const structuralAnalysis: StructuralAnalysis | null = useMemo(() => {
     if (!artifactForStructure) return null;
@@ -1291,16 +1292,16 @@ export const DecisionMapSheet = React.memo(() => {
     if (Array.isArray(existingStatements) && existingStatements.length > 0 && Array.isArray(existingParagraphs) && existingParagraphs.length > 0) {
       return { statements: existingStatements, paragraphs: existingParagraphs };
     }
-    if (!aiTurn?.batch?.responses) return { statements: [], paragraphs: [] };
+    if (!aiTurnSafe?.batch?.responses) return { statements: [], paragraphs: [] };
 
     const pid = activeMappingPid ? String(activeMappingPid) : null;
-    const mappingResponses = (aiTurn as any)?.mappingResponses;
+    const mappingResponses = aiTurnSafe?.mappingResponses;
     const entry = pid && mappingResponses && typeof mappingResponses === "object" ? (mappingResponses as any)[pid] : null;
     const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
     const last = arr.length > 0 ? arr[arr.length - 1] : null;
     const citationOrderArr = normalizeCitationSourceOrder(last?.meta?.citationSourceOrder);
 
-    const sources = Object.entries(aiTurn.batch.responses)
+    const sources = Object.entries(aiTurnSafe.batch.responses)
       .map(([providerId, r]: [string, any], idx) => {
         const text = typeof r?.text === "string" ? r.text : "";
         if (!text.trim()) return null;
@@ -1320,7 +1321,7 @@ export const DecisionMapSheet = React.memo(() => {
     } catch {
       return { statements: [], paragraphs: [] };
     }
-  }, [aiTurn, mappingArtifact, activeMappingPid]);
+  }, [aiTurnSafe, mappingArtifact, activeMappingPid]);
 
   const paragraphProjection = useMemo(() => {
     const paragraphs = derivedShadow.paragraphs;
@@ -1425,9 +1426,9 @@ export const DecisionMapSheet = React.memo(() => {
         ? rawScores
         : Array.isArray(rawScores)
           ? new Map(rawScores as any)
-        : rawScores && typeof rawScores === "object"
-          ? new Map(Object.entries(rawScores))
-          : new Map();
+          : rawScores && typeof rawScores === "object"
+            ? new Map(Object.entries(rawScores))
+            : new Map();
     const tiers = relevance?.tiers && typeof relevance.tiers === "object" ? relevance.tiers : null;
     const tierById = new Map<string, "high" | "medium" | "low">();
     if (tiers?.high && Array.isArray(tiers.high)) for (const id of tiers.high) tierById.set(String(id), "high");
@@ -2524,6 +2525,7 @@ export const DecisionMapSheet = React.memo(() => {
                       <div className="flex-1 overflow-hidden relative">
                         <ParagraphSpaceView
                           graph={sheetData.mappingArtifact?.geometry?.substrate || null}
+                          aiTurnId={sheetData.aiTurn?.id}
                           paragraphProjection={sheetData.paragraphProjection}
                           claims={sheetData.semanticClaims}
                           shadowStatements={sheetData.mappingArtifact?.shadow?.statements || []}

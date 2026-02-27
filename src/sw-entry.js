@@ -768,6 +768,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const { parseSemanticMapperOutput } = await import('./ConciergeService/semanticMapper');
           const { packEmbeddingMap, unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
           const { buildCognitiveArtifact } = await import('../shared/cognitive-artifact');
+          const { computeBasinInversion } = await import('../shared/geometry/basinInversion');
           const { extractForcingPoints } = await import('./utils/cognitive/traversalEngine');
           const { computeShadowDelta, getTopUnreferenced } = await import('./shadow/ShadowDelta');
           const dims = DEFAULT_CONFIG.embeddingDimensions;
@@ -874,7 +875,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
             sendResponse({ success: false, error: "No shadow statements available" }); return;
           }
-          if (!Array.isArray(shadowParagraphs)) shadowParagraphs = [];
+          if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
+            const { projectParagraphs } = await import('./shadow');
+            shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
+          }
 
           // Model count from batch responses
           const batchResps = responsesForTurn.filter((r) => r && r.responseType === "batch");
@@ -884,14 +888,16 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const preSemantic = turnArtifact?.geometry?.preSemantic || null;
           const regions = Array.isArray(preSemantic?.regions) ? preSemantic.regions
             : Array.isArray(preSemantic?.regionization?.regions) ? preSemantic.regionization.regions
-            : [];
+              : [];
 
           // Substrate (immutable)
           const substrate = turnArtifact?.geometry?.substrate || null;
 
           // ── C. Geometry embeddings (immutable, generate if missing) ──
           let geoRecord = await sm.loadEmbeddings(aiTurnId);
-          if (!geoRecord) {
+
+          if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings || (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0)) {
+            // Force re-generation if missing or empty despite having paragraphs
             const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
             const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
             let queryEmbedding = null;
@@ -973,6 +979,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           console.log(`[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${claimEmbeddings?.size || 0} claims`);
 
           // ── E. Deterministic pipeline (all math, no LLM) ──
+
+
 
           // 1. Reconstruct provenance (cosine math: claims × statements/paragraphs)
           const enrichedClaims = await reconstructProvenance(
@@ -1094,14 +1102,16 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           };
 
           let forcingPoints = [];
-          try { forcingPoints = extractForcingPoints(traversalGraph).map((fp) => ({
-            id: String(fp?.id || ''), type: fp?.type, tier: typeof fp?.tier === 'number' ? fp.tier : 0,
-            question: String(fp?.question || ''), condition: String(fp?.condition || ''),
-            ...(Array.isArray(fp?.options) ? { options: fp.options.map((o) => ({ claimId: String(o?.claimId || ''), label: String(o?.label || '') })).filter((o) => o.claimId && o.label) } : {}),
-            unlocks: [], prunes: [],
-            blockedBy: Array.isArray(fp?.blockedByGateIds) ? fp.blockedByGateIds.map(String).filter(Boolean) : [],
-            sourceStatementIds: Array.isArray(fp?.sourceStatementIds) ? fp.sourceStatementIds.map(String).filter(Boolean) : [],
-          })); } catch (_) { }
+          try {
+            forcingPoints = extractForcingPoints(traversalGraph).map((fp) => ({
+              id: String(fp?.id || ''), type: fp?.type, tier: typeof fp?.tier === 'number' ? fp.tier : 0,
+              question: String(fp?.question || ''), condition: String(fp?.condition || ''),
+              ...(Array.isArray(fp?.options) ? { options: fp.options.map((o) => ({ claimId: String(o?.claimId || ''), label: String(o?.label || '') })).filter((o) => o.claimId && o.label) } : {}),
+              unlocks: [], prunes: [],
+              blockedBy: Array.isArray(fp?.blockedByGateIds) ? fp.blockedByGateIds.map(String).filter(Boolean) : [],
+              sourceStatementIds: Array.isArray(fp?.sourceStatementIds) ? fp.sourceStatementIds.map(String).filter(Boolean) : [],
+            }));
+          } catch (_) { }
 
           // 7. Completeness
           let completeness = null;
@@ -1134,6 +1144,22 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             })
             .filter((e) => [EDGE_SUPPORTS, EDGE_CONFLICTS, 'tradeoff', EDGE_PREREQUISITE].includes(String(e.type || '').trim()));
 
+          // ── D.2 Basin inversion (deterministic based on embeddings) ──
+          let basinInversion = undefined;
+          try {
+            const paraIds = geoRecord.meta?.paragraphIndex || [];
+            const paraVectors = [];
+            if (geoRecord.paragraphEmbeddings && paraIds.length > 0) {
+              const view = new Float32Array(geoRecord.paragraphEmbeddings);
+              for (let i = 0; i < paraIds.length; i++) {
+                paraVectors.push(view.subarray(i * dims, (i + 1) * dims));
+              }
+              basinInversion = computeBasinInversion(paraIds, paraVectors);
+            }
+          } catch (err) {
+            console.warn('[Regenerate] Basin inversion failed:', err);
+          }
+
           // ── F. Assemble mapper artifact (same shape as StepExecutor) ──
           const mapperArtifact = {
             id: `artifact-regen-${Date.now()}`,
@@ -1158,6 +1184,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               topUnreferenced: Array.isArray(topUnindexed) ? topUnindexed.map((u) => u?.statement).filter(Boolean) : [],
             },
             ...(claimProvenance ? { claimProvenance } : {}),
+            ...(basinInversion ? { basinInversion } : {}),
           };
 
           // ── G. Build full cognitive artifact ──
@@ -1212,6 +1239,60 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const claims = claimMeta.claimIndex.map(id => ({ id }));
           const diagnostics = computeElbowDiagnosticsFromEmbeddings(claimEmbeddings, paragraphEmbeddings, claims);
           sendResponse({ success: true, data: diagnostics });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+
+      case "GET_PARAGRAPH_EMBEDDINGS_RECORD":
+        (async () => {
+          const { aiTurnId, debug } = message.payload || {};
+          const key = String(aiTurnId || "").trim();
+          if (!key) {
+            sendResponse({ success: true, data: { ok: false, reason: "missing_aiTurnId" } });
+            return;
+          }
+          const geoRecord = await sm.loadEmbeddings(key);
+          const meta = geoRecord?.meta || null;
+          const hasPara = !!geoRecord?.paragraphEmbeddings;
+          const hasIndex = !!meta?.paragraphIndex;
+          const dims = meta?.dimensions;
+
+          if (!hasPara || !hasIndex || !dims) {
+            let knownTurnIds = null;
+            try {
+              if (sm?.adapter?.all) {
+                const all = await sm.adapter.all("embeddings");
+                const ids = (Array.isArray(all) ? all : [])
+                  .map((r) => String(r?.aiTurnId || r?.id || "").trim())
+                  .filter(Boolean);
+                knownTurnIds = ids.slice(0, 200);
+              }
+            } catch (_) { }
+            sendResponse({
+              success: true,
+              data: {
+                ok: false,
+                aiTurnId: key,
+                reason: "missing_embeddings_or_index",
+                found: !!geoRecord,
+                hasParagraphEmbeddings: hasPara,
+                hasParagraphIndex: hasIndex,
+                dimensions: typeof dims === "number" ? dims : null,
+                meta: meta || null,
+                knownTurnIds,
+              },
+            });
+            return;
+          }
+
+          const payload = {
+            ok: true,
+            aiTurnId: key,
+            buffer: geoRecord.paragraphEmbeddings,
+            index: meta.paragraphIndex,
+            dimensions: meta.dimensions,
+            timestamp: meta.timestamp || null,
+          };
+          sendResponse({ success: true, data: payload });
         })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 

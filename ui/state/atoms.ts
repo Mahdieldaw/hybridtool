@@ -149,6 +149,15 @@ export const turnByIdAtom = atom(
       get(turnsMapAtom).get(turnId),
 );
 
+export const turnAtomFamily = atomFamily(
+  (turnId: string) =>
+    atom((get) => {
+      if (!turnId) return undefined;
+      return get(turnsMapAtom).get(turnId);
+    }),
+  (a, b) => a === b,
+);
+
 // -----------------------------
 // Core chat state
 // -----------------------------
@@ -559,5 +568,4 @@ export const pinnedSingularityProvidersAtom = atom<Record<string, string>>({});
  * Value is the turnId or null
  */
 export const hasAutoOpenedPaneAtom = atom<string | null>(null);
-
 
