@@ -54,6 +54,65 @@ function pctBelow(sorted: number[], threshold: number): number {
   return 100 - pctAbove(sorted, threshold);
 }
 
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => {
+    const ric = (globalThis as any)?.requestIdleCallback;
+    if (typeof ric === "function") {
+      ric(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+async function computePairwiseSimsChunked(
+  rows: number[],
+  view: Float32Array,
+  dims: number,
+  shouldCancel?: () => boolean,
+): Promise<number[]> {
+  const n = rows.length;
+  const totalPairs = (n * (n - 1)) / 2;
+  const sims = new Array<number>(totalPairs);
+  let out = 0;
+
+  let lastYield =
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+
+  for (let a = 0; a < n; a++) {
+    if (shouldCancel?.()) throw new Error("cancelled");
+    const rowA = rows[a];
+    const baseA = rowA * dims;
+    for (let b = a + 1; b < n; b++) {
+      const rowB = rows[b];
+      const baseB = rowB * dims;
+      let dot = 0;
+      for (let k = 0; k < dims; k++) {
+        dot += view[baseA + k] * view[baseB + k];
+      }
+      const q = Math.round(dot * 1e6) / 1e6;
+      sims[out++] = q;
+
+      const now =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
+      if (now - lastYield > 10) {
+        if (shouldCancel?.()) throw new Error("cancelled");
+        await yieldToMain();
+        lastYield =
+          typeof performance !== "undefined" && typeof performance.now === "function"
+            ? performance.now()
+            : Date.now();
+      }
+    }
+  }
+
+  return sims;
+}
+
 // ─── Histogram ───────────────────────────────────────────────────────────────
 
 const HISTOGRAM_BINS = 20;
@@ -169,7 +228,7 @@ function TextHistogram({
 
 export function EmbeddingDistributionPanel({ artifact, aiTurnId }: Props) {
   const substrate = artifact?.geometry?.substrate;
-  const nodes = safeArr(substrate?.nodes);
+  const nodes = useMemo(() => safeArr(substrate?.nodes), [substrate?.nodes]);
   const knnEdges = safeArr(substrate?.edges);
   const mutualEdges = safeArr(substrate?.mutualEdges);
   const strongEdges = safeArr(substrate?.strongEdges);
@@ -184,6 +243,8 @@ export function EmbeddingDistributionPanel({ artifact, aiTurnId }: Props) {
   const requestedRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+
     const shouldCompute = (!rawAllPairwise || rawAllPairwise.length === 0) && !!aiTurnId;
     if (!shouldCompute) {
       setComputedAllPairwise(null);
@@ -205,18 +266,24 @@ export function EmbeddingDistributionPanel({ artifact, aiTurnId }: Props) {
       { type: "GET_PARAGRAPH_EMBEDDINGS_RECORD", payload: { aiTurnId: reqKey } },
       (response) => {
         if (requestedRef.current !== reqKey) return;
-        setIsComputing(false);
+        if (!mounted) return;
         if (chrome.runtime.lastError) {
+          if (!mounted || requestedRef.current !== reqKey) return;
+          setIsComputing(false);
           setComputeError(chrome.runtime.lastError.message || "Runtime messaging error");
           return;
         }
         if (!response?.success) {
+          if (!mounted || requestedRef.current !== reqKey) return;
+          setIsComputing(false);
           setComputeError(response?.error || "Failed to load cached paragraph embeddings");
           return;
         }
 
         const data = response?.data as any;
         if (!data || data.ok === false) {
+          if (!mounted || requestedRef.current !== reqKey) return;
+          setIsComputing(false);
           setComputeError("Cached paragraph embeddings not found for this turn");
           return;
         }
@@ -225,6 +292,8 @@ export function EmbeddingDistributionPanel({ artifact, aiTurnId }: Props) {
         const index = Array.isArray(data.index) ? (data.index as string[]) : [];
         const dims = typeof data.dimensions === "number" ? data.dimensions : 0;
         if (!buffer || dims <= 0 || index.length === 0) {
+          if (!mounted || requestedRef.current !== reqKey) return;
+          setIsComputing(false);
           setComputeError("Unexpected embeddings payload shape");
           return;
         }
@@ -249,35 +318,46 @@ export function EmbeddingDistributionPanel({ artifact, aiTurnId }: Props) {
 
         const n = rows.length;
         if (n < 2) {
+          if (!mounted || requestedRef.current !== reqKey) return;
+          setIsComputing(false);
           setComputeError("Not enough paragraph embeddings to compute pairwise field");
           return;
         }
 
         const expectedFloats = index.length * dims;
         if (view.length < expectedFloats) {
+          if (!mounted || requestedRef.current !== reqKey) return;
+          setIsComputing(false);
           setComputeError("Cached embedding buffer is shorter than expected");
           return;
         }
 
-        const sims: number[] = [];
-        for (let a = 0; a < n; a++) {
-          const rowA = rows[a];
-          const baseA = rowA * dims;
-          for (let b = a + 1; b < n; b++) {
-            const rowB = rows[b];
-            const baseB = rowB * dims;
-            let dot = 0;
-            for (let k = 0; k < dims; k++) {
-              dot += view[baseA + k] * view[baseB + k];
-            }
-            const q = Math.round(dot * 1e6) / 1e6;
-            sims.push(q);
+        const run = async () => {
+          try {
+            const sims = await computePairwiseSimsChunked(
+              rows,
+              view,
+              dims,
+              () => !mounted || requestedRef.current !== reqKey,
+            );
+            if (!mounted || requestedRef.current !== reqKey) return;
+            setComputedAllPairwise(sims);
+            setIsComputing(false);
+          } catch (err) {
+            if (!mounted || requestedRef.current !== reqKey) return;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg === "cancelled") return;
+            setIsComputing(false);
+            setComputeError("Failed to compute full pairwise similarities");
           }
-        }
-
-        setComputedAllPairwise(sims);
+        };
+        void run();
       },
     );
+
+    return () => {
+      mounted = false;
+    };
   }, [aiTurnId, rawAllPairwise, nodes]);
 
   // ─── A. Distribution Summary Cards ───────────────────────────────────────

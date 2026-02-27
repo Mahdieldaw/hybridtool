@@ -13,9 +13,19 @@ import { clearElbowCache } from "../../hooks/useElbowDiagnostics";
 import { turnsMapAtom } from "../../state/atoms";
 import { normalizeProviderId } from "../../utils/provider-id-mapper";
 
-function mergeArtifacts(base: any, patch: any): any {
+function mergeArtifacts<T>(
+  base: T,
+  patch: any,
+  ctx?: { visited?: WeakSet<object>; depth?: number },
+): any {
+  const visited = ctx?.visited ?? new WeakSet<object>();
+  const depth = ctx?.depth ?? 50;
+  if (depth <= 0) return base;
   if (!patch || typeof patch !== "object") return base;
   if (!base || typeof base !== "object") return patch;
+  if (visited.has(base as any) || visited.has(patch as any)) return base;
+  visited.add(base as any);
+  visited.add(patch as any);
   if (Array.isArray(base) || Array.isArray(patch)) {
     if (Array.isArray(patch) && patch.length > 0) return patch;
     return base;
@@ -25,7 +35,7 @@ function mergeArtifacts(base: any, patch: any): any {
     if (v === undefined || v === null) continue;
     const prev = out[k];
     if (prev && typeof prev === "object" && !Array.isArray(prev) && typeof v === "object" && !Array.isArray(v)) {
-      out[k] = mergeArtifacts(prev, v);
+      out[k] = mergeArtifacts(prev, v, { visited, depth: depth - 1 });
     } else if (Array.isArray(v)) {
       out[k] = v.length > 0 ? v : prev;
     } else {

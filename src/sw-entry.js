@@ -757,8 +757,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
       // Only embedding model call needed; everything else is deterministic math.
       case "REGENERATE_EMBEDDINGS":
         (async () => {
-          const { aiTurnId, providerId } = message.payload || {};
+          const { aiTurnId, providerId, persist } = message.payload || {};
           if (!aiTurnId || !providerId) { sendResponse({ success: false, error: "Missing aiTurnId or providerId" }); return; }
+          const shouldPersistArtifact = persist !== false;
           const turnRaw = await sm.adapter.get("turns", aiTurnId);
           if (!turnRaw) { sendResponse({ success: false, error: "Turn not found" }); return; }
 
@@ -771,6 +772,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const { computeBasinInversion } = await import('../shared/geometry/basinInversion');
           const { extractForcingPoints } = await import('./utils/cognitive/traversalEngine');
           const { computeShadowDelta, getTopUnreferenced } = await import('./shadow/ShadowDelta');
+          const { buildGeometricSubstrate } = await import('./geometry/substrate');
+          const { buildPreSemanticInterpretation, computePerModelQueryRelevance } = await import('./geometry/interpretation');
+          const { computeQueryRelevance } = await import('./geometry/queryRelevance');
+          const { enrichStatementsWithGeometry } = await import('./geometry/enrichment');
           const dims = DEFAULT_CONFIG.embeddingDimensions;
 
           const normalizeProvId = (pid) => String(pid || "").trim().toLowerCase();
@@ -884,15 +889,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const batchResps = responsesForTurn.filter((r) => r && r.responseType === "batch");
           const modelCount = Math.max(citationOrderArr.length, batchResps.length, 1);
 
-          // Pre-semantic regions (immutable, from geometry)
-          const preSemantic = turnArtifact?.geometry?.preSemantic || null;
-          const regions = Array.isArray(preSemantic?.regions) ? preSemantic.regions
-            : Array.isArray(preSemantic?.regionization?.regions) ? preSemantic.regionization.regions
-              : [];
-
-          // Substrate (immutable)
-          const substrate = turnArtifact?.geometry?.substrate || null;
-
           // ── C. Geometry embeddings (immutable, generate if missing) ──
           let geoRecord = await sm.loadEmbeddings(aiTurnId);
 
@@ -942,6 +938,42 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           const statementEmbeddings = unpackEmbeddingMap(geoRecord.statementEmbeddings, geoRecord.meta.statementIndex, geoRecord.meta.dimensions);
           const paragraphEmbeddings = unpackEmbeddingMap(geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, geoRecord.meta.dimensions);
+          const queryEmbedding =
+            geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
+              ? new Float32Array(geoRecord.queryEmbedding)
+              : null;
+
+          const substrate = buildGeometricSubstrate(
+            shadowParagraphs,
+            paragraphEmbeddings,
+            geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
+          );
+
+          const queryBoost = queryEmbedding
+            ? computePerModelQueryRelevance(queryEmbedding, statementEmbeddings, shadowParagraphs)
+            : null;
+          const preSemantic = buildPreSemanticInterpretation(substrate, shadowParagraphs, paragraphEmbeddings, queryBoost);
+          const regions = preSemantic?.regionization?.regions || [];
+
+          try {
+            enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions);
+          } catch (_) { }
+
+          let queryRelevance = null;
+          try {
+            if (queryEmbedding) {
+              queryRelevance = computeQueryRelevance({
+                queryEmbedding,
+                statements: shadowStatements,
+                statementEmbeddings,
+                paragraphEmbeddings,
+                paragraphs: shadowParagraphs,
+                substrate,
+                regionization: preSemantic?.regionization || null,
+                regionProfiles: preSemantic?.regionProfiles || null,
+              });
+            }
+          } catch (_) { }
 
           // ── D. Claim embeddings (per-provider, from parsed claims) ──
           const mapperClaimsForProvenance = parsedClaims.map((c) => ({
@@ -1037,11 +1069,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           try {
             if (cachedStructuralAnalysis && claimProvenanceExclusivity && claimProvenanceOverlap) {
               const { computeBlastRadiusFilter } = await import('./core/blast-radius/blastRadiusFilter');
-              // Query relevance from persisted artifact geometry (immutable)
-              const queryRelevanceScores = turnArtifact?.geometry?.query?.relevance?.statementScores || null;
-              // Convert plain object back to Map if needed
-              const qrMap = queryRelevanceScores instanceof Map ? queryRelevanceScores
-                : (queryRelevanceScores && typeof queryRelevanceScores === 'object') ? new Map(Object.entries(queryRelevanceScores).map(([k, v]) => [k, Number(v)])) : null;
+              const qrMap = queryRelevance?.statementScores && typeof queryRelevance.statementScores.get === 'function'
+                ? queryRelevance.statementScores
+                : null;
               blastRadiusResult = computeBlastRadiusFilter({
                 claims: cachedStructuralAnalysis.claimsWithLeverage,
                 edges: parsedEdges,
@@ -1120,9 +1150,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               const { buildStatementFates } = await import('./geometry/interpretation/fateTracking');
               const { findUnattendedRegions } = await import('./geometry/interpretation/coverageAudit');
               const { buildCompletenessReport } = await import('./geometry/interpretation/completenessReport');
-              const qrScores = turnArtifact?.geometry?.query?.relevance?.statementScores || null;
-              const qrMap = qrScores instanceof Map ? qrScores
-                : (qrScores && typeof qrScores === 'object') ? new Map(Object.entries(qrScores).map(([k, v]) => [k, Number(v)])) : null;
+              const qrMap = queryRelevance?.statementScores && typeof queryRelevance.statementScores.get === 'function'
+                ? queryRelevance.statementScores
+                : null;
               const statementFates = buildStatementFates(shadowStatements, enrichedClaims, qrMap);
               const unattendedRegions = findUnattendedRegions(substrate, shadowParagraphs, enrichedClaims, regions, shadowStatements);
               const completenessReport = buildCompletenessReport(statementFates, unattendedRegions, shadowStatements, regions.length);
@@ -1188,12 +1218,48 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           };
 
           // ── G. Build full cognitive artifact ──
+          const coords = substrate?.layout2d?.coordinates || {};
+          const regionsByNode = new Map();
+          for (const r of regions) {
+            for (const nodeId of r?.nodeIds || []) {
+              if (nodeId && !regionsByNode.has(nodeId)) regionsByNode.set(nodeId, r.id);
+            }
+          }
+          const componentsByNode = new Map();
+          for (const c of substrate?.topology?.components || []) {
+            for (const nodeId of c?.nodeIds || []) {
+              if (nodeId && !componentsByNode.has(nodeId)) componentsByNode.set(nodeId, c.id);
+            }
+          }
+          const substrateGraph = {
+            nodes: (substrate?.nodes || []).map((n) => {
+              const p = n.paragraphId;
+              const xy = coords[p] || [0, 0];
+              return {
+                ...n,
+                x: xy[0],
+                y: xy[1],
+                regionId: regionsByNode.get(p) ?? null,
+                componentId: componentsByNode.get(p) ?? null,
+              };
+            }),
+            edges: (substrate?.graphs?.knn?.edges || []).map((e) => ({ source: e.source, target: e.target, similarity: e.similarity })),
+            mutualEdges: (substrate?.graphs?.mutual?.edges || []).map((e) => ({ source: e.source, target: e.target, similarity: e.similarity })),
+            strongEdges: (substrate?.graphs?.strong?.edges || []).map((e) => ({ source: e.source, target: e.target, similarity: e.similarity })),
+            softThreshold: substrate?.graphs?.strong?.softThreshold ?? 0,
+            similarityStats: substrate?.meta?.similarityStats,
+            ...(substrate?.meta?.extendedSimilarityStats ? { extendedSimilarityStats: substrate.meta.extendedSimilarityStats } : {}),
+            ...(Array.isArray(substrate?.meta?.allPairwiseSimilarities)
+              ? { allPairwiseSimilarities: substrate.meta.allPairwiseSimilarities.slice(0, 20000) }
+              : {}),
+          };
+
           const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
             shadow: { extraction: { statements: shadowStatements }, delta: shadowDelta || null },
             paragraphProjection: { paragraphs: shadowParagraphs },
-            substrate: { graph: substrate, shape: null },
+            substrate: { graph: substrateGraph, shape: null },
             preSemantic: preSemantic || null,
-            ...(turnArtifact?.geometry?.query?.relevance ? { query: { relevance: turnArtifact.geometry.query.relevance } } : {}),
+            ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
           });
 
           // ── H. Persist as provider-specific artifact ──
@@ -1221,7 +1287,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           let artifactPatched = false;
           let artifactForUi = cognitiveArtifact || null;
-          if (cognitiveArtifact && mappingResp?.id) {
+          if (shouldPersistArtifact && cognitiveArtifact && mappingResp?.id) {
             const existingArtifact =
               mappingResp?.artifact && typeof mappingResp.artifact === "object" ? mappingResp.artifact : null;
             const mergedArtifact = mergeArtifacts(existingArtifact, cognitiveArtifact);
@@ -1270,6 +1336,95 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const claims = claimMeta.claimIndex.map(id => ({ id }));
           const diagnostics = computeElbowDiagnosticsFromEmbeddings(claimEmbeddings, paragraphEmbeddings, claims);
           sendResponse({ success: true, data: diagnostics });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+
+      case "DEHYDRATE_ALL_STORED_ARTIFACTS":
+        (async () => {
+          const { dehydrateArtifact } = await import('./persistence/artifact-hydration');
+
+          const summarizeBytes = (value) => {
+            try {
+              return new Blob([JSON.stringify(value)]).size;
+            } catch {
+              return 0;
+            }
+          };
+
+          const adapter = sm?.adapter;
+          if (!adapter) {
+            sendResponse({ success: false, error: "Persistence adapter not available" });
+            return;
+          }
+
+          const providerResponses = await adapter.getAll("provider_responses");
+          let scannedProviderResponses = 0;
+          let updatedProviderResponses = 0;
+          let providerRespBytesBefore = 0;
+          let providerRespBytesAfter = 0;
+
+          for (const r of providerResponses || []) {
+            scannedProviderResponses += 1;
+            if (!r || typeof r !== "object") continue;
+            if (!r.id) continue;
+            const artifact = r.artifact;
+            if (!artifact || typeof artifact !== "object") continue;
+            providerRespBytesBefore += summarizeBytes(artifact);
+            const dehydrated = dehydrateArtifact(artifact);
+            providerRespBytesAfter += summarizeBytes(dehydrated);
+            const beforeStr = JSON.stringify(artifact);
+            const afterStr = JSON.stringify(dehydrated);
+            if (beforeStr === afterStr) continue;
+            await adapter.put("provider_responses", { ...r, artifact: dehydrated, updatedAt: Date.now() }, r.id);
+            updatedProviderResponses += 1;
+          }
+
+          const turns = await adapter.getAll("turns");
+          let scannedTurns = 0;
+          let updatedTurns = 0;
+          let turnBytesBefore = 0;
+          let turnBytesAfter = 0;
+
+          for (const t of turns || []) {
+            scannedTurns += 1;
+            if (!t || typeof t !== "object") continue;
+            if (!t.id) continue;
+            const mapping = t.mapping;
+            if (!mapping || typeof mapping !== "object") continue;
+
+            const mappingArtifact = mapping?.artifact;
+            if (!mappingArtifact || typeof mappingArtifact !== "object") continue;
+
+            turnBytesBefore += summarizeBytes(mappingArtifact);
+            const dehydrated = dehydrateArtifact(mappingArtifact);
+            turnBytesAfter += summarizeBytes(dehydrated);
+
+            const beforeStr = JSON.stringify(mappingArtifact);
+            const afterStr = JSON.stringify(dehydrated);
+            if (beforeStr === afterStr) continue;
+
+            const nextMapping = { ...mapping, artifact: dehydrated };
+            await adapter.put("turns", { ...t, mapping: nextMapping, updatedAt: Date.now() }, t.id);
+            updatedTurns += 1;
+          }
+
+          sendResponse({
+            success: true,
+            data: {
+              providerResponses: {
+                scanned: scannedProviderResponses,
+                updated: updatedProviderResponses,
+                approxBytesBefore: providerRespBytesBefore,
+                approxBytesAfter: providerRespBytesAfter,
+              },
+              turns: {
+                scanned: scannedTurns,
+                updated: updatedTurns,
+                approxBytesBefore: turnBytesBefore,
+                approxBytesAfter: turnBytesAfter,
+              },
+            }
+          });
         })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 

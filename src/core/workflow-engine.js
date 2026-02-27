@@ -15,9 +15,10 @@ function minifyMappingArtifactForPersistence(artifact) {
   const traversal = artifact.traversal && typeof artifact.traversal === "object" ? artifact.traversal : {};
   const meta = artifact.meta && typeof artifact.meta === "object" ? artifact.meta : {};
   const claims = Array.isArray(semantic.claims)
-    ? semantic.claims.map((c) => {
-      if (!c || typeof c !== "object") return c;
-      const cc = { ...c };
+    ? semantic.claims
+      .filter((c) => !!c && typeof c === "object" && !Array.isArray(c))
+      .map((c) => {
+        const cc = { ...c };
       if (cc.sourceStatements !== undefined) {
         const existingIds = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
         if (existingIds.length === 0 && Array.isArray(cc.sourceStatements)) {
@@ -41,7 +42,7 @@ function minifyMappingArtifactForPersistence(artifact) {
         delete cc.sourceRegions;
       }
       return cc;
-    })
+      })
     : [];
   return {
     semantic: {

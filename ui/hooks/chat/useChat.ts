@@ -286,15 +286,29 @@ export function useChat() {
                   : round.completedAt || round.createdAt || Date.now();
               const updatedAt =
                 typeof resp?.updatedAt === "number" ? resp.updatedAt : createdAt;
+              let hydrated: any = resp?.artifact;
+              let hydrationError: string | null = null;
+              if (hydrated && typeof hydrated === "object") {
+                try {
+                  hydrated = hydrateArtifact(hydrated);
+                } catch (e) {
+                  hydrated = null;
+                  hydrationError = e instanceof Error ? e.message : String(e);
+                  console.warn("[useChat] hydrateArtifact failed; skipping artifact", e);
+                }
+              }
               return {
                 providerId: (resp?.providerId as ProviderKey) || (providerId as ProviderKey),
                 text: typeof resp?.text === "string" ? resp.text : "",
                 status: resp?.status || "completed",
                 createdAt,
                 updatedAt,
-                meta: resp?.meta || {},
-                ...(resp?.artifacts ? { artifacts: resp.artifacts } : {}),
-                ...(resp?.artifact ? { artifact: hydrateArtifact(resp.artifact) } : {}),
+                meta: {
+                  ...(resp?.meta || {}),
+                  ...(hydrationError ? { _artifactHydrationError: hydrationError } : {}),
+                },
+                ...(Array.isArray(resp?.artifacts) ? { artifacts: resp.artifacts } : {}),
+                ...(resp?.artifact !== undefined ? { artifact: hydrated } : {}),
               } as ProviderResponse;
             };
 

@@ -4,6 +4,27 @@ export function dehydrateArtifact(fullArtifact: any): any {
   const artifact = fullArtifact as any;
   const out: any = { ...artifact };
 
+  for (const k of [
+    "blastRadiusFilter",
+    "completeness",
+    "traversal",
+    "traversalAnalysis",
+    "traversalGraph",
+    "forcingPoints",
+    "pipelineGate",
+    "modelOrdering",
+    "regionProfiles",
+    "regionization",
+    "shapeSignals",
+    "statementScores",
+    "preSemantic",
+    "basinInversion",
+    "surveyRationale",
+    "surveyGates",
+  ]) {
+    if (out[k] !== undefined) delete out[k];
+  }
+
   const stripClaimDupes = (claims: any[]): any[] => {
     return (claims || []).map((c) => {
       if (!c || typeof c !== "object") return c;
@@ -33,6 +54,7 @@ export function dehydrateArtifact(fullArtifact: any): any {
         delete cc.sourceRegions;
       }
 
+      if (cc.provenanceWeights !== undefined) delete cc.provenanceWeights;
       return cc;
     });
   };
@@ -41,7 +63,9 @@ export function dehydrateArtifact(fullArtifact: any): any {
     const semantic = artifact.semantic as any;
     const claims = Array.isArray(semantic.claims) ? semantic.claims : null;
     if (claims) {
-      out.semantic = { ...semantic, claims: stripClaimDupes(claims) };
+      const nextSemantic: any = { ...semantic, claims: stripClaimDupes(claims) };
+      if (nextSemantic.claimProvenance !== undefined) delete nextSemantic.claimProvenance;
+      out.semantic = nextSemantic;
     }
   }
 
@@ -51,14 +75,16 @@ export function dehydrateArtifact(fullArtifact: any): any {
 
   if (artifact?.geometry && typeof artifact.geometry === "object") {
     const geometry = artifact.geometry as any;
-    const substrate = geometry.substrate;
-    if (substrate && typeof substrate === "object" && !Array.isArray(substrate)) {
-      const nextSubstrate: any = { ...substrate };
-      if (nextSubstrate.allPairwiseSimilarities !== undefined) {
-        delete nextSubstrate.allPairwiseSimilarities;
-      }
-      out.geometry = { ...geometry, substrate: nextSubstrate };
+    const nextGeometry: any = { ...geometry };
+    for (const k of ["diagnostics", "query", "preSemantic", "basinInversion", "statementScores", "shapeSignals"]) {
+      if (nextGeometry[k] !== undefined) delete nextGeometry[k];
     }
+    if (nextGeometry.substrate !== undefined) delete nextGeometry.substrate;
+    out.geometry = nextGeometry;
+  }
+
+  if (artifact?.shadow && typeof artifact.shadow === "object") {
+    out.shadow = {};
   }
 
   return out;
@@ -93,17 +119,43 @@ export function hydrateArtifact(dehydratedArtifact: any): any {
     return null;
   })();
 
+  const rawRegions = artifact?.shadow?.regions;
+  const regionLookup = (() => {
+    if (Array.isArray(rawRegions)) {
+      const m = new Map<string, any>();
+      for (const r of rawRegions) {
+        const id = String(r?.id ?? r?.regionId ?? "").trim();
+        if (!id) continue;
+        if (!m.has(id)) m.set(id, r);
+      }
+      return m;
+    }
+    return null;
+  })();
+
   const hydrateClaims = (claims: any[]): any[] => {
     return (claims || []).map((c) => {
       if (!c || typeof c !== "object") return c;
       const cc: any = { ...c };
-      const ids = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
-      if (!Array.isArray(cc.sourceStatements) && ids.length > 0 && statementLookup) {
-        const statements = ids
+
+      // Hydrate statements
+      const sIds = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
+      if (!Array.isArray(cc.sourceStatements) && sIds.length > 0 && statementLookup) {
+        const statements = sIds
           .map((id: any) => statementLookup.get(String(id)))
           .filter((x: any) => x != null);
         if (statements.length > 0) cc.sourceStatements = statements;
       }
+
+      // Hydrate regions
+      const rIds = Array.isArray(cc.sourceRegionIds) ? cc.sourceRegionIds : [];
+      if (!Array.isArray(cc.sourceRegions) && rIds.length > 0 && regionLookup) {
+        const regions = rIds
+          .map((id: any) => regionLookup.get(String(id)))
+          .filter((x: any) => x != null);
+        if (regions.length > 0) cc.sourceRegions = regions;
+      }
+
       return cc;
     });
   };

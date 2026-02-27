@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, mappingRecomputeSelectionByRoundAtom, activeRecomputeStateAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, mappingRecomputeSelectionByRoundAtom, activeRecomputeStateAtom, turnsMapAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
@@ -844,6 +844,7 @@ export const DecisionMapSheet = React.memo(() => {
   const sessionId = useAtomValue(currentSessionIdAtom);
   const lastSessionIdRef = useRef<string | null>(sessionId);
   const { runMappingForAiTurn } = useRoundActions();
+  const setTurnsMap = useSetAtom(turnsMapAtom);
 
   const setToast = useSetAtom(toastAtom);
 
@@ -1002,6 +1003,53 @@ export const DecisionMapSheet = React.memo(() => {
     const parsed = normalizeArtifactCandidate(picked);
     return (parsed || picked) && typeof (parsed || picked) === "object" ? (parsed || picked) : null;
   }, [aiTurnSafe, activeMappingPid]);
+
+  const viewArtifactRequestRef = useRef<string | null>(null);
+  useEffect(() => {
+    const aiTurnId = aiTurnSafe?.id ? String(aiTurnSafe.id) : "";
+    const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : "";
+    if (!aiTurnId || !pid) return;
+
+    const needsRich =
+      activeTab === "entities" ||
+      activeTab === "evidence" ||
+      activeTab === "landscape" ||
+      (activeTab === "synthesis" && synthesisSubTab === "substrate");
+    if (!needsRich) return;
+
+    const hasGeometry = Array.isArray(mappingArtifact?.geometry?.substrate?.nodes) && mappingArtifact.geometry.substrate.nodes.length > 0;
+    const hasShadow = !!mappingArtifact?.shadow && (Array.isArray(mappingArtifact.shadow.statements) ? mappingArtifact.shadow.statements.length > 0 : typeof mappingArtifact.shadow.statements === "object");
+    if (hasGeometry && hasShadow) return;
+
+    const key = `${aiTurnId}::${pid}`;
+    if (viewArtifactRequestRef.current === key) return;
+    viewArtifactRequestRef.current = key;
+
+    chrome.runtime.sendMessage(
+      { type: "REGENERATE_EMBEDDINGS", payload: { aiTurnId, providerId: pid, persist: false } },
+      (response) => {
+        if (viewArtifactRequestRef.current !== key) return;
+        if (chrome.runtime.lastError) return;
+        if (!response?.success) return;
+        const artifact = response?.data?.artifact;
+        if (!artifact || typeof artifact !== "object") return;
+
+        setTurnsMap((draft: Map<string, any>) => {
+          const turn = draft.get(aiTurnId);
+          if (!turn) return;
+          if (!turn.mappingResponses) turn.mappingResponses = {};
+          const existing = turn.mappingResponses[pid];
+          const arr = Array.isArray(existing) ? existing : existing ? [existing] : [];
+          if (arr.length > 0) {
+            arr[arr.length - 1] = { ...arr[arr.length - 1], artifact };
+          } else {
+            arr.push({ providerId: pid, text: "", artifact, status: "completed", createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
+          }
+          turn.mappingResponses[pid] = arr;
+        });
+      },
+    );
+  }, [activeTab, synthesisSubTab, aiTurnSafe?.id, activeMappingPid, mappingArtifact, setTurnsMap]);
 
   const providerContexts = useAtomValue(providerContextsAtom);
 
