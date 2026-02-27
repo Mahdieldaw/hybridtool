@@ -1454,8 +1454,8 @@ export interface BasinInversionPeak {
 }
 
 export interface BasinInversionBridgePair {
-  a: string;
-  b: string;
+  nodeA: string;
+  nodeB: string;
   similarity: number;
   basinA: number;
   basinB: number;
@@ -1626,6 +1626,9 @@ export interface AiTurn {
 
   /** Per-provider mapping responses with full artifacts for provider-aware resolution */
   mappingResponses?: Record<string, any[]>;
+
+  /** Per-provider singularity responses */
+  singularityResponses?: Record<string, any[]>;
 
   pipelineStatus?: PipelineStatus;
 

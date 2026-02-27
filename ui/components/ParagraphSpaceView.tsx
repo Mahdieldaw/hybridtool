@@ -305,6 +305,11 @@ export function ParagraphSpaceView({
       setBasinLoading(false);
       return;
     }
+    if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
+      setBasinResult(null);
+      setBasinLoading(false);
+      return;
+    }
     let cancelled = false;
     setBasinLoading(true);
     chrome.runtime.sendMessage(
@@ -317,14 +322,27 @@ export function ParagraphSpaceView({
           setBasinResult(null);
           return;
         }
-        const buf: ArrayBuffer | null = response?.data?.buffer || null;
+        const rawBuf = response?.data?.buffer || null;
         const idx: string[] = Array.isArray(response?.data?.index) ? response.data.index : [];
         const dims: number = typeof response?.data?.dimensions === "number" ? response.data.dimensions : 0;
-        if (!buf || !(buf instanceof ArrayBuffer) || idx.length === 0 || !(dims > 0)) {
+
+        let validBuf = null;
+        if (rawBuf instanceof ArrayBuffer) {
+          validBuf = rawBuf;
+        } else if (rawBuf?.buffer instanceof ArrayBuffer) {
+          validBuf = rawBuf.buffer;
+        } else if (rawBuf && typeof rawBuf === "object") {
+          validBuf = new Uint8Array(Object.values(rawBuf)).buffer;
+        } else if (Array.isArray(rawBuf)) {
+          validBuf = new Uint8Array(rawBuf).buffer;
+        }
+
+        if (!validBuf || idx.length === 0 || !(dims > 0)) {
+          console.error("[ParagraphSpaceView] Invalid basin buffer structure", { hasBuf: !!rawBuf, idxLength: idx.length, dims });
           setBasinResult(null);
           return;
         }
-        const view = new Float32Array(buf);
+        const view = new Float32Array(validBuf);
         const maxRows = Math.floor(view.length / dims);
         const rowCount = Math.min(idx.length, maxRows);
         const ids: string[] = [];
@@ -341,7 +359,7 @@ export function ParagraphSpaceView({
     return () => {
       cancelled = true;
     };
-  }, [showBasinView, aiTurnId]);
+  }, [showBasinView, aiTurnId, embeddingStatus]);
 
   /** Provider names keyed by model index */
   const modelProviders = useMemo(() => {
@@ -641,7 +659,7 @@ export function ParagraphSpaceView({
   }, [showRegionHulls, regionOptions, filteredParagraphIds, paragraphPosition, scaleX, scaleY]);
 
   const basinRects = useMemo(() => {
-    if (!showBasinView || !basinResult || basinResult.basinCount <= 1) return [];
+    if (!showBasinView || !basinResult || basinResult.basinCount < 1) return [];
     const perBasin = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>();
     for (const pid of filteredParagraphIds) {
       const basinId = basinResult.basinByNodeId[pid];
@@ -1295,7 +1313,7 @@ export function ParagraphSpaceView({
           <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm border" style={{ backgroundColor: "rgba(148,163,184,0.12)", borderColor: "rgba(148,163,184,0.35)" }} /><span>Patch</span></div>
         </div>
 
-        {showBasinView && basinResult && basinResult.basinCount > 1 && (
+        {showBasinView && basinResult && basinResult.basinCount >= 1 && (
           <>
             <div className="w-px h-3 bg-white/10" />
             <div className="flex items-center gap-2">

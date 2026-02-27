@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, mappingRecomputeSelectionByRoundAtom, activeRecomputeStateAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
@@ -756,6 +756,12 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
 
+  const hasResponse = useCallback((providerId: string) => {
+    if (!aiTurn?.mappingResponses) return false;
+    const responses = (aiTurn.mappingResponses as any)[providerId];
+    return Array.isArray(responses) && responses.length > 0;
+  }, [aiTurn]);
+
   return (
     <div className="relative" ref={menuRef}>
       <button
@@ -785,12 +791,36 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
             {providers.map(p => {
               const pid = String(p.id);
               const isUnauthorized = authStatus && authStatus[pid] === false;
-              const isDisabled = isUnauthorized;
+              const hasData = hasResponse(pid);
 
               return (
-                <button key={pid} onClick={() => { if (!isDisabled) { handleClipClick(aiTurn.id, "mapping", pid); setIsOpen(false); } }} disabled={isDisabled} className={clsx("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors", pid === activeProviderId ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary", isDisabled && "opacity-60 cursor-not-allowed")}>
-                  <div className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: getProviderColor(pid) }} />
-                  <span className="flex-1 text-xs font-medium">{p.name}</span>
+                <button
+                  key={pid}
+                  onClick={() => {
+                    if (!isUnauthorized) {
+                      handleClipClick(aiTurn.id, "mapping", pid);
+                      setIsOpen(false);
+                    }
+                  }}
+                  disabled={isUnauthorized}
+                  className={clsx(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors",
+                    pid === activeProviderId ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
+                    isUnauthorized && "opacity-60 cursor-not-allowed"
+                  )}
+                >
+                  <div className="relative">
+                    <div className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: getProviderColor(pid) }} />
+                    {hasData && (
+                      <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-brand-500 rounded-full border border-surface-raised animate-pulse" />
+                    )}
+                  </div>
+                  <span className={clsx("flex-1 text-xs", hasData ? "font-semibold text-text-primary" : "font-medium")}>
+                    {p.name}
+                  </span>
+                  {hasData && pid !== activeProviderId && (
+                    <span className="text-[10px] uppercase tracking-wider text-text-muted px-1.5 py-0.5 rounded-sm bg-surface-highlight/30">Cached</span>
+                  )}
                   {pid === activeProviderId && <span>✓</span>}
                   {isUnauthorized && <span>🔒</span>}
                 </button>
@@ -928,9 +958,43 @@ export const DecisionMapSheet = React.memo(() => {
   ) as AiTurnWithUI | undefined;
   const aiTurnSafe: AiTurnWithUI | null = isAiTurn(aiTurn) ? aiTurn : null;
 
+  const mappingSelectionByRound = useAtomValue(mappingRecomputeSelectionByRoundAtom);
+  const activeRecomputeState = useAtomValue(activeRecomputeStateAtom);
+
   const activeMappingPid = useMemo(() => {
-    return mappingProvider || aiTurnSafe?.meta?.mapper || undefined;
-  }, [mappingProvider, aiTurnSafe?.meta?.mapper]);
+    // 1. Explicit user selection THIS session for THIS turn overrides everything 
+    // (even if it doesn't have data yet - the user explicitly wants to look at it)
+    const explicitForTurn = aiTurnSafe?.userTurnId ? mappingSelectionByRound[aiTurnSafe.userTurnId] : null;
+    if (explicitForTurn) return explicitForTurn;
+
+    // 2. If a recompute is actively running for this turn, focus on it
+    if (activeRecomputeState?.aiTurnId === aiTurnSafe?.id && activeRecomputeState?.stepType === "mapping") {
+      return activeRecomputeState.providerId;
+    }
+
+    const preferred = mappingProvider;
+    const historical = aiTurnSafe?.meta?.mapper;
+
+    // Check if the given provider ID has actual data in this turn
+    const hasData = (pid: string | null | undefined) => {
+      if (!pid || !aiTurnSafe?.mappingResponses) return false;
+      const resp = (aiTurnSafe.mappingResponses as any)[pid];
+      return Array.isArray(resp) && resp.length > 0;
+    };
+
+    // 3. If the global preferred mapper has data, use it.
+    if (preferred && hasData(preferred)) return preferred;
+
+    // 4. Otherwise, fallback to the historical mapper if it has data.
+    if (historical && hasData(historical)) return historical;
+
+    // 5. Pick ANY available mapper that has data.
+    const availableMappers = Object.keys(aiTurnSafe?.mappingResponses || {});
+    if (availableMappers.length > 0) return availableMappers[0];
+
+    // 6. Absolute Fallback
+    return preferred || historical || undefined;
+  }, [mappingProvider, aiTurnSafe, mappingSelectionByRound, activeRecomputeState]);
 
   const mappingArtifact = useMemo(() => {
     const picked = getProviderArtifact(aiTurnSafe, activeMappingPid);
@@ -964,7 +1028,7 @@ export const DecisionMapSheet = React.memo(() => {
       }
     }
     return '';
-  }, [activeMappingPid, providerContexts, mappingArtifact, aiTurn]);
+  }, [activeMappingPid, providerContexts, mappingArtifact, aiTurnSafe]);
 
   const parsedSemanticFromText = useMemo(() => {
     const raw = String(rawMappingText || '').trim();
@@ -1777,9 +1841,9 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
               <div className="w-1/3 flex justify-start">
-                {aiTurn && (
+                {aiTurnSafe && (
                   <MapperSelector
-                    aiTurn={aiTurn}
+                    aiTurn={aiTurnSafe}
                     activeProviderId={activeMappingPid}
                   />
                 )}

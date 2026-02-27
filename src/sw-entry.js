@@ -1244,7 +1244,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case "GET_PARAGRAPH_EMBEDDINGS_RECORD":
         (async () => {
-          const { aiTurnId, debug } = message.payload || {};
+          const { aiTurnId } = message.payload || {};
           const key = String(aiTurnId || "").trim();
           if (!key) {
             sendResponse({ success: true, data: { ok: false, reason: "missing_aiTurnId" } });
@@ -1284,10 +1284,15 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             return;
           }
 
+          let safeBuffer = geoRecord.paragraphEmbeddings;
+          if (safeBuffer && !(safeBuffer instanceof ArrayBuffer)) {
+            safeBuffer = safeBuffer.buffer || Array.from(safeBuffer);
+          }
+
           const payload = {
             ok: true,
             aiTurnId: key,
-            buffer: geoRecord.paragraphEmbeddings,
+            buffer: safeBuffer,
             index: meta.paragraphIndex,
             dimensions: meta.dimensions,
             timestamp: meta.timestamp || null,

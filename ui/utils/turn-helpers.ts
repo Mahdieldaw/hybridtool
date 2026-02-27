@@ -175,7 +175,7 @@ export function normalizeBackendRoundsToTurns(
       const fallbackTimestamp = round.completedAt || round.createdAt || Date.now();
       const batch = round.batch
         ? { ...round.batch, timestamp: round.batch?.timestamp ?? fallbackTimestamp }
-        : undefined;
+        : (round.providers ? { responses: round.providers, timestamp: fallbackTimestamp } : undefined);
       const mapping = round.mapping
         ? { ...round.mapping, timestamp: round.mapping?.timestamp ?? fallbackTimestamp }
         : undefined;
@@ -192,6 +192,8 @@ export function normalizeBackendRoundsToTurns(
         ...(batch ? { batch } : {}),
         ...(mapping ? { mapping } : {}),
         ...(singularity ? { singularity } : {}),
+        mappingResponses: round.mappingResponses,
+        singularityResponses: round.singularityResponses,
         pipelineStatus: round.pipelineStatus || undefined,
         meta: round.meta || {},
       };

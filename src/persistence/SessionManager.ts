@@ -72,6 +72,7 @@ type ExistingProviderResponse = {
   text?: string;
   status?: unknown;
   meta?: Record<string, unknown>;
+  artifact?: unknown;
   createdAt?: number;
   updatedAt?: number;
 };
@@ -1043,6 +1044,9 @@ export class SessionManager {
 
     const meta = value["meta"];
     if (isPlainObject(meta)) out.meta = meta;
+
+    const artifact = value["artifact"];
+    if (artifact !== undefined) out.artifact = artifact;
 
     const createdAt = value["createdAt"];
     if (isNumber(createdAt)) out.createdAt = createdAt;

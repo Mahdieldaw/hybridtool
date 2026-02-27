@@ -293,6 +293,7 @@ export function useChat() {
                 updatedAt,
                 meta: resp?.meta || {},
                 ...(resp?.artifacts ? { artifacts: resp.artifacts } : {}),
+                ...(resp?.artifact ? { artifact: resp.artifact } : {}),
               } as ProviderResponse;
             };
 

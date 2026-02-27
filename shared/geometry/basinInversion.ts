@@ -119,8 +119,12 @@ class UnionFind {
 
 export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]): BasinInversionResult {
     const startMs = Date.now();
-    const ids = idsIn.map((x) => String(x || "").trim()).filter(Boolean);
-    const nodeCount = Math.min(ids.length, vectorsIn.length);
+    const validPairs = idsIn
+        .map((x, i) => ({ id: String(x || "").trim(), vec: vectorsIn[i] }))
+        .filter(p => Boolean(p.id) && Boolean(p.vec));
+    const ids = validPairs.map(p => p.id);
+    const alignedVectors = validPairs.map(p => p.vec);
+    const nodeCount = ids.length;
 
     if (nodeCount < 2) {
         return {
@@ -165,9 +169,9 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     let maxS = -Infinity;
     let k = 0;
     for (let i = 0; i < nodeCount; i++) {
-        const a = vectorsIn[i];
+        const a = alignedVectors[i];
         for (let j = i + 1; j < nodeCount; j++) {
-            const b = vectorsIn[j];
+            const b = alignedVectors[j];
             let dot = 0;
             const len = Math.min(a.length, b.length);
             for (let t = 0; t < len; t++) dot += a[t] * b[t];
@@ -327,7 +331,7 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
                 const b = ids[j];
                 const basinA = basinByNodeId[a] ?? 0;
                 const basinB = basinByNodeId[b] ?? 0;
-                valleyZonePairs.push({ a, b, similarity: s, basinA, basinB, deltaFromValley: s - T_v });
+                valleyZonePairs.push({ nodeA: a, nodeB: b, similarity: s, basinA, basinB, deltaFromValley: s - T_v });
             }
         }
         valleyZonePairs.sort((x, y) => Math.abs(x.deltaFromValley) - Math.abs(y.deltaFromValley));

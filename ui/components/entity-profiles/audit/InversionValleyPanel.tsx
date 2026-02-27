@@ -135,6 +135,17 @@ function BasinHistogram({ result }: { result: BasinInversionResult }) {
   );
 }
 
+export type BasinRow = { id: string; basinId: number; size: number; ratio: number; trenchDepth: number | null };
+export type BridgeRow = {
+  id: string;
+  a: string;
+  b: string;
+  similarity: number;
+  basinA: number;
+  basinB: number;
+  delta: number;
+};
+
 export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Props) {
   const [record, setRecord] = useState<EmbeddingRecord | null>(null);
   const [loading, setLoading] = useState(false);
@@ -206,7 +217,8 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
             timestamp: data.timestamp ?? null,
           });
         } else {
-          setError(null);
+          setError("Unexpected payload: missing buffer or index");
+          console.warn("[InversionValleyPanel] Unexpected payload", data);
           setRecord(null);
         }
       },
@@ -249,8 +261,6 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
     ];
   }, [result]);
 
-  type BasinRow = { id: string; basinId: number; size: number; ratio: number; trenchDepth: number | null };
-
   const basinRows = useMemo<BasinRow[]>(() => {
     if (!result) return [];
     return result.basins.map((b: BasinInversionBasin) => ({
@@ -285,22 +295,12 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
     [basinRows],
   );
 
-  type BridgeRow = {
-    id: string;
-    a: string;
-    b: string;
-    similarity: number;
-    basinA: number;
-    basinB: number;
-    delta: number;
-  };
-
   const bridgeRows = useMemo<BridgeRow[]>(() => {
     if (!result || result.status !== "ok") return [];
     return result.bridgePairs.slice(0, 250).map((p: BasinInversionBridgePair, idx: number) => ({
       id: `${idx}`,
-      a: p.a,
-      b: p.b,
+      a: p.nodeA,
+      b: p.nodeB,
       similarity: p.similarity,
       basinA: p.basinA,
       basinB: p.basinB,
@@ -374,7 +374,7 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
     );
   }
 
-  if (!record || !result) {
+  if (!result) {
     return (
       <div className="rounded-xl border border-border-subtle bg-surface px-4 py-8 text-center text-sm text-text-muted">
         <div>No cached paragraph embeddings available for this turn. Use Regenerate to compute them.</div>

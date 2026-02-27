@@ -123,6 +123,7 @@ export interface ProviderResponseRecord {
   error?: string;
   content?: string;
   metadata?: Record<string, any>;
+  artifact?: any;
   tokenUsage?: {
     promptTokens: number;
     completionTokens: number;
