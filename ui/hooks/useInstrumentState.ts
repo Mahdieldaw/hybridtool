@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 
+// Keep PipelineLayer exported for backward compatibility (used in Reference Shelf cards)
 export type PipelineLayer =
   | 'substrate' | 'mutual-graph' | 'basin-inversion' | 'query-relevance'
   | 'competitive-provenance' | 'continuous-field' | 'carrier-detection'
@@ -13,11 +14,15 @@ export type SelectedEntity =
   | { type: 'model'; index: number }
   | null;
 
+export type EvidenceScope = 'claim' | 'cross-claim' | 'statement';
+
 export interface InstrumentState {
   rightPanelMode: 'instrument' | 'narrative';
-  selectedLayer: PipelineLayer;
+  selectedView: string;
   selectedClaimId: string | null;
   selectedEntity: SelectedEntity;
+  expandedRefSections: string[];
+  scope: EvidenceScope;
   showMutualEdges: boolean;
   showClaimDiamonds: boolean;
   showMapperEdges: boolean;
@@ -30,9 +35,11 @@ export interface InstrumentState {
 
 export interface InstrumentActions {
   setRightPanelMode: (mode: 'instrument' | 'narrative') => void;
-  setSelectedLayer: (layer: PipelineLayer) => void;
+  setSelectedView: (viewId: string) => void;
   selectClaim: (claimId: string | null, label?: string) => void;
   setSelectedEntity: (entity: SelectedEntity) => void;
+  toggleRefSection: (sectionId: string) => void;
+  setScope: (scope: EvidenceScope) => void;
   toggleMutualEdges: () => void;
   toggleClaimDiamonds: () => void;
   toggleMapperEdges: () => void;
@@ -46,9 +53,11 @@ export interface InstrumentActions {
 
 const DEFAULTS: InstrumentState = {
   rightPanelMode: 'instrument',
-  selectedLayer: 'substrate',
+  selectedView: 'provenance',
   selectedClaimId: null,
   selectedEntity: null,
+  expandedRefSections: [],
+  scope: 'claim',
   showMutualEdges: true,
   showClaimDiamonds: true,
   showMapperEdges: false,
@@ -61,9 +70,11 @@ const DEFAULTS: InstrumentState = {
 
 export function useInstrumentState(): [InstrumentState, InstrumentActions] {
   const [rightPanelMode, setRightPanelMode] = useState<'instrument' | 'narrative'>(DEFAULTS.rightPanelMode);
-  const [selectedLayer, setSelectedLayer] = useState<PipelineLayer>(DEFAULTS.selectedLayer);
+  const [selectedView, setSelectedView] = useState<string>(DEFAULTS.selectedView);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity>(null);
+  const [expandedRefSections, setExpandedRefSections] = useState<string[]>(DEFAULTS.expandedRefSections);
+  const [scope, setScope] = useState<EvidenceScope>(DEFAULTS.scope);
   const [showMutualEdges, setShowMutualEdges] = useState(DEFAULTS.showMutualEdges);
   const [showClaimDiamonds, setShowClaimDiamonds] = useState(DEFAULTS.showClaimDiamonds);
   const [showMapperEdges, setShowMapperEdges] = useState(DEFAULTS.showMapperEdges);
@@ -78,11 +89,21 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     setSelectedEntity(claimId ? { type: 'claim', id: claimId, label } : null);
   }, []);
 
+  const toggleRefSection = useCallback((sectionId: string) => {
+    setExpandedRefSections(prev =>
+      prev.includes(sectionId)
+        ? prev.filter(s => s !== sectionId)
+        : [...prev, sectionId]
+    );
+  }, []);
+
   const reset = useCallback(() => {
     setRightPanelMode(DEFAULTS.rightPanelMode);
-    setSelectedLayer(DEFAULTS.selectedLayer);
+    setSelectedView(DEFAULTS.selectedView);
     setSelectedClaimId(DEFAULTS.selectedClaimId);
     setSelectedEntity(DEFAULTS.selectedEntity);
+    setExpandedRefSections(DEFAULTS.expandedRefSections);
+    setScope(DEFAULTS.scope);
     setShowMutualEdges(DEFAULTS.showMutualEdges);
     setShowClaimDiamonds(DEFAULTS.showClaimDiamonds);
     setShowMapperEdges(DEFAULTS.showMapperEdges);
@@ -92,11 +113,14 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     setHighlightInternalEdges(DEFAULTS.highlightInternalEdges);
     setHighlightSpannedHulls(DEFAULTS.highlightSpannedHulls);
   }, []);
+
   const state = useMemo<InstrumentState>(() => ({
     rightPanelMode,
-    selectedLayer,
+    selectedView,
     selectedClaimId,
     selectedEntity,
+    expandedRefSections,
+    scope,
     showMutualEdges,
     showClaimDiamonds,
     showMapperEdges,
@@ -106,16 +130,19 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     highlightInternalEdges,
     highlightSpannedHulls,
   }), [
-    rightPanelMode, selectedLayer, selectedClaimId, selectedEntity,
+    rightPanelMode, selectedView, selectedClaimId, selectedEntity,
+    expandedRefSections, scope,
     showMutualEdges, showClaimDiamonds, showMapperEdges, showRegionHulls, showBasinRects,
     highlightSourceParagraphs, highlightInternalEdges, highlightSpannedHulls,
   ]);
 
   const actions = useMemo<InstrumentActions>(() => ({
     setRightPanelMode,
-    setSelectedLayer,
+    setSelectedView,
     selectClaim,
     setSelectedEntity,
+    toggleRefSection,
+    setScope,
     toggleMutualEdges: () => setShowMutualEdges(v => !v),
     toggleClaimDiamonds: () => setShowClaimDiamonds(v => !v),
     toggleMapperEdges: () => setShowMapperEdges(v => !v),
@@ -125,7 +152,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     toggleHighlightInternalEdges: () => setHighlightInternalEdges(v => !v),
     toggleHighlightSpannedHulls: () => setHighlightSpannedHulls(v => !v),
     reset,
-  }), [selectClaim, reset]);
+  }), [selectClaim, toggleRefSection, reset]);
 
   return [state, actions];
 }

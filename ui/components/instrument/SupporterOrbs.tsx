@@ -8,12 +8,13 @@ interface SupporterOrbsProps {
 }
 
 function getProviderFromSupporter(s: string | number, citationSourceOrder?: Record<string | number, string>) {
-  if ((typeof s === "number" || !isNaN(Number(s))) && citationSourceOrder) {
+  if (typeof s === "string") {
+    const config = getProviderConfig(s);
+    if (config) return config;
+  }
+  if (citationSourceOrder && (typeof s === "number" || (typeof s === "string" && !isNaN(Number(s))))) {
     const providerId = citationSourceOrder[Number(s)];
     if (providerId) return getProviderConfig(providerId) || null;
-  }
-  if (typeof s === "string") {
-    return getProviderConfig(s) || null;
   }
   return null;
 }

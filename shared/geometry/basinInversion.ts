@@ -278,7 +278,7 @@ function deriveBandwidthBounds(
 function buildBandwidthLadder(lo: number, hi: number, maxGapRatio: number): number[] {
     if (lo <= 0 || hi <= 0 || lo >= hi) return lo > 0 ? [lo] : [];
     // Minimum steps so adjacent ratio never exceeds (1 + maxGapRatio)
-    const steps = Math.ceil(Math.log(hi / lo) / Math.log(1 + maxGapRatio)) + 1;
+    const steps = Math.max(20, Math.ceil(Math.log(hi / lo) / Math.log(1 + maxGapRatio)) + 1);
     const ladder: number[] = [];
     for (let i = 0; i < steps; i++) {
         const t = i / (steps - 1);

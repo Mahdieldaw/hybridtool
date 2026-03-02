@@ -16,15 +16,10 @@ import {
   SubstrateCard,
   MutualGraphCard,
   BasinInversionCard,
-  QueryRelevanceCard,
   BlastRadiusCard,
-  CompetitiveProvenanceCard,
-  ContinuousFieldCard,
   CarrierDetectionCard,
   ModelOrderingCard,
   AlignmentCard,
-  ProvenanceComparisonCard,
-  MixedProvenanceCard,
 } from "./instrument/LayerCards";
 import { useInstrumentState } from "../hooks/useInstrumentState";
 import type { PipelineLayer } from "../hooks/useInstrumentState";
@@ -32,6 +27,12 @@ import { useClaimCentroids } from "../hooks/useClaimCentroids";
 import { ToggleBar } from "./instrument/ToggleBar";
 import { ClaimDetailDrawer } from "./instrument/ClaimDetailDrawer";
 import { NarrativePanel } from "./instrument/NarrativePanel";
+import { useEvidenceRows } from "../hooks/useEvidenceRows";
+import { BUILT_IN_COLUMNS, DEFAULT_VIEWS, DEFAULT_VIEW_MAP } from "./instrument/columnRegistry";
+import type { ColumnDef, ViewConfig } from "./instrument/columnRegistry";
+import { EvidenceTable } from "./instrument/EvidenceTable";
+import { ContextStrip } from "./instrument/ContextStrip";
+import { ColumnPicker } from "./instrument/ColumnPicker";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -66,20 +67,6 @@ function normalizeArtifactCandidate(input: unknown): any | null {
 
 function safeArr<T = any>(v: any): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
-}
-
-function safeObj(v: any): Record<string, any> {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {};
-}
-
-function fmtNum(v: number | null | undefined, digits = 3): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return v.toFixed(digits);
-}
-
-function fmtInt(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return Math.round(v).toLocaleString();
 }
 
 function tryParseJsonObject(text: string): any | null {
@@ -516,437 +503,60 @@ function CrossSignalComparePanel({ artifact, selectedLayer }: { artifact: any; s
   );
 }
 
-function TemporaryInstrumentationPanel({ artifact, selectedLayer }: { artifact: any; selectedLayer?: string }) {
-  const statementAllocation = artifact?.statementAllocation ?? null;
-  const continuousField = artifact?.continuousField ?? null;
-  const claimProvenance = artifact?.claimProvenance ?? null;
-  const assignmentDiagnostics = safeObj(claimProvenance?.competitiveAssignmentDiagnostics);
-  const perClaimAlloc = safeObj(statementAllocation?.perClaim);
-  const dualCoordinateActive: boolean = statementAllocation?.dualCoordinateActive ?? false;
 
-  const geometryCorrelation = useMemo(() => {
-    const candidates = [
-      artifact?.geometryCorrelation,
-      statementAllocation?.geometryCorrelation,
-      claimProvenance?.geometryCorrelation,
-      artifact?.instrumentation?.geometryCorrelation,
-    ];
-    for (const v of candidates) {
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-    }
-    return null;
-  }, [artifact, statementAllocation, claimProvenance]);
+// ============================================================================
+// REFERENCE SHELF SECTION
+// ============================================================================
 
-  const entropy = useMemo(() => {
-    const ent = statementAllocation?.entropy ?? null;
-    if (ent && typeof ent === "object") return ent;
-    const counts = safeObj(statementAllocation?.assignmentCounts);
-    let one = 0;
-    let two = 0;
-    let threePlus = 0;
-    let total = 0;
-    for (const v of Object.values(counts)) {
-      const n = typeof v === "number" && Number.isFinite(v) ? v : 0;
-      if (n <= 0) continue;
-      if (n === 1) one++;
-      else if (n === 2) two++;
-      else threePlus++;
-      total++;
-    }
-    return { one, two, threePlus, total };
-  }, [statementAllocation]);
-
-  const claims = useMemo(() => safeArr<any>(artifact?.semantic?.claims), [artifact]);
-
-  const { stmtToPara, paraTextMap } = useMemo(() => {
-    const stmtToPara = new Map<string, string>();
-    const paraTextMap = new Map<string, string>();
-    for (const p of safeArr<any>(artifact?.shadow?.paragraphs)) {
-      const pid = String(p?.id ?? "");
-      if (!pid) continue;
-      if (p?._fullParagraph) paraTextMap.set(pid, String(p._fullParagraph));
-      for (const sid of safeArr<any>(p?.statementIds)) {
-        stmtToPara.set(String(sid), pid);
-      }
-    }
-    return { stmtToPara, paraTextMap };
-  }, [artifact]);
-
-  const paragraphSimilarityPerClaim = useMemo(() => safeObj(artifact?.paragraphSimilarityField?.perClaim), [artifact]);
-
-  // Assigned paragraphs (§0 competitive assignment) — always available from sourceStatementIds
-  const assignedParagraphsByClaim = useMemo(() => {
-    const m = new Map<string, Array<{ id: string; text: string }>>();
-    for (const claim of claims) {
-      const cid = String(claim?.id ?? "");
-      const seenPara = new Set<string>();
-      const paras: Array<{ id: string; text: string }> = [];
-      for (const sid of safeArr<any>(claim?.sourceStatementIds)) {
-        const pid = stmtToPara.get(String(sid));
-        if (!pid || seenPara.has(pid)) continue;
-        seenPara.add(pid);
-        paras.push({ id: pid, text: paraTextMap.get(pid) ?? "" });
-      }
-      m.set(cid, paras);
-    }
-    return m;
-  }, [claims, stmtToPara, paraTextMap]);
-
-  // Full ranked paragraph list (§3 sim field) — only available after regenerate
-  const rankedParagraphsByClaim = useMemo(() => {
-    const m = new Map<string, Array<{ id: string; text: string; sim: number; w1: number | null }>>();
-    for (const claim of claims) {
-      const cid = String(claim?.id ?? "");
-      const simField = safeArr<any>(paragraphSimilarityPerClaim[cid]?.field);
-      if (simField.length === 0) continue;
-      const pw1 = new Map<string, number>();
-      for (const entry of safeArr<any>(perClaimAlloc[cid]?.directStatementProvenance)) {
-        const sid = String(entry?.statementId ?? "");
-        const pid = stmtToPara.get(sid);
-        if (!pid) continue;
-        pw1.set(pid, (pw1.get(pid) ?? 0) + (typeof entry.weight === "number" ? entry.weight : 0));
-      }
-      const paras = simField
-        .filter((e: any) => typeof e?.sim === "number" && String(e?.paragraphId ?? "").length > 0)
-        .map((e: any) => ({
-          id: String(e.paragraphId),
-          text: paraTextMap.get(String(e.paragraphId)) ?? "",
-          sim: e.sim as number,
-          w1: pw1.get(String(e.paragraphId)) ?? null,
-        }));
-      m.set(cid, paras);
-    }
-    return m;
-  }, [claims, stmtToPara, paraTextMap, perClaimAlloc, paragraphSimilarityPerClaim]);
-
-  const comparisonRows = useMemo(() => {
-    const ids = new Set<string>();
-    for (const k of Object.keys(assignmentDiagnostics)) ids.add(String(k));
-    for (const k of Object.keys(perClaimAlloc)) ids.add(String(k));
-    return Array.from(ids).map((id) => {
-      const oldDiag = assignmentDiagnostics[id] || null;
-      const newDiag = perClaimAlloc[id] || null;
-      const oldPool = typeof oldDiag?.poolSize === "number" ? oldDiag.poolSize : null;
-      const newPool = typeof newDiag?.poolSize === "number" ? newDiag.poolSize : null;
-      const newBulk = typeof newDiag?.provenanceBulk === "number" ? newDiag.provenanceBulk : null;
-      const ratio = oldPool && oldPool > 0 && newPool != null ? newPool / oldPool : null;
-      return { id, oldPool, newPool, newBulk, ratio };
-    }).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  }, [assignmentDiagnostics, perClaimAlloc]);
-
-  const continuousSummary = useMemo(() => {
-    const perClaim = safeObj(continuousField?.perClaim);
-    const claimIds = Object.keys(perClaim);
-    let totalCore = 0;
-    for (const id of claimIds) {
-      const core = perClaim[id]?.coreSetSize;
-      if (typeof core === "number" && Number.isFinite(core)) totalCore += core;
-    }
-    const disagreements = Array.isArray(continuousField?.disagreementMatrix) ? continuousField.disagreementMatrix.length : 0;
-    return { claimCount: claimIds.length, totalCore, disagreements };
-  }, [continuousField]);
-
-  // Context-specific content based on selected layer
-  const layer = selectedLayer ?? 'substrate';
-
-  const EntropyGrid = () => (
-    <div className="grid grid-cols-3 gap-2">
-      {[
-        { label: "1 claim", count: entropy?.one, total: entropy?.total, color: "text-emerald-400" },
-        { label: "2 claims", count: entropy?.two, total: entropy?.total, color: "text-amber-400" },
-        { label: "3+ claims", count: entropy?.threePlus, total: entropy?.total, color: "text-rose-400" },
-      ].map(({ label, count, total, color }) => (
-        <div key={label} className="bg-white/3 rounded-lg p-2 text-center">
-          <div className="text-[9px] text-text-muted uppercase">{label}</div>
-          <div className={clsx("text-sm font-mono font-semibold", color)}>{fmtInt(count ?? null)}</div>
-          <div className="text-[9px] text-text-muted">{total && total > 0 && count != null ? ((count / total) * 100).toFixed(1) : "—"}%</div>
+function RefSection({
+  id: _id,
+  label,
+  expanded,
+  onToggle,
+  copyText,
+  children,
+}: {
+  id: string;
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  copyText?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-white/5 last:border-b-0">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
+        onClick={onToggle}
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+          {label}
+        </span>
+        <div className="flex items-center gap-2">
+          {copyText && expanded && (
+            <CopyButton
+              text={copyText}
+              label={`Copy ${label}`}
+              variant="icon"
+              disabled={!copyText}
+            />
+          )}
+          <span className="text-text-muted text-[10px]">{expanded ? '▲' : '▼'}</span>
         </div>
-      ))}
-    </div>
-  );
-
-  const PoolComparisonTable = () => (
-    <>
-      <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">Old vs New Pool Size</div>
-      {comparisonRows.length === 0 ? (
-        <div className="text-xs text-text-muted italic py-1">No competitive diagnostics available.</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-[360px] w-full text-[11px]">
-            <thead className="text-[10px] uppercase text-text-muted">
-              <tr className="border-b border-white/10">
-                <th className="text-left py-1 pr-2">Claim</th>
-                <th className="text-right py-1 px-2">Old Pool</th>
-                <th className="text-right py-1 px-2">New Pool</th>
-                <th className="text-right py-1 px-2">Bulk</th>
-                <th className="text-right py-1 pl-2">Ratio</th>
-              </tr>
-            </thead>
-            <tbody>
-              {comparisonRows.map((r) => (
-                <tr key={r.id} className="border-b border-white/5 last:border-b-0">
-                  <td className="py-1 pr-2 text-text-primary font-mono">{r.id}</td>
-                  <td className="py-1 px-2 text-right text-text-muted">{fmtInt(r.oldPool)}</td>
-                  <td className="py-1 px-2 text-right text-text-muted">{fmtInt(r.newPool)}</td>
-                  <td className="py-1 px-2 text-right text-text-muted">{fmtNum(r.newBulk)}</td>
-                  <td className="py-1 pl-2 text-right text-text-muted">{fmtNum(r.ratio, 2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3">
+          {children}
         </div>
       )}
-    </>
-  );
-
-  const ParagraphSourcesSection = () => {
-    if (comparisonRows.length === 0) return null;
-    return (
-      <>
-        {/* §0 assigned paragraphs — always available */}
-        <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-1">Paragraph Sources (§0 competitive assignment)</div>
-        <div className="space-y-3">
-          {comparisonRows.map((r) => {
-            const paras = assignedParagraphsByClaim.get(r.id) ?? [];
-            return (
-              <div key={r.id}>
-                <div className="text-[10px] font-mono text-text-primary mb-1">
-                  {r.id} <span className="text-text-muted">({paras.length} paragraphs)</span>
-                </div>
-                {paras.length === 0 ? (
-                  <div className="text-[10px] text-text-muted italic pl-2">no paragraphs</div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {paras.map((p) => (
-                      <div key={p.id} className="pl-2 border-l-2 border-white/10">
-                        <div className="text-[9px] font-mono text-text-muted mb-0.5">{p.id}</div>
-                        {p.text ? (
-                          <div className="text-[10px] text-text-primary leading-relaxed">
-                            {p.text.length > 220 ? p.text.slice(0, 220) + "…" : p.text}
-                          </div>
-                        ) : (
-                          <div className="text-[10px] text-text-muted italic">no text</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* §3 full ranked paragraph similarity — only after regenerate */}
-        {comparisonRows.some(r => (rankedParagraphsByClaim.get(r.id)?.length ?? 0) > 0) && (
-          <>
-            <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-3">Paragraph Cosine Similarity (§3 all paragraphs)</div>
-            <div className="space-y-3">
-              {comparisonRows.map((r) => {
-                const paras = rankedParagraphsByClaim.get(r.id) ?? [];
-                if (paras.length === 0) return null;
-                return (
-                  <div key={r.id}>
-                    <div className="text-[10px] font-mono text-text-primary mb-1">
-                      {r.id} <span className="text-text-muted">({paras.length} paragraphs, ranked by sim)</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {paras.map((p) => (
-                        <div key={p.id} className="pl-2 border-l-2 border-white/10">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-[9px] font-mono text-text-muted">{p.id}</span>
-                            <span className="text-[9px] font-mono text-blue-400">sim={p.sim.toFixed(3)}</span>
-                            {p.w1 != null && (
-                              <span className="text-[9px] font-mono text-emerald-400">w₁={p.w1.toFixed(3)}</span>
-                            )}
-                          </div>
-                          {p.text ? (
-                            <div className="text-[10px] text-text-primary leading-relaxed">
-                              {p.text.length > 220 ? p.text.slice(0, 220) + "…" : p.text}
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-text-muted italic">no text</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </>
-    );
-  };
-
-  const content = (() => {
-    if (layer === 'competitive-provenance') {
-      return (
-        <>
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className={clsx("px-2 py-0.5 rounded border", dualCoordinateActive ? "border-amber-500/40 text-amber-300 bg-amber-500/10" : "border-emerald-500/40 text-emerald-300 bg-emerald-500/10")}>
-              {dualCoordinateActive ? "Dual coordinate system active" : "Single coordinate system"}
-            </span>
-            <span className="text-text-muted">geom corr: <span className="font-mono">{geometryCorrelation == null ? "—" : geometryCorrelation.toFixed(3)}</span></span>
-          </div>
-          <EntropyGrid />
-          <PoolComparisonTable />
-          <ParagraphSourcesSection />
-        </>
-      );
-    }
-    if (layer === 'continuous-field') {
-      return (
-        <>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="bg-white/3 rounded-lg p-2">
-              <div className="text-[9px] text-text-muted uppercase">Claims profiled</div>
-              <div className="text-sm font-mono font-semibold">{fmtInt(continuousSummary.claimCount)}</div>
-            </div>
-            <div className="bg-white/3 rounded-lg p-2">
-              <div className="text-[9px] text-text-muted uppercase">Core statements</div>
-              <div className="text-sm font-mono font-semibold">{fmtInt(continuousSummary.totalCore)}</div>
-            </div>
-            <div className="bg-white/3 rounded-lg p-2">
-              <div className="text-[9px] text-text-muted uppercase">Disagreements</div>
-              <div className={clsx("text-sm font-mono font-semibold", continuousSummary.disagreements > 0 ? "text-amber-400" : "")}>{fmtInt(continuousSummary.disagreements)}</div>
-            </div>
-          </div>
-          {continuousSummary.disagreements > 0 && (
-            <div className="text-[10px] text-amber-300/80">
-              {continuousSummary.disagreements} statement{continuousSummary.disagreements !== 1 ? 's' : ''} where competitive winner ≠ continuous field winner. See the Continuous Field card for details.
-            </div>
-          )}
-        </>
-      );
-    }
-    if (layer === 'blast-radius') {
-      const br = artifact?.blastRadiusFilter ?? null;
-      const meta = br?.meta ?? null;
-      return (
-        <>
-          <div className="grid grid-cols-2 gap-x-4 text-[11px]">
-            <div className="space-y-0.5">
-              <div className="flex justify-between py-0.5"><span className="text-text-muted">Convergence ratio</span><span className="font-mono">{meta?.convergenceRatio != null ? (meta.convergenceRatio * 100).toFixed(0) + '%' : '—'}</span></div>
-              <div className="flex justify-between py-0.5"><span className="text-text-muted">Skip survey</span><span className={clsx("font-mono", br?.skipSurvey ? "text-rose-400" : "text-emerald-400")}>{br?.skipSurvey ? "yes" : "no"}</span></div>
-              {br?.skipReason && <div className="flex justify-between py-0.5"><span className="text-text-muted">Reason</span><span className="font-mono text-amber-400 truncate max-w-[160px]" title={br.skipReason}>{br.skipReason}</span></div>}
-            </div>
-            <div className="space-y-0.5">
-              <div className="flex justify-between py-0.5"><span className="text-text-muted">Suppressed</span><span className={clsx("font-mono", (meta?.suppressedCount ?? 0) > 0 ? "text-amber-400" : "")}>{fmtInt(meta?.suppressedCount)}</span></div>
-              <div className="flex justify-between py-0.5"><span className="text-text-muted">Candidates</span><span className="font-mono">{fmtInt(meta?.candidateCount)}</span></div>
-              <div className="flex justify-between py-0.5"><span className="text-text-muted">Axes</span><span className="font-mono">{fmtInt(meta?.axisCount)}</span></div>
-            </div>
-          </div>
-        </>
-      );
-    }
-    if (layer === 'substrate' || layer === 'mutual-graph' || layer === 'basin-inversion') {
-      const basinResult = artifact?.geometry?.basinInversion ?? null;
-      const substrate = artifact?.geometry?.substrate ?? null;
-      const D = basinResult?.discriminationRange ?? null;
-      const nodes = substrate?.nodes ?? [];
-      const mutualEdges = substrate?.mutualEdges ?? [];
-      const participating = nodes.filter((n: any) => (n.mutualDegree ?? 0) > 0).length;
-      return (
-        <div className="grid grid-cols-2 gap-x-4 text-[11px]">
-          <div className="space-y-0.5">
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Nodes</span><span className="font-mono">{fmtInt(nodes.length)}</span></div>
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Mutual edges</span><span className="font-mono">{fmtInt(mutualEdges.length)}</span></div>
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Participating</span><span className="font-mono">{nodes.length > 0 ? ((participating / nodes.length) * 100).toFixed(0) + '%' : '—'}</span></div>
-          </div>
-          <div className="space-y-0.5">
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">D = P90−P10</span><span className={clsx("font-mono", D == null ? "" : D >= 0.10 ? "text-emerald-400" : D >= 0.05 ? "text-amber-400" : "text-rose-400")}>{D != null ? D.toFixed(4) : '—'}</span></div>
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">T_v</span><span className="font-mono">{basinResult?.T_v != null ? basinResult.T_v.toFixed(4) : '—'}</span></div>
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Basins</span><span className="font-mono">{fmtInt(basinResult?.basinCount)}</span></div>
-          </div>
-        </div>
-      );
-    }
-    if (layer === 'query-relevance') {
-      const statementScores = artifact?.geometry?.query?.relevance?.statementScores ?? null;
-      const scoreEntries = statementScores ? Object.values(statementScores) : [];
-      const simRaws = scoreEntries.map((s: any) => s?.simRaw).filter((v: any) => typeof v === 'number' && Number.isFinite(v)) as number[];
-      const modelGroups = new Map<number, number[]>();
-      for (const s of scoreEntries as any[]) {
-        if (s?.modelIndex == null || typeof s?.simRaw !== 'number') continue;
-        if (!modelGroups.has(s.modelIndex)) modelGroups.set(s.modelIndex, []);
-        modelGroups.get(s.modelIndex)!.push(s.simRaw);
-      }
-      const modelMeans = Array.from(modelGroups.entries()).map(([mi, vals]) => ({ mi, mean: vals.reduce((a: number, b: number) => a + b, 0) / vals.length })).sort((a, b) => b.mean - a.mean);
-      const spread = modelMeans.length >= 2 ? modelMeans[0].mean - modelMeans[modelMeans.length - 1].mean : null;
-      const mean = simRaws.length > 0 ? simRaws.reduce((a, b) => a + b, 0) / simRaws.length : null;
-      return (
-        <div className="grid grid-cols-2 gap-x-4 text-[11px]">
-          <div className="space-y-0.5">
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Statements</span><span className="font-mono">{fmtInt(simRaws.length)}</span></div>
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Mean raw cosine</span><span className="font-mono">{mean != null ? mean.toFixed(4) : '—'}</span></div>
-          </div>
-          <div className="space-y-0.5">
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Models</span><span className="font-mono">{fmtInt(modelMeans.length)}</span></div>
-            <div className="flex justify-between py-0.5"><span className="text-text-muted">Model spread</span><span className={clsx("font-mono", spread != null && spread > 0.10 ? "text-amber-400" : "")}>{spread != null ? spread.toFixed(4) : '—'}</span></div>
-          </div>
-        </div>
-      );
-    }
-    // Fallback: show full panel (competitive provenance + continuous summary)
-    return (
-      <>
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <span className={clsx("px-2 py-0.5 rounded border", dualCoordinateActive ? "border-amber-500/40 text-amber-300 bg-amber-500/10" : "border-emerald-500/40 text-emerald-300 bg-emerald-500/10")}>
-            {dualCoordinateActive ? "Dual coordinate system active" : "Single coordinate system"}
-          </span>
-        </div>
-        <EntropyGrid />
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-white/3 rounded-lg p-2">
-            <div className="text-[9px] text-text-muted uppercase">Continuous claims</div>
-            <div className="text-sm font-mono font-semibold">{fmtInt(continuousSummary.claimCount)}</div>
-          </div>
-          <div className="bg-white/3 rounded-lg p-2">
-            <div className="text-[9px] text-text-muted uppercase">Core statements</div>
-            <div className="text-sm font-mono font-semibold">{fmtInt(continuousSummary.totalCore)}</div>
-          </div>
-          <div className="bg-white/3 rounded-lg p-2">
-            <div className="text-[9px] text-text-muted uppercase">Disagreements</div>
-            <div className="text-sm font-mono font-semibold">{fmtInt(continuousSummary.disagreements)}</div>
-          </div>
-        </div>
-      </>
-    );
-  })();
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Diagnostics</div>
-        <div className="text-[11px] text-text-muted font-mono">
-          corr={geometryCorrelation == null ? "—" : geometryCorrelation.toFixed(3)}
-        </div>
-      </div>
-      {content}
     </div>
   );
 }
 
 // ============================================================================
-// LAYER TAB DEFINITIONS
+// LAYER COPY TEXT HELPER (used for Reference Shelf copy buttons)
 // ============================================================================
-
-const LAYERS: { id: PipelineLayer; label: string; level?: string }[] = [
-  { id: 'substrate', label: 'Substrate', level: 'L1' },
-  { id: 'mutual-graph', label: 'Mutual', level: 'L1' },
-  { id: 'basin-inversion', label: 'Basin', level: 'L1' },
-  { id: 'query-relevance', label: 'Query', level: 'L1' },
-  { id: 'competitive-provenance', label: 'Provenance' },
-  { id: 'continuous-field', label: 'Continuous' },
-  { id: 'provenance-comparison', label: 'Compare' },
-  { id: 'mixed-provenance', label: 'Mixed', level: 'L1' },
-  { id: 'carrier-detection', label: 'Carrier', level: 'L1' },
-  { id: 'model-ordering', label: 'Model Order', level: 'L1' },
-  { id: 'blast-radius', label: 'Blast', level: 'L2' },
-  { id: 'alignment', label: 'Alignment' },
-  { id: 'raw-artifacts', label: 'Raw' },
-];
 
 function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
   if (!artifact) return '';
@@ -1040,11 +650,17 @@ export const DecisionMapSheet = React.memo(() => {
   const setToast = useSetAtom(toastAtom);
   const [regenState, setRegenState] = useState<"idle" | "running" | "done" | "error">("idle");
 
-  // ── Instrument state (v3 layout) ──────────────────────────────
+  // ── Instrument state (v4 console layout) ──────────────────────────────
   const [instrumentState, instrumentActions] = useInstrumentState();
-  const { selectedLayer, selectedEntity, selectedClaimId: instrumentSelectedClaimId } = instrumentState;
+  const {
+    selectedView,
+    selectedEntity,
+    selectedClaimId: instrumentSelectedClaimId,
+    scope,
+    expandedRefSections,
+  } = instrumentState;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
+  const [sheetHeightRatio, setSheetHeightRatio] = useState(0.72);
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -1054,18 +670,39 @@ export const DecisionMapSheet = React.memo(() => {
 
   useEffect(() => {
     if (openState) {
-      // Map legacy tab names to instrument layer
-      const raw = String(openState.tab || 'substrate');
-      let layer: PipelineLayer = 'substrate';
-      if (raw === 'blast-radius' || raw === 'gates') layer = 'blast-radius';
-      else if (raw === 'query' || raw === 'queryRelevance') layer = 'query-relevance';
-      else if (raw === 'space') layer = 'mutual-graph';
-      else if (raw === 'raw-artifacts' || raw === 'json') layer = 'raw-artifacts';
-      instrumentActions.setSelectedLayer(layer);
       instrumentActions.selectClaim(null);
-      setSheetHeightRatio(0.5);
+      setSheetHeightRatio(0.72);
     }
-  }, [openState?.turnId, openState?.tab]);
+  }, [openState?.turnId]);
+
+  // ── Evidence console state ─────────────────────────────────────
+  const [extraColumns, setExtraColumns] = useState<ColumnDef[]>([]);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(
+    () => DEFAULT_VIEW_MAP.get('provenance')?.columns ?? DEFAULT_VIEWS[0].columns
+  );
+
+  // Reset column visibility when view changes
+  useEffect(() => {
+    const view = DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0];
+    setVisibleColumnIds(view.columns);
+  }, [selectedView]);
+
+  const allColumns = useMemo(
+    () => [...BUILT_IN_COLUMNS, ...extraColumns],
+    [extraColumns]
+  );
+
+  const activeColumns = useMemo(
+    () => visibleColumnIds
+      .map(id => allColumns.find(c => c.id === id))
+      .filter((c): c is ColumnDef => c != null),
+    [allColumns, visibleColumnIds]
+  );
+
+  const activeViewConfig = useMemo(
+    (): ViewConfig => DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0],
+    [selectedView]
+  );
 
   useEffect(() => {
     const prev = lastSessionIdRef.current;
@@ -1156,6 +793,10 @@ export const DecisionMapSheet = React.memo(() => {
     const parsed = normalizeArtifactCandidate(picked);
     return (parsed || picked) && typeof (parsed || picked) === "object" ? (parsed || picked) : null;
   }, [aiTurnSafe, activeMappingPid]);
+
+  // ── Evidence rows (hook) ───────────────────────────────────────
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const evidenceRows = useEvidenceRows(mappingArtifact, instrumentSelectedClaimId);
 
   const viewArtifactRequestRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1568,51 +1209,7 @@ export const DecisionMapSheet = React.memo(() => {
                 )}
               </div>
 
-              {/* Center: Layer selector Tabs */}
-              <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
-                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
-                  {LAYERS.map(layer => (
-                    <button
-                      key={layer.id}
-                      type="button"
-                      className={clsx(
-                        "px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all whitespace-nowrap border uppercase tracking-tight flex items-center gap-1",
-                        selectedLayer === layer.id
-                          ? "bg-brand-500/20 border-brand-500 text-text-primary shadow-[0_0_10px_rgba(var(--brand-500-rgb),0.1)]"
-                          : "bg-black/20 border-white/5 text-text-muted hover:text-text-primary hover:border-white/20"
-                      )}
-                      onClick={() => instrumentActions.setSelectedLayer(layer.id)}
-                    >
-                      {layer.label}
-                      {layer.level && (
-                        <span className={clsx(
-                          "px-1 rounded-[3px] text-[8px] font-bold leading-none py-0.5",
-                          selectedLayer === layer.id ? "bg-brand-500/30 text-brand-400" : "bg-white/10 text-text-muted"
-                        )}>
-                          {layer.level}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-
-                {selectedEntity && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-text-muted flex-none border-l border-white/10 pl-2 ml-1">
-                    <span className="text-text-primary font-medium truncate max-w-[120px]">
-                      {selectedEntity.type === 'claim'
-                        ? (selectedEntity.label || selectedEntity.id)
-                        : `${selectedEntity.type}:${'id' in selectedEntity ? selectedEntity.id : ''}`}
-                    </span>
-                    <button
-                      type="button"
-                      className="text-text-muted hover:text-text-primary transition-colors ml-0.5"
-                      onClick={() => { instrumentActions.selectClaim(null); }}
-                    >✕</button>
-                  </div>
-                )}
-              </div>
-
-              {/* Right: Spacer/Close (keeps tabs centered) */}
+              {/* Right: Actions */}
               <div className="flex-none flex items-center gap-2">
                 <button
                   type="button"
@@ -1707,37 +1304,8 @@ export const DecisionMapSheet = React.memo(() => {
               </div>
             )}
 
-            {/* ── Instrument: Field Health Bar ──────────────────── */}
-            {(() => {
-              const basinResult = (mappingArtifact as any)?.geometry?.basinInversion;
-              const substrate = (mappingArtifact as any)?.geometry?.substrate;
-              const mutualEdgesArr = substrate?.mutualEdges || [];
-              const D: number | null = basinResult?.discriminationRange ?? null;
-              const T_v: number | null = basinResult?.T_v ?? null;
-              const basinCount: number | null = basinResult?.basinCount ?? null;
-              const totalNodes: number = (substrate?.nodes || []).length;
-              const participatingNodes: number = (substrate?.nodes || []).filter((n: any) => (n.mutualDegree ?? 0) > 0).length;
-              const participationRate = totalNodes > 0 ? Math.round(participatingNodes / totalNodes * 100) : null;
-              const status: string = basinResult?.status ?? 'unknown';
-              const dColor = D == null ? 'text-text-muted' : D >= 0.10 ? 'text-emerald-400' : D >= 0.05 ? 'text-amber-400' : 'text-rose-400';
-              return (
-                <div className="flex items-center gap-4 px-6 py-2 border-b border-white/10 bg-black/5 text-[11px] flex-wrap flex-none">
-                  <span className={dColor} title="Discrimination range P90−P10">D={D != null ? D.toFixed(3) : '—'}</span>
-                  <span className="text-text-muted" title="Valley threshold">T_v={T_v != null ? T_v.toFixed(3) : '—'}</span>
-                  {basinCount != null && <span className="text-text-muted">{basinCount} basin{basinCount !== 1 ? 's' : ''}</span>}
-                  <span className="text-text-muted">{mutualEdgesArr.length} mutual edges</span>
-                  {participationRate != null && <span className="text-text-muted">{participationRate}% particip</span>}
-                  <span className={clsx(
-                    "ml-auto px-2 py-0.5 rounded-full border text-[10px] font-medium",
-                    status === 'ok' ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
-                      : status === 'undifferentiated' ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
-                        : 'border-rose-500/40 text-rose-400 bg-rose-500/10'
-                  )}>
-                    {status === 'ok' ? '✓ geometry active' : status === 'undifferentiated' ? '⚠ undifferentiated field' : status}
-                  </span>
-                </div>
-              );
-            })()}
+            {/* ── Context Strip (geometry health) ──────────────────── */}
+            <ContextStrip artifact={mappingArtifact} />
 
             {/* ── Instrument: Two-zone layout (v3) ───────────────── */}
             <div className="flex-1 flex overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
@@ -1803,70 +1371,128 @@ export const DecisionMapSheet = React.memo(() => {
                 </div>
 
                 {/* Content area */}
-                <div className="flex-1 overflow-hidden relative flex">
+                <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
                   {instrumentState.rightPanelMode === 'instrument' ? (
                     <>
-                      {/* Instrument: Layer card */}
-                      <div className="flex-1 overflow-y-auto custom-scrollbar">
-                        {selectedLayer === 'raw-artifacts' ? (
-                          <div className="p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">Raw Artifacts JSON</div>
-                              <CopyButton
-                                text={mappingArtifactJson || ''}
-                                label="Copy raw artifact JSON"
-                                variant="icon"
-                                disabled={!mappingArtifactJson}
-                              />
-                            </div>
-                            <pre className="text-[10px] text-text-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
-                              {mappingArtifactJson || '(no artifact data)'}
-                            </pre>
-                          </div>
-                        ) : (
-                          <div className="p-4 space-y-4">
-                            <div className="bg-surface border border-border-subtle rounded-xl p-4 relative">
-                              <CopyButton
-                                text={getLayerCopyText(selectedLayer, mappingArtifact)}
-                                label={`Copy ${LAYERS.find(l => l.id === selectedLayer)?.label ?? selectedLayer} layer data`}
-                                variant="icon"
-                                className="absolute top-2 right-2 z-10"
-                                disabled={!mappingArtifact}
-                              />
-                              {selectedLayer === 'substrate' && (
-                                <SubstrateCard artifact={mappingArtifact} selectedEntity={selectedEntity} />
-                              )}
-                              {selectedLayer === 'mutual-graph' && (
-                                <MutualGraphCard artifact={mappingArtifact} selectedEntity={selectedEntity} />
-                              )}
-                              {selectedLayer === 'basin-inversion' && (
-                                <BasinInversionCard artifact={mappingArtifact} selectedEntity={selectedEntity} />
-                              )}
-                              {selectedLayer === 'query-relevance' && (
-                                <QueryRelevanceCard artifact={mappingArtifact} selectedEntity={selectedEntity} />
-                              )}
-                              {selectedLayer === 'competitive-provenance' && (
-                                <CompetitiveProvenanceCard artifact={mappingArtifact} selectedEntity={selectedEntity} />
-                              )}
-                              {selectedLayer === 'model-ordering' && <ModelOrderingCard artifact={mappingArtifact} />}
-                              {selectedLayer === 'alignment' && <AlignmentCard artifact={mappingArtifact} />}
-                              {selectedLayer === 'carrier-detection' && <CarrierDetectionCard artifact={mappingArtifact} />}
-                              {selectedLayer === 'continuous-field' && <ContinuousFieldCard artifact={mappingArtifact} />}
-                              {selectedLayer === 'provenance-comparison' && <ProvenanceComparisonCard artifact={mappingArtifact} />}
-                              {selectedLayer === 'mixed-provenance' && <MixedProvenanceCard artifact={mappingArtifact} />}
-                              {selectedLayer === 'blast-radius' && (
-                                <BlastRadiusCard artifact={mappingArtifact} selectedEntity={selectedEntity} />
-                              )}
-                            </div>
+                      {/* ── Toolbar: Claim selector + View switcher + Scope toggle + Column picker ── */}
+                      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-none flex-wrap">
+                        {/* Claim selector */}
+                        <select
+                          className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary max-w-[160px] focus:outline-none focus:border-brand-500/50 cursor-pointer"
+                          value={instrumentSelectedClaimId ?? ''}
+                          onChange={e => {
+                            const id = e.target.value || null;
+                            instrumentActions.selectClaim(id, id ? (semanticClaims.find((c: any) => c.id === id)?.label) : undefined);
+                          }}
+                        >
+                          <option value="">— Select claim —</option>
+                          {semanticClaims.map((c: any) => (
+                            <option key={c.id} value={c.id}>
+                              {c.label ?? c.id}
+                            </option>
+                          ))}
+                        </select>
 
-                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                              <CrossSignalComparePanel artifact={mappingArtifact} selectedLayer={selectedLayer} />
+                        {/* View switcher */}
+                        <select
+                          className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-brand-500/50 cursor-pointer"
+                          value={selectedView}
+                          onChange={e => instrumentActions.setSelectedView(e.target.value)}
+                        >
+                          {DEFAULT_VIEWS.map(v => (
+                            <option key={v.id} value={v.id}>{v.label}</option>
+                          ))}
+                        </select>
+
+                        {/* Scope toggle */}
+                        <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
+                          {(['claim', 'cross-claim'] as const).map(s => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => instrumentActions.setScope(s)}
+                              className={clsx(
+                                "px-2 py-1 text-[10px] transition-colors",
+                                scope === s
+                                  ? "bg-brand-500/20 text-brand-300"
+                                  : "text-text-muted hover:text-text-secondary"
+                              )}
+                            >
+                              {s === 'claim' ? 'Claim' : 'All'}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Column picker */}
+                        <div className="ml-auto">
+                          <ColumnPicker
+                            allColumns={allColumns}
+                            visibleColumnIds={visibleColumnIds}
+                            defaultColumnIds={activeViewConfig.columns}
+                            onToggle={(colId) => {
+                              setVisibleColumnIds(prev =>
+                                prev.includes(colId)
+                                  ? prev.filter(id => id !== colId)
+                                  : [...prev, colId]
+                              );
+                            }}
+                            onAddComputed={(col) => {
+                              setExtraColumns(prev => [...prev, col]);
+                              setVisibleColumnIds(prev => [...prev, col.id]);
+                            }}
+                            onReset={() => setVisibleColumnIds(activeViewConfig.columns)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* ── Evidence Table (flex-1) ── */}
+                      <div className="flex-1 min-h-0 overflow-hidden">
+                        <EvidenceTable
+                          rows={evidenceRows}
+                          columns={activeColumns}
+                          viewConfig={activeViewConfig}
+                          scope={scope}
+                          onRowClick={(row) => {
+                            if (row.statementId) {
+                              instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {/* ── Reference Shelf (collapsible sections) ── */}
+                      <div className="flex-none border-t border-white/10 overflow-y-auto custom-scrollbar max-h-72">
+                        {([
+                          { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
+                          { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
+                          { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
+                          { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifact} /> },
+                          { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
+                          { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifact} /> },
+                          { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifact} /> },
+                          { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifact} /> },
+                          { id: 'raw-artifacts', label: 'Raw Artifacts', content: (
+                            <div>
+                              <CopyButton text={mappingArtifactJson || ''} label="Copy raw artifact JSON" variant="icon" disabled={!mappingArtifactJson} />
+                              <pre className="text-[10px] text-text-muted font-mono whitespace-pre-wrap break-all leading-relaxed mt-2">
+                                {mappingArtifactJson || '(no artifact data)'}
+                              </pre>
                             </div>
-                            <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                              <TemporaryInstrumentationPanel artifact={mappingArtifact} selectedLayer={selectedLayer} />
-                            </div>
-                          </div>
-                        )}
+                          )},
+                        ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
+                          <RefSection
+                            key={id}
+                            id={id}
+                            label={label}
+                            expanded={expandedRefSections.includes(id)}
+                            onToggle={() => instrumentActions.toggleRefSection(id)}
+                            copyText={id !== 'raw-artifacts' && id !== 'cross-signal'
+                              ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
+                              : undefined}
+                          >
+                            {content}
+                          </RefSection>
+                        ))}
                       </div>
 
                       {/* ClaimDetailDrawer overlay */}
