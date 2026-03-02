@@ -31,33 +31,6 @@ function meanAndStddev(values: number[]): { mu: number | null; sigma: number | n
     return { mu, sigma };
 }
 
-function meanAndStddevInRange(
-    values: number[],
-    lo: number,
-    hi: number
-): { mu: number | null; sigma: number | null; n: number } {
-    if (!(hi >= lo)) return { mu: null, sigma: null, n: 0 };
-    let n = 0;
-    let mean = 0;
-    let m2 = 0;
-    for (const x of values) {
-        if (!(x >= lo && x <= hi)) continue;
-        n += 1;
-        const delta = x - mean;
-        mean += delta / n;
-        const delta2 = x - mean;
-        m2 += delta * delta2;
-    }
-    if (n === 0) return { mu: null, sigma: null, n: 0 };
-    const sigma = Math.sqrt(m2 / n);
-    return { mu: mean, sigma, n };
-}
-
-function bandwidthFromSigma(sigma: number | null): number | null {
-    if (sigma == null || !Number.isFinite(sigma) || !(sigma > 0)) return null;
-    return 2 * sigma;
-}
-
 function buildBandwidthGrid(minS: number, maxS: number, bandwidth: number): number[] {
     if (!Number.isFinite(minS) || !Number.isFinite(maxS) || !Number.isFinite(bandwidth)) return [];
     if (!(maxS > minS) || !(bandwidth > 0)) return [minS];
@@ -130,73 +103,257 @@ function candidatesFromCurve(xs: number[], ys: number[]): PeakCandidate[] {
     return out;
 }
 
+function candidatesFromCurveByIndex(xs: number[], ys: number[]): PeakCandidate[] {
+    const idxs = localMaximaIndices(ys);
+    const out: PeakCandidate[] = [];
+    for (const index of idxs) out.push({ index, center: xs[index], height: ys[index] });
+    out.sort((a, b) => a.index - b.index);
+    return out;
+}
+
+function median(values: number[]): number | null {
+    if (values.length === 0) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    return quantile(sorted, 0.5);
+}
+
+function curvatureMagnitudes(ys: number[], dx: number | null): number[] {
+    if (ys.length < 3 || dx == null || !(dx > 0) || !Number.isFinite(dx)) return [];
+    const invDx2 = 1 / (dx * dx);
+    const mags: number[] = [];
+    for (let i = 1; i < ys.length - 1; i++) {
+        const k = (ys[i - 1] - 2 * ys[i] + ys[i + 1]) * invDx2;
+        mags.push(Math.abs(k));
+    }
+    return mags;
+}
+
+function nearestLocalMinIndex(ys: number[], start: number, dir: -1 | 1): number | null {
+    if (ys.length < 3) return null;
+    if (dir === -1) {
+        for (let i = start - 1; i > 0; i--) {
+            if (ys[i] <= ys[i - 1] && ys[i] <= ys[i + 1]) return i;
+        }
+        return 0;
+    }
+    for (let i = start + 1; i < ys.length - 1; i++) {
+        if (ys[i] <= ys[i - 1] && ys[i] <= ys[i + 1]) return i;
+    }
+    return ys.length - 1;
+}
+
+type ValleyCandidate = {
+    peakA: PeakCandidate;
+    peakB: PeakCandidate;
+    valleyIndex: number;
+    T_v: number;
+    yA: number;
+    yB: number;
+    yV: number;
+    promA: number;
+    promB: number;
+    promMin: number;
+    curvature: number | null;
+};
+
+type SweepEntry = {
+    bandwidth: number;
+    xs: number[];
+    ys: number[];
+    peaksByIndex: PeakCandidate[];
+    peakCount: number;
+    valleys: ValleyCandidate[];
+    dx: number | null;
+    curvatureMagnitudes: number[];
+};
+
+function buildValleyCandidates(peaksByIndex: PeakCandidate[], xs: number[], ys: number[], dx: number | null): ValleyCandidate[] {
+    if (peaksByIndex.length < 2) return [];
+    const out: ValleyCandidate[] = [];
+    for (let i = 0; i < peaksByIndex.length - 1; i++) {
+        const peakA = peaksByIndex[i];
+        const peakB = peaksByIndex[i + 1];
+        const valleyIdx = localMinIndexBetween(ys, peakA.index, peakB.index);
+        if (valleyIdx == null) continue;
+        const yA = ys[peakA.index];
+        const yB = ys[peakB.index];
+        const yV = ys[valleyIdx];
+        if (!(yA > 0 && yB > 0)) continue;
+        const promA = (yA - yV) / yA;
+        const promB = (yB - yV) / yB;
+        if (!Number.isFinite(promA) || !Number.isFinite(promB)) continue;
+        const curvature = valleyIdx > 0 && valleyIdx < ys.length - 1 && dx != null && dx > 0 && Number.isFinite(dx)
+            ? (ys[valleyIdx - 1] - 2 * ys[valleyIdx] + ys[valleyIdx + 1]) / (dx * dx)
+            : null;
+        out.push({
+            peakA,
+            peakB,
+            valleyIndex: valleyIdx,
+            T_v: xs[valleyIdx],
+            yA,
+            yB,
+            yV,
+            promA,
+            promB,
+            promMin: Math.min(promA, promB),
+            curvature,
+        });
+    }
+    return out;
+}
+
 type SelectedValley = {
     peakA: PeakCandidate;
     peakB: PeakCandidate;
     T_v: number;
-    promSigmaA: number;
-    promSigmaB: number;
+    promA: number;
+    promB: number;
     localMu: number;
-    localSigma: number;
-    valleyDepthSigma: number;
+    curvatureThreshold: number; // renamed from localSigma — this is what it actually is
+    valleyDepth: number;
 };
 
-function selectValleyFromPeaks(
-    peaks: PeakCandidate[],
-    xs: number[],
-    ys: number[],
+// ---------------------------------------------------------------------------
+// BANDWIDTH LADDER — fully derived, no hardcoded range or count
+// ---------------------------------------------------------------------------
+
+/**
+ * Probes upward from hBase until the KDE collapses to a single peak (unimodal
+ * ceiling), and downward until peak count exceeds the noise floor (sqrt of N).
+ * Returns the terrain-meaningful [lo, hi] multiplier range as actual bandwidth
+ * values.
+ *
+ * The step size in both probe directions is intentionally coarse (10% of hBase)
+ * because we only need a rough bound — the ladder will be densely filled inside
+ * the range afterward.
+ */
+function deriveBandwidthBounds(
+    hBase: number,
     similarities: number[],
-    sigma: number | null
-): SelectedValley | null {
-    if (peaks.length < 2) return null;
-    if (sigma == null || !Number.isFinite(sigma) || !(sigma > 0)) return null;
-    let best: SelectedValley | null = null;
+    minS: number,
+    maxS: number
+): { lo: number; hi: number } {
+    const noiseFloor = Math.sqrt(similarities.length);
+    const probeStep = hBase * 0.1;
 
-    for (let a = 0; a < peaks.length; a++) {
-        for (let b = a + 1; b < peaks.length; b++) {
-            const pA = peaks[a];
-            const pB = peaks[b];
-            const loIdx = Math.min(pA.index, pB.index);
-            const hiIdx = Math.max(pA.index, pB.index);
-            const valleyIdx = localMinIndexBetween(ys, loIdx, hiIdx);
-            if (valleyIdx == null) continue;
-
-            const T_v = xs[valleyIdx];
-            const promSigmaA = Math.abs(pA.center - T_v) / sigma;
-            const promSigmaB = Math.abs(pB.center - T_v) / sigma;
-            if (!(promSigmaA >= 1 && promSigmaB >= 1)) continue;
-
-            const loS = Math.min(pA.center, pB.center);
-            const hiS = Math.max(pA.center, pB.center);
-            const local = meanAndStddevInRange(similarities, loS, hiS);
-            if (local.mu == null || local.sigma == null) continue;
-            if (!Number.isFinite(local.mu) || !Number.isFinite(local.sigma) || !(local.sigma > 0)) continue;
-            if (!(T_v <= local.mu - local.sigma)) continue;
-
-            const valleyDepthSigma = (local.mu - T_v) / local.sigma;
-            if (!Number.isFinite(valleyDepthSigma)) continue;
-
-            if (
-                best == null ||
-                valleyDepthSigma > best.valleyDepthSigma ||
-                (valleyDepthSigma === best.valleyDepthSigma && (pA.height + pB.height) > (best.peakA.height + best.peakB.height))
-            ) {
-                best = {
-                    peakA: pA,
-                    peakB: pB,
-                    T_v,
-                    promSigmaA,
-                    promSigmaB,
-                    localMu: local.mu,
-                    localSigma: local.sigma,
-                    valleyDepthSigma,
-                };
-            }
+    // Probe upward: find where KDE first goes (and stays) unimodal
+    let hi = hBase * 10; // fallback ceiling
+    let unimodalCount = 0;
+    for (let h = hBase; h <= hBase * 10; h += probeStep) {
+        const xs = buildBandwidthGrid(minS, maxS, h);
+        const ys = kdeAtPoints(similarities, xs, h);
+        const peakCount = candidatesFromCurveByIndex(xs, ys).length;
+        if (peakCount <= 1) {
+            unimodalCount++;
+            if (unimodalCount >= 3) { hi = h; break; }
+        } else {
+            unimodalCount = 0;
         }
     }
 
-    return best;
+    // Probe downward: find where KDE first exceeds the noise floor
+    let lo = hBase * 0.05; // fallback floor
+    for (let h = hBase; h >= hBase * 0.05; h -= probeStep) {
+        const xs = buildBandwidthGrid(minS, maxS, h);
+        const ys = kdeAtPoints(similarities, xs, h);
+        const peakCount = candidatesFromCurveByIndex(xs, ys).length;
+        if (peakCount > noiseFloor) { lo = h; break; }
+    }
+
+    // Ensure lo < hi with a sensible minimum spread
+    if (lo >= hi) lo = hi * 0.2;
+    return { lo, hi };
 }
+
+/**
+ * Builds a log-spaced bandwidth ladder from hi (coarse) down to lo (fine).
+ * Step count is derived: enough steps so no two adjacent bandwidths differ
+ * by more than maxGapRatio (default 10%). This is the only assumption carried
+ * forward — named and explicit.
+ *
+ * Log spacing ensures equal proportional sensitivity across the range.
+ * Descending order (coarse → fine) means the first stable bimodal window
+ * encountered is the one with the longest persistence.
+ */
+function buildBandwidthLadder(lo: number, hi: number, maxGapRatio: number): number[] {
+    if (lo <= 0 || hi <= 0 || lo >= hi) return [lo];
+    // Minimum steps so adjacent ratio never exceeds (1 + maxGapRatio)
+    const steps = Math.max(20, Math.ceil(Math.log(hi / lo) / Math.log(1 + maxGapRatio)) + 1);
+    const ladder: number[] = [];
+    for (let i = 0; i < steps; i++) {
+        const t = i / (steps - 1);
+        // Descending: starts at hi (coarse), ends at lo (fine)
+        const h = Math.exp(Math.log(hi) + t * (Math.log(lo) - Math.log(hi)));
+        if (Number.isFinite(h) && h > 0) ladder.push(h);
+    }
+    return ladder;
+}
+
+function deriveAdaptiveLadder(
+    lo: number,
+    hi: number,
+    similarities: number[],
+    minS: number,
+    maxS: number,
+    discriminationRange: number | null,
+    scale: number | null
+): number[] {
+    // Derive coarse step from this field's own discrimination structure
+    // Wide mode separation → bimodal regime is wide → coarser steps are safe
+    const regimeProxy = discriminationRange != null && scale != null && scale > 0 ? discriminationRange / scale : 0.5;
+    const coarseLogStep = Math.max(0.3, Math.min(0.7, regimeProxy * 0.4));
+
+    // Pass 1: coarse sweep to bracket the bimodal transition zone
+    let transitionLo = lo;
+    let transitionHi = hi;
+    let prevPeakCount: number | null = null;
+    const coarseLadder: number[] = [];
+    for (let logH = Math.log(hi); logH >= Math.log(lo); logH -= coarseLogStep) {
+        coarseLadder.push(Math.exp(logH));
+    }
+
+    let zoneStart: number | null = null;
+    let zoneEnd: number | null = null;
+    for (const h of coarseLadder) {
+        const xs = buildBandwidthGrid(minS, maxS, h);
+        const ys = kdeAtPoints(similarities, xs, h);
+        const peakCount = candidatesFromCurveByIndex(xs, ys).length;
+        if (prevPeakCount != null) {
+            if (prevPeakCount !== 2 && peakCount === 2 && zoneStart === null) {
+                zoneStart = h; // entered bimodal regime (coarse→fine = hi→lo)
+            }
+            if (prevPeakCount === 2 && peakCount !== 2 && zoneStart !== null && zoneEnd === null) {
+                zoneEnd = h; // exited bimodal regime
+            }
+        }
+        prevPeakCount = peakCount;
+    }
+
+    // If we found a transition zone, derive step size from its width
+    // Step must be small enough that min 3 steps fit inside the zone
+    if (zoneStart !== null && zoneEnd !== null && zoneEnd < zoneStart) {
+        transitionLo = zoneEnd;
+        transitionHi = zoneStart;
+        // Terrain told us how wide its own transition is
+        // Divide by 3 so the minimum stability window fits inside
+        const zoneWidth = Math.log(transitionHi / transitionLo);
+        const derivedLogStep = zoneWidth / 3;
+        // Full ladder still spans lo→hi, but step is transition-derived
+        const steps = Math.max(20, Math.ceil(Math.log(hi / lo) / derivedLogStep) + 1);
+        const ladder: number[] = [];
+        for (let i = 0; i < steps; i++) {
+            const t = i / (steps - 1);
+            ladder.push(Math.exp(Math.log(hi) + t * (Math.log(lo) - Math.log(hi))));
+        }
+        return ladder.filter(h => Number.isFinite(h) && h > 0);
+    }
+
+    // Fallback: no clean transition found — use coarse step as derived step
+    // (field may be genuinely unimodal or noisy — transition may not exist)
+    return buildBandwidthLadder(lo, hi, 1 - Math.exp(-coarseLogStep));
+}
+
+// ---------------------------------------------------------------------------
 
 class UnionFind {
     parent: Int32Array;
@@ -211,9 +368,7 @@ class UnionFind {
     }
     find(x: number): number {
         let root = x;
-        while (this.parent[root] !== root) {
-            root = this.parent[root];
-        }
+        while (this.parent[root] !== root) root = this.parent[root];
         let curr = x;
         while (this.parent[curr] !== root) {
             const next = this.parent[curr];
@@ -228,14 +383,9 @@ class UnionFind {
         if (ra === rb) return;
         const rka = this.rank[ra];
         const rkb = this.rank[rb];
-        if (rka < rkb) {
-            this.parent[ra] = rb;
-        } else if (rka > rkb) {
-            this.parent[rb] = ra;
-        } else {
-            this.parent[rb] = ra;
-            this.rank[ra] = rka + 1;
-        }
+        if (rka < rkb) { this.parent[ra] = rb; }
+        else if (rka > rkb) { this.parent[rb] = ra; }
+        else { this.parent[rb] = ra; this.rank[ra] = rka + 1; }
     }
 }
 
@@ -310,6 +460,8 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     const sorted = [...similarities].sort((a, b) => a - b);
     const p10 = quantile(sorted, 0.1);
     const p90 = quantile(sorted, 0.9);
+    const p25 = quantile(sorted, 0.25);
+    const p75 = quantile(sorted, 0.75);
     const discriminationRange = (p10 != null && p90 != null) ? (p90 - p10) : null;
 
     const binCount = Math.max(1, Math.ceil(Math.sqrt(pairCount)));
@@ -330,35 +482,146 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     }
 
     const histogramSmoothed = histogram.slice();
-    const bandwidth = bandwidthFromSigma(sigma);
-    const xs = bandwidth != null ? buildBandwidthGrid(minS, maxS, bandwidth) : [];
-    const ys = bandwidth != null ? kdeAtPoints(similarities, xs, bandwidth) : [];
-    const peakCandidates = candidatesFromCurve(xs, ys);
-    const selected = selectValleyFromPeaks(peakCandidates, xs, ys, similarities, sigma);
+    const iqr = p25 != null && p75 != null ? p75 - p25 : null;
+    const scaleCandidates = [sigma, iqr != null ? iqr / 1.34 : null].filter(
+        (v): v is number => v != null && Number.isFinite(v) && v > 0
+    );
+    const scale = scaleCandidates.length > 0 ? Math.min(...scaleCandidates) : null;
+    const hBase = scale != null ? 0.9 * scale * Math.pow(pairCount, -0.2) : null;
 
-    const peaks: BasinInversionPeak[] = peakCandidates.map((p) => ({
-        index: p.index,
-        center: p.center,
-        height: p.height,
-        prominence: sigma != null && sigma > 0 ? (() => {
-            const leftMin = (() => {
-                for (let i = p.index - 1; i > 0; i--) {
-                    if (ys[i] <= ys[i - 1] && ys[i] <= ys[i + 1]) return i;
-                }
-                return 0;
-            })();
-            const rightMin = (() => {
-                for (let i = p.index + 1; i < ys.length - 1; i++) {
-                    if (ys[i] <= ys[i - 1] && ys[i] <= ys[i + 1]) return i;
-                }
-                return ys.length - 1;
-            })();
-            const dL = Math.abs(p.center - xs[leftMin]);
-            const dR = Math.abs(xs[rightMin] - p.center);
-            const d = dL <= dR ? dL : dR;
-            return d / sigma;
-        })() : 0,
-    }));
+    // Build terrain-derived bandwidth sweep
+    let sweep: SweepEntry[] = [];
+    let derivedLo: number | null = null;
+    let derivedHi: number | null = null;
+    let ladderSteps: number | null = null;
+
+    if (hBase != null && hBase > 0) {
+        const bounds = deriveBandwidthBounds(hBase, similarities, minS, maxS);
+        derivedLo = bounds.lo;
+        derivedHi = bounds.hi;
+        const ladder = deriveAdaptiveLadder(
+            bounds.lo,
+            bounds.hi,
+            similarities,
+            minS,
+            maxS,
+            discriminationRange,
+            scale
+        );
+        ladderSteps = ladder.length;
+        sweep = ladder.map((bandwidth): SweepEntry => {
+            const xs = buildBandwidthGrid(minS, maxS, bandwidth);
+            const ys = kdeAtPoints(similarities, xs, bandwidth);
+            const dx = xs.length > 1 ? xs[1] - xs[0] : null;
+            const peaksByIndex = candidatesFromCurveByIndex(xs, ys);
+            const valleys = buildValleyCandidates(peaksByIndex, xs, ys, dx);
+            const curvatureValues = curvatureMagnitudes(ys, dx);
+            return {
+                bandwidth,
+                xs,
+                ys,
+                dx,
+                peaksByIndex,
+                peakCount: peaksByIndex.length,
+                valleys,
+                curvatureMagnitudes: curvatureValues,
+            };
+        });
+    }
+
+    // Detect the FULL first contiguous bimodal run (not capped at 3)
+    // Minimum 3 consecutive entries required for stability
+    let stableStart = -1;
+    let stableEnd = -1;
+    for (let i = 0; i < sweep.length; i++) {
+        if (sweep[i].peakCount === 2) {
+            if (stableStart === -1) stableStart = i;
+            stableEnd = i;
+        } else {
+            if (stableStart !== -1) break; // first run ended, stop here
+        }
+    }
+    const hasStableWindow = stableStart !== -1 && (stableEnd - stableStart) >= 2;
+
+    let hStarEntry: SweepEntry | null = null;
+    let stableWindow: SweepEntry[] = [];
+    if (hasStableWindow) {
+        // Full contiguous run
+        stableWindow = sweep.slice(stableStart, stableEnd + 1);
+        // h* = smallest bandwidth (finest resolution) in the stable window
+        const minH = Math.min(...stableWindow.map((w) => w.bandwidth));
+        hStarEntry = stableWindow.find((w) => w.bandwidth === minH) ?? stableWindow[stableWindow.length - 1];
+    }
+
+    // alpha and curvatureThreshold derived from full stable window — not a subset
+    const stableProminences: number[] = [];
+    const stableCurvatures: number[] = [];
+    for (const entry of stableWindow) {
+        for (const v of entry.valleys) {
+            if (Number.isFinite(v.promMin)) stableProminences.push(v.promMin);
+        }
+        for (const m of entry.curvatureMagnitudes) {
+            if (Number.isFinite(m)) stableCurvatures.push(m);
+        }
+    }
+    const alpha = median(stableProminences);
+    const curvatureThreshold = median(stableCurvatures);
+
+    const selectValleyFromEntry = (entry: SweepEntry | null): SelectedValley | null => {
+        if (!entry || alpha == null || curvatureThreshold == null) return null;
+        const candidates = entry.valleys.filter((v) =>
+            v.promMin >= alpha &&
+            v.curvature != null &&
+            v.curvature > 0 &&
+            Math.abs(v.curvature) > curvatureThreshold
+        );
+        if (candidates.length === 0) return null;
+        let best = candidates[0];
+        let bestDepth = ((best.yA + best.yB) / 2) - best.yV;
+        for (let i = 1; i < candidates.length; i++) {
+            const c = candidates[i];
+            const depth = ((c.yA + c.yB) / 2) - c.yV;
+            if (depth > bestDepth) { best = c; bestDepth = depth; }
+        }
+        return {
+            peakA: best.peakA,
+            peakB: best.peakB,
+            T_v: best.T_v,
+            promA: best.promA,
+            promB: best.promB,
+            localMu: (best.yA + best.yB) / 2,
+            curvatureThreshold,   // correctly named — this is what it is
+            valleyDepth: bestDepth,
+        };
+    };
+
+    const selected = selectValleyFromEntry(hStarEntry);
+    const displayEntry = hStarEntry ?? (hBase != null
+        ? sweep.reduce<SweepEntry | null>((best, entry) => {
+            if (!best) return entry;
+            return Math.abs(entry.bandwidth - hBase) < Math.abs(best.bandwidth - hBase) ? entry : best;
+        }, null)
+        : null);
+
+    const peakCandidates = displayEntry ? candidatesFromCurve(displayEntry.xs, displayEntry.ys) : [];
+    const peaks: BasinInversionPeak[] = displayEntry ? peakCandidates.map((p) => {
+        const leftIdx = nearestLocalMinIndex(displayEntry.ys, p.index, -1);
+        const rightIdx = nearestLocalMinIndex(displayEntry.ys, p.index, 1);
+        const leftVal = leftIdx != null ? displayEntry.ys[leftIdx] : null;
+        const rightVal = rightIdx != null ? displayEntry.ys[rightIdx] : null;
+        const valleyVal = leftVal != null && rightVal != null
+            ? Math.max(leftVal, rightVal)
+            : leftVal != null ? leftVal
+            : rightVal != null ? rightVal
+            : p.height;
+        const prominence = p.height > 0 ? (p.height - valleyVal) / p.height : 0;
+        return {
+            index: p.index,
+            center: p.center,
+            height: p.height,
+            prominence: Number.isFinite(prominence) ? prominence : 0,
+        };
+    }) : [];
 
     const T_low = (mu != null && sigma != null) ? mu - sigma : null;
     const T_high = (mu != null && sigma != null) ? mu + sigma : null;
@@ -369,12 +632,7 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
     let basinByNodeId: Record<string, number> = {};
     let basinCount = 1;
 
-    const dOk = (discriminationRange != null && sigma != null) ? (discriminationRange > sigma) : false;
-    if (!dOk) {
-        status = "undifferentiated";
-        statusLabel = "Undifferentiated Field";
-        T_v = null;
-    } else if (!selected) {
+    if (!selected || !hStarEntry) {
         status = "no_basin_structure";
         statusLabel = "Continuous Field / No Basin Structure Detected";
         T_v = null;
@@ -389,17 +647,12 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
         for (let i = 0; i < nodeCount; i++) {
             const r = uf.find(i);
             let bid = rootToBasin.get(r);
-            if (bid == null) {
-                bid = next++;
-                rootToBasin.set(r, bid);
-            }
+            if (bid == null) { bid = next++; rootToBasin.set(r, bid); }
             nodeBasin[i] = bid;
         }
         basinCount = next;
         basinByNodeId = {};
-        for (let i = 0; i < nodeCount; i++) {
-            basinByNodeId[ids[i]] = nodeBasin[i];
-        }
+        for (let i = 0; i < nodeCount; i++) basinByNodeId[ids[i]] = nodeBasin[i];
     }
 
     if (status !== "ok") {
@@ -476,12 +729,25 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
 
     let binnedSamplingDiffers: boolean | null = null;
     let binnedPeakCenters: number[] | null = null;
-    if (bandwidth != null && bandwidth > 0 && binWidth > 0) {
+    const displayBandwidth = displayEntry ? displayEntry.bandwidth : null;
+    if (displayBandwidth != null && displayBandwidth > 0 && binWidth > 0) {
         const binCenters = new Array<number>(binCount);
         for (let i = 0; i < binCount; i++) binCenters[i] = binMin + (i + 0.5) * binWidth;
-        const yb = kdeAtPoints(similarities, binCenters, bandwidth);
-        const binnedCandidates = candidatesFromCurve(binCenters, yb);
-        const binnedSelected = selectValleyFromPeaks(binnedCandidates, binCenters, yb, similarities, sigma);
+        const yb = kdeAtPoints(similarities, binCenters, displayBandwidth);
+        const binnedDx = binCenters.length > 1 ? binCenters[1] - binCenters[0] : null;
+        const binnedEntry: SweepEntry = {
+            bandwidth: displayBandwidth,
+            xs: binCenters,
+            ys: yb,
+            dx: binnedDx,
+            peaksByIndex: candidatesFromCurveByIndex(binCenters, yb),
+            peakCount: 0,
+            valleys: [],
+            curvatureMagnitudes: curvatureMagnitudes(yb, binnedDx),
+        };
+        binnedEntry.peakCount = binnedEntry.peaksByIndex.length;
+        binnedEntry.valleys = buildValleyCandidates(binnedEntry.peaksByIndex, binCenters, yb, binnedDx);
+        const binnedSelected = selectValleyFromEntry(binnedEntry);
         binnedPeakCenters = binnedSelected ? [binnedSelected.peakA.center, binnedSelected.peakB.center] : null;
 
         if ((selected == null) !== (binnedSelected == null)) {
@@ -530,17 +796,30 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
         meta: {
             processingTimeMs: Date.now() - startMs,
             peakDetection: {
-                bandwidth,
+                bandwidth: displayBandwidth,
+                // These two are kept for API compatibility but note:
+                // bandwidthSigma is the global sigma of the similarity field (not a bandwidth sigma)
                 bandwidthSigma: sigma,
                 bandwidthN: pairCount,
+                // Sweep diagnostics
+                derivedBandwidthLo: derivedLo,
+                derivedBandwidthHi: derivedHi,
+                ladderSteps,
+                stableWindowLength: stableWindow.length,
                 selectedPeaks: selected
                     ? [
-                        { center: selected.peakA.center, height: selected.peakA.height, prominenceSigma: selected.promSigmaA },
-                        { center: selected.peakB.center, height: selected.peakB.height, prominenceSigma: selected.promSigmaB },
+                        { center: selected.peakA.center, height: selected.peakA.height, prominenceSigma: selected.promA },
+                        { center: selected.peakB.center, height: selected.peakB.height, prominenceSigma: selected.promB },
                     ]
                     : [],
                 valley: selected
-                    ? { T_v: selected.T_v, depthSigma: selected.valleyDepthSigma, localMu: selected.localMu, localSigma: selected.localSigma }
+                    ? {
+                        T_v: selected.T_v,
+                        valleyDepth: selected.valleyDepth,
+                        localMu: selected.localMu,
+                        // curvatureThreshold replaces localSigma — correctly named
+                        curvatureThreshold: selected.curvatureThreshold,
+                    }
                     : null,
                 binnedSamplingDiffers,
                 binnedPeakCenters,

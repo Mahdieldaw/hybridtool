@@ -21,6 +21,8 @@ export function dehydrateArtifact(fullArtifact: any): any {
     "basinInversion",
     "surveyRationale",
     "surveyGates",
+    "statementAllocation",
+    "continuousField",
   ]) {
     if (out[k] !== undefined) delete out[k];
   }
@@ -54,7 +56,7 @@ export function dehydrateArtifact(fullArtifact: any): any {
         delete cc.sourceRegions;
       }
 
-      if (cc.provenanceWeights !== undefined) delete cc.provenanceWeights;
+      if (cc.provenanceWeights !== undefined) delete cc.provenanceWeights; // legacy: was a Map, didn't serialize — stripped for cleanliness
       return cc;
     });
   };

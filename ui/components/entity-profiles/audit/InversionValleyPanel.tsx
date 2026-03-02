@@ -16,6 +16,9 @@ interface BasinInversionArtifact {
   geometry?: {
     basinInversion?: BasinInversionResult | null;
   };
+  shadow?: {
+    paragraphs?: Array<{ id: string; _fullParagraph?: string }>;
+  };
 }
 
 type Props = { artifact?: BasinInversionArtifact | null; aiTurnId?: string; retrigger?: number };
@@ -254,9 +257,9 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
       { label: "Peaks", value: formatInt(result.peaks.length) },
       { label: "T_v", value: result.status === "ok" ? formatNum(result.T_v, 6) : "—" },
       { label: "Bandwidth", value: pd ? formatNum(pd.bandwidth, 6) : "—" },
-      { label: "Peak A prom/σ", value: pd?.selectedPeaks?.[0] ? formatNum(pd.selectedPeaks[0].prominenceSigma, 2) : "—" },
-      { label: "Peak B prom/σ", value: pd?.selectedPeaks?.[1] ? formatNum(pd.selectedPeaks[1].prominenceSigma, 2) : "—" },
-      { label: "Valley depth/σ", value: pd?.valley ? formatNum(pd.valley.depthSigma, 2) : "—" },
+      { label: "Peak A prominence", value: pd?.selectedPeaks?.[0] ? formatNum(pd.selectedPeaks[0].prominenceSigma, 2) : "—" },
+      { label: "Peak B prominence", value: pd?.selectedPeaks?.[1] ? formatNum(pd.selectedPeaks[1].prominenceSigma, 2) : "—" },
+      { label: "Valley depth", value: pd?.valley ? formatNum(pd.valley.valleyDepth ?? pd.valley.depthSigma ?? null, 2) : "—" },
       { label: "Binned differs", value: pd?.binnedSamplingDiffers == null ? "—" : pd.binnedSamplingDiffers ? "yes" : "no" },
       { label: "Basins", value: formatInt(result.basinCount) },
       { label: "Largest Basin", value: result.largestBasinRatio == null ? "—" : formatPct(result.largestBasinRatio, 1) },
@@ -302,8 +305,8 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
   );
 
   const bridgeRows = useMemo<BridgeRow[]>(() => {
-    if (!result || result.status !== "ok") return [];
-    return result.bridgePairs.slice(0, 250).map((p: BasinInversionBridgePair, idx: number) => ({
+    if (!result) return [];
+    return (result.bridgePairs ?? []).slice(0, 250).map((p: BasinInversionBridgePair, idx: number) => ({
       id: `${idx}`,
       a: p.nodeA,
       b: p.nodeB,
@@ -314,12 +317,40 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
     }));
   }, [result]);
 
+  const paragraphTextMap = useMemo(() => {
+    const m = new Map<string, string>();
+    const paras = artifact?.shadow?.paragraphs;
+    if (!Array.isArray(paras)) return m;
+    for (const p of paras) {
+      if (p?.id && p._fullParagraph) m.set(p.id, p._fullParagraph);
+    }
+    return m;
+  }, [artifact]);
+
   const bridgeTableSpec = useMemo<TableSpec<BridgeRow>>(
     () => ({
       title: "Bridge Inspector (pairs near T_v)",
       columns: [
-        { key: "a", header: "Para A", cell: (r) => <span className="font-mono text-xs">{r.a}</span>, sortValue: (r) => r.a },
-        { key: "b", header: "Para B", cell: (r) => <span className="font-mono text-xs">{r.b}</span>, sortValue: (r) => r.b },
+        {
+          key: "a",
+          header: "Para A",
+          cell: (r) => {
+            const text = paragraphTextMap.get(r.a);
+            const tip = text ? (text.length > 200 ? text.slice(0, 200) + "…" : text) : r.a;
+            return <span className="font-mono text-xs" title={tip}>{r.a}</span>;
+          },
+          sortValue: (r) => r.a,
+        },
+        {
+          key: "b",
+          header: "Para B",
+          cell: (r) => {
+            const text = paragraphTextMap.get(r.b);
+            const tip = text ? (text.length > 200 ? text.slice(0, 200) + "…" : text) : r.b;
+            return <span className="font-mono text-xs" title={tip}>{r.b}</span>;
+          },
+          sortValue: (r) => r.b,
+        },
         { key: "similarity", header: "Similarity", level: "L1" as const, cell: (r) => <span className="font-mono text-xs">{r.similarity.toFixed(6)}</span>, sortValue: (r) => r.similarity },
         { key: "basinA", header: "Basin A", cell: (r) => <span className="font-mono text-xs">{r.basinA}</span>, sortValue: (r) => r.basinA },
         { key: "basinB", header: "Basin B", cell: (r) => <span className="font-mono text-xs">{r.basinB}</span>, sortValue: (r) => r.basinB },
@@ -330,7 +361,7 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
       defaultSortDir: "asc",
       emptyMessage: "No valley threshold detected.",
     }),
-    [bridgeRows],
+    [bridgeRows, paragraphTextMap],
   );
 
   if (!aiTurnId) {
@@ -418,12 +449,8 @@ export function InversionValleyPanel({ artifact, aiTurnId, retrigger = 0 }: Prop
 
       <BasinHistogram result={result} />
 
-      {result.status === "ok" && (
-        <>
-          <DataTable spec={basinTableSpec} />
-          <DataTable spec={bridgeTableSpec} />
-        </>
-      )}
+      <DataTable spec={basinTableSpec} />
+      <DataTable spec={bridgeTableSpec} />
     </div>
   );
 }

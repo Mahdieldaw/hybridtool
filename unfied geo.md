@@ -304,3 +304,252 @@ This becomes a global optimization rather than per-claim threshold gating. Imple
 | 1 | Statement-level competitive allocation added alongside existing paragraph logic | Whether competitive weights differentiate claims; whether they agree with existing pruning relevance | Geometry correlation + competitive entropy |
 | 2 | Canonical embedding chosen; continuous per-claim field added | Within-claim semantic density; disagreement between competitive and continuous signals | Disagreement matrix understood |
 | 3 | Pruning refactored to use competitive weights instead of local thresholds | Whether unified geometry improves pruning precision; carrier pass rate | Phase 2 evidence warrants it |
+
+
+
+
+followup:
+# Mixed-Method Provenance: Implementation Specification
+
+## Context
+
+We currently compute paragraph-level competitive provenance allocation in `reconstructProvenance`. Each paragraph computes its similarity to all claim centroids and assigns itself to claims exceeding its own μ+σ threshold. This is **paragraph-centric competitive allocation** — the paragraph decides which claims deserve it.
+
+We are adding a second, complementary allocation: **claim-centric direct scoring** — each claim scores all paragraphs by direct cosine similarity, thresholded by the claim's own distribution. The two pools are unioned, then statement-level direct cosine within the merged pool removes paragraph-inherited noise.
+
+This does not replace existing competitive allocation. It runs alongside it. Both feed into a merged pool. Existing competitive logic is retained intact.
+
+## Why
+
+Competitive allocation is blind to evidence that another claim "won" — if paragraph P scores μ+σ for claim_4 but only μ+0.8σ for claim_2, claim_2 never sees P even if P contains the most semantically relevant statement in the entire corpus for claim_2. Claim-centric scoring recovers these cases because it asks "what's close to this claim?" not "who wins this paragraph?"
+
+Neither method alone is faithful. Their failure modes are structurally different and non-overlapping. The union has strictly better recall. Statement-level filtering restores precision.
+
+---
+
+## Step 1: Claim-Centric Paragraph Scoring
+
+### Location
+Add inside `reconstructProvenance`, after existing paragraph competitive allocation is computed. Do not modify existing competitive logic.
+
+### Computation
+
+```
+For each claim C with centroid embedding e_C:
+  For each paragraph P with embedding e_P:
+    claimCentricSim[C][P] = cosineSimilarity(e_P, e_C)
+  
+  μ_C = mean(claimCentricSim[C][P] for all P)
+  σ_C = stddev(claimCentricSim[C][P] for all P)
+  threshold_C = μ_C + σ_C
+  
+  claimCentricPool[C] = all P where claimCentricSim[C][P] > threshold_C
+```
+
+### Edge cases
+- If σ_C == 0 (all paragraphs equidistant from claim): claimCentricPool[C] = empty. This claim has no distinguishable paragraph affinity. Do not fallback.
+- If number of paragraphs < 3: skip claim-centric, rely on competitive only.
+
+### Store per claim
+```
+claimCentricProvenance[C] = {
+  paragraphs: [ { paragraphId, sim, threshold, aboveThreshold: boolean } ],
+  μ: number,
+  σ: number,
+  threshold: number,
+  poolSize: number
+}
+```
+
+Store the FULL ranked list of all paragraphs with their sim scores, not just the ones above threshold. The threshold determines the pool but the full ranking is needed for the debug panel.
+
+---
+
+## Step 2: Merge Pools
+
+### Computation
+
+```
+For each claim C:
+  competitivePool[C] = existing paragraph pool from current competitive allocation
+  claimCentricPool[C] = from Step 1
+  
+  mergedParagraphPool[C] = union(competitivePool[C], claimCentricPool[C])
+```
+
+Deduplicate by paragraph ID.
+
+### Store per claim
+```
+mergedProvenance[C] = {
+  paragraphIds: string[],
+  fromCompetitiveOnly: string[],    // in competitive but not claim-centric
+  fromClaimCentricOnly: string[],   // in claim-centric but not competitive
+  fromBoth: string[],               // in both pools
+  totalMerged: number
+}
+```
+
+The three subsets (competitiveOnly, claimCentricOnly, both) are the primary diagnostic. They show where the methods agree and diverge.
+
+---
+
+## Step 3: Statement-Level Refinement Within Merged Pool
+
+### Computation
+
+CRITICAL: The μ and σ used for statement classification must be computed over ALL statements in the corpus, not just the union pool. The union pool is already filtered for paragraph-level proximity — computing statistics only within it inflates μ and compresses σ, causing the threshold to rubber-stamp everything.
+
+```
+For each claim C:
+  // Step A: Compute GLOBAL distribution of all statements against this claim
+  For ALL statements S in the full corpus:
+    globalSim[S] = cosineSimilarity(e_S, e_C)   // statement embedding to claim centroid
+  
+  μ_global = mean(globalSim over ALL statements)
+  σ_global = stddev(globalSim over ALL statements)
+  
+  // Step B: Identify candidate statements from merged paragraph pool
+  candidateStatements = all statements S where S.paragraphId ∈ mergedParagraphPool[C]
+  
+  // Step C: Classify candidates using GLOBAL thresholds
+  For each candidate statement S:
+    if globalSim[S] > μ_global + σ_global:
+      fate = "primary"
+    else if globalSim[S] > μ_global:
+      fate = "supporting"
+    else:
+      fate = "inherited"
+```
+
+This ensures a statement is classified "primary" only if it is notably closer to this claim than the average statement in the entire corpus — not just better than other pre-filtered neighbors.
+
+### Apply supporter constraint
+After statement classification, filter: only retain statements where S.modelIndex ∈ claim.supporters. Statements from non-supporting models are excluded regardless of geometric proximity.
+
+### Store per claim
+```
+statementRefinement[C] = {
+  statements: [
+    { 
+      statementId, 
+      directSim,           // raw cosine to claim centroid (same as globalSim)
+      fate,                 // "primary" | "supporting" | "inherited"
+      μ_global,             // corpus-wide mean for this claim (for context)
+      σ_global,             // corpus-wide stddev for this claim
+      fromParagraphId,     // which paragraph brought this statement in
+      paragraphSource,     // "competitive" | "claimCentric" | "both"
+      competitiveWeight,   // from existing §1 allocation if available, null otherwise
+      continuousScore      // from §2 continuous field if available, null otherwise
+    }
+  ],
+  primaryCount: number,
+  supportingCount: number,
+  inheritedCount: number
+}
+```
+
+---
+
+## Step 4: Continuous Field as Diagnostic Overlay
+
+If Phase 2 continuous field (evidenceScore = z_claim + z_core) is already computed, cross-reference it against statement fates from Step 3.
+
+### Flag disagreements
+
+```
+For each statement S in claim C's refined pool:
+  if fate == "inherited" AND continuousScore > 0:
+    flag = "continuous_disagrees_with_exclusion"
+  
+  if fate == "primary" AND continuousScore < 0:
+    flag = "continuous_disagrees_with_inclusion"
+  
+  if fate == "primary" AND competitiveWeight == 0:
+    flag = "competitive_disagrees_with_inclusion"
+```
+
+These flags are diagnostic only. They do not change fates. They surface in the debug panel for manual inspection.
+
+---
+
+## Debug Panel Output
+
+### New section: "Mixed Provenance" per claim
+
+**Header row**: `{claimLabel} — {primaryCount} primary · {supportingCount} supporting · {inheritedCount} inherited · {mergedParagraphCount} paragraphs ({fromBoth}∩ {fromCompetitiveOnly}C {fromClaimCentricOnly}CC)`
+
+**Three sub-views:**
+
+#### Sub-view 1: Paragraph Sources
+Show all paragraphs in merged pool, sorted by claimCentricSim descending.
+
+| Column | Value |
+|---|---|
+| Paragraph ID | ID |
+| Claim-centric sim | cosine to claim centroid |
+| Source | "both" / "competitive only" / "claim-centric only" |
+| Statements contained | count of primary/supporting/inherited within this paragraph |
+| Paragraph text | truncated first 120 chars |
+
+Highlight rows where source = "claim-centric only" — these are the recovered paragraphs competitive missed.
+
+#### Sub-view 2: Statement Fates
+Show all candidate statements sorted by directSim descending.
+
+| Column | Value |
+|---|---|
+| Statement ID | ID |
+| Direct sim | cosine to claim centroid |
+| Fate | primary / supporting / inherited |
+| Paragraph source | which pool brought its paragraph in |
+| Competitive weight | from §1 if available |
+| Continuous score | from §2 if available |
+| Flags | any disagreement flags from Step 4 |
+| Text | truncated first 120 chars |
+
+Color coding: green = primary, amber = supporting, grey = inherited, red outline = any disagreement flag.
+
+#### Sub-view 3: Method Comparison (existing Compare panel columns)
+Retain the existing three-column comparison (Direct / Competitive / Continuous) from the current panel. The new mixed provenance lives alongside it, not replacing it. The user can compare what mixed provenance chose against what each individual method would have chosen.
+
+---
+
+## What This Does NOT Change
+
+- **Existing competitive paragraph allocation**: Retained intact. It feeds into the merge as one of two inputs.
+- **Existing §1 statement-level competitive allocation**: Retained intact. Its weights appear as a diagnostic column in the statement fates view.
+- **Existing §2 continuous field**: Retained intact. Its evidenceScore appears as a diagnostic column.
+- **Blast radius**: Consumes provenance outputs. Once merged provenance improves source statement pools, blast radius benefits automatically without code changes.
+- **Mapper**: No changes.
+- **Traversal / Survey**: No changes.
+
+## What This DOES Change
+
+- **Canonical provenance pool per claim**: Now derived from merged paragraph pool + statement refinement, not from competitive paragraph allocation alone.
+- **Skeletonization input**: When triage consumes source statement IDs for a claim, it should consume the "primary" + "supporting" statements from mixed provenance rather than the old competitive-only pool. Inherited statements are excluded from skeletonization consideration.
+- **Exclusivity calculation**: Recomputed on the merged pools. A statement is exclusive to claim C if it appears as "primary" or "supporting" in C's pool and does not appear as "primary" or "supporting" in any other claim's pool.
+
+---
+
+## Completion Criteria
+
+1. Claim-centric paragraph scoring produces ranked lists for all claims with visible thresholds
+2. Merged pools are strictly larger than or equal to competitive-only pools (union can only add, never subtract)
+3. Statement refinement produces meaningful three-tier distribution (not all primary, not all inherited)
+4. Debug panel surfaces all three sub-views with disagreement flags
+5. At least one claim shows a "claim-centric only" paragraph that contains a statement scored as "primary" after refinement — this is the recovered evidence case that motivated the entire change
+6. Existing competitive allocation, continuous field, and Compare panel remain functional and unchanged
+
+---
+
+## Instrumentation for Future Decision
+
+After implementation, surface these aggregate statistics across all claims:
+
+- **Recovery rate**: What percentage of "primary" statements came from claim-centric-only paragraphs? (How much evidence was competitive missing?)
+- **Noise rate**: What percentage of "inherited" statements came from claim-centric-only paragraphs? (How much noise did the wider net introduce before statement filtering caught it?)
+- **Agreement rate**: What percentage of merged paragraphs were in both pools? (How often do the methods agree?)
+- **Disagreement flag rate**: What percentage of statements have any Step 4 disagreement flag? (How often do the diagnostic overlays disagree with the primary derivation?)
+
+These four numbers tell you whether the mixed method is worth keeping, whether statement filtering is doing its job, and whether the continuous/competitive diagnostics reveal patterns worth acting on.

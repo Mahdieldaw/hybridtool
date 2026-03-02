@@ -113,5 +113,9 @@ export function buildCognitiveArtifact(
     surveyRationale: mapper?.surveyRationale ?? undefined,
     completeness: mapper?.completeness ?? undefined,
     substrateSummary: mapper?.substrate ?? undefined,
+    statementAllocation: mapper?.statementAllocation ?? undefined,
+    continuousField: mapper?.continuousField ?? undefined,
+    paragraphSimilarityField: mapper?.paragraphSimilarityField ?? undefined,
+    mixedProvenance: mapper?.mixedProvenance ?? undefined,
   };
 }

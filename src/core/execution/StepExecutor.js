@@ -535,6 +535,7 @@ export class StepExecutor {
     let preSemanticInterpretation = null;
     let substrate = null;
     let enrichmentResult = null;
+    let basinInversionResult = null;
     let clusteringModule = null;
 
     if (Array.isArray(shadowResult?.statements) && shadowResult.statements.length > 0) {
@@ -797,6 +798,19 @@ export class StepExecutor {
             status: 'failed',
             error: getErrorMessage(err),
           };
+        }
+
+        try {
+          if (!substrateDegenerate && geometryParagraphEmbeddings && paragraphResult?.paragraphs?.length > 0) {
+            const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+            const paraIds = paragraphResult.paragraphs.map(p => p.id || p.paragraphId || String(p.index ?? ''));
+            const paraVectors = paraIds.map(id => geometryParagraphEmbeddings.get(id)).filter(Boolean);
+            if (paraVectors.length > 0) {
+              basinInversionResult = computeBasinInversion(paraIds.slice(0, paraVectors.length), paraVectors);
+            }
+          }
+        } catch (err) {
+          console.warn('[StepExecutor] Basin inversion failed:', getErrorMessage(err));
         }
 
         try {
@@ -1127,7 +1141,110 @@ export class StepExecutor {
                   claimEmbeddings,
                 );
 
+                // ── PHASE 1: STATEMENT-LEVEL COMPETITIVE ALLOCATION ────────
+                let statementAllocationResult = null;
+                try {
+                  const { computeStatementCompetitiveAllocation } = await import('../../ConciergeService/claimAssembly');
+                  statementAllocationResult = computeStatementCompetitiveAllocation(
+                    mapperClaimsForProvenance.map(c => ({
+                      id: c.id,
+                      supporters: Array.isArray(c.supporters) ? c.supporters : [],
+                    })),
+                    statementEmbeddingResult?.embeddings || new Map(),
+                    claimEmbeddings || new Map(),
+                    shadowResult.statements,
+                  );
+                  const ent = statementAllocationResult?.entropy;
+                  console.log(`[Phase1] Statement allocation: ${ent?.total ?? 0} stmts assigned (1-claim:${ent?.one ?? 0}, 2-claim:${ent?.two ?? 0}, 3+:${ent?.threePlus ?? 0})`);
+                } catch (err) {
+                  console.warn('[Phase1] Statement competitive allocation failed:', getErrorMessage(err));
+                  statementAllocationResult = null;
+                }
+
+                // ── GEOMETRY CORRELATION ────────────────────────────────────
+                if (statementAllocationResult && enrichedClaims && paragraphResult?.paragraphs) {
+                  try {
+                    const { computeGeometryCorrelation } = await import('../../ConciergeService/claimAssembly');
+                    const corr = computeGeometryCorrelation(enrichedClaims, statementAllocationResult, paragraphResult.paragraphs);
+                    statementAllocationResult.geometryCorrelation = corr;
+                    console.log(`[Phase1] Geometry correlation: ${corr != null ? corr.toFixed(4) : 'null'}`);
+                  } catch (err) {
+                    console.warn('[Phase1] Geometry correlation failed:', getErrorMessage(err));
+                  }
+                }
+
+                // ── PHASE 2: CONTINUOUS FIELD ───────────────────────────────
+                let continuousFieldResult = null;
+                try {
+                  const { computeContinuousField } = await import('../../ConciergeService/claimAssembly');
+                  continuousFieldResult = computeContinuousField(
+                    mapperClaimsForProvenance.map(c => ({ id: c.id })),
+                    statementEmbeddingResult?.embeddings || new Map(),
+                    claimEmbeddings || new Map(),
+                    shadowResult.statements,
+                    statementAllocationResult,
+                  );
+                  const claimIds = Object.keys(continuousFieldResult?.perClaim || {});
+                  const totalCore = claimIds.reduce((s, cid) => s + (continuousFieldResult.perClaim[cid]?.coreSetSize || 0), 0);
+                  console.log(`[Phase2] Continuous field: ${claimIds.length} claims, ${totalCore} core statements, ${continuousFieldResult.disagreementMatrix?.length || 0} disagreements`);
+                } catch (err) {
+                  console.warn('[Phase2] Continuous field failed:', getErrorMessage(err));
+                  continuousFieldResult = null;
+                }
+
+                // ── PHASE 3: PARAGRAPH SIMILARITY FIELD ─────────────────────
+                let paragraphSimilarityResult = null;
+                try {
+                  const { computeParagraphSimilarityField } = await import('../../ConciergeService/claimAssembly');
+                  paragraphSimilarityResult = computeParagraphSimilarityField(
+                    mapperClaimsForProvenance.map(c => ({ id: c.id })),
+                    embeddingResult?.embeddings || new Map(),
+                    claimEmbeddings || new Map(),
+                    paragraphResult.paragraphs,
+                  );
+                  console.log(`[Phase3] Paragraph similarity field: ${Object.keys(paragraphSimilarityResult?.perClaim || {}).length} claims`);
+                } catch (err) {
+                  console.warn('[Phase3] Paragraph similarity field failed:', getErrorMessage(err));
+                  paragraphSimilarityResult = null;
+                }
+
+                // ── PHASE 3b: MIXED-METHOD PROVENANCE ───────────────────────
+                let mixedProvenanceResult = null;
+                try {
+                  const { computeMixedMethodProvenance } = await import('../../ConciergeService/claimAssembly');
+                  // Build competitive paragraph pools from enrichedClaims
+                  const stmtToParaId = new Map();
+                  for (const para of (paragraphResult?.paragraphs ?? [])) {
+                    for (const sid of (para.statementIds ?? [])) {
+                      stmtToParaId.set(sid, para.id);
+                    }
+                  }
+                  const competitivePools = new Map();
+                  for (const ec of (enrichedClaims ?? [])) {
+                    const paraSet = new Set();
+                    for (const sid of (ec.sourceStatementIds ?? [])) {
+                      const pid = stmtToParaId.get(sid);
+                      if (pid) paraSet.add(pid);
+                    }
+                    competitivePools.set(ec.id, paraSet);
+                  }
+                  mixedProvenanceResult = computeMixedMethodProvenance(
+                    mapperClaimsForProvenance.map(c => ({ id: c.id, supporters: c.supporters })),
+                    paragraphResult?.paragraphs ?? [],
+                    shadowResult.statements,
+                    embeddingResult?.embeddings || new Map(),
+                    statementEmbeddingResult?.embeddings || new Map(),
+                    claimEmbeddings || new Map(),
+                    competitivePools,
+                  );
+                  console.log(`[MixedProvenance] recovery=${(mixedProvenanceResult.recoveryRate * 100).toFixed(1)}% expansion=${(mixedProvenanceResult.expansionRate * 100).toFixed(1)}% removal=${(mixedProvenanceResult.removalRate * 100).toFixed(1)}%`);
+                } catch (err) {
+                  console.warn('[MixedProvenance] Failed:', getErrorMessage(err));
+                  mixedProvenanceResult = null;
+                }
+
                 // ── CLAIM PROVENANCE (moved before blast radius filter) ────
+
                 let mapperArtifact_claimProvenance = null;
                 let claimProvenanceOwnership = null;
                 let claimProvenanceExclusivity = null;
@@ -1670,6 +1787,10 @@ export class StepExecutor {
                     ...(rawGates.length > 0 ? { surveyGates: rawGates, surveyRationale } : { surveyRationale }),
                     preSemantic: preSemanticInterpretation || null,
                     ...(completeness ? { completeness } : {}),
+                    ...(statementAllocationResult ? { statementAllocation: statementAllocationResult } : {}),
+                    ...(continuousFieldResult ? { continuousField: continuousFieldResult } : {}),
+                    ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
+                    ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
                     ...(alignmentResult ? { alignment: alignmentResult } : {}),
 
                     // SHADOW DATA
@@ -1811,6 +1932,7 @@ export class StepExecutor {
               },
               preSemantic: preSemanticInterpretation || null,
               ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
+              ...(basinInversionResult ? { basinInversion: basinInversionResult } : {}),
             });
 
             try {

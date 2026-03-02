@@ -764,7 +764,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           if (!turnRaw) { sendResponse({ success: false, error: "Turn not found" }); return; }
 
           const { generateStatementEmbeddings, generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, structuredTruncate, DEFAULT_CONFIG } = await import('./clustering');
-          const { generateClaimEmbeddings, reconstructProvenance, computeElbowDiagnosticsFromEmbeddings } = await import('./ConciergeService/claimAssembly');
+          const { generateClaimEmbeddings, reconstructProvenance, computeElbowDiagnosticsFromEmbeddings, computeCompetitiveAssignmentDiagnostics } = await import('./ConciergeService/claimAssembly');
           const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('./ConciergeService/claimProvenance');
           const { parseSemanticMapperOutput } = await import('./ConciergeService/semanticMapper');
           const { packEmbeddingMap, unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
@@ -1055,11 +1055,25 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 mapperClaimsForProvenance.map((c) => ({ id: c.id })),
               );
             } catch (_) { }
+            let competitiveAssignmentDiagnostics = null;
+            try {
+              competitiveAssignmentDiagnostics = computeCompetitiveAssignmentDiagnostics(
+                mapperClaimsForProvenance.map((c) => ({ id: c.id })),
+                paragraphEmbeddings,
+                claimEmbeddings,
+                shadowParagraphs,
+              );
+              const cadKeys = competitiveAssignmentDiagnostics ? Object.keys(competitiveAssignmentDiagnostics) : [];
+              console.log(`[Regenerate] competitiveAssignmentDiagnostics: ${cadKeys.length} claims, paraEmb=${paragraphEmbeddings.size}, claimEmb=${claimEmbeddings.size}, paras=${shadowParagraphs.length}`);
+            } catch (cadErr) {
+              console.warn('[Regenerate] competitiveAssignmentDiagnostics failed:', cadErr);
+            }
             claimProvenance = {
               statementOwnership: Object.fromEntries(Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])),
               claimExclusivity: Object.fromEntries(claimProvenanceExclusivity),
               claimOverlap: claimProvenanceOverlap,
               ...(elbowDiagnostics ? { elbowDiagnostics } : {}),
+              ...(competitiveAssignmentDiagnostics ? { competitiveAssignmentDiagnostics } : {}),
             };
           } catch (err) {
             console.warn('[Regenerate] Claim provenance failed:', getErrorMessage(err));
@@ -1204,6 +1218,114 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             console.warn('[Regenerate] Basin inversion failed:', err);
           }
 
+          // ── E.2 Phase 1: Statement-level competitive allocation ──
+          let statementAllocationResult = null;
+          try {
+            const { computeStatementCompetitiveAllocation } = await import('./ConciergeService/claimAssembly');
+            statementAllocationResult = computeStatementCompetitiveAllocation(
+              enrichedClaims.map(c => ({ id: c.id, supporters: Array.isArray(c.supporters) ? c.supporters : [] })),
+              statementEmbeddings,
+              claimEmbeddings,
+              shadowStatements,
+            );
+          } catch (err) {
+            console.warn('[Regenerate] Phase 1 statement allocation failed:', err);
+          }
+
+          // ── E.2b Geometry correlation ──
+          if (statementAllocationResult && enrichedClaims && shadowParagraphs) {
+            try {
+              const { computeGeometryCorrelation } = await import('./ConciergeService/claimAssembly');
+              const corr = computeGeometryCorrelation(enrichedClaims, statementAllocationResult, shadowParagraphs);
+              statementAllocationResult.geometryCorrelation = corr;
+              console.log(`[Regenerate] Geometry correlation: ${corr != null ? corr.toFixed(4) : 'null'}`);
+            } catch (err) {
+              console.warn('[Regenerate] Geometry correlation failed:', err);
+            }
+          }
+
+          // ── E.3 Phase 2: Continuous field ──
+          let continuousFieldResult = null;
+          try {
+            const { computeContinuousField } = await import('./ConciergeService/claimAssembly');
+            continuousFieldResult = computeContinuousField(
+              enrichedClaims.map(c => ({ id: c.id })),
+              statementEmbeddings,
+              claimEmbeddings,
+              shadowStatements,
+              statementAllocationResult,
+            );
+          } catch (err) {
+            console.warn('[Regenerate] Phase 2 continuous field failed:', err);
+          }
+
+          // ── E.3b Phase 3: Paragraph similarity field ──
+          let paragraphSimilarityResult = null;
+          try {
+            const { computeParagraphSimilarityField } = await import('./ConciergeService/claimAssembly');
+            paragraphSimilarityResult = computeParagraphSimilarityField(
+              enrichedClaims.map(c => ({ id: c.id })),
+              paragraphEmbeddings,
+              claimEmbeddings,
+              shadowParagraphs,
+            );
+            console.log(`[Regenerate] Phase 3 paragraph similarity: ${Object.keys(paragraphSimilarityResult?.perClaim || {}).length} claims`);
+          } catch (err) {
+            console.warn('[Regenerate] Phase 3 paragraph similarity failed:', err);
+          }
+
+          // ── E.3c Mixed-method provenance ──
+          let mixedProvenanceResult = null;
+          try {
+            const { computeMixedMethodProvenance } = await import('./ConciergeService/claimAssembly');
+            const stmtToParaId = new Map();
+            for (const para of shadowParagraphs) {
+              for (const sid of (para.statementIds ?? [])) {
+                stmtToParaId.set(sid, para.id);
+              }
+            }
+            const competitivePools = new Map();
+            for (const ec of enrichedClaims) {
+              const paraSet = new Set();
+              for (const sid of (ec.sourceStatementIds ?? [])) {
+                const pid = stmtToParaId.get(sid);
+                if (pid) paraSet.add(pid);
+              }
+              competitivePools.set(ec.id, paraSet);
+            }
+            mixedProvenanceResult = computeMixedMethodProvenance(
+              mapperClaimsForProvenance.map(c => ({ id: c.id, supporters: c.supporters })),
+              shadowParagraphs,
+              shadowStatements,
+              paragraphEmbeddings,
+              statementEmbeddings,
+              claimEmbeddings,
+              competitivePools,
+            );
+            console.log(`[Regenerate][MixedProvenance] recovery=${(mixedProvenanceResult.recoveryRate * 100).toFixed(1)}% expansion=${(mixedProvenanceResult.expansionRate * 100).toFixed(1)}% removal=${(mixedProvenanceResult.removalRate * 100).toFixed(1)}%`);
+          } catch (err) {
+            console.warn('[Regenerate] Mixed-method provenance failed:', err);
+          }
+
+          // ── E.4 Claim↔Geometry Alignment ───────────────────────────
+          let alignmentResult = null;
+          try {
+            const regionProfiles = preSemantic?.regionProfiles || null;
+            console.log(`[Regenerate] Alignment prereqs: stmtEmb=${statementEmbeddings.size}, regions=${regions.length}, claims=${enrichedClaims.length}, regionProfiles=${Array.isArray(regionProfiles) ? regionProfiles.length : 'null'}`);
+            if (statementEmbeddings.size > 0 && regions.length > 0 && enrichedClaims.length > 0 && regionProfiles) {
+              const { buildClaimVectors, computeAlignment } = await import('./geometry');
+              const dimensions = geoRecord.meta?.dimensions || (statementEmbeddings.values().next().value?.length || 0);
+              const claimVectors = buildClaimVectors(enrichedClaims, statementEmbeddings, dimensions);
+              console.log(`[Regenerate] claimVectors=${claimVectors.length}, dims=${dimensions}`);
+              if (claimVectors.length > 0) {
+                alignmentResult = computeAlignment(claimVectors, regions, regionProfiles, statementEmbeddings);
+                console.log(`[Regenerate] Alignment computed: globalCoverage=${alignmentResult?.globalCoverage}, regionCoverages=${alignmentResult?.regionCoverages?.length}`);
+              }
+            }
+          } catch (err) {
+            console.warn('[Regenerate] Alignment failed:', err);
+          }
+
           // ── F. Assemble mapper artifact (same shape as StepExecutor) ──
           const mapperArtifact = {
             id: `artifact-regen-${Date.now()}`,
@@ -1229,6 +1351,11 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             },
             ...(claimProvenance ? { claimProvenance } : {}),
             ...(basinInversion ? { basinInversion } : {}),
+            ...(statementAllocationResult ? { statementAllocation: statementAllocationResult } : {}),
+            ...(continuousFieldResult ? { continuousField: continuousFieldResult } : {}),
+            ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
+            ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
+            ...(alignmentResult ? { alignment: alignmentResult } : {}),
           };
 
           // ── G. Build full cognitive artifact ──
@@ -1275,6 +1402,17 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             preSemantic: preSemantic || null,
             ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
           });
+
+          // ── G.1 Diagnostic: verify critical fields in cognitive artifact ──
+          console.log(`[Regenerate] Artifact diagnostics:`,
+            `shadow.paragraphs=${Array.isArray(cognitiveArtifact?.shadow?.paragraphs) ? cognitiveArtifact.shadow.paragraphs.length : 'missing'}`,
+            `shadow.statements=${Array.isArray(cognitiveArtifact?.shadow?.statements) ? cognitiveArtifact.shadow.statements.length : 'missing'}`,
+            `claimProvenance=${cognitiveArtifact?.claimProvenance ? 'present' : 'missing'}`,
+            `competitiveAssignmentDiagnostics=${cognitiveArtifact?.claimProvenance?.competitiveAssignmentDiagnostics ? Object.keys(cognitiveArtifact.claimProvenance.competitiveAssignmentDiagnostics).length + ' claims' : 'missing'}`,
+            `alignment=${cognitiveArtifact?.geometry?.alignment ? 'present' : 'missing'}`,
+            `basinInversion=${cognitiveArtifact?.geometry?.basinInversion ? cognitiveArtifact.geometry.basinInversion.status : 'missing'}`,
+            `statementAllocation=${cognitiveArtifact?.statementAllocation ? 'present' : 'missing'}`,
+          );
 
           // ── H. Persist as provider-specific artifact ──
           const mergeArtifacts = (base, patch) => {

@@ -4,7 +4,6 @@ import {
     Claim,
     Edge,
     ProblemStructure,
-    EnrichedClaim,
     DissentPatternData,
     KeystonePatternData,
     ChainPatternData,
@@ -16,6 +15,8 @@ const decisionMapGraphDbg = (...args: any[]) => {
     if (DEBUG_DECISION_MAP_GRAPH) console.debug('[DecisionMapGraph]', ...args);
 };
 
+const REGION_COLORS = ["#34d399", "#60a5fa", "#fbbf24", "#fb7185", "#a78bfa", "#22d3ee", "#f472b6", "#c084fc", "#f97316", "#4ade80"];
+
 // Internal node type for d3 simulation, extending V3 Claim
 export interface GraphNode extends d3.SimulationNodeDatum {
     id: string; // V3 claim id
@@ -23,6 +24,8 @@ export interface GraphNode extends d3.SimulationNodeDatum {
     text: string;
     supporters: (string | number)[]; // V3 numbers or legacy strings
     support_count: number;
+    provenanceBulk?: number | null;
+    sourceRegionIds?: string[];
     type: Claim['type'];
     role: Claim['role'];
     // D3 state
@@ -45,34 +48,20 @@ interface Props {
     claims: Claim[];
     edges: Edge[];
     problemStructure?: ProblemStructure;
-    enrichedClaims?: EnrichedClaim[];
-    citationSourceOrder?: Record<number, string>;
     onNodeClick?: (node: GraphNode) => void;
     selectedClaimIds?: string[];
     width?: number;
     height?: number;
 }
 
-function getRoleColor(role: Claim['role']): string {
-    switch (role) {
-        case 'anchor':
-            return '#3b82f6';
-        case 'branch':
-            return '#10b981';
-        case 'challenger':
-            return '#f59e0b';
-        case 'supplement':
-            return '#6b7280';
-        default:
-            return '#8b5cf6';
+function getNodeRadius(node: GraphNode): number {
+    const bulk = typeof node.provenanceBulk === 'number' && Number.isFinite(node.provenanceBulk) ? node.provenanceBulk : null;
+    if (bulk != null) {
+        return Math.max(12, Math.min(34, 12 + Math.sqrt(Math.max(0, bulk)) * 10));
     }
-}
-
-// Node sizing by support_count (slightly compact): 1≈48px, 2≈60px, 3+≈72px diameter
-function getNodeRadius(supportCount: number): number {
-    const base = 18;
-    const scale = 6;
-    return base + Math.max(1, supportCount) * scale;
+    const base = 14;
+    const scale = 5;
+    return Math.max(12, Math.min(30, base + Math.max(1, node.support_count) * scale));
 }
 
 // Simple connected-components for parallel layout
@@ -111,8 +100,6 @@ const DecisionMapGraph: React.FC<Props> = ({
     claims: inputClaims,
     edges: inputEdges,
     problemStructure,
-    enrichedClaims,
-    citationSourceOrder: _citationSourceOrder,
     onNodeClick,
     selectedClaimIds,
     width = 400,
@@ -165,6 +152,21 @@ const DecisionMapGraph: React.FC<Props> = ({
         if (ids.length === 0) return [];
         return buildSimpleComponents(ids, inputEdges);
     }, [inputClaims, inputEdges]);
+
+    const regionColorById = React.useMemo(() => {
+        const ids = new Set<string>();
+        for (const c of inputClaims as any[]) {
+            const rids = Array.isArray(c?.sourceRegionIds) ? c.sourceRegionIds : [];
+            for (const rid of rids) {
+                const id = String(rid ?? '').trim();
+                if (id) ids.add(id);
+            }
+        }
+        const sorted = Array.from(ids).sort((a, b) => a.localeCompare(b));
+        const m = new Map<string, string>();
+        for (let i = 0; i < sorted.length; i++) m.set(sorted[i], REGION_COLORS[i % REGION_COLORS.length]);
+        return m;
+    }, [inputClaims]);
 
     const getComponentColors = useCallback((claimId: string): { fill: string; stroke: string } | null => {
         if (componentGroups.length < 2) return null;
@@ -348,6 +350,8 @@ const DecisionMapGraph: React.FC<Props> = ({
                 text: c.text,
                 supporters,
                 support_count: supportCount,
+                provenanceBulk: (typeof (c as any)?.provenanceBulk === 'number' && Number.isFinite((c as any)?.provenanceBulk)) ? (c as any).provenanceBulk : null,
+                sourceRegionIds: Array.isArray((c as any)?.sourceRegionIds) ? (c as any).sourceRegionIds.map((x: any) => String(x)).filter((x: string) => x.trim().length > 0) : [],
                 type: c.type,
                 role: c.role,
                 x: existing?.x ?? target?.x ?? width / 2 + (Math.random() - 0.5) * 100,
@@ -408,13 +412,13 @@ const DecisionMapGraph: React.FC<Props> = ({
                     return 0.28;
                 }))
             .force('center', d3.forceCenter(width / 2, height / 2).strength(0.01)) // Extremely weak centering
-            .force('collision', d3.forceCollide<GraphNode>().radius(d => getNodeRadius(d.support_count) + 45)) // Large collision radius for labels
+            .force('collision', d3.forceCollide<GraphNode>().radius(d => getNodeRadius(d) + 45)) // Large collision radius for labels
             // No x-centering force - let nodes spread horizontally
             .force('y', d3.forceY(height / 2).strength(0.02)) // Very weak vertical centering
             // Soft boundary force to keep nodes inside canvas
             .force('boundary', () => {
                 simNodes.forEach(node => {
-                    const r = getNodeRadius(node.support_count);
+                    const r = getNodeRadius(node);
                     if (node.x !== undefined) {
                         if (node.x < nodePadding + r) {
                             node.vx = (node.vx || 0) + 1.5;
@@ -513,11 +517,12 @@ const DecisionMapGraph: React.FC<Props> = ({
 
 
     // Mouse handlers for SVG
-    const dragState = useRef<{ nodeId: string | null; startX: number; startY: number }>({
-        nodeId: null, startX: 0, startY: 0
+    const DRAG_THRESHOLD = 5;
+    const dragState = useRef<{ nodeId: string | null; startX: number; startY: number; dragging: boolean; node: GraphNode | null }>({
+        nodeId: null, startX: 0, startY: 0, dragging: false, node: null,
     });
 
-    const handleMouseDown = (nodeId: string, e: React.MouseEvent) => {
+    const handleMouseDown = (nodeId: string, node: GraphNode, e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
         const svg = svgRef.current;
@@ -528,8 +533,9 @@ const DecisionMapGraph: React.FC<Props> = ({
             nodeId,
             startX: e.clientX - rect.left,
             startY: e.clientY - rect.top,
+            dragging: false,
+            node,
         };
-        handleDragStart(nodeId);
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
@@ -540,6 +546,13 @@ const DecisionMapGraph: React.FC<Props> = ({
             const rect = svgRef.current.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
+            const dx = x - dragState.current.startX;
+            const dy = y - dragState.current.startY;
+            if (!dragState.current.dragging) {
+                if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+                dragState.current.dragging = true;
+                handleDragStart(dragState.current.nodeId);
+            }
             handleDrag(dragState.current.nodeId, x, y);
             return;
         }
@@ -559,8 +572,13 @@ const DecisionMapGraph: React.FC<Props> = ({
 
     const handleMouseUp = () => {
         if (dragState.current.nodeId) {
-            handleDragEnd(dragState.current.nodeId);
-            dragState.current.nodeId = null;
+            if (dragState.current.dragging) {
+                handleDragEnd(dragState.current.nodeId);
+            } else {
+                // Click (no drag threshold exceeded) — fire onNodeClick
+                if (dragState.current.node) onNodeClick?.(dragState.current.node);
+            }
+            dragState.current = { nodeId: null, startX: 0, startY: 0, dragging: false, node: null };
         }
         isPanningRef.current = false;
     };
@@ -771,35 +789,35 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
                                         edge.type === 'prerequisite' ? 'url(#arrowBlack)' :
                                         undefined;
-                        const markerStart =
-                            edge.type === 'conflicts' ? 'url(#arrowRed)' :
-                                edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
-                                    undefined;
                         const midX = (coords.x1 + coords.x2) / 2;
                         const midY = (coords.y1 + coords.y2) / 2;
+
+                        // Curved edge: quadratic bezier with perpendicular control point
+                        const dx = coords.x2 - coords.x1;
+                        const dy = coords.y2 - coords.y1;
+                        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                        const curvature = Math.min(40, len * 0.2);
+                        const cpX = midX - (dy / len) * curvature;
+                        const cpY = midY + (dx / len) * curvature;
+                        const curvePath = `M ${coords.x1} ${coords.y1} Q ${cpX} ${cpY} ${coords.x2} ${coords.y2}`;
 
                         return (
                             <g key={`edge-${i}`}>
                                 {/* Wide glow layer */}
-                                <line
-                                    x1={coords.x1}
-                                    y1={coords.y1}
-                                    x2={coords.x2}
-                                    y2={coords.y2}
+                                <path
+                                    d={curvePath}
+                                    fill="none"
                                     stroke={baseColor}
                                     strokeWidth={12}
                                     strokeOpacity={0.12}
                                 />
-                                {/* Main line with filter */}
-                                <line
-                                    x1={coords.x1}
-                                    y1={coords.y1}
-                                    x2={coords.x2}
-                                    y2={coords.y2}
+                                {/* Main curved path */}
+                                <path
+                                    d={curvePath}
+                                    fill="none"
                                     stroke={baseColor}
                                     strokeWidth={2.5}
                                     strokeDasharray={dash}
-                                    markerStart={markerStart}
                                     markerEnd={markerEnd}
                                     filter={
                                         edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
@@ -807,29 +825,15 @@ const DecisionMapGraph: React.FC<Props> = ({
                                                 edge.type === 'prerequisite' ? 'url(#edgeGlowBlue)' :
                                                 undefined
                                     }
-                                    style={{
-                                        animation: edge.type === 'conflicts' ? 'conflictPulse 2s ease-in-out infinite' : undefined
-                                    }}
-                                >
-                                    {edge.type === 'conflicts' && (
-                                        <animate
-                                            attributeName="stroke-opacity"
-                                            values="0.4;0.8;0.4"
-                                            dur="2s"
-                                            repeatCount="indefinite"
-                                        />
-                                    )}
-                                </line>
+                                />
                                 {/* Invisible wider hit area for hover */}
-                                <line
-                                    x1={coords.x1}
-                                    y1={coords.y1}
-                                    x2={coords.x2}
-                                    y2={coords.y2}
+                                <path
+                                    d={curvePath}
+                                    fill="none"
                                     stroke="transparent"
                                     strokeWidth={20}
                                     style={{ cursor: 'pointer' }}
-                                    onMouseEnter={() => setHoveredEdge({ edge, x: midX, y: midY })}
+                                    onMouseEnter={() => setHoveredEdge({ edge, x: cpX, y: cpY })}
                                     onMouseLeave={() => setHoveredEdge(null)}
                                 />
                             </g>
@@ -843,217 +847,47 @@ const DecisionMapGraph: React.FC<Props> = ({
                     {nodes.map(node => {
                         const x = node.x || 0;
                         const y = node.y || 0;
-                        const radius = getNodeRadius(node.support_count);
+                        const radius = getNodeRadius(node);
                         const isHovered = hoveredNode === node.id;
-
-                        // Find enriched data for this node
-                        const enriched = enrichedClaims?.find(c => c.id === node.id);
-
-                        // NEW: Get patterns for this claim
-                        // Use O(1) lookups
-                        const isPeak = lookups.peakSet.has(node.id);
-                        const isKeystone = lookups.keystoneSet.has(node.id);
-                        const isDissent = lookups.dissentSet.has(node.id);
-                        const isFragile = lookups.fragileSet.has(node.id);
-                        const chainPosition = lookups.chainMap.get(node.id) ?? null;
-
-                        // Determine color based on patterns (priority order)
-                        const color =
-                            isKeystone ? '#8b5cf6' :          // Purple for keystone
-                                isDissent ? '#fbbf24' :           // Yellow/amber for dissent
-                                    isFragile ? '#f97316' :           // Orange for fragile
-                                        isPeak ? '#3b82f6' :              // Blue for peaks
-                                            enriched?.isChallenger ? '#f59e0b' :
-                                                enriched?.isEvidenceGap ? '#ef4444' :
-                                                    enriched?.isHighSupport ? '#10b981' :
-                                                        getRoleColor(node.role);
-
                         const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
-                        const showWarning = !!(enriched?.isEvidenceGap || enriched?.isLeverageInversion || isFragile);
+                        const dominantRegionId = (() => {
+                            const ids = Array.isArray(node.sourceRegionIds) ? node.sourceRegionIds : [];
+                            if (ids.length === 0) return null;
+                            const counts = new Map<string, number>();
+                            for (const rid of ids) {
+                                const id = String(rid ?? '').trim();
+                                if (!id) continue;
+                                counts.set(id, (counts.get(id) ?? 0) + 1);
+                            }
+                            let best: string | null = null;
+                            let bestCount = -1;
+                            for (const [id, c] of counts) {
+                                if (c > bestCount) {
+                                    bestCount = c;
+                                    best = id;
+                                }
+                            }
+                            return best;
+                        })();
+                        const regionColor = dominantRegionId ? regionColorById.get(dominantRegionId) : null;
+                        const fill = regionColor ? `${regionColor}cc` : "rgba(148,163,184,0.75)";
+                        const stroke = regionColor ?? "rgba(148,163,184,0.55)";
 
                         return (
                             <g
                                 key={node.id}
                                 transform={`translate(${x}, ${y})`}
                                 style={{ cursor: 'pointer' }}
-                                onMouseDown={(e) => handleMouseDown(node.id, e)}
+                                onMouseDown={(e) => handleMouseDown(node.id, node, e)}
                                 onMouseEnter={() => setHoveredNode(node.id)}
                                 onMouseLeave={() => setHoveredNode(null)}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onNodeClick?.(node);
-                                }}
                             >
-                                {/* Hover aura */}
-                                {isHovered && (
-                                    <circle r={radius + 16} fill={color} opacity={0.25} filter="url(#nodeGlow)">
-                                        <animate attributeName="opacity" values="0.25;0.4;0.25" dur="1.5s" repeatCount="indefinite" />
-                                    </circle>
-                                )}
-
+                                <circle r={radius} fill={fill} stroke={stroke} strokeWidth={2} opacity={0.9} />
                                 {isSelected && (
-                                    <circle r={radius + 10} fill="none" stroke={color} strokeWidth={3} strokeOpacity={0.9} />
+                                    <circle r={radius + 7} fill="none" stroke="rgba(255,255,255,0.95)" strokeWidth={3.5} />
                                 )}
-
-                                {/* Outer ring */}
-                                {node.role !== 'challenger' ? (
-                                    <circle
-                                        r={radius + 3}
-                                        fill="none"
-                                        stroke={color}
-                                        strokeWidth={isHovered ? 2.5 : 1.5}
-                                        strokeOpacity={0.5}
-                                    />
-                                ) : (
-                                    <polygon
-                                        points={`${0},${-(radius + 3)} ${radius + 3},0 0,${radius + 3} ${-(radius + 3)},0`}
-                                        fill="none"
-                                        stroke={color}
-                                        strokeWidth={isHovered ? 2.5 : 1.5}
-                                        strokeOpacity={0.5}
-                                    />
-                                )}
-
-                                {/* Radial gradient definition */}
-                                <defs>
-                                    <radialGradient id={`nodeGrad-${node.id}`} cx="30%" cy="30%">
-                                        <stop offset="0%" stopColor={`${color}cc`} />
-                                        <stop offset="60%" stopColor={color} />
-                                        <stop offset="100%" stopColor={`${color}88`} />
-                                    </radialGradient>
-                                </defs>
-
-                                {/* Main node */}
-                                {node.role !== 'challenger' ? (
-                                    <circle
-                                        r={radius}
-                                        fill={`url(#nodeGrad-${node.id})`}
-                                        stroke={color}
-                                        strokeWidth={isHovered ? 3 : 2}
-                                        filter="url(#nodeGlow)"
-                                    />
-                                ) : (
-                                    <polygon
-                                        points={`${0},${-radius} ${radius},0 0,${radius} ${-radius},0`}
-                                        fill={`url(#nodeGrad-${node.id})`}
-                                        stroke={color}
-                                        strokeWidth={isHovered ? 3 : 2}
-                                        filter="url(#nodeGlow)"
-                                    />
-                                )}
-
-                                {/* Highlight sparkle */}
-                                <circle
-                                    cx={-radius * 0.35}
-                                    cy={-radius * 0.35}
-                                    r={radius * 0.2}
-                                    fill="rgba(255,255,255,0.5)"
-                                    opacity={isHovered ? 0.7 : 0.4}
-                                />
-
-                                {/* NEW: Dissent indicator (⚡) */}
-                                {isDissent && (
-                                    <text
-                                        y={-radius - 8}
-                                        textAnchor="middle"
-                                        fontSize={16}
-                                        style={{ filter: 'drop-shadow(0 0 4px rgba(251, 191, 36, 0.8))' }}
-                                    >
-                                        ⚡
-                                    </text>
-                                )}
-
-                                {/* Keystone crown indicator */}
-                                {isKeystone && !isDissent && (
-                                    <text
-                                        y={-radius - 8}
-                                        textAnchor="middle"
-                                        fontSize={14}
-                                    >
-                                        👑
-                                    </text>
-                                )}
-
-                                {/* Peak indicator (star) */}
-                                {isPeak && !isKeystone && !isDissent && (
-                                    <text
-                                        y={-radius - 8}
-                                        textAnchor="middle"
-                                        fontSize={12}
-                                        fill="#3b82f6"
-                                    >
-                                        ★
-                                    </text>
-                                )}
-
-                                {/* NEW: Fragile indicator */}
-                                {isFragile && (
-                                    <g transform={`translate(${radius * 0.6}, ${-radius * 0.6})`}>
-                                        <circle r={8} fill="#f97316" stroke="#fff" strokeWidth={1} />
-                                        <text
-                                            textAnchor="middle"
-                                            dy={4}
-                                            fill="#fff"
-                                            fontSize={10}
-                                            fontWeight="bold"
-                                        >
-                                            ~
-                                        </text>
-                                    </g>
-                                )}
-
-                                {/* Chain position indicator */}
-                                {chainPosition !== null && (
-                                    <text
-                                        y={radius + 24}
-                                        textAnchor="middle"
-                                        fill="rgba(59, 130, 246, 0.8)"
-                                        fontSize={10}
-                                        fontWeight="bold"
-                                    >
-                                        Step {chainPosition + 1}
-                                    </text>
-                                )}
-
-                                {/* Warning indicator for evidence gaps / leverage inversions */}
-                                {showWarning && !isFragile && (
-                                    <g transform={`translate(${-radius * 0.6}, ${-radius * 0.6})`}>
-                                        <circle r={8} fill="#ef4444" stroke="#fff" strokeWidth={1} />
-                                        <text
-                                            textAnchor="middle"
-                                            dy={4}
-                                            fill="#fff"
-                                            fontSize={10}
-                                            fontWeight="bold"
-                                        >
-                                            !
-                                        </text>
-                                    </g>
-                                )}
-
-                                {/* Support count badge */}
-                                {node.support_count > 1 && (
-                                    <g>
-                                        <circle
-                                            cx={radius * 0.6}
-                                            cy={-radius * 0.6}
-                                            r={10}
-                                            fill="rgba(0,0,0,0.8)"
-                                            stroke={color}
-                                            strokeWidth={1.5}
-                                        />
-                                        <text
-                                            x={radius * 0.6}
-                                            y={-radius * 0.6 + 4}
-                                            textAnchor="middle"
-                                            fill="white"
-                                            fontSize={10}
-                                            fontWeight="bold"
-                                            style={{ pointerEvents: 'none' }}
-                                        >
-                                            {node.support_count}
-                                        </text>
-                                    </g>
+                                {isHovered && !isSelected && (
+                                    <circle r={radius + 5} fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth={2} />
                                 )}
                             </g>
                         );
@@ -1065,11 +899,9 @@ const DecisionMapGraph: React.FC<Props> = ({
                     {nodes.map(node => {
                         const x = node.x || 0;
                         const y = node.y || 0;
-                        const radius = getNodeRadius(node.support_count);
+                        const radius = getNodeRadius(node);
                         const isHovered = hoveredNode === node.id;
-
-                        // Show for larger nodes always, others on hover
-                        if (!isHovered && node.support_count < 2) return null;
+                        const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
 
                         return (
                             <g
@@ -1077,24 +909,23 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 transform={`translate(${x}, ${y})`}
                             >
                                 <foreignObject
-                                    x={-90}
-                                    y={radius + 8}
-                                    width={180}
-                                    height={50}
+                                    x={-80}
+                                    y={radius + 5}
+                                    width={160}
+                                    height={isHovered || isSelected ? 54 : 30}
                                     style={{ overflow: 'visible' }}
                                 >
                                     <div
                                         style={{
-                                            padding: '4px 8px',
-                                            fontSize: 11,
-                                            fontWeight: 600,
-                                            color: 'rgba(255,255,255,0.95)',
+                                            padding: isHovered || isSelected ? '4px 6px' : '2px 4px',
+                                            fontSize: isHovered || isSelected ? 11 : 9,
+                                            fontWeight: isHovered || isSelected ? 600 : 500,
+                                            color: isHovered || isSelected ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.70)',
                                             textAlign: 'center',
-                                            wordWrap: 'break-word',
                                             overflow: 'hidden',
                                             textOverflow: 'ellipsis',
                                             display: '-webkit-box',
-                                            WebkitLineClamp: 3,
+                                            WebkitLineClamp: isHovered || isSelected ? 3 : 2,
                                             WebkitBoxOrient: 'vertical',
                                             lineHeight: 1.3,
                                             textShadow: '0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,1)'
@@ -1139,6 +970,22 @@ const DecisionMapGraph: React.FC<Props> = ({
                         </foreignObject>
                     </g>
                 )}
+            </g>
+
+            {/* Edge legend — bottom-left, fixed in SVG space */}
+            <g transform={`translate(10, ${height - 68})`} style={{ pointerEvents: 'none' }}>
+                <rect x={0} y={0} width={130} height={62} rx={5} fill="rgba(0,0,0,0.55)" />
+                {[
+                    { label: 'Supports', color: '#9ca3af', dash: undefined },
+                    { label: 'Conflicts', color: '#ef4444', dash: '6,4' },
+                    { label: 'Tradeoff', color: '#f97316', dash: '2,2' },
+                    { label: 'Prerequisite', color: '#60a5fa', dash: undefined },
+                ].map(({ label, color, dash }, idx) => (
+                    <g key={label} transform={`translate(8, ${12 + idx * 13})`}>
+                        <line x1={0} y1={0} x2={18} y2={0} stroke={color} strokeWidth={2} strokeDasharray={dash} />
+                        <text x={24} y={4} fill="rgba(255,255,255,0.75)" fontSize={9} fontFamily="sans-serif">{label}</text>
+                    </g>
+                ))}
             </g>
 
         </svg>

@@ -1,0 +1,1472 @@
+[
+  {
+    "id": "claim_1",
+    "label": "Prioritize Structural Preservation over Narrative Synthesis",
+    "direct": [
+      {
+        "statementId": "s_76",
+        "sim": 0.7907438606783633,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_4",
+        "sim": 0.7625111795019774,
+        "text": "This method seeks to reduce the risk of models ‘synthesizing’ an artificial truth — instead, it focuses on preserving the original structure of data, avoiding accidental loss of crucial information."
+      },
+      {
+        "statementId": "s_3",
+        "sim": 0.7599248242754234,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_49",
+        "sim": 0.7570506306632454,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_72",
+        "sim": 0.7499791856007975,
+        "text": "> \"It converts language into structural truth.\""
+      },
+      {
+        "statementId": "s_101",
+        "sim": 0.7430346768607485,
+        "text": "Instead of pretending to “understand” meaning, it treats language as *evidence* embedded in a geometric substrate."
+      },
+      {
+        "statementId": "s_106",
+        "sim": 0.7423102380920885,
+        "text": "It operationalizes a deep ethical stance: *information has structural value independent of its narrative utility*."
+      },
+      {
+        "statementId": "s_119",
+        "sim": 0.7383687061157137,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      },
+      {
+        "statementId": "s_51",
+        "sim": 0.7331492722896702,
+        "text": "You’re essentially treating model outputs like a physical landscape where \"truth\" is defined by **structural load** rather than \"vibes.\""
+      },
+      {
+        "statementId": "s_98",
+        "sim": 0.7282600597203329,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_34",
+        "weight": 1,
+        "text": "The commitment to surfacing structural forks rather than asking for preferences is sophisticated — it's a real insight about how to externalize intent without priming the user."
+      },
+      {
+        "statementId": "s_49",
+        "weight": 1,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_53",
+        "weight": 1,
+        "text": "| Traditional AI Synthesis | Singularity Geometry Pipeline |\n| :--- | :--- |\n| **Goal:** A cohesive, single-voiced summary."
+      },
+      {
+        "statementId": "s_84",
+        "weight": 1,
+        "text": "* It shifts the user’s role from \"Editor\" to \"Architect.\" You aren't just fixing typos; you’re ensuring the structural integrity of the knowledge base."
+      },
+      {
+        "statementId": "s_98",
+        "weight": 1,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_101",
+        "weight": 1,
+        "text": "Instead of pretending to “understand” meaning, it treats language as *evidence* embedded in a geometric substrate."
+      },
+      {
+        "statementId": "s_72",
+        "weight": 0.9650737156226209,
+        "text": "> \"It converts language into structural truth.\""
+      },
+      {
+        "statementId": "s_31",
+        "weight": 0.9198368300471795,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_126",
+        "weight": 0.8867731934551131,
+        "text": "This pipeline turns synthesis from a rhetorical act into a **forensic process**."
+      },
+      {
+        "statementId": "s_96",
+        "weight": 0.8708317900781964,
+        "text": "It’s the difference between a storyteller and a civil engineer."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_76",
+        "evidenceScore": 4.902947217953098,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 4.655761206943803,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_4",
+        "evidenceScore": 4.186619953678563,
+        "text": "This method seeks to reduce the risk of models ‘synthesizing’ an artificial truth — instead, it focuses on preserving the original structure of data, avoiding accidental loss of crucial information."
+      },
+      {
+        "statementId": "s_49",
+        "evidenceScore": 4.158721883671111,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_101",
+        "evidenceScore": 4.009738392719782,
+        "text": "Instead of pretending to “understand” meaning, it treats language as *evidence* embedded in a geometric substrate."
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 3.685423620715608,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_31",
+        "evidenceScore": 3.6824255877384986,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_51",
+        "evidenceScore": 3.549416158709149,
+        "text": "You’re essentially treating model outputs like a physical landscape where \"truth\" is defined by **structural load** rather than \"vibes.\""
+      },
+      {
+        "statementId": "s_119",
+        "evidenceScore": 3.479091576410738,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      },
+      {
+        "statementId": "s_106",
+        "evidenceScore": 3.3813460246392353,
+        "text": "It operationalizes a deep ethical stance: *information has structural value independent of its narrative utility*."
+      }
+    ]
+  },
+  {
+    "id": "claim_2",
+    "label": "Operationalize Ethics via Irreplaceability Metrics",
+    "direct": [
+      {
+        "statementId": "s_60",
+        "sim": 0.8040795469274196,
+        "text": "* **The \"Irreplaceability\" Metric:** This is your \"killer app.\" In a world drowning in generated text, the only thing that matters is: *“If I delete this, what do I lose that I can't find elsewhere?”* That’s a measurable, objective anchor for human judgment."
+      },
+      {
+        "statementId": "s_83",
+        "sim": 0.7849291875173474,
+        "text": "* By measuring the **\"blast radius\"** of a deletion, you turn editing from a subjective whim into a tactical maneuver."
+      },
+      {
+        "statementId": "s_5",
+        "sim": 0.761927883485902,
+        "text": "The **irreplaceability metrics** serve as a moral backbone, ensuring that any decision-making or pruning of information comes with a full understanding of the structural consequences."
+      },
+      {
+        "statementId": "s_9",
+        "sim": 0.7489611426822963,
+        "text": "The **irreplaceability metric** becomes a safeguard for keeping essential information intact."
+      },
+      {
+        "statementId": "s_54",
+        "sim": 0.7384385475163956,
+        "text": "| **Goal:** Mapping the irreplaceability of claims."
+      },
+      {
+        "statementId": "s_106",
+        "sim": 0.7215133508154953,
+        "text": "It operationalizes a deep ethical stance: *information has structural value independent of its narrative utility*."
+      },
+      {
+        "statementId": "s_24",
+        "sim": 0.7084841092848662,
+        "text": "- **Performance in ambiguous contexts:** The system’s focus on **irreplaceability metrics** might struggle in highly ambiguous or poorly structured data, where relationships between claims are weak or inconclusive."
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.7040052485851455,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_56",
+        "sim": 0.6902107497479975,
+        "text": "| **Mechanism:** Topological friction and blast radius."
+      },
+      {
+        "statementId": "s_98",
+        "sim": 0.6815140750395049,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_5",
+        "weight": 1,
+        "text": "The **irreplaceability metrics** serve as a moral backbone, ensuring that any decision-making or pruning of information comes with a full understanding of the structural consequences."
+      },
+      {
+        "statementId": "s_9",
+        "weight": 1,
+        "text": "The **irreplaceability metric** becomes a safeguard for keeping essential information intact."
+      },
+      {
+        "statementId": "s_44",
+        "weight": 1,
+        "text": "That's a real audience — researchers, policy teams, investigative journalists."
+      },
+      {
+        "statementId": "s_55",
+        "weight": 1,
+        "text": "|\n| **Mechanism:** Averaging or \"best-of\" selection."
+      },
+      {
+        "statementId": "s_60",
+        "weight": 1,
+        "text": "* **The \"Irreplaceability\" Metric:** This is your \"killer app.\" In a world drowning in generated text, the only thing that matters is: *“If I delete this, what do I lose that I can't find elsewhere?”* That’s a measurable, objective anchor for human judgment."
+      },
+      {
+        "statementId": "s_83",
+        "weight": 1,
+        "text": "* By measuring the **\"blast radius\"** of a deletion, you turn editing from a subjective whim into a tactical maneuver."
+      },
+      {
+        "statementId": "s_102",
+        "weight": 0.886347719438104,
+        "text": "This is a radical but necessary humility."
+      },
+      {
+        "statementId": "s_17",
+        "weight": 0.8439604409981684,
+        "text": "It also ensures users are always working within a controlled, reversible environment — which is critical for keeping the integrity of decisions intact."
+      },
+      {
+        "statementId": "s_56",
+        "weight": 0.7927905095104906,
+        "text": "| **Mechanism:** Topological friction and blast radius."
+      },
+      {
+        "statementId": "s_6",
+        "weight": 0.7926323646160945,
+        "text": "This system could be a real boon in fields where accountability and precision are paramount — investigative reporting, policy-making, research, etc."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_60",
+        "evidenceScore": 6.732731115629138,
+        "text": "* **The \"Irreplaceability\" Metric:** This is your \"killer app.\" In a world drowning in generated text, the only thing that matters is: *“If I delete this, what do I lose that I can't find elsewhere?”* That’s a measurable, objective anchor for human judgment."
+      },
+      {
+        "statementId": "s_5",
+        "evidenceScore": 5.328596687561523,
+        "text": "The **irreplaceability metrics** serve as a moral backbone, ensuring that any decision-making or pruning of information comes with a full understanding of the structural consequences."
+      },
+      {
+        "statementId": "s_9",
+        "evidenceScore": 4.911850179294136,
+        "text": "The **irreplaceability metric** becomes a safeguard for keeping essential information intact."
+      },
+      {
+        "statementId": "s_54",
+        "evidenceScore": 4.503907575328437,
+        "text": "| **Goal:** Mapping the irreplaceability of claims."
+      },
+      {
+        "statementId": "s_83",
+        "evidenceScore": 4.434484374167823,
+        "text": "* By measuring the **\"blast radius\"** of a deletion, you turn editing from a subjective whim into a tactical maneuver."
+      },
+      {
+        "statementId": "s_76",
+        "evidenceScore": 4.313357430519778,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_106",
+        "evidenceScore": 3.9249374019855097,
+        "text": "It operationalizes a deep ethical stance: *information has structural value independent of its narrative utility*."
+      },
+      {
+        "statementId": "s_24",
+        "evidenceScore": 3.4701099947944307,
+        "text": "- **Performance in ambiguous contexts:** The system’s focus on **irreplaceability metrics** might struggle in highly ambiguous or poorly structured data, where relationships between claims are weak or inconclusive."
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 3.023778212180379,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_58",
+        "evidenceScore": 2.994162218417645,
+        "text": "|\n| **Risk:** Silent loss of edge-case information."
+      }
+    ]
+  },
+  {
+    "id": "claim_3",
+    "label": "Bifurcate UI into Concierge and Lab Modes",
+    "direct": [
+      {
+        "statementId": "s_61",
+        "sim": 0.8174225455776846,
+        "text": "* **The \"Concierge\" vs. \"Lab\" Split:** You’ve solved the \"UX of Complexity\" problem by making the depth optional."
+      },
+      {
+        "statementId": "s_111",
+        "sim": 0.7851954065627642,
+        "text": "Casual users get a clean synthesis (the “Concierge”), while power users can dive into “Council Orbs” or “Decision Maps”—but crucially, *exploration never overwrites*."
+      },
+      {
+        "statementId": "s_15",
+        "sim": 0.7598196746564936,
+        "text": "This approach strikes a balance between **powerful abstraction** (Concierge mode) and **detailed, non-destructive analysis** (Traversal, Council Orbs, Decision Map)."
+      },
+      {
+        "statementId": "s_22",
+        "sim": 0.7258588893193028,
+        "text": "- **Complexity for novices:** While the system does a great job at reducing cognitive load for the everyday user, the deeper functionality (such as the graph snapshots and traversal modes) may still overwhelm those who aren’t familiar with this kind of decision support."
+      },
+      {
+        "statementId": "s_91",
+        "sim": 0.7143933047557558,
+        "text": "If the \"Concierge\" experience lags because the \"Geometry\" is still being computed, users might revert to the \"seductive comfort\" of a faster, dumber LLM."
+      },
+      {
+        "statementId": "s_7",
+        "sim": 0.7134663561001832,
+        "text": "It’s a systemic approach to complexity, pushing the user to grapple with consequences instead of settling for easy answers."
+      },
+      {
+        "statementId": "s_85",
+        "sim": 0.7111500480575105,
+        "text": "* **The \"Concierge\" path** handles the 90% of use cases where people just need a synthesis they can trust."
+      },
+      {
+        "statementId": "s_14",
+        "sim": 0.7048362360698701,
+        "text": "This dynamic flexibility could accommodate different types of users, from casual decision-makers to power users engaged in detailed exploration."
+      },
+      {
+        "statementId": "s_59",
+        "sim": 0.7039245089453938,
+        "text": "| **Risk:** High cognitive load (mitigated by \"Concierge\")."
+      },
+      {
+        "statementId": "s_49",
+        "sim": 0.6977381467938572,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_7",
+        "weight": 1,
+        "text": "It’s a systemic approach to complexity, pushing the user to grapple with consequences instead of settling for easy answers."
+      },
+      {
+        "statementId": "s_8",
+        "weight": 1,
+        "text": "The system doesn’t \"decide\" — it shows users where decisions would matter most, helping them visualize the cascading effects of their actions."
+      },
+      {
+        "statementId": "s_12",
+        "weight": 1,
+        "text": "The system recognizes that most users will want simplicity, so the default view is a readable synthesis."
+      },
+      {
+        "statementId": "s_13",
+        "weight": 1,
+        "text": "But, crucially, it provides easy access to more granular levels of analysis without forcing users down that path."
+      },
+      {
+        "statementId": "s_14",
+        "weight": 1,
+        "text": "This dynamic flexibility could accommodate different types of users, from casual decision-makers to power users engaged in detailed exploration."
+      },
+      {
+        "statementId": "s_15",
+        "weight": 1,
+        "text": "This approach strikes a balance between **powerful abstraction** (Concierge mode) and **detailed, non-destructive analysis** (Traversal, Council Orbs, Decision Map)."
+      },
+      {
+        "statementId": "s_21",
+        "weight": 1,
+        "text": "The visualization and interface for this concept will need to be exceptionally intuitive."
+      },
+      {
+        "statementId": "s_59",
+        "weight": 1,
+        "text": "| **Risk:** High cognitive load (mitigated by \"Concierge\")."
+      },
+      {
+        "statementId": "s_61",
+        "weight": 1,
+        "text": "* **The \"Concierge\" vs. \"Lab\" Split:** You’ve solved the \"UX of Complexity\" problem by making the depth optional."
+      },
+      {
+        "statementId": "s_64",
+        "weight": 1,
+        "text": "It moves the user from \"Prompt Engineer\" to \"System Adjudicator.\""
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_61",
+        "evidenceScore": 6.020549951704449,
+        "text": "* **The \"Concierge\" vs. \"Lab\" Split:** You’ve solved the \"UX of Complexity\" problem by making the depth optional."
+      },
+      {
+        "statementId": "s_111",
+        "evidenceScore": 5.4491412483252475,
+        "text": "Casual users get a clean synthesis (the “Concierge”), while power users can dive into “Council Orbs” or “Decision Maps”—but crucially, *exploration never overwrites*."
+      },
+      {
+        "statementId": "s_15",
+        "evidenceScore": 5.357840983642718,
+        "text": "This approach strikes a balance between **powerful abstraction** (Concierge mode) and **detailed, non-destructive analysis** (Traversal, Council Orbs, Decision Map)."
+      },
+      {
+        "statementId": "s_7",
+        "evidenceScore": 3.983847198156593,
+        "text": "It’s a systemic approach to complexity, pushing the user to grapple with consequences instead of settling for easy answers."
+      },
+      {
+        "statementId": "s_16",
+        "evidenceScore": 3.909978917093447,
+        "text": "By offering tools that allow users to explore deeper layers without overwhelming them, it seems to democratize deep analytic power."
+      },
+      {
+        "statementId": "s_22",
+        "evidenceScore": 3.7139857589172047,
+        "text": "- **Complexity for novices:** While the system does a great job at reducing cognitive load for the everyday user, the deeper functionality (such as the graph snapshots and traversal modes) may still overwhelm those who aren’t familiar with this kind of decision support."
+      },
+      {
+        "statementId": "s_49",
+        "evidenceScore": 3.512232043035243,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_14",
+        "evidenceScore": 3.510889736092773,
+        "text": "This dynamic flexibility could accommodate different types of users, from casual decision-makers to power users engaged in detailed exploration."
+      },
+      {
+        "statementId": "s_34",
+        "evidenceScore": 3.2543177424953833,
+        "text": "The commitment to surfacing structural forks rather than asking for preferences is sophisticated — it's a real insight about how to externalize intent without priming the user."
+      },
+      {
+        "statementId": "s_91",
+        "evidenceScore": 3.185907615734407,
+        "text": "If the \"Concierge\" experience lags because the \"Geometry\" is still being computed, users might revert to the \"seductive comfort\" of a faster, dumber LLM."
+      }
+    ]
+  },
+  {
+    "id": "claim_4",
+    "label": "Enforce Honest Degradation of Certainty",
+    "direct": [
+      {
+        "statementId": "s_105",
+        "sim": 0.7542281121261709,
+        "text": "Most systems hide uncertainty; this one weaponizes it as a design principle."
+      },
+      {
+        "statementId": "s_18",
+        "sim": 0.7488255525297206,
+        "text": "Unlike other AI systems that might obscure or downplay uncertainty, this system directly flags mismatches or collapsing embeddings."
+      },
+      {
+        "statementId": "s_39",
+        "sim": 0.7453040669948614,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_69",
+        "sim": 0.7371266558639655,
+        "text": "Your commitment to \"Honest Degradation\" needs to be incredibly loud here to prevent the math from accidentally silencing dissent."
+      },
+      {
+        "statementId": "s_119",
+        "sim": 0.7347489900970708,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      },
+      {
+        "statementId": "s_80",
+        "sim": 0.7344770018675597,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      },
+      {
+        "statementId": "s_110",
+        "sim": 0.7319485017185308,
+        "text": "But if one obscure report contradicts consensus yet anchors a unique basin of evidence, the system flags it—not because it’s “correct,” but because it’s *structurally singular*."
+      },
+      {
+        "statementId": "s_51",
+        "sim": 0.7312887484645806,
+        "text": "You’re essentially treating model outputs like a physical landscape where \"truth\" is defined by **structural load** rather than \"vibes.\""
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.7292872747470591,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_108",
+        "sim": 0.7274900507743924,
+        "text": "The system doesn’t ask “Is this true?” but “What breaks if this is gone?” That shift—from verification to consequence—feels both pragmatic and profound."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_25",
+        "weight": 1,
+        "text": "The manifesto articulates a system that functions not as a provider of quick answers but as a safeguard for accurate, deliberate action."
+      },
+      {
+        "statementId": "s_37",
+        "weight": 1,
+        "text": "Phrases like \"mutual recognition via distribution-relative thresholds\" and \"competitive provenance\" sound precise but describe genuinely hard, unsolved problems."
+      },
+      {
+        "statementId": "s_69",
+        "weight": 1,
+        "text": "Your commitment to \"Honest Degradation\" needs to be incredibly loud here to prevent the math from accidentally silencing dissent."
+      },
+      {
+        "statementId": "s_108",
+        "weight": 1,
+        "text": "The system doesn’t ask “Is this true?” but “What breaks if this is gone?” That shift—from verification to consequence—feels both pragmatic and profound."
+      },
+      {
+        "statementId": "s_110",
+        "weight": 1,
+        "text": "But if one obscure report contradicts consensus yet anchors a unique basin of evidence, the system flags it—not because it’s “correct,” but because it’s *structurally singular*."
+      },
+      {
+        "statementId": "s_122",
+        "weight": 1,
+        "text": "Most tools would smooth over ambiguity; this one **amplifies it as a warning**."
+      },
+      {
+        "statementId": "s_10",
+        "weight": 0.9946291080238846,
+        "text": "It's a non-compromising tool for ensuring that nothing valuable is discarded inadvertently."
+      },
+      {
+        "statementId": "s_58",
+        "weight": 0.9809933934704659,
+        "text": "|\n| **Risk:** Silent loss of edge-case information."
+      },
+      {
+        "statementId": "s_105",
+        "weight": 0.9542341445484059,
+        "text": "Most systems hide uncertainty; this one weaponizes it as a design principle."
+      },
+      {
+        "statementId": "s_48",
+        "weight": 0.9199208580356485,
+        "text": "The manifesto would be stronger if it spent one honest paragraph on where the geometry actually fails and what the fallback experience feels like in practice, rather than just promising that failure modes are \"flagged.\""
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_18",
+        "evidenceScore": 3.591586687485542,
+        "text": "Unlike other AI systems that might obscure or downplay uncertainty, this system directly flags mismatches or collapsing embeddings."
+      },
+      {
+        "statementId": "s_39",
+        "evidenceScore": 3.450497874697638,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_105",
+        "evidenceScore": 3.3254314711954867,
+        "text": "Most systems hide uncertainty; this one weaponizes it as a design principle."
+      },
+      {
+        "statementId": "s_76",
+        "evidenceScore": 3.2793079441397888,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 3.1498786559635206,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_31",
+        "evidenceScore": 3.085125856871197,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_4",
+        "evidenceScore": 3.0650082279239887,
+        "text": "This method seeks to reduce the risk of models ‘synthesizing’ an artificial truth — instead, it focuses on preserving the original structure of data, avoiding accidental loss of crucial information."
+      },
+      {
+        "statementId": "s_110",
+        "evidenceScore": 3.049929350637031,
+        "text": "But if one obscure report contradicts consensus yet anchors a unique basin of evidence, the system flags it—not because it’s “correct,” but because it’s *structurally singular*."
+      },
+      {
+        "statementId": "s_51",
+        "evidenceScore": 3.027740065494182,
+        "text": "You’re essentially treating model outputs like a physical landscape where \"truth\" is defined by **structural load** rather than \"vibes.\""
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 3.023690753478932,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      }
+    ]
+  },
+  {
+    "id": "claim_5",
+    "label": "Account for Embedding Space Pathologies",
+    "direct": [
+      {
+        "statementId": "s_39",
+        "sim": 0.8836920101240937,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_80",
+        "sim": 0.8330611893020601,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.7425145901552029,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_65",
+        "sim": 0.7420670730882761,
+        "text": "> **\"Embeddings are a coordinate system, not a law.\"**"
+      },
+      {
+        "statementId": "s_3",
+        "sim": 0.7348721819954958,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_120",
+        "sim": 0.7124777128342671,
+        "text": "Embeddings *do* collapse—especially in low-variance domains (e.g., legal boilerplate, repetitive reports)."
+      },
+      {
+        "statementId": "s_67",
+        "sim": 0.7116277554099915,
+        "text": "The biggest risk is **semantic drift.** Two sentences can be geometrically close (high cosine similarity) but logically opposite (e.g., \"The drug is safe\" vs. \"The drug is not safe\")."
+      },
+      {
+        "statementId": "s_77",
+        "sim": 0.7070206162835359,
+        "text": "Here are my thoughts on the strengths, the risks, and the underlying \"vibe\" of the Singularity Geometry Pipeline."
+      },
+      {
+        "statementId": "s_31",
+        "sim": 0.7061164674273352,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_98",
+        "sim": 0.7004060498630423,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_39",
+        "weight": 1,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_77",
+        "weight": 1,
+        "text": "Here are my thoughts on the strengths, the risks, and the underlying \"vibe\" of the Singularity Geometry Pipeline."
+      },
+      {
+        "statementId": "s_80",
+        "weight": 0.8903286667615175,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      },
+      {
+        "statementId": "s_65",
+        "weight": 0.7800674383189163,
+        "text": "> **\"Embeddings are a coordinate system, not a law.\"**"
+      },
+      {
+        "statementId": "s_92",
+        "weight": 0.5947343843412146,
+        "text": "* **The \"So What?\" Factor:** For the casual user, \"topology\" sounds like a math homework assignment."
+      },
+      {
+        "statementId": "s_40",
+        "weight": 0.5306518761299709,
+        "text": "The manifesto gestures at this briefly (\"embeddings are a coordinate system, not a law\") but doesn't reckon with how badly this can degrade in practice."
+      },
+      {
+        "statementId": "s_38",
+        "weight": 0.42317382696898886,
+        "text": "The document asserts these work without acknowledging how sensitive the results are to embedding model choice, dimensionality, clustering parameters, and domain."
+      },
+      {
+        "statementId": "s_56",
+        "weight": 0.20720949048950946,
+        "text": "| **Mechanism:** Topological friction and blast radius."
+      },
+      {
+        "statementId": "s_31",
+        "weight": 0.08016316995282045,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_39",
+        "evidenceScore": 6.380439205978156,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_80",
+        "evidenceScore": 5.5632388471597025,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 4.228080958502414,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_76",
+        "evidenceScore": 4.160506237712888,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_31",
+        "evidenceScore": 3.7356435752636434,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_65",
+        "evidenceScore": 3.4849374109088824,
+        "text": "> **\"Embeddings are a coordinate system, not a law.\"**"
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 3.2684004342502466,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_101",
+        "evidenceScore": 3.0893730917771824,
+        "text": "Instead of pretending to “understand” meaning, it treats language as *evidence* embedded in a geometric substrate."
+      },
+      {
+        "statementId": "s_18",
+        "evidenceScore": 3.054543496434379,
+        "text": "Unlike other AI systems that might obscure or downplay uncertainty, this system directly flags mismatches or collapsing embeddings."
+      },
+      {
+        "statementId": "s_120",
+        "evidenceScore": 2.9127876341923655,
+        "text": "Embeddings *do* collapse—especially in low-variance domains (e.g., legal boilerplate, repetitive reports)."
+      }
+    ]
+  },
+  {
+    "id": "claim_6",
+    "label": "Guard Against Logical Semantic Drift",
+    "direct": [
+      {
+        "statementId": "s_67",
+        "sim": 0.8359210457129952,
+        "text": "The biggest risk is **semantic drift.** Two sentences can be geometrically close (high cosine similarity) but logically opposite (e.g., \"The drug is safe\" vs. \"The drug is not safe\")."
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.7914775312349241,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_80",
+        "sim": 0.7637918573005099,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      },
+      {
+        "statementId": "s_3",
+        "sim": 0.759744937395988,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_119",
+        "sim": 0.7529459688470076,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      },
+      {
+        "statementId": "s_18",
+        "sim": 0.7339603126700806,
+        "text": "Unlike other AI systems that might obscure or downplay uncertainty, this system directly flags mismatches or collapsing embeddings."
+      },
+      {
+        "statementId": "s_39",
+        "sim": 0.7323386312876287,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_4",
+        "sim": 0.730425228465021,
+        "text": "This method seeks to reduce the risk of models ‘synthesizing’ an artificial truth — instead, it focuses on preserving the original structure of data, avoiding accidental loss of crucial information."
+      },
+      {
+        "statementId": "s_98",
+        "sim": 0.713086382668784,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_103",
+        "sim": 0.7079955156780133,
+        "text": "By anchoring truth in *preservation cost* rather than coherence or plausibility, it sidesteps the hallucination trap not by policing content, but by making fragility visible."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_67",
+        "weight": 1,
+        "text": "The biggest risk is **semantic drift.** Two sentences can be geometrically close (high cosine similarity) but logically opposite (e.g., \"The drug is safe\" vs. \"The drug is not safe\")."
+      },
+      {
+        "statementId": "s_89",
+        "weight": 1,
+        "text": "Instead of picking a \"winner\" model, you let the models fight for territory in the vector space."
+      },
+      {
+        "statementId": "s_95",
+        "weight": 1,
+        "text": "It moves the needle from **Generative AI** (which adds noise) to **Structural AI** (which identifies signal)."
+      },
+      {
+        "statementId": "s_76",
+        "weight": 0.5081577957634223,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_94",
+        "weight": 0.4675406605151915,
+        "text": "It’s dense, defensive of human agency, and deeply skeptical of the \"black box\" nature of current AI."
+      },
+      {
+        "statementId": "s_50",
+        "weight": 0.46326730024259155,
+        "text": "It’s refreshingly cynical about \"semantic understanding\" and leans into what high-dimensional models actually are: math."
+      },
+      {
+        "statementId": "s_70",
+        "weight": 0.3457380102757093,
+        "text": "It doesn’t ask us to trust the AI; it asks us to look at the structural consequences of our own choices."
+      },
+      {
+        "statementId": "s_68",
+        "weight": 0.2713060225252281,
+        "text": "If the geometry sees them as the same \"basin,\" it might flag one as replaceable when it’s actually a contradiction."
+      },
+      {
+        "statementId": "s_52",
+        "weight": 0.15245851442901637,
+        "text": "Your pipeline does the opposite—it treats the mess as data."
+      },
+      {
+        "statementId": "s_80",
+        "weight": 0.10967133323848258,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_76",
+        "evidenceScore": 4.516460457566096,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 4.473296788591556,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_67",
+        "evidenceScore": 4.244526391049737,
+        "text": "The biggest risk is **semantic drift.** Two sentences can be geometrically close (high cosine similarity) but logically opposite (e.g., \"The drug is safe\" vs. \"The drug is not safe\")."
+      },
+      {
+        "statementId": "s_119",
+        "evidenceScore": 3.6063677564990444,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      },
+      {
+        "statementId": "s_80",
+        "evidenceScore": 3.5869776620043194,
+        "text": "* **The Risk:** You are at the mercy of the **embedding model’s resolution.** If the vector space doesn’t capture a subtle but vital logical distinction, the \"geometry\" will be flat where it should be jagged."
+      },
+      {
+        "statementId": "s_18",
+        "evidenceScore": 3.4510713480464172,
+        "text": "Unlike other AI systems that might obscure or downplay uncertainty, this system directly flags mismatches or collapsing embeddings."
+      },
+      {
+        "statementId": "s_4",
+        "evidenceScore": 3.325887084018924,
+        "text": "This method seeks to reduce the risk of models ‘synthesizing’ an artificial truth — instead, it focuses on preserving the original structure of data, avoiding accidental loss of crucial information."
+      },
+      {
+        "statementId": "s_39",
+        "evidenceScore": 3.260136998052809,
+        "text": "Geometry-based structure is only as honest as the embedding space — and embedding spaces have well-known pathologies (anisotropy, hubness, domain drift)."
+      },
+      {
+        "statementId": "s_31",
+        "evidenceScore": 3.037230763248137,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 3.0224075245163196,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      }
+    ]
+  },
+  {
+    "id": "claim_7",
+    "label": "Expose Pre-Geometric Semantic Cuts",
+    "direct": [
+      {
+        "statementId": "s_76",
+        "sim": 0.7512825794987971,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_42",
+        "sim": 0.7495370298569719,
+        "text": "The system can't fully escape semantics; it just pushes the semantic choices earlier in the pipeline, where they're less visible."
+      },
+      {
+        "statementId": "s_98",
+        "sim": 0.7000741003170032,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_101",
+        "sim": 0.699021118939545,
+        "text": "Instead of pretending to “understand” meaning, it treats language as *evidence* embedded in a geometric substrate."
+      },
+      {
+        "statementId": "s_68",
+        "sim": 0.6920471645702446,
+        "text": "If the geometry sees them as the same \"basin,\" it might flag one as replaceable when it’s actually a contradiction."
+      },
+      {
+        "statementId": "s_90",
+        "sim": 0.6917205679193407,
+        "text": "The user doesn't see \"Model A vs. Model B\"; they see \"Claim A vs. Claim B\" and where they overlap."
+      },
+      {
+        "statementId": "s_104",
+        "sim": 0.6897250195454498,
+        "text": "> “When the geometry lies, the system says ‘I can’t decide’.”  \nThat line alone is worth the price of admission."
+      },
+      {
+        "statementId": "s_54",
+        "sim": 0.6881291314237563,
+        "text": "| **Goal:** Mapping the irreplaceability of claims."
+      },
+      {
+        "statementId": "s_3",
+        "sim": 0.6794573527016399,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_73",
+        "sim": 0.675994226045904,
+        "text": "That line is a heavy lift, but if the pipeline can actually visualize the \"blast radius\" of a deleted claim, it transforms synthesis from a creative act into a **defensible one.**"
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_42",
+        "weight": 0.9221464718293166,
+        "text": "The system can't fully escape semantics; it just pushes the semantic choices earlier in the pipeline, where they're less visible."
+      },
+      {
+        "statementId": "s_41",
+        "weight": 0.36591169819864156,
+        "text": "There's also a slight tension in the \"no semantic privilege\" commitment."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_76",
+        "evidenceScore": 5.606445911347986,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_42",
+        "evidenceScore": 4.824893308889862,
+        "text": "The system can't fully escape semantics; it just pushes the semantic choices earlier in the pipeline, where they're less visible."
+      },
+      {
+        "statementId": "s_101",
+        "evidenceScore": 4.280859497065734,
+        "text": "Instead of pretending to “understand” meaning, it treats language as *evidence* embedded in a geometric substrate."
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 3.9512935267229325,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 3.9076851658430183,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_68",
+        "evidenceScore": 3.243391244512902,
+        "text": "If the geometry sees them as the same \"basin,\" it might flag one as replaceable when it’s actually a contradiction."
+      },
+      {
+        "statementId": "s_119",
+        "evidenceScore": 3.1910843702924225,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      },
+      {
+        "statementId": "s_104",
+        "evidenceScore": 3.1205591311252228,
+        "text": "> “When the geometry lies, the system says ‘I can’t decide’.”  \nThat line alone is worth the price of admission."
+      },
+      {
+        "statementId": "s_90",
+        "evidenceScore": 2.8502931441985213,
+        "text": "The user doesn't see \"Model A vs. Model B\"; they see \"Claim A vs. Claim B\" and where they overlap."
+      },
+      {
+        "statementId": "s_117",
+        "evidenceScore": 2.767490625737496,
+        "text": "Here, semantics are *optional overlays*, not foundational assumptions."
+      }
+    ]
+  },
+  {
+    "id": "claim_8",
+    "label": "Optimize for Computational Feasibility",
+    "direct": [
+      {
+        "statementId": "s_61",
+        "sim": 0.6947785188235551,
+        "text": "* **The \"Concierge\" vs. \"Lab\" Split:** You’ve solved the \"UX of Complexity\" problem by making the depth optional."
+      },
+      {
+        "statementId": "s_127",
+        "sim": 0.6935934231907485,
+        "text": "For builders of compositional AI systems, it’s even more vital: if you’re chaining models, you *must* know which outputs carry unique signal versus redundant echo."
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.6831749884293135,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_22",
+        "sim": 0.6831264568156831,
+        "text": "- **Complexity for novices:** While the system does a great job at reducing cognitive load for the everyday user, the deeper functionality (such as the graph snapshots and traversal modes) may still overwhelm those who aren’t familiar with this kind of decision support."
+      },
+      {
+        "statementId": "s_49",
+        "sim": 0.6827851606202819,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_67",
+        "sim": 0.6741656640349186,
+        "text": "The biggest risk is **semantic drift.** Two sentences can be geometrically close (high cosine similarity) but logically opposite (e.g., \"The drug is safe\" vs. \"The drug is not safe\")."
+      },
+      {
+        "statementId": "s_24",
+        "sim": 0.6709895339406478,
+        "text": "- **Performance in ambiguous contexts:** The system’s focus on **irreplaceability metrics** might struggle in highly ambiguous or poorly structured data, where relationships between claims are weak or inconclusive."
+      },
+      {
+        "statementId": "s_91",
+        "sim": 0.663220639861321,
+        "text": "If the \"Concierge\" experience lags because the \"Geometry\" is still being computed, users might revert to the \"seductive comfort\" of a faster, dumber LLM."
+      },
+      {
+        "statementId": "s_33",
+        "sim": 0.6631967354758386,
+        "text": "It sidesteps the trap most AI synthesis tools fall into: pretending to resolve uncertainty by burying it in confident-sounding prose."
+      },
+      {
+        "statementId": "s_23",
+        "sim": 0.6611814867819855,
+        "text": "Even with clear separation between simple and deep modes, there might still be a steep learning curve to understand the nuances of these tools."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_88",
+        "weight": 0.9002228350762671,
+        "text": "In high-stakes research, knowing *why* you pivoted at 2:00 PM on a Tuesday is often more important than the pivot itself."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_76",
+        "evidenceScore": 3.988187669590445,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_127",
+        "evidenceScore": 3.765590958487076,
+        "text": "For builders of compositional AI systems, it’s even more vital: if you’re chaining models, you *must* know which outputs carry unique signal versus redundant echo."
+      },
+      {
+        "statementId": "s_49",
+        "evidenceScore": 3.7338481350761175,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_61",
+        "evidenceScore": 3.491965243277792,
+        "text": "* **The \"Concierge\" vs. \"Lab\" Split:** You’ve solved the \"UX of Complexity\" problem by making the depth optional."
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 3.2895591525585406,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_31",
+        "evidenceScore": 3.1612031445705986,
+        "text": "The core idea — treating multi-model output as geometric structure and measuring irreplaceability rather than synthesizing meaning — is genuinely interesting and addresses a real problem."
+      },
+      {
+        "statementId": "s_33",
+        "evidenceScore": 3.1169817990712056,
+        "text": "It sidesteps the trap most AI synthesis tools fall into: pretending to resolve uncertainty by burying it in confident-sounding prose."
+      },
+      {
+        "statementId": "s_23",
+        "evidenceScore": 2.917413453932573,
+        "text": "Even with clear separation between simple and deep modes, there might still be a steep learning curve to understand the nuances of these tools."
+      },
+      {
+        "statementId": "s_4",
+        "evidenceScore": 2.8755295161314764,
+        "text": "This method seeks to reduce the risk of models ‘synthesizing’ an artificial truth — instead, it focuses on preserving the original structure of data, avoiding accidental loss of crucial information."
+      },
+      {
+        "statementId": "s_67",
+        "evidenceScore": 2.78731066129104,
+        "text": "The biggest risk is **semantic drift.** Two sentences can be geometrically close (high cosine similarity) but logically opposite (e.g., \"The drug is safe\" vs. \"The drug is not safe\")."
+      }
+    ]
+  },
+  {
+    "id": "claim_9",
+    "label": "Address Temporal Obsolescence",
+    "direct": [
+      {
+        "statementId": "s_129",
+        "sim": 0.8286954542573803,
+        "text": "The manifesto mentions immutable snapshots—but real-world decision-making often requires *diachronic* analysis."
+      },
+      {
+        "statementId": "s_128",
+        "sim": 0.7211543573772428,
+        "text": "A paragraph might be irreplaceable today but obsolete tomorrow."
+      },
+      {
+        "statementId": "s_54",
+        "sim": 0.7161460472994168,
+        "text": "| **Goal:** Mapping the irreplaceability of claims."
+      },
+      {
+        "statementId": "s_99",
+        "sim": 0.7079144242792835,
+        "text": "It reads less like a product spec and more like a *constitutional document* for responsible epistemic tooling in the age of multi-model uncertainty."
+      },
+      {
+        "statementId": "s_98",
+        "sim": 0.7055444227301862,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_60",
+        "sim": 0.7018960954700817,
+        "text": "* **The \"Irreplaceability\" Metric:** This is your \"killer app.\" In a world drowning in generated text, the only thing that matters is: *“If I delete this, what do I lose that I can't find elsewhere?”* That’s a measurable, objective anchor for human judgment."
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.699821069001491,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_27",
+        "sim": 0.6934914696383113,
+        "text": "**Final Thoughts:** This manifesto articulates a unique, principled approach to handling multi-model outputs."
+      },
+      {
+        "statementId": "s_49",
+        "sim": 0.6927610557915078,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_82",
+        "sim": 0.6866878835672928,
+        "text": "In a world of infinite LLM summarization, we are losing the \"texture\" of original thought."
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_128",
+        "weight": 1,
+        "text": "A paragraph might be irreplaceable today but obsolete tomorrow."
+      },
+      {
+        "statementId": "s_129",
+        "weight": 1,
+        "text": "The manifesto mentions immutable snapshots—but real-world decision-making often requires *diachronic* analysis."
+      },
+      {
+        "statementId": "s_100",
+        "weight": 0.7838683312935166,
+        "text": "Here are some thoughts, organized by theme:"
+      },
+      {
+        "statementId": "s_99",
+        "weight": 0.5275602295709648,
+        "text": "It reads less like a product spec and more like a *constitutional document* for responsible epistemic tooling in the age of multi-model uncertainty."
+      },
+      {
+        "statementId": "s_107",
+        "weight": 0.506341063991115,
+        "text": "This aligns with archival science, journalism, and scientific reproducibility."
+      },
+      {
+        "statementId": "s_118",
+        "weight": 0.5024195396655418,
+        "text": "The geometry comes first; labels are annotations you can toggle on—if you dare."
+      },
+      {
+        "statementId": "s_116",
+        "weight": 0.4256267793758505,
+        "text": "Too many systems impose categories (“this is a claim about climate policy”) based on shallow heuristics."
+      },
+      {
+        "statementId": "s_115",
+        "weight": 0.40242045045568586,
+        "text": "This offers *scalable agency*: the same turn supports both a policymaker skimming conclusions and an investigator tracing provenance through competitive claim graphs."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_129",
+        "evidenceScore": 5.745158818662013,
+        "text": "The manifesto mentions immutable snapshots—but real-world decision-making often requires *diachronic* analysis."
+      },
+      {
+        "statementId": "s_98",
+        "evidenceScore": 4.181339992216865,
+        "text": "This **“Singularity Geometry Pipeline — Manifesto”** is a compelling, philosophically grounded vision for a new class of AI-assisted reasoning systems—one that deliberately eschews the seduction of semantic fluency in favor of **structural honesty**."
+      },
+      {
+        "statementId": "s_76",
+        "evidenceScore": 3.8349470748604393,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_99",
+        "evidenceScore": 3.7492209733771524,
+        "text": "It reads less like a product spec and more like a *constitutional document* for responsible epistemic tooling in the age of multi-model uncertainty."
+      },
+      {
+        "statementId": "s_49",
+        "evidenceScore": 3.6234586939935585,
+        "text": "This manifesto is a sophisticated pivot away from the current AI trend of \"more synthesis, more polish.\" Instead of trying to make the AI a better writer, you’re making it a better **structural engineer**."
+      },
+      {
+        "statementId": "s_3",
+        "evidenceScore": 3.3534289931386208,
+        "text": "The emphasis on geometry as the source of truth, rather than semantic interpretation, challenges conventional wisdom in AI systems that often rely on model consensus or narrative-driven outputs."
+      },
+      {
+        "statementId": "s_128",
+        "evidenceScore": 3.241421829602868,
+        "text": "A paragraph might be irreplaceable today but obsolete tomorrow."
+      },
+      {
+        "statementId": "s_54",
+        "evidenceScore": 3.06651645819608,
+        "text": "| **Goal:** Mapping the irreplaceability of claims."
+      },
+      {
+        "statementId": "s_27",
+        "evidenceScore": 3.0388674842421772,
+        "text": "**Final Thoughts:** This manifesto articulates a unique, principled approach to handling multi-model outputs."
+      },
+      {
+        "statementId": "s_60",
+        "evidenceScore": 2.980751725180899,
+        "text": "* **The \"Irreplaceability\" Metric:** This is your \"killer app.\" In a world drowning in generated text, the only thing that matters is: *“If I delete this, what do I lose that I can't find elsewhere?”* That’s a measurable, objective anchor for human judgment."
+      }
+    ]
+  },
+  {
+    "id": "claim_10",
+    "label": "Bridge the Confidence Gap for Casual Users",
+    "direct": [
+      {
+        "statementId": "s_46",
+        "sim": 0.7640523754593912,
+        "text": "The happy-path framing suggests broader ambition, which creates a tension: the product's value proposition (honest about its limits, refuses to manufacture consensus) may be genuinely off-putting to the majority of users who *want* a confident answer, even a wrong one."
+      },
+      {
+        "statementId": "s_62",
+        "sim": 0.719540505979973,
+        "text": "Most users just want a safe answer; the fact that they *could* audit the \"Council Orbs\" creates a \"halo of trust\" even if they never click."
+      },
+      {
+        "statementId": "s_19",
+        "sim": 0.718583898138634,
+        "text": "This avoids the all-too-common issue of AI providing overly confident yet flawed answers."
+      },
+      {
+        "statementId": "s_112",
+        "sim": 0.6895612409608771,
+        "text": "This respects cognitive diversity: some need answers, others need levers."
+      },
+      {
+        "statementId": "s_22",
+        "sim": 0.6841030339029032,
+        "text": "- **Complexity for novices:** While the system does a great job at reducing cognitive load for the everyday user, the deeper functionality (such as the graph snapshots and traversal modes) may still overwhelm those who aren’t familiar with this kind of decision support."
+      },
+      {
+        "statementId": "s_71",
+        "sim": 0.6824737543700877,
+        "text": "It’s a tool for the \"skeptical expert,\" which is an underserved market."
+      },
+      {
+        "statementId": "s_24",
+        "sim": 0.6778248155719346,
+        "text": "- **Performance in ambiguous contexts:** The system’s focus on **irreplaceability metrics** might struggle in highly ambiguous or poorly structured data, where relationships between claims are weak or inconclusive."
+      },
+      {
+        "statementId": "s_33",
+        "sim": 0.6714251418426354,
+        "text": "It sidesteps the trap most AI synthesis tools fall into: pretending to resolve uncertainty by burying it in confident-sounding prose."
+      },
+      {
+        "statementId": "s_111",
+        "sim": 0.6628873372318766,
+        "text": "Casual users get a clean synthesis (the “Concierge”), while power users can dive into “Council Orbs” or “Decision Maps”—but crucially, *exploration never overwrites*."
+      },
+      {
+        "statementId": "s_76",
+        "sim": 0.6562843074266979,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      }
+    ],
+    "competitive": [
+      {
+        "statementId": "s_46",
+        "weight": 0.9749525994195105,
+        "text": "The happy-path framing suggests broader ambition, which creates a tension: the product's value proposition (honest about its limits, refuses to manufacture consensus) may be genuinely off-putting to the majority of users who *want* a confident answer, even a wrong one."
+      },
+      {
+        "statementId": "s_86",
+        "weight": 0.3754530609466262,
+        "text": "* **The \"Lab\" path** honors the 10% of users (investigative reporters, policy makers) who *cannot* afford to be wrong."
+      },
+      {
+        "statementId": "s_41",
+        "weight": 0.27126308937280696,
+        "text": "There's also a slight tension in the \"no semantic privilege\" commitment."
+      },
+      {
+        "statementId": "s_81",
+        "weight": 0.177960291430283,
+        "text": "You’ve noted this in your \"A short note on reliability,\" but it’s the primary point of failure."
+      }
+    ],
+    "continuous": [
+      {
+        "statementId": "s_46",
+        "evidenceScore": 5.157736337746089,
+        "text": "The happy-path framing suggests broader ambition, which creates a tension: the product's value proposition (honest about its limits, refuses to manufacture consensus) may be genuinely off-putting to the majority of users who *want* a confident answer, even a wrong one."
+      },
+      {
+        "statementId": "s_19",
+        "evidenceScore": 4.271029986876848,
+        "text": "This avoids the all-too-common issue of AI providing overly confident yet flawed answers."
+      },
+      {
+        "statementId": "s_112",
+        "evidenceScore": 3.6569345010718166,
+        "text": "This respects cognitive diversity: some need answers, others need levers."
+      },
+      {
+        "statementId": "s_33",
+        "evidenceScore": 3.523896853561617,
+        "text": "It sidesteps the trap most AI synthesis tools fall into: pretending to resolve uncertainty by burying it in confident-sounding prose."
+      },
+      {
+        "statementId": "s_7",
+        "evidenceScore": 3.0615836096648503,
+        "text": "It’s a systemic approach to complexity, pushing the user to grapple with consequences instead of settling for easy answers."
+      },
+      {
+        "statementId": "s_34",
+        "evidenceScore": 3.061388617153792,
+        "text": "The commitment to surfacing structural forks rather than asking for preferences is sophisticated — it's a real insight about how to externalize intent without priming the user."
+      },
+      {
+        "statementId": "s_76",
+        "evidenceScore": 3.0373105972174512,
+        "text": "You aren't just building a tool; you’re proposing an **epistemic safety net.** By prioritizing geometry over semantics, you’re essentially saying: *\"I don't care what the model thinks it said; I care where that thought sits in the ecosystem of all other thoughts.\"*"
+      },
+      {
+        "statementId": "s_110",
+        "evidenceScore": 2.952243491894641,
+        "text": "But if one obscure report contradicts consensus yet anchors a unique basin of evidence, the system flags it—not because it’s “correct,” but because it’s *structurally singular*."
+      },
+      {
+        "statementId": "s_62",
+        "evidenceScore": 2.922232379356346,
+        "text": "Most users just want a safe answer; the fact that they *could* audit the \"Council Orbs\" creates a \"halo of trust\" even if they never click."
+      },
+      {
+        "statementId": "s_119",
+        "evidenceScore": 2.8611063391506306,
+        "text": "This prevents the system from smuggling in bias under the guise of “interpretation.” It also future-proofs against shifts in language: the structure may persist even as words evolve."
+      }
+    ]
+  }
+]

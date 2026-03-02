@@ -752,6 +752,73 @@ export interface LinkedClaim {
   hasConditionalSignal: boolean; // any source statement has signals.conditional
   hasSequenceSignal: boolean;
   hasTensionSignal: boolean;
+  provenanceBulk: number;     // Σ paragraph weights for this claim
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MIXED-METHOD PROVENANCE
+// Merges paragraph-centric competitive allocation with claim-centric scoring.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type ParagraphOrigin = 'competitive-only' | 'claim-centric-only' | 'both';
+
+export interface MixedParagraphEntry {
+  paragraphId: string;
+  origin: ParagraphOrigin;
+  claimCentricSim: number | null;  // null if not in claim-centric pool
+  claimCentricAboveThreshold: boolean;
+}
+
+export interface MixedStatementEntry {
+  statementId: string;
+  globalSim: number;              // cos(statement, claim)
+  kept: boolean;                  // globalSim >= μ_global
+  fromSupporterModel: boolean;    // statement.modelIndex ∈ claim.supporters
+  paragraphOrigin: ParagraphOrigin;
+  paragraphId: string;
+  zone: 'core' | 'boundary-promoted' | 'removed';  // fate after differential filter
+  coreCoherence: number | null;   // mean cos(statement, retainedCore) — boundary zone only
+  corpusAffinity: number | null;  // mean cos(statement, ALL corpus statements) — boundary only
+  differential: number | null;    // coreCoherence - corpusAffinity — boundary only
+}
+
+export interface MixedProvenanceClaimResult {
+  claimId: string;
+  // Claim-centric paragraph scoring stats
+  ccMu: number;
+  ccSigma: number;
+  ccThreshold: number;
+  // Merged paragraph pool
+  mergedParagraphs: MixedParagraphEntry[];
+  // All candidate statements from merged pool (with keep/remove decision)
+  statements: MixedStatementEntry[];
+  // Global floor threshold used for statement filter
+  globalMu: number;
+  globalSigma: number;
+  // Boundary zone coherence stats
+  boundaryCoherenceMu: number | null;  // mean coreCoherence across boundary statements
+  // Counts
+  keptCount: number;
+  removedCount: number;
+  totalCount: number;
+  bothCount: number;
+  competitiveOnlyCount: number;
+  claimCentricOnlyCount: number;
+  // Fate breakdown after differential filter
+  coreCount: number;
+  boundaryPromotedCount: number;
+  boundaryRemovedCount: number;
+  floorRemovedCount: number;          // below μ - σ
+  // Canonical survived statement IDs (core + boundary-promoted, after supporter filter)
+  canonicalStatementIds: string[];
+}
+
+export interface MixedProvenanceResult {
+  perClaim: Record<string, MixedProvenanceClaimResult>;
+  // Aggregate diagnostics
+  recoveryRate: number;   // % of final kept stmts also in competitive set
+  expansionRate: number;  // % of final kept stmts NOT in competitive set
+  removalRate: number;    // % of merged-pool stmts removed by μ_global floor
 }
 
 export interface LeverageInversionInfo {
@@ -1510,6 +1577,10 @@ export interface BasinInversionResult {
       bandwidth: number | null;
       bandwidthSigma: number | null;
       bandwidthN: number;
+      derivedBandwidthLo?: number | null;
+      derivedBandwidthHi?: number | null;
+      ladderSteps?: number | null;
+      stableWindowLength?: number | null;
       selectedPeaks: Array<{
         center: number;
         height: number;
@@ -1518,9 +1589,11 @@ export interface BasinInversionResult {
       valley:
         | {
           T_v: number;
-          depthSigma: number;
+          depthSigma?: number;
+          valleyDepth?: number;
           localMu: number;
-          localSigma: number;
+          localSigma?: number;
+          curvatureThreshold?: number;
         }
         | null;
       binnedSamplingDiffers: boolean | null;
