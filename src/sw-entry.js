@@ -1302,7 +1302,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               claimEmbeddings,
               competitivePools,
             );
-            console.log(`[Regenerate][MixedProvenance] recovery=${(mixedProvenanceResult.recoveryRate * 100).toFixed(1)}% expansion=${(mixedProvenanceResult.expansionRate * 100).toFixed(1)}% removal=${(mixedProvenanceResult.removalRate * 100).toFixed(1)}%`);
+            const rr = mixedProvenanceResult.recoveryRate ?? 0;
+            const er = mixedProvenanceResult.expansionRate ?? 0;
+            const rmr = mixedProvenanceResult.removalRate ?? 0;
+            console.log(`[Regenerate][MixedProvenance] recovery=${(rr * 100).toFixed(1)}% expansion=${(er * 100).toFixed(1)}% removal=${(rmr * 100).toFixed(1)}%`);
           } catch (err) {
             console.warn('[Regenerate] Mixed-method provenance failed:', err);
           }

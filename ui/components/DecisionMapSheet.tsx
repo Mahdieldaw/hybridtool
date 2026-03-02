@@ -13,7 +13,7 @@ import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd } from "../utils/copy-format-utils";
 import { ParagraphSpaceView } from "./ParagraphSpaceView";
 import {
-  SubstrateCard, 
+  SubstrateCard,
   MutualGraphCard,
   BasinInversionCard,
   QueryRelevanceCard,
@@ -355,9 +355,15 @@ function CrossSignalComparePanel({ artifact, selectedLayer }: { artifact: any; s
     'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
     'alignment': ['avgStatementRelevance', 'blastRadius'],
   };
-  const [defaults] = useState<[string, string]>(layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius']);
+  const defaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
   const [xKey, setXKey] = useState<string>(defaults[0]);
   const [yKey, setYKey] = useState<string>(defaults[1]);
+
+  useEffect(() => {
+    const newDefaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
+    setXKey(newDefaults[0]);
+    setYKey(newDefaults[1]);
+  }, [selectedLayer]);
 
   const xMeasure = measures.find((m) => m.key === xKey) ?? measures[0];
   const yMeasure = measures.find((m) => m.key === yKey) ?? measures[Math.min(1, measures.length - 1)];

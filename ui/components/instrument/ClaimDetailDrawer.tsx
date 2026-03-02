@@ -111,13 +111,12 @@ export function ClaimDetailDrawer({
 
   // Build statement text lookup
   const stmtTextMap = useMemo(() => {
-    const m = new Map<string, string>();
+    const map = new Map<string, string>();
     for (const s of (artifact?.shadow?.statements ?? [])) {
-      m.set(String(s.id), String(s.text ?? ''));
+      map.set(String(s.id), String(s.text ?? ''));
     }
-    return m;
+    return map;
   }, [artifact]);
-
   // Provenance data
   const provenanceData = useMemo(() => {
     const exclusivity = artifact?.claimProvenance?.claimExclusivity;

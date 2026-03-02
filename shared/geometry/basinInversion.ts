@@ -276,9 +276,9 @@ function deriveBandwidthBounds(
  * encountered is the one with the longest persistence.
  */
 function buildBandwidthLadder(lo: number, hi: number, maxGapRatio: number): number[] {
-    if (lo <= 0 || hi <= 0 || lo >= hi) return [lo];
+    if (lo <= 0 || hi <= 0 || lo >= hi) return lo > 0 ? [lo] : [];
     // Minimum steps so adjacent ratio never exceeds (1 + maxGapRatio)
-    const steps = Math.max(20, Math.ceil(Math.log(hi / lo) / Math.log(1 + maxGapRatio)) + 1);
+    const steps = Math.ceil(Math.log(hi / lo) / Math.log(1 + maxGapRatio)) + 1;
     const ladder: number[] = [];
     for (let i = 0; i < steps; i++) {
         const t = i / (steps - 1);
@@ -288,7 +288,6 @@ function buildBandwidthLadder(lo: number, hi: number, maxGapRatio: number): numb
     }
     return ladder;
 }
-
 function deriveAdaptiveLadder(
     lo: number,
     hi: number,
@@ -549,10 +548,10 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
         // Full contiguous run
         stableWindow = sweep.slice(stableStart, stableEnd + 1);
         // h* = smallest bandwidth (finest resolution) in the stable window
-        const minH = Math.min(...stableWindow.map((w) => w.bandwidth));
-        hStarEntry = stableWindow.find((w) => w.bandwidth === minH) ?? stableWindow[stableWindow.length - 1];
+        hStarEntry = stableWindow.reduce((best, entry) =>
+            entry.bandwidth < best.bandwidth ? entry : best
+        );
     }
-
     // alpha and curvatureThreshold derived from full stable window — not a subset
     const stableProminences: number[] = [];
     const stableCurvatures: number[] = [];
@@ -572,8 +571,7 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
         const candidates = entry.valleys.filter((v) =>
             v.promMin >= alpha &&
             v.curvature != null &&
-            v.curvature > 0 &&
-            Math.abs(v.curvature) > curvatureThreshold
+            v.curvature > curvatureThreshold
         );
         if (candidates.length === 0) return null;
         let best = candidates[0];
@@ -612,8 +610,8 @@ export function computeBasinInversion(idsIn: string[], vectorsIn: Float32Array[]
         const valleyVal = leftVal != null && rightVal != null
             ? Math.max(leftVal, rightVal)
             : leftVal != null ? leftVal
-            : rightVal != null ? rightVal
-            : p.height;
+                : rightVal != null ? rightVal
+                    : p.height;
         const prominence = p.height > 0 ? (p.height - valleyVal) / p.height : 0;
         return {
             index: p.index,

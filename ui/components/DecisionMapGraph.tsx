@@ -401,7 +401,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                         link.type === 'conflicts' ? 220 :
                             link.type === 'tradeoff' ? 180 :
                                 link.type === 'prerequisite' ? 150 :
-                                120;
+                                    120;
                     return isWideLayout ? baseDist * 1.6 : baseDist; // Increased distance
                 })
                 .strength(link => {
@@ -778,7 +778,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 edge.type === 'conflicts' ? '#ef4444' :
                                     edge.type === 'tradeoff' ? '#f97316' :
                                         edge.type === 'prerequisite' ? '#111827' :
-                                        '#9ca3af';
+                                            '#9ca3af';
                         const dash =
                             edge.type === 'conflicts' ? '6,4' :
                                 edge.type === 'tradeoff' ? '2,2' :
@@ -788,7 +788,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 edge.type === 'conflicts' ? 'url(#arrowRed)' :
                                     edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
                                         edge.type === 'prerequisite' ? 'url(#arrowBlack)' :
-                                        undefined;
+                                            undefined;
                         const midX = (coords.x1 + coords.x2) / 2;
                         const midY = (coords.y1 + coords.y2) / 2;
 
@@ -823,7 +823,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                         edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
                                             edge.type === 'tradeoff' ? 'url(#edgeGlowOrange)' :
                                                 edge.type === 'prerequisite' ? 'url(#edgeGlowBlue)' :
-                                                undefined
+                                                    undefined
                                     }
                                 />
                                 {/* Invisible wider hit area for hover */}
@@ -953,7 +953,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 <div
                                     style={{
                                         background: 'rgba(0,0,0,0.95)',
-                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#9ca3af'}`,
+                                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#9ca3af'}`,
                                         borderRadius: 6,
                                         padding: '6px 10px',
                                         fontSize: 11,
@@ -979,7 +979,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     { label: 'Supports', color: '#9ca3af', dash: undefined },
                     { label: 'Conflicts', color: '#ef4444', dash: '6,4' },
                     { label: 'Tradeoff', color: '#f97316', dash: '2,2' },
-                    { label: 'Prerequisite', color: '#60a5fa', dash: undefined },
+                    { label: 'Prerequisite', color: '#111827', dash: undefined },
                 ].map(({ label, color, dash }, idx) => (
                     <g key={label} transform={`translate(8, ${12 + idx * 13})`}>
                         <line x1={0} y1={0} x2={18} y2={0} stroke={color} strokeWidth={2} strokeDasharray={dash} />

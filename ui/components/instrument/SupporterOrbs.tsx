@@ -12,7 +12,7 @@ function getProviderFromSupporter(s: string | number, citationSourceOrder?: Reco
     const providerId = citationSourceOrder[Number(s)];
     if (providerId) return getProviderConfig(providerId) || null;
   }
-  if (typeof s === "string" && isNaN(Number(s))) {
+  if (typeof s === "string") {
     return getProviderConfig(s) || null;
   }
   return null;

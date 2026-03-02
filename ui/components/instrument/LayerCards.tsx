@@ -27,10 +27,9 @@ function fmtPct(v: number | null | undefined, digits = 1): string {
 }
 
 function fmtInt(v: number | null | undefined): string {
-  if (v == null) return "—";
+  if (v == null || !Number.isFinite(v)) return "—";
   return Math.round(v as number).toLocaleString();
 }
-
 function computeStats(values: number[]) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -336,11 +335,11 @@ function SortableTable<Row extends Record<string, any>>({
             const rawKey = row?.id != null ? String(row.id) : "";
             const rowKey = rawKey.trim() ? rawKey : `row-${i}`;
             return (
-            <tr key={rowKey} className="border-b border-white/5 hover:bg-white/3 transition-colors">
-              {columns.map((col) => (
-                <td key={col.key} className="py-1 px-2 text-text-secondary">{col.cell(row)}</td>
-              ))}
-            </tr>
+              <tr key={rowKey} className="border-b border-white/5 hover:bg-white/3 transition-colors">
+                {columns.map((col) => (
+                  <td key={col.key} className="py-1 px-2 text-text-secondary">{col.cell(row)}</td>
+                ))}
+              </tr>
             );
           })}
         </tbody>
@@ -801,11 +800,13 @@ export function BasinInversionCard({
               { key: "a", header: "Node A", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.a}</span> },
               { key: "b", header: "Node B", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.b}</span> },
               { key: "similarity", header: "Sim", sortValue: (r) => r.similarity, cell: (r) => <span className="font-mono">{fmt(r.similarity, 5)}</span> },
-              { key: "delta", header: "Δ from T_v", sortValue: (r) => r.delta == null ? 999 : Math.abs(r.delta), cell: (r) => {
-                const d = r.delta;
-                const color = d != null && Math.abs(d) < 0.002 ? "text-rose-400" : "text-text-muted";
-                return <span className={clsx("font-mono", color)}>{d != null ? (d >= 0 ? "+" : "") + fmt(d, 5) : "—"}</span>;
-              }},
+              {
+                key: "delta", header: "Δ from T_v", sortValue: (r) => r.delta == null ? 999 : Math.abs(r.delta), cell: (r) => {
+                  const d = r.delta;
+                  const color = d != null && Math.abs(d) < 0.002 ? "text-rose-400" : "text-text-muted";
+                  return <span className={clsx("font-mono", color)}>{d != null ? (d >= 0 ? "+" : "") + fmt(d, 5) : "—"}</span>;
+                }
+              },
             ]}
             rows={bridgeRows}
             defaultSortKey="delta"
@@ -1087,16 +1088,20 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
       <CardSection title="Per-Claim Scores">
         <SortableTable
           columns={[
-            { key: "label", header: "Claim", cell: (r) => (
-              <span className={clsx("text-[10px] truncate max-w-[140px] inline-block", r.suppressed && "line-through text-text-muted", selectedClaimId === r.claimId && "text-brand-400")}>
-                {r.label || r.claimId}
-              </span>
-            )},
-            { key: "composite", header: "Score", sortValue: (r) => r.composite, cell: (r) => (
-              <span className={clsx("font-mono", r.suppressed ? "text-rose-400/60 line-through" : (r.composite ?? 0) > 0.5 ? "text-amber-400" : "text-text-secondary")}>
-                {fmt(r.composite, 3)}
-              </span>
-            )},
+            {
+              key: "label", header: "Claim", cell: (r) => (
+                <span className={clsx("text-[10px] truncate max-w-[140px] inline-block", r.suppressed && "line-through text-text-muted", selectedClaimId === r.claimId && "text-brand-400")}>
+                  {r.label || r.claimId}
+                </span>
+              )
+            },
+            {
+              key: "composite", header: "Score", sortValue: (r) => r.composite, cell: (r) => (
+                <span className={clsx("font-mono", r.suppressed ? "text-rose-400/60 line-through" : (r.composite ?? 0) > 0.5 ? "text-amber-400" : "text-text-secondary")}>
+                  {fmt(r.composite, 3)}
+                </span>
+              )
+            },
             { key: "cascadeBreadth", header: "Casc", sortValue: (r) => r.cascadeBreadth, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeBreadth, 2)}</span> },
             { key: "exclusiveEvidence", header: "Excl", sortValue: (r) => r.exclusiveEvidence, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.exclusiveEvidence, 2)}</span> },
             { key: "leverage", header: "Levg", sortValue: (r) => r.leverage, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.leverage, 2)}</span> },

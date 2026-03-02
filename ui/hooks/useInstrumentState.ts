@@ -81,15 +81,17 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
   const reset = useCallback(() => {
     setRightPanelMode(DEFAULTS.rightPanelMode);
     setSelectedLayer(DEFAULTS.selectedLayer);
-    setSelectedClaimId(null);
-    setSelectedEntity(null);
+    setSelectedClaimId(DEFAULTS.selectedClaimId);
+    setSelectedEntity(DEFAULTS.selectedEntity);
     setShowMutualEdges(DEFAULTS.showMutualEdges);
     setShowClaimDiamonds(DEFAULTS.showClaimDiamonds);
     setShowMapperEdges(DEFAULTS.showMapperEdges);
     setShowRegionHulls(DEFAULTS.showRegionHulls);
     setShowBasinRects(DEFAULTS.showBasinRects);
+    setHighlightSourceParagraphs(DEFAULTS.highlightSourceParagraphs);
+    setHighlightInternalEdges(DEFAULTS.highlightInternalEdges);
+    setHighlightSpannedHulls(DEFAULTS.highlightSpannedHulls);
   }, []);
-
   const state = useMemo<InstrumentState>(() => ({
     rightPanelMode,
     selectedLayer,

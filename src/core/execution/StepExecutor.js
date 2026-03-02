@@ -803,10 +803,17 @@ export class StepExecutor {
         try {
           if (!substrateDegenerate && geometryParagraphEmbeddings && paragraphResult?.paragraphs?.length > 0) {
             const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
-            const paraIds = paragraphResult.paragraphs.map(p => p.id || p.paragraphId || String(p.index ?? ''));
-            const paraVectors = paraIds.map(id => geometryParagraphEmbeddings.get(id)).filter(Boolean);
-            if (paraVectors.length > 0) {
-              basinInversionResult = computeBasinInversion(paraIds.slice(0, paraVectors.length), paraVectors);
+            const aligned = paragraphResult.paragraphs
+              .map(p => {
+                const id = p.id || p.paragraphId || String(p.index ?? '');
+                const vec = geometryParagraphEmbeddings.get(id);
+                return vec ? { id, vec } : null;
+              })
+              .filter(Boolean);
+            if (aligned.length > 0) {
+              const paraIds = aligned.map(a => a.id);
+              const paraVectors = aligned.map(a => a.vec);
+              basinInversionResult = computeBasinInversion(paraIds, paraVectors);
             }
           }
         } catch (err) {
