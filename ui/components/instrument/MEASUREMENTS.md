@@ -692,3 +692,395 @@ Developer checklist (code-traced)
 - Ensure `artifact.mixedProvenance` is persisted in runs where `computeMixedMethodProvenance` executes.
 - When changing `globalMu`/`globalSigma` calculation or the differential rule, update the UI tests and the Debug Panel column behavior.
 - If you enable LLM attribution for pruning later, keep this pipeline as a geometric fallback and record differences.
+
+---
+
+# Evidence Console — Architecture & Usage Manual
+
+The Evidence Console replaces the old 13-tab card layout with a forensic-first evidence table as the primary instrument surface. It consists of four layers:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Context Strip (always visible, ~40px)          │  ← geometry health at a glance
+├─────────────────────────────────────────────────┤
+│  Toolbar: claim | view | scope | + Columns      │  ← controls
+├─────────────────────────────────────────────────┤
+│  Evidence Table (flex-1, virtualized)           │  ← primary surface
+├─────────────────────────────────────────────────┤
+│  Reference Shelf (max-h-72, collapsible)        │  ← deep-dive cards
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## File Map
+
+| File | Purpose |
+|------|---------|
+| `ui/hooks/useEvidenceRows.ts` | Assembles `EvidenceRow[]` from the cognitive artifact |
+| `ui/components/instrument/columnRegistry.ts` | Column definitions, view presets, types |
+| `ui/components/instrument/EvidenceTable.tsx` | Virtualized table with sort/group/threshold preview |
+| `ui/components/instrument/ContextStrip.tsx` | Geometry health pills (D, T_v, basins, participation, Q_spread, status) |
+| `ui/components/instrument/ColumnPicker.tsx` | Column visibility popover + computed column builder |
+| `ui/components/instrument/expressionEngine.ts` | Safe expression parser (no `eval()`) for computed columns |
+| `ui/hooks/useInstrumentState.ts` | State: `selectedView`, `scope`, `expandedRefSections` |
+| `ui/components/DecisionMapSheet.tsx` | Parent — wires everything together |
+
+---
+
+## 1. `useEvidenceRows(artifact, selectedClaimId)` — Data Assembly
+
+**Location:** `ui/hooks/useEvidenceRows.ts`
+
+Produces one `EvidenceRow` per shadow statement. Data is pulled from multiple artifact paths and merged into a flat row.
+
+### Data sources
+
+| Field(s) | Artifact path | Scope |
+|----------|---------------|-------|
+| `sim_query` | `geometry.query.relevance.statementScores[stmtId].querySimilarity` | Global (same for all claims) |
+| `fate` | `completeness.statementFates[stmtId].fate` | Global |
+| `claimCount` | `statementAllocation.assignmentCounts[stmtId]` | Global |
+| `sim_claim`, `z_claim`, `z_core`, `evidenceScore` | `continuousField.perClaim[claimId].field[].{sim_claim, z_claim, z_core, evidenceScore}` | Claim-relative |
+| `w_comp`, `excess_comp`, `tau_S` | `statementAllocation.perClaim[claimId].directStatementProvenance[].{weight, excess, threshold}` | Claim-relative |
+| `globalSim`, `zone`, `coreCoherence`, `corpusAffinity`, `differential`, `paragraphOrigin` | `mixedProvenance.perClaim[claimId].statements[]` | Claim-relative |
+| `isExclusive` | `claimProvenance.claimExclusivity[claimId].exclusiveIds` OR fate has only 1 claimId | Claim-relative |
+| `stance`, `confidence` | `shadow.statements[].{stance, confidence}` | Per-statement |
+
+### Memoization strategy
+
+- **`globalMaps`** (query scores, fates, assignment counts) — recomputed only when `artifact` changes.
+- **`claimMaps`** (continuous field, competitive, mixed, exclusivity) — recomputed when `artifact` OR `selectedClaimId` changes.
+- **Row assembly** — recomputed when any of the above change.
+
+### Inclusion flags
+
+Determine which statements appear when `scope = 'claim'`:
+
+| Flag | Condition |
+|------|-----------|
+| `inCompetitive` | Statement appears in competitive allocation for this claim |
+| `inContinuousCore` | Statement in continuous field AND `z_claim > 1.0` |
+| `inMixed` | Statement appears in mixed provenance for this claim |
+| `inDirectTopN` | Statement appears in continuous field at all |
+
+### Why some rows show `null` for claim-relative fields
+
+Claim-relative fields (`sim_claim`, `w_comp`, `globalSim`, etc.) are `null` when the statement was NOT included in that analysis pipeline for the selected claim. This is expected — not every statement participates in every provenance method. When `scope = 'all'`, these null-field rows become visible (they're filtered out in `scope = 'claim'`).
+
+---
+
+## 2. `columnRegistry.ts` — Column Definitions & Views
+
+### ColumnDef
+
+Each column is a typed object:
+
+```typescript
+interface ColumnDef {
+  id: string;           // Used as key everywhere
+  label: string;        // Display name in table header
+  accessor: (row: EvidenceRow) => any;  // Value extractor
+  type: 'number' | 'text' | 'category' | 'boolean';
+  format?: (val: any) => string;        // Display formatter
+  sortable: boolean;
+  groupable: boolean;
+  description?: string;  // Tooltip text
+  source: 'built-in' | 'computed';
+  category: 'identity' | 'geometry' | 'competitive' | 'continuous' | 'mixed' | 'metadata';
+}
+```
+
+### Built-in columns (20)
+
+| Category | Columns |
+|----------|---------|
+| **Identity** | `text`, `model`, `paragraphId` |
+| **Geometry** | `sim_claim`, `sim_query` |
+| **Competitive** | `w_comp`, `excess_comp`, `tau_S`, `claimCount` |
+| **Continuous** | `z_claim`, `z_core`, `evidenceScore` |
+| **Mixed** | `globalSim`, `zone`, `coreCoherence`, `corpusAffinity`, `differential`, `paragraphOrigin` |
+| **Metadata** | `fate`, `stance`, `isExclusive` |
+
+### ViewConfig
+
+Each view preset controls which columns are visible, how rows are sorted, and whether they're grouped:
+
+```typescript
+interface ViewConfig {
+  id: string;
+  label: string;
+  columns: string[];       // Which column IDs are shown
+  sortBy: string;          // Default sort column
+  sortDir: 'asc' | 'desc';
+  groupBy: string | null;  // Default group column (null = flat list)
+}
+```
+
+### Default views
+
+| View | Purpose | Columns | Sort | Group |
+|------|---------|---------|------|-------|
+| **Provenance** | Core evidence view. "Which statements back this claim and how strongly?" | text, model, sim_claim, w_comp, evidenceScore, zone | sim_claim desc | zone |
+| **Differential** | Boundary analysis. "Which statements are specifically aligned vs generically present?" | text, model, globalSim, zone, coreCoherence, corpusAffinity, differential | differential asc | zone |
+| **Allocation** | Resource sharing. "How is each statement distributed across claims?" | text, model, claimCount, w_comp, isExclusive, sim_query | w_comp desc | (none) |
+| **Query Alignment** | Query relevance. "How well does each statement address the original question?" | text, model, sim_query, sim_claim, fate | sim_query desc | fate |
+
+### What happens when you switch views
+
+1. `selectedView` state updates (in `useInstrumentState`)
+2. `useEffect` in `DecisionMapSheet` resets `visibleColumnIds` to the new view's `.columns`
+3. `activeViewConfig` memo recalculates
+4. `useEffect` in `EvidenceTable` syncs local sort/group state from the new `viewConfig`
+5. Table re-renders with new columns, sort order, and grouping
+
+---
+
+## 3. `EvidenceTable` — Virtualized Table
+
+**Location:** `ui/components/instrument/EvidenceTable.tsx`
+
+### Architecture
+
+Uses `@tanstack/react-virtual` v3 `useVirtualizer` to render 200+ rows without scroll lag. Only rows visible in the viewport are rendered.
+
+```
+Props:
+  rows: EvidenceRow[]       ← from useEvidenceRows
+  columns: ColumnDef[]      ← filtered by visibleColumnIds
+  viewConfig: ViewConfig    ← active view preset
+  scope: 'claim' | 'cross-claim' | 'statement'
+  onSort, onGroup, onRowClick  ← optional callbacks
+```
+
+### Processing pipeline (inside the component)
+
+```
+rows
+  → scopedRows (filtered by scope: 'claim' = only inclusion-flagged rows)
+  → sortedRows (sorted by localSortBy + localSortDir)
+  → virtualItems (grouped by localGroupBy, interleaved group headers + rows)
+  → useVirtualizer (estimates: group=28px, row=32px, expanded=96px)
+```
+
+### Row sizes
+
+| Item type | Height |
+|-----------|--------|
+| Group header | 28px |
+| Normal row | 32px |
+| Expanded row | 96px (shows full text + metadata) |
+
+### Scope filtering
+
+| Scope | What's shown |
+|-------|-------------|
+| `claim` | Only rows where `inCompetitive \|\| inContinuousCore \|\| inMixed \|\| inDirectTopN` |
+| `cross-claim` / `statement` | All shadow statements |
+
+### Sorting
+
+Click a column header to cycle: **desc** → **asc** → **none** → **desc**. Only columns with `sortable: true` respond to clicks. Active sort column is highlighted in the header.
+
+Null values sort to the bottom regardless of direction.
+
+### Grouping
+
+Columns with `groupable: true` show a small `÷ group` / `÷ ungroup` button below the header label. When grouped, rows are partitioned by the column value and each group gets a colored header showing the group key and count.
+
+Groupable columns: `model`, `paragraphId`, `claimCount`, `zone`, `paragraphOrigin`, `fate`, `stance`, `isExclusive`.
+
+### Threshold preview (Phase 8)
+
+The `zone` column header has a range slider (`z_claim` from -2 to 3, step 0.1, default 1.0). Dragging it reclassifies zones in real-time:
+- `z_claim > threshold` → core
+- `z_claim > threshold * 0.5` → boundary-promoted
+- else → removed
+
+Changed rows are highlighted `bg-amber-500/10`. Click `✕` to clear the preview. This does NOT modify the artifact — it's a local visual preview only.
+
+### Row expansion
+
+Click any row to expand it. The expanded state shows:
+- Full statement text (word-wrapped)
+- Statement ID, model index, paragraph ID
+
+---
+
+## 4. `ContextStrip` — Geometry Health Bar
+
+**Location:** `ui/components/instrument/ContextStrip.tsx`
+
+A row of colored pills showing geometry health metrics. Always visible at the top of the instrument panel.
+
+### Metrics
+
+| Pill | Source | Color thresholds |
+|------|--------|-----------------|
+| **D** (discrimination range) | `basinInversion.discriminationRange` | Green: D >= 0.10, Amber: 0.05-0.10, Red: < 0.05 |
+| **T_v** (valley threshold) | `basinInversion.T_v` | Always neutral (informational) |
+| **basins** | `basinInversion.basinCount` | Always neutral |
+| **particip** (participation rate) | `substrate.nodes` where `mutualDegree > 0` / total | Green: >= 20%, Amber: 5-20%, Red: < 5% |
+| **Q_spread** | P90 - P10 of `query.relevance.statementScores[*].querySimilarity` | Always neutral |
+| **status** | `basinInversion.status` | Green: "ok", Amber: "undifferentiated", Red: anything else |
+
+### Clickable histograms
+
+Pills with histogram data (`D` and `Q_spread`) open a popover on click showing a 20-bin mini histogram with the distribution. The `D` histogram also shows a vertical marker at `T_v`.
+
+### Implementation details
+
+- `MiniHistogram`: 20-bin histogram rendered as flex bars. Hover shows bin range and count.
+- `Pill`: button with outside-click-to-close behavior. Only pills with `histogramData` are clickable.
+- Uses `useMemo` on `artifact` to rebuild pill array. No claim-relative state.
+
+---
+
+## 5. `ColumnPicker` — Column Visibility & Computed Columns
+
+**Location:** `ui/components/instrument/ColumnPicker.tsx`
+
+Opened via the `+ Columns` button in the toolbar. A popover with:
+
+### Column visibility
+
+Checkboxes grouped by category (Identity, Geometry, Competitive, Continuous, Mixed, Metadata, Computed). Toggle any column on/off. `Reset` restores the active view's default column set.
+
+### Computed columns (expression engine)
+
+At the bottom of the popover, users can add custom computed columns:
+
+1. Enter a **label** (column display name)
+2. Enter an **expression** (e.g., `sim_claim - tau_S`, `w_comp > 0.5 ? 1 : 0`)
+3. Click `+ Add Column`
+
+The expression is validated and compiled via `expressionEngine.ts`. Invalid expressions show an error. Valid columns appear in the table with an `fx` badge.
+
+Autocomplete suggests column names as you type.
+
+---
+
+## 6. `expressionEngine.ts` — Safe Expression Evaluator
+
+**Location:** `ui/components/instrument/expressionEngine.ts`
+
+A recursive descent parser that evaluates expressions without `eval()`.
+
+### Supported syntax
+
+| Feature | Examples |
+|---------|---------|
+| **Arithmetic** | `sim_claim + w_comp`, `z_claim * 2`, `excess_comp / tau_S` |
+| **Comparison** | `sim_claim > 0.5`, `z_claim >= 1.0`, `claimCount === 1` |
+| **Logic** | `isExclusive && w_comp > 0.3`, `!isExclusive` |
+| **Ternary** | `z_claim > 1 ? "core" : "removed"` |
+| **Functions** | `abs(differential)`, `max(sim_claim, sim_query)`, `min(w_comp, 0.5)`, `round(z_claim)` |
+| **Column references** | Any `EvidenceRow` field name: `sim_claim`, `w_comp`, `fate`, etc. |
+| **Literals** | Numbers (`0.5`, `100`), strings (`"core"`), booleans (`true`, `false`), `null` |
+
+### Null propagation
+
+If any column reference in an arithmetic or comparison expression is `null`, the entire expression returns `null`. This prevents misleading results from missing data.
+
+### API
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `compileExpression(expr, columnIds)` | `→ CompiledExpression \| null` | Compile and validate. Returns an object with `.evaluate(row)` |
+| `validateExpression(expr, columnIds)` | `→ string \| null` | Validate only. Returns error message or null if valid |
+
+### Parser precedence (low to high)
+
+1. Ternary (`? :`)
+2. OR (`\|\|`)
+3. AND (`&&`)
+4. Equality (`===`, `!==`)
+5. Comparison (`>`, `<`, `>=`, `<=`)
+6. Add/subtract (`+`, `-`)
+7. Multiply/divide/modulo (`*`, `/`, `%`)
+8. Unary (`-`, `!`)
+9. Primary (literals, identifiers, function calls, parenthesized expressions)
+
+---
+
+## 7. `useInstrumentState` — State Management
+
+**Location:** `ui/hooks/useInstrumentState.ts`
+
+### State shape
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `selectedView` | `string` | `'provenance'` | Active view preset ID |
+| `scope` | `'claim' \| 'cross-claim' \| 'statement'` | `'claim'` | Row filter scope |
+| `expandedRefSections` | `string[]` | `[]` | Which Reference Shelf sections are open |
+
+### Actions
+
+| Action | What it does |
+|--------|-------------|
+| `setSelectedView(id)` | Switch view → triggers column + sort/group reset |
+| `setScope(scope)` | Switch scope → filters rows in EvidenceTable |
+| `toggleRefSection(id)` | Open/close a Reference Shelf card section |
+
+---
+
+## 8. Wiring in `DecisionMapSheet.tsx`
+
+### Toolbar controls (top of instrument panel)
+
+| Control | State | Effect |
+|---------|-------|--------|
+| **Claim selector** (`<select>`) | `selectedClaimId` | Changes which claim's data `useEvidenceRows` assembles |
+| **View switcher** (`<select>`) | `selectedView` | Resets visible columns + sort/group via `useEffect` |
+| **Scope toggle** (claim / all) | `scope` | Filters rows to claim-relevant or all statements |
+| **+ Columns** button | opens `ColumnPicker` | Toggle column visibility, add computed columns |
+
+### Data flow
+
+```
+artifact (from parent)
+  ↓
+useEvidenceRows(artifact, selectedClaimId) → EvidenceRow[]
+  ↓
+activeColumns = visibleColumnIds.map(id → allColumns.find(id))
+  ↓
+<EvidenceTable rows={evidenceRows} columns={activeColumns} viewConfig={activeViewConfig} scope={scope} />
+```
+
+### Column state
+
+- `extraColumns`: computed columns added by user (persisted in component state)
+- `allColumns`: `BUILT_IN_COLUMNS` + `extraColumns`
+- `visibleColumnIds`: set from active view's `.columns` on view switch; toggled via ColumnPicker
+
+### Reference Shelf
+
+Below the evidence table. Each section is a collapsible `RefSection` wrapper around existing card components. Sections: Pairwise Geometry, Mutual Graph, Basin Inversion, Model Ordering, Blast Radius, Carrier Detection, Alignment, Cross-Signal Scatter, Raw Artifacts.
+
+Expand/collapse is tracked in `useInstrumentState.expandedRefSections`.
+
+---
+
+## Quick-reference: column semantics
+
+| Column | What it measures | L1/L2 | Interpretation |
+|--------|-----------------|-------|---------------|
+| `sim_claim` | cos(statement, claim embedding) | L1 | Higher = more geometrically aligned |
+| `sim_query` | cos(statement, query embedding) | L1 | Higher = more relevant to user's question |
+| `w_comp` | Competitive allocation weight | L1 | Share of this statement "owned" by the claim |
+| `excess_comp` | Weight above threshold | L1 | How far above the allocation threshold |
+| `tau_S` | Allocation threshold | L1 | The competitive cutoff for this claim |
+| `claimCount` | Number of claims this statement supports | L2 | 1 = exclusive, >1 = shared evidence |
+| `z_claim` | Z-score relative to claim distribution | L1 | >1.0 = core, 0.5-1.0 = boundary |
+| `z_core` | Z-score relative to core cluster | L1 | How far from the core center |
+| `evidenceScore` | Composite evidence score | L1 | Blended measure of evidence strength |
+| `globalSim` | Global similarity from mixed provenance | L1 | Position in the global field |
+| `zone` | core / boundary-promoted / removed | L2 | Mixed-provenance classification |
+| `coreCoherence` | Mean cos to core cluster | L1 | How well the statement fits the core |
+| `corpusAffinity` | Mean cos to all statements | L1 | Generic similarity (not claim-specific) |
+| `differential` | coreCoherence - corpusAffinity | L1 | Negative = specifically aligned to claim |
+| `paragraphOrigin` | Which method found this statement | L2 | competitive-only / claim-centric-only / both |
+| `fate` | Statement disposition | L2 | primary / supporting / unaddressed / orphan / noise |
+| `stance` | Epistemic stance label | L2 | From semantic mapper |
+| `isExclusive` | Exclusively assigned to this claim | L2 | true = not shared with other claims |
