@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import type { EvidenceRow } from "../../hooks/useEvidenceRows";
 import type { ColumnDef, ViewConfig } from "./columnRegistry";
+import { CopyButton } from "../CopyButton";
 
 // ============================================================================
 // TYPES
@@ -35,7 +36,7 @@ type VirtualItem = GroupedItem | RowItem;
 function fmt(v: any, col: ColumnDef): string {
   if (v == null) return '—';
   if (col.format) return col.format(v);
-  if (typeof v === 'boolean') return v ? '✓' : '—';
+  if (typeof v === 'boolean') return v ? '✓' : '✕';
   if (typeof v === 'number') return Number.isFinite(v) ? v.toFixed(3) : '—';
   return String(v);
 }
@@ -122,8 +123,8 @@ function Cell({ col, row, previews, changed }: {
           {formatted}
         </span>
       ) : isBool ? (
-        <span className={clsx("text-[11px]", displayVal ? "text-emerald-400" : "text-text-muted")}>
-          {displayVal ? "✓" : "—"}
+        <span className={clsx("text-[11px]", displayVal === true ? "text-emerald-400" : "text-text-muted")}>
+          {displayVal == null ? "—" : displayVal ? "✓" : "✕"}
         </span>
       ) : isNum ? (
         <span className="text-[11px] font-mono text-text-secondary">{formatted}</span>
@@ -140,6 +141,7 @@ function Cell({ col, row, previews, changed }: {
 
 function colWidth(id: string): number {
   const widths: Record<string, number> = {
+    statementId: 120,
     model: 44,
     paragraphId: 60,
     sim_claim: 72,
@@ -157,6 +159,19 @@ function colWidth(id: string): number {
     corpusAffinity: 96,
     differential: 84,
     paragraphOrigin: 120,
+    bs_twin: 56,
+    bs_simTwin: 72,
+    bs_bestSim: 72,
+    bs_t_sim: 64,
+    bs_bestClaim: 84,
+    bs_t_dir: 64,
+    bs_gate: 56,
+    bs_pId: 80,
+    bs_pTwin: 64,
+    bs_pBest: 72,
+    bs_pTau: 64,
+    bs_nearSim: 220,
+    bs_nearDir: 220,
     fate: 96,
     stance: 88,
     isExclusive: 72,
@@ -191,6 +206,63 @@ function sortRows(
     else cmp = String(av).localeCompare(String(bv));
     return sortDir === 'asc' ? cmp : -cmp;
   });
+}
+
+function applyFilters(rows: EvidenceRow[], viewConfig: ViewConfig, columns: ColumnDef[]): EvidenceRow[] {
+  const rules = viewConfig.filter;
+  if (!rules || rules.length === 0) return rows;
+
+  const colById = new Map(columns.map(c => [c.id, c] as const));
+
+  const getVal = (row: EvidenceRow, columnId: string): any => {
+    const col = colById.get(columnId);
+    if (col) return col.accessor(row);
+    return (row as any)[columnId];
+  };
+
+  const matches = (row: EvidenceRow): boolean => {
+    for (const rule of rules) {
+      const v = getVal(row, rule.columnId);
+      switch (rule.op) {
+        case 'is-null':
+          if (v != null) return false;
+          break;
+        case 'not-null':
+          if (v == null) return false;
+          break;
+        case 'contains': {
+          if (v == null) return false;
+          const needle = rule.value == null ? '' : String(rule.value);
+          if (!String(v).includes(needle)) return false;
+          break;
+        }
+        case '===':
+          if (v !== rule.value) return false;
+          break;
+        case '!==':
+          if (v === rule.value) return false;
+          break;
+        case '>':
+        case '>=':
+        case '<':
+        case '<=': {
+          const av = typeof v === 'number' ? v : Number(v);
+          const bv = typeof rule.value === 'number' ? rule.value : Number(rule.value);
+          if (!Number.isFinite(av) || !Number.isFinite(bv)) return false;
+          if (rule.op === '>' && !(av > bv)) return false;
+          if (rule.op === '>=' && !(av >= bv)) return false;
+          if (rule.op === '<' && !(av < bv)) return false;
+          if (rule.op === '<=' && !(av <= bv)) return false;
+          break;
+        }
+        default:
+          return false;
+      }
+    }
+    return true;
+  };
+
+  return rows.filter(matches);
 }
 
 function buildVirtualItems(
@@ -231,6 +303,7 @@ export interface EvidenceTableProps {
   columns: ColumnDef[];
   viewConfig: ViewConfig;
   scope: 'claim' | 'cross-claim' | 'statement';
+  bottomInset?: number;
   onSort?: (columnId: string) => void;
   onGroup?: (columnId: string | null) => void;
   onColumnToggle?: (columnId: string) => void;
@@ -246,6 +319,7 @@ export function EvidenceTable({
   columns,
   viewConfig,
   scope,
+  bottomInset,
   onSort,
   onGroup,
   onColumnToggle: _onColumnToggle,
@@ -270,15 +344,22 @@ export function EvidenceTable({
   // Filter rows by scope
   const scopedRows = useMemo(() => {
     if (scope === 'claim') {
+      const anyClaimSignals = rows.some(r => r.inCompetitive || r.inContinuousCore || r.inMixed || r.inDirectTopN);
+      if (!anyClaimSignals) return rows;
       return rows.filter(r => r.inCompetitive || r.inContinuousCore || r.inMixed || r.inDirectTopN);
     }
     return rows;
   }, [rows, scope]);
 
+  const filteredRows = useMemo(
+    () => applyFilters(scopedRows, viewConfig, columns),
+    [scopedRows, viewConfig, columns]
+  );
+
   // Sort
   const sortedRows = useMemo(
-    () => sortRows(scopedRows, localSortBy, localSortDir, columns),
-    [scopedRows, localSortBy, localSortDir, columns]
+    () => sortRows(filteredRows, localSortBy, localSortDir, columns),
+    [filteredRows, localSortBy, localSortDir, columns]
   );
 
   // Build virtual items (groups + rows)
@@ -300,23 +381,21 @@ export function EvidenceTable({
   });
 
   const handleSort = useCallback((colId: string) => {
-    setLocalSortBy(prev => {
-      if (prev !== colId) {
+    setLocalSortBy(prevCol => {
+      if (prevCol !== colId) {
         setLocalSortDir('desc');
         return colId;
       }
-      return prev;
-    });
-    setLocalSortDir(prev => {
-      if (localSortBy !== colId) return 'desc';
-      if (prev === 'desc') return 'asc';
-      if (prev === 'asc') return null;
-      return 'desc';
+      // Same column - cycle direction
+      setLocalSortDir(prevDir => {
+        if (prevDir === 'desc') return 'asc';
+        if (prevDir === 'asc') return null;
+        return 'desc';
+      });
+      return prevCol;
     });
     onSort?.(colId);
-  }, [localSortBy, onSort]);
-
-  const handleGroup = useCallback((colId: string | null) => {
+  }, [onSort]);  const handleGroup = useCallback((colId: string | null) => {
     setLocalGroupBy(colId);
     onGroup?.(colId);
   }, [onGroup]);
@@ -357,10 +436,53 @@ export function EvidenceTable({
 
   const zonePreview = thresholdPreviews['zone'];
 
+  const tableCopyText = useMemo(() => {
+    if (!columns || columns.length === 0) return "";
+    if (!virtualItems || virtualItems.length === 0) return "";
+    const header = columns.map((c) => c.label.replace(/\r?\n/g, " ").trim()).join("\t");
+    const lines: string[] = [header];
+    for (const item of virtualItems) {
+      if (item.type === "group") {
+        lines.push(`— GROUP: ${item.groupKey} (${item.count}) —`);
+        continue;
+      }
+      const row = item.row;
+      const line = columns.map((col) => {
+        const baseVal = col.accessor(row);
+        const previewOverride = thresholdPreviews[col.id];
+        let displayVal = baseVal;
+        if (previewOverride && col.id === 'zone' && row.z_claim != null) {
+          const overrides = applyThresholdPreview(row, thresholdPreviews);
+          if ('zone' in overrides) displayVal = (overrides as any).zone ?? baseVal;
+        }
+        return fmt(displayVal, col).replace(/\r?\n/g, " ").trim();
+      }).join("\t");
+      lines.push(line);
+    }
+
+    const legendLines = columns
+      .map((c) => {
+        const desc = c.description?.replace(/\r?\n/g, " ").trim();
+        if (!desc) return null;
+        return `${c.label} (${c.id}): ${desc}`;
+      })
+      .filter((v): v is string => !!v);
+    if (legendLines.length > 0) {
+      lines.push("");
+      lines.push("— LEGEND —");
+      lines.push(...legendLines);
+    }
+    return lines.join("\n");
+  }, [columns, virtualItems, thresholdPreviews]);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Sticky header */}
       <div className="flex-none border-b border-border-subtle bg-surface sticky top-0 z-10">
+        <div className="flex items-center justify-between px-2 py-1 border-b border-white/5">
+          <div className="text-[10px] text-text-muted">{sortedRows.length.toLocaleString()} row(s)</div>
+          <CopyButton variant="icon" label="Copy table" text={tableCopyText} disabled={!tableCopyText} />
+        </div>
         <div className="flex items-stretch">
           {columns.map((col) => (
             <div
@@ -408,7 +530,7 @@ export function EvidenceTable({
                     min={-2}
                     max={3}
                     step={0.1}
-                    defaultValue={1.0}
+                    value={zonePreview?.previewThreshold ?? 1.0}        
                     className="w-full h-1 accent-amber-400"
                     onChange={e => setZoneThreshold(parseFloat(e.target.value))}
                     title={`Zone threshold: z_claim > ${zonePreview?.previewThreshold?.toFixed(1) ?? '1.0'}`}
@@ -428,7 +550,11 @@ export function EvidenceTable({
       </div>
 
       {/* Virtualized body */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto custom-scrollbar min-h-0"
+        style={bottomInset ? { paddingBottom: bottomInset } : undefined}
+      >
         <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const item = virtualItems[virtualRow.index];

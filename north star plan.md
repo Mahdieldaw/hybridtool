@@ -1,8 +1,13 @@
-# Singularity Geometry Pipeline — North Star
+# Singularity Geometry Pipeline — Canon (Implementation + Diagnostics)
 
-**Purpose**: This document defines the final vision for every geometric measurement in the pipeline: what it measures, what level of honesty it operates at, who consumes it, and what the gap is between the current implementation and the target state. It does not make architectural decisions — it presents the decision surface for each measurement so implementation choices are grounded.
+**Purpose**: This document is the canonical, code-traced description of what the geometry + provenance + blast scoring pipeline does today, and which measurements are strictly diagnostic. It is written to match deployed behavior, and it is intended to replace “plan” language with “current truth”.
 
-**Governing principles are defined first. Every measurement must satisfy all four.**
+**Reading key**:
+- **In-play**: consumed by the pipeline to make routing/weighting/filtering decisions or to produce canonical outputs consumed downstream.
+- **Diagnostic**: computed and surfaced for inspection/comparison, but not used to make pipeline decisions.
+- **L1/L2**: epistemic tier as defined below.
+
+The instrument panel reference remains the authoritative UI-facing glossary of artifact fields: [MEASUREMENTS.md](file:///c:/Users/Mahdi/Desktop/hybrid/ui/components/instrument/MEASUREMENTS.md).
 ---
 
 ## Part I: Governing Principles
@@ -120,23 +125,21 @@ Historical turns populate all diagnostic panels without recompute.
 
 #### Substrate Measurements
 
-|Measurement|Level|What it honestly measures|Consumer|Current status|Target status|
-|---|---|---|---|---|---|
-|Full pairwise similarity matrix (N×N paragraphs)|L1|Cosine similarity between every pair of paragraph embeddings|Mutual recognition graph construction, carrier detection, provenance anchoring, per-consumer threshold calibration, all downstream density/isolation measures|Diagnostic (computed to find top-5, then discarded except in diagnostic surface)|**Active** — the substrate from which everything derives|
-|Distribution stats: count, min, P10, P25, P50, P75, P80, P90, P95, max, mean, stddev|L1|Shape of the full similarity distribution|Consumer threshold calibration (carrier: P75; provenance: per-claim distribution)|Diagnostic|**Active** — each consumer reads the percentile appropriate to its decision|
-|Discrimination range: P90 − P10|L1|How much useful spread the embedding model provides for this query|Degradation detection: if range < 0.02, flag "insufficient embedding discrimination" — no downstream threshold can be meaningful|Diagnostic|**Active** — gate for honest degradation flagging|
-|Per-node: sorted similarity list to all other nodes|L1|Each paragraph's relationship to the entire field, not just its top-K neighbors|Mutual recognition graph (rank position determines edge existence), provenance (claim centroid similarity to each paragraph)|Not stored|**Active** — stored as part of full pairwise|
-|Per-node: `top1Sim`|L1|Cosine similarity to nearest paragraph neighbor. Nearest-neighbor distance proxy.|Isolation detection, substrate quality check|Active|Active (no change)|
-|Per-node: `avgTopKSim` (K=5)|L1|Mean cosine to 5 nearest neighbors. Local density estimate.|Diagnostic — provides local context but no active consumer uses it for a decision|Active|**Diagnostic** — retained as a density descriptor, not a pipeline input|
+|Measurement|Level|What it honestly measures|Consumer|Role today|
+|---|---|---|---|---|
+|Full pairwise similarity matrix (N×N paragraphs)|L1|Cosine similarity between every pair of paragraph embeddings|Mutual recognition (μ+σ), discrimination range (D), basin inversion input, region profile measurements|In-play (internal substrate); exported only as sampled distributions / basin histogram|
+|Distribution stats: count, min, P10, P25, P50, P75, P80, P90, P95, max, mean, stddev|L1|Shape of the full pairwise similarity distribution|Basin inversion diagnostics; substrate health; consumer calibration where applicable|Diagnostic (UI) + in-play inputs for derived thresholds where used|
+|Discrimination range: P90 − P10|L1|How much usable spread the embedding model provides for this query|Pipeline gating floor: if `D < 0.10`, treat geometry as non-discriminating|In-play|
+|Per-node: sorted similarity list to all other nodes|L1|Each paragraph’s relationship to the entire field|Mutual recognition (μ+σ) notable-neighbor detection|In-play (internal substrate)|
+|Per-node: `top1Sim`|L1|Cosine similarity to nearest paragraph neighbor|Isolation proxy (`isolationScore = 1 - top1Sim`), health checks|In-play (node stats)|
+|Per-node: `avgTopKSim` (K=5)|L1|Mean cosine to 5 nearest neighbors|Local density descriptor|Diagnostic|
 
-**What gets removed from this layer**:
+**Legacy diagnostic graphs (still computed/exported):**
 
-|Removed|Why|
-|---|---|
-|Strong graph|Soft threshold derivation (P80 of top-1 similarities) was overridden by clamp [0.55, 0.78] on every test query. Policy disguised as derivation.|
-|`softThreshold`|Dead — consumer (strong graph) is removed|
-|`strongDegree` per node|Dead — consumer (strong graph) is removed|
-|Clamp [0.55, 0.78]|Dead — was the policy override|
+|Diagnostic view|What it is|Why it still exists|
+|---|---|---|
+|Strong graph (`softThreshold`, clamped)|`strongEdges = mutualEdges filtered by softThreshold`|Back-compat visualization + threshold auditing; not used for routing/topology anymore.|
+|Clamp `[0.55, 0.78]`|A policy guardrail applied to soft-threshold derivation|Kept explicitly visible because it is policy, not geometry; safe for diagnostics, not canonical structure.|
 
 ---
 
@@ -188,7 +191,7 @@ This prevents the unit self-similarity from inflating per-node thresholds.
 |`profiles.internalDensity`|Fraction of possible mutual-rank edges within region that exist|Active|
 |Coverage audit|Bridge detection between regions|Active|
 
-**Current state**: Active. Replaces mutual KNN (fixed top-5) for structural routing.
+**Current state**: Active. Replaces mutual KNN (fixed top-5) for structural routing. The UI canvas still renders `mutualEdges` (legacy mutual-kNN) until mutual recognition edges are exported.
 
 **Why mutual recognition and not alternatives**:
 
@@ -293,7 +296,12 @@ reconstruction.
 
 **Inputs**: Claim centroids (L2), paragraph embeddings (L1), statement embeddings (L1)
 
-**Mechanism: Competitive Assignment**
+This system currently runs multiple provenance measurements in parallel:
+- **§0 (Legacy, paragraph-centric)**: paragraph competitive assignment against claim-text centroids, then “inherit all statements from winning paragraphs”.
+- **§1 (In-play, statement-centric)**: statement competitive allocation with per-statement μ+σ thresholds, linear excess weights, and supporter filtering.
+- **Mixed-method (In-play for canonical sets + blast surface comparison)**: merges paragraph pools with claim-centric paragraph scoring, then applies preservation-by-default statement filtering to produce `canonicalStatementIds` per claim.
+
+#### §0 Competitive Assignment (legacy paragraph pools)
 
 Provenance is not determined by global constants or elbow detection. It is determined by competitive assignment — each paragraph independently decides which claims it belongs to, based on its own similarity distribution across all claim centroids.
 
@@ -335,24 +343,8 @@ all paragraphs), no claim exceeds any paragraph's threshold. Flagged as
 "undifferentiated — claim centroids colocated." Fallback: assign all paragraphs 
 to all claims.
 
-**Future refinement — proportional weights**: The binary assignment (above mean = in, below mean = out) can be extended to continuous weights:
+**Weighting note**: Linear excess weights are implemented in §1 (statement allocation). The §0 paragraph system remains a binary paragraph assignment used primarily for legacy comparison surfaces.
 
-
-
-```
-excess(P, c) = sim(P, c) - (μ_P + σ_P)    (positive for assigned claims only)
-weight(P, c) = excess(P, c) / Σ excess(P, c')   (across all assigned claims)
-bulk(c) = Σ weight(P, c)                    (across all assigned paragraphs)
-```
-
-Weights enable graduated blast radius (a paragraph where the pruned claim had 90% weight is heavily exposed; one where it had 15% is barely affected), weight-aware carrier detection (don't sweep for carriers on lightly-weighted statements), and proportional skeletonization. Implement after binary competitive assignment is validated.
-
-```
-**Council resolution**: Linear weights confirmed. Softmax and nonlinear 
-> **Council resolution**: Linear weights confirmed. Softmax and nonlinear
-> alternatives rejected — they manufacture false confidence in homogeneous fields
-> where tiny numerical differences would dominate. Linear excess is the honest
-> measurement of marginal affinity.
 |Measurement|Level|What it honestly measures|Consumer|Status|
 |---|---|---|---|---|
 |Per-claim source statement IDs|L2 (depends on claim centroid)|Which statements live in paragraphs that competitively select this claim|Fate tracking, exclusivity, blast radius, skeletonization, completeness|Active|
@@ -363,6 +355,36 @@ Weights enable graduated blast radius (a paragraph where the pruned claim had 90
 |`exclusivityRatio` per claim|L1 (set membership)|Exclusive source statements / total. Emerges from centroid geometry.|Blast radius (exclusive evidence loss), triage, skeletonization|Active|
 |Pairwise Jaccard on source statement sets|L1 (set overlap)|Evidence overlap between claim pairs|Blast radius axis clustering, deduplication, mapper quality check|Active|
 |Per-claim excess affinity distribution|L1|Distribution of (sim - μ) values for assigned paragraphs. High excess = strong ownership. Low excess = marginal membership.|Diagnostics (provenance confidence per claim)|Diagnostic|
+
+---
+
+#### §1 Competitive Provenance (in-play statement allocation)
+
+**What it does**: Assigns statements directly to claims by cross-claim competition at statement granularity. This avoids “paragraph inheritance noise” and produces linear weights used in the Compare panels and downstream scoring.
+
+**Mechanism (as implemented)**:
+- For each statement S, compute `sim(S,C) = cosine(e_S, e_C)` for each claim centroid C.
+- Let `μ_S` and `σ_S` be mean/stddev over the set `{ sim(S,C) }` across claims (2-claim special case handled in code).
+- Assign S to claim C iff `sim(S,C) > μ_S + σ_S`, and set `excess = sim - τ_S`.
+- Weight within assigned claims: `w(S,C) = excess(S,C) / Σ excess(S,C')`.
+- Apply supporter constraint: keep only statements whose `modelIndex ∈ claim.supporters` when supporters exist.
+
+**Where it lives**:
+- Producer: `computeStatementCompetitiveAllocation(...)` in [claimAssembly.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/ConciergeService/claimAssembly.ts)
+- Artifact: `artifact.statementAllocation` (per-claim pools, weights, entropy, assignment counts)
+
+---
+
+#### Mixed-Method Provenance (in-play canonical statement sets)
+
+**What it does**: Produces a conservative canonical statement set per claim (`canonicalStatementIds`) by merging paragraph-level competitive pools with claim-centric paragraph scoring, then filtering statements by a preservation-by-default rule.
+
+**Where it lives**:
+- Producer: `computeMixedMethodProvenance(...)` in [claimAssembly.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/ConciergeService/claimAssembly.ts)
+- Artifact: `artifact.mixedProvenance.perClaim[claimId].canonicalStatementIds`
+
+**Primary consumers today**:
+- Blast surface (vernal twin) comparison score: [blastSurface.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/blastSurface.ts)
 ---
 
 ### Layer 6: Carrier Detection
@@ -371,17 +393,16 @@ Weights enable graduated blast radius (a paragraph where the pruned claim had 90
 
 **Inputs**: Statement embeddings (L1), pruning decisions (user input via traversal)
 
-|Measurement|Level|What it honestly measures|Consumer|Current status|Target status|
-|---|---|---|---|---|---|
-|Per-statement carrier candidates|L1|Which other statements are geometrically close enough to "carry" a pruned statement's content|Skeletonization: carrier found → pruned statement REMOVE, carrier → SKELETONIZE. No carrier → pruned statement SKELETONIZE (sole carrier).|Active — global 0.60 threshold (82% pass rate, ambient noise acceptance)|**Active** — per-statement elbow detection on statement-to-statement similarities|
+|Measurement|Level|What it honestly measures|Consumer|Role today|
+|---|---|---|---|---|
+|Per-statement carrier candidates|L1|Which other statements are geometrically close enough to carry a pruned statement’s content|Skeletonization: carrier found → pruned statement REMOVE, carrier → SKELETONIZE. No carrier → pruned statement SKELETONIZE (sole carrier).|In-play|
 
 #### Carrier Threshold
 
-|Property|Current|Target|
-|---|---|---|
-| Mechanism | Global static 0.60 | `max(μ_statement + σ_statement, P75_global)` on both gates. Per-statement μ+σ adapts to local density. Global P75 floor prevents isolated statements from getting falsely "carried" by distant neighbors. |
-| Dual gate | Both gates use 0.60 | Both gates (claim similarity and statement similarity) use the same mechanism: `max(μ+σ, P75_global)` applied to their respective distributions. |
-| Degradation | Everything above 0.60 is a carrier (most pairs) | In uniform fields (σ ≈ 0), threshold ≈ max(μ, P75). Most statements won't have carriers. Content is preserved as skeletonized text. Correct bias under irreplaceability principle. |
+|Property|As implemented today|
+|---|---|
+| Mechanism | Dual gate with adaptive thresholds: `sourceSimilarity > max(μ_source+σ_source, P75_source)` AND `claimSimilarity > max(μ_claim+σ_claim, P75_claim)` computed over eligible candidates. |
+| Degradation | In uniform/noisy fields where σ is small and the P75 floor dominates, few statements pass both gates; preservation bias routes toward skeletonization. |
 
 ---
 
@@ -389,10 +410,10 @@ Weights enable graduated blast radius (a paragraph where the pruned claim had 90
 
 **What this layer does**: Identifies near-duplicate statements across models for compression in the mapper prompt.
 
-|Measurement|Level|What it honestly measures|Consumer|Current status|Target status|
-|---|---|---|---|---|---|
-|Statement-pair cosine similarity|L1|Geometric proximity of two statement embeddings|Paraphrase expansion in `TriageEngine.ts`|Active — threshold 0.85 (0.1% pass rate, only threshold that actually discriminates)|Active — retain 0.85 as floor|
-|Token Jaccard overlap|L1|Lexical overlap between statement texts|Not implemented|—|**Add as secondary gate**: Jaccard > 0.5 required alongside cosine > 0.85. Guards against stance-flipped near-duplicates ("Drug X is safe" / "Drug X is lethal" — high cosine, low Jaccard).|
+|Measurement|Level|What it honestly measures|Consumer|Role today|
+|---|---|---|---|---|
+|Statement-pair cosine similarity (≥ 0.85)|L1|Geometric proximity of two statement embeddings|Cross-model paraphrase detection in `TriageEngine.ts`|In-play|
+|Token Jaccard overlap (≥ 0.5)|L1|Lexical overlap between statement texts|Secondary paraphrase gate to reject stance-flipped near-duplicates|In-play|
 
 **Validation** (post-implementation): Cross-reference paraphrase detections against mapper-labeled paraphrases. If >95% of mapper-identified paraphrases have cosine ≥ 0.85 AND Jaccard > 0.5, thresholds are calibrated.
 
@@ -461,6 +482,33 @@ Weights enable graduated blast radius (a paragraph where the pruned claim had 90
 
 ---
 
+### Layer 10.5: Blast Surface (Vernal twin) — L1 comparison score
+
+**What this layer does**: Computes a provenance-derived damage assessment from mixed-method canonical statement sets. This runs alongside the legacy blast radius filter and is designed to replace L3 structural heuristics with L1 measurements (cosines + set membership).
+
+**Where it runs**:
+- Producer: `computeBlastSurface(...)` in [blastSurface.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/blastSurface.ts)
+- Wiring: deterministic pipeline step “Blast surface” in [deterministicPipeline.js](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/execution/deterministicPipeline.js)
+- Artifact: `artifact.blastSurface`
+
+**Layers (as implemented)**:
+- **Layer A — Evidence inventory (inputs)**: canonical statement sets per claim from `artifact.mixedProvenance.perClaim[claimId].canonicalStatementIds`. Canonical exclusives are derived internally: a canonical statement is exclusive to claim C iff it appears in no other claim’s canonical set.
+- **Layer B — Exclusive vulnerability (twin / absorption)**:
+  - Output: `layerB` (`ClaimAbsorptionProfile`) with `exclusiveCount`, `orphanCount`, `absorbableCount`, `orphanRatio`, per-statement carrier diagnostics, and `absorptionByTarget`.
+  - Candidate pool: union of other claims’ canonical statements (excluding this claim’s canonical set), not the full corpus.
+  - Adaptive similarity gate: `τ_sim = clamp01(μ_S + 2·σ_S)` where μ/σ are computed over `cos(S, T)` for `T` in that cross-claim pool.
+  - Replacement gate: a candidate only counts as a “twin” if it is both highly similar (`cos(S,T*) > τ_sim`) and more claim-core-aligned than corpus-generic (`coreAffinity(T*) − corpusAffinity(T*) > 0`).
+  - Optional stricter variant: `layerBGate2` also enforces a claim-territory gate (`cos(T*, claimEmbedding) > territoryThreshold`), where `territoryThreshold` prefers an adaptive direction threshold (`τ_dir`) and falls back to mixed-provenance `globalMu`.
+- **Layer C — Evidence mass**: `{ canonicalCount, exclusiveCount, coreCount }`.
+- **Layer D — Cascade echo**: canonical overlap exposure `Σ_D (sharedCount / |canonical(D)|) × exclusivityRatio(D)`.
+
+**Vernal merged score (instrumentation)**:
+- `vulnerableCount` is the `layerB` orphan count; `destroyedQueryMean` averages query relevance over those vulnerable statements (normalized to [0,1]).
+- Vernal cascade exposure is computed separately from Layer D: `Σ_D (sharedCount / |canonical(D)|) × vulnerableCount(D)`.
+- Query tilt is variance-bounded: `queryTilt = λ × destroyedQueryMean` where `λ` scales with cross-claim spread in structural mass and query loss.
+
+This layer is **diagnostic until it becomes the sole blast gate**, but its measurements are L1 and computed deterministically.
+
 ### Layer 11: Fate Tracking and Completeness
 
 **What this layer does**: Classifies every statement by what happened to it in the pipeline. Produces recovery worklists for evidence the mapper may have missed.
@@ -512,12 +560,13 @@ Weights enable graduated blast radius (a paragraph where the pruned claim had 90
 
 **What this layer does**: Decides whether enough geometric structure exists to proceed with geometry-dependent pipeline steps.
 
-|Gate|Current mechanism|Target mechanism|
-|---|---|---|
-| "Is there enough structure?" | Shape classification → lens → threshold-dependent regions | Mutual recognition edge count > 0 AND discrimination range (P90-P10) ≥ 0.10 AND participation_rate > 5%, where participation_rate = (number of nodes with ≥1 mutual recognition edge) / total_nodes. If edges exist but discrimination range is below floor: `undifferentiated_field`. If >0 edges but one component >70%: `convergent_field`. If participation_rate < 5% while other conditions (edges>0 and discrimination≥0.10) hold, return verdict `insufficient_structure` (few spurious dyads do not constitute usable substrate). |
-| Skip geometry entirely | `pipelineGates.verdict === 'skip_geometry'` | Same verdict. Triggers: 0 mutual recognition edges OR discrimination range < 0.10. |
+**Mechanism today** (see [pipelineGates.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/geometry/interpretation/pipelineGates.ts)):
+- **Skip geometry** if substrate is degenerate, OR mutual recognition edge count is 0, OR discrimination range `D < 0.10`.
+- **Insufficient structure** if participation rate `< 5%` (few spurious dyads), or if isolation is extreme with no meaningful components.
+- **Trivial convergence** if the largest component dominates (`> 85%`) with high model diversity and low isolation.
+- **Proceed** otherwise, with confidence derived from mutual-recognition density + participation.
 
-**What gets removed**: Shape classification (`fragmentationScore`, `bimodalityScore`, `parallelScore`) as active pipeline inputs. Retained as diagnostic field descriptors. The lens (`AdaptiveLens`) loses both its consumers (HAC is deleted, strong graph is dying) and becomes diagnostic-only.
+Shape classification and the lens remain useful descriptors, but they are not the gate authority anymore.
 
 ---
 
@@ -591,9 +640,9 @@ STORED PRIMITIVES
 ```
 
 ---
-## Part V: Implementation Sequence
+## Appendix A: Implementation Notes (non-canonical)
 
-Each step is independently valuable and testable. Dependencies flow downward.
+This section is retained as historical engineering notes and validation prompts. It is not the canonical description of current behavior.
 
 | Step | What changes | What validates it | Depends on | Status |
 |---|---|---|---|---|
@@ -610,18 +659,3 @@ Each step is independently valuable and testable. Dependencies flow downward.
 | 11. Paraphrase Jaccard gate | Add token Jaccard > 0.5 as secondary gate alongside cosine > 0.85 | Stance-flipped near-duplicates rejected. True paraphrases still pass. | Nothing | **Implemented — validation pending** |
 | 12. Diagnostic promotions | Promote `sourceModelDiversity` → blast radius (hallucination check). Veto `sourceCoherence` promotion. Hold `centroidSimilarity` and `crossesRegionBoundary` for empirical validation. | sourceModelDiversity disagreements flagged in blast radius. | Steps 3, 6 | **Implemented — validation pending** |
 
-## Part VI: Empirical Questions
-
-These cannot be resolved by design. They require data from diverse queries.
-
-| Question | How to answer | When | Status |
-|---|---|---|---|
-| Does competitive assignment produce reasonable pool sizes on homogeneous queries? | Run threshold calibration query. Pool sizes per claim. | After step 3 | **Answered**: 6-29 per claim, avg exclusivity 8.7% |
-| Does competitive assignment produce tight pools on heterogeneous queries? | Run diverse-topic query. | After step 3 | **Answered**: 12-65 per claim, avg exclusivity 33.6% |
-| Does blast radius differentiate after competitive assignment? | Check blast radius composite scores. | After step 3 | **Answered**: Meaningful spread, non-uniform suppression |
-| Does the 22x model ordering spread survive mutual recognition transition? | Run same queries, check irreplaceability spread. | After step 6 | **Open** — test now |
-| Does pipeline gating with discrimination range ≥ 0.10 catch spurious structure? | Run queries with tight similarity distributions. Check whether gate fires. | After step 7 | Open |
-| Does `max(μ+σ, P75_global)` produce meaningful carrier detection? | Run pruning decisions, check carrier pass rate and replacement fidelity. | After step 9 | Open |
-| Does linear weight entropy distinguish homogeneous from heterogeneous provenance? | Compute weight entropy per paragraph across queries of varying breadth. | After step 10 | Open |
-| Does sourceModelDiversity reliably flag mapper hallucinated consensus? | Compare mapper `supporters[]` to geometric model diversity across queries. Measure disagreement frequency. | After step 12 | Open |
-| Does paraphrase Jaccard > 0.5 cause false negatives on legitimate paraphrases? | Check paraphrases with different wording against Jaccard threshold. | After step 11 | Open |

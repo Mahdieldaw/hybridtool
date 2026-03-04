@@ -970,150 +970,39 @@ export function QueryRelevanceCard({ artifact, selectedEntity: _selectedEntity }
 
 export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; selectedEntity: SelectedEntity }) {
   const br = artifact?.blastRadiusFilter ?? null;
-  const scores: any[] = useMemo(() => (Array.isArray(br?.scores) ? br.scores : []), [br]);
   const axes: any[] = useMemo(() => (Array.isArray(br?.axes) ? br.axes : []), [br]);
-  const meta = br?.meta ?? null;
+  const surveyGates: any[] = useMemo(() => safeArr(artifact?.surveyGates), [artifact]);
 
-  type ScoreRow = {
-    id: string;
-    claimId: string;
-    label: string;
-    composite: number | null;
-    rawComposite: number | null;
-    cascadeBreadth: number | null;
-    exclusiveEvidence: number | null;
-    leverage: number | null;
-    queryRelevance: number | null;
-    articulationPoint: number | null;
-    suppressed: boolean;
-  };
+  const hasAny =
+    (artifact?.blastSurface && Array.isArray(artifact?.blastSurface?.scores) && artifact.blastSurface.scores.length > 0) ||
+    surveyGates.length > 0 ||
+    axes.length > 0;
 
-  const scoreRows = useMemo<ScoreRow[]>(() =>
-    scores.map((s: any) => {
-      const c = s?.components ?? {};
-      const n = (v: any) => typeof v === "number" && Number.isFinite(v) ? v : null;
-      return {
-        id: s?.claimId ?? "",
-        claimId: s?.claimId ?? "",
-        label: s?.claimLabel ?? "",
-        composite: n(s?.composite),
-        rawComposite: n(s?.rawComposite),
-        cascadeBreadth: n(c.cascadeBreadth),
-        exclusiveEvidence: n(c.exclusiveEvidence),
-        leverage: n(c.leverage),
-        queryRelevance: n(c.queryRelevance),
-        articulationPoint: n(c.articulationPoint),
-        suppressed: !!s?.suppressed,
-      };
-    }),
-    [scores]
-  );
-
-  const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
-  const focusedRow = selectedClaimId ? scoreRows.find((r) => r.claimId === selectedClaimId) : null;
-
-  if (!br) {
-    return <div className="text-xs text-text-muted italic py-4">Blast radius data not available in artifact.</div>;
+  if (!hasAny) {
+    return <div className="text-xs text-text-muted italic py-4">Blast diagnostics not available in artifact.</div>;
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded">L2 ⚑</span>
-        <span className="text-[9px] text-text-muted">policy blend — weights visible below</span>
-      </div>
-
-      <InterpretiveCallout
-        text={`${fmtInt(meta?.axisCount)} axes from ${fmtInt(meta?.totalClaims)} claims. ${fmtInt(meta?.suppressedCount)} suppressed (composite < 0.20).${br.skipSurvey ? ' Survey SKIPPED.' : ''}`}
-        variant={(meta?.suppressedCount ?? 0) > 0 || br.skipSurvey ? 'warn' : 'ok'}
-      />
-
-      {/* Summary */}
-      <CardSection title="Summary">
-        <div className="grid grid-cols-2 gap-x-4">
-          <div>
-            <StatRow label="Total Claims" value={fmtInt(meta?.totalClaims)} />
-            <StatRow label="Suppressed" value={fmtInt(meta?.suppressedCount)} color={(meta?.suppressedCount ?? 0) > 0 ? "text-amber-400" : undefined} />
-            <StatRow label="Candidates" value={fmtInt(meta?.candidateCount)} />
-            <StatRow label="Axes" value={fmtInt(meta?.axisCount)} />
-          </div>
-          <div>
-            <StatRow label="Question Ceiling" value={String(br.questionCeiling ?? "—")} />
-            <StatRow label="Skip Survey" value={br.skipSurvey ? "YES" : "no"} color={br.skipSurvey ? "text-rose-400" : "text-emerald-400"} />
-            <StatRow label="Convergence" value={fmtPct(meta?.convergenceRatio)} />
-            {br.skipReason && <StatRow label="Skip Reason" value={br.skipReason} color="text-amber-400" />}
-          </div>
-        </div>
-      </CardSection>
-
-      {/* Policy weights — prominently displayed as per design */}
-      <CardSection title="Policy Weights" badge={{ text: "these are policy, not data", color: "#f59e0b" }}>
-        <div className="grid grid-cols-5 gap-1 text-center">
-          {[
-            { label: "Cascade", weight: "0.30" },
-            { label: "Exclusive", weight: "0.25" },
-            { label: "Leverage", weight: "0.20" },
-            { label: "QueryRel", weight: "0.15" },
-            { label: "Artic.", weight: "0.10" },
-          ].map((w) => (
-            <div key={w.label} className="bg-white/3 rounded-lg p-1.5">
-              <div className="text-[8px] text-text-muted">{w.label}</div>
-              <div className="text-xs font-mono font-semibold text-amber-400">{w.weight}</div>
-            </div>
-          ))}
-        </div>
-      </CardSection>
-
-      {/* Focused claim view */}
-      {focusedRow && (
-        <CardSection title={`Claim: ${focusedRow.label || focusedRow.claimId}`}>
-          <div className="flex items-center gap-3 mb-2">
-            <StatRow label="Composite (final)" value={fmt(focusedRow.composite, 4)} color={(focusedRow.composite ?? 0) > 0.5 ? "text-amber-400" : undefined} />
-            <StatRow label="Raw" value={fmt(focusedRow.rawComposite, 4)} />
-            <span className={clsx("text-[9px] px-1.5 py-0.5 rounded border", focusedRow.suppressed ? "border-rose-500/30 text-rose-400" : "border-emerald-500/30 text-emerald-400")}>
-              {focusedRow.suppressed ? "suppressed" : "active"}
-            </span>
-          </div>
-          <div className="space-y-0.5">
-            <HorizontalBar label="Cascade" value={focusedRow.cascadeBreadth ?? 0} max={1} color="#60a5fa" />
-            <HorizontalBar label="Exclusive" value={focusedRow.exclusiveEvidence ?? 0} max={1} color="#34d399" />
-            <HorizontalBar label="Leverage" value={focusedRow.leverage ?? 0} max={1} color="#a78bfa" />
-            <HorizontalBar label="QueryRel" value={focusedRow.queryRelevance ?? 0} max={1} color="#fbbf24" />
-            <HorizontalBar label="Artic." value={focusedRow.articulationPoint ?? 0} max={1} color="#f97316" />
-          </div>
+      <BlastSurfaceInline artifact={artifact} />
+      <BlastVernalInline artifact={artifact} />
+      <BlastTwinsInline artifact={artifact} selectedEntity={selectedEntity} />
+      {surveyGates.length > 0 && (
+        <CardSection title={`Survey Gates (${surveyGates.length})`}>
+          <SortableTable
+            columns={[
+              { key: "id", header: "Gate", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{String(r?.id ?? "")}</span> },
+              { key: "question", header: "Question", cell: (r) => <span className="text-[10px] text-text-secondary truncate max-w-[360px] inline-block">{String(r?.question ?? "")}</span> },
+              { key: "affected", header: "Affected", sortValue: (r) => safeArr(r?.affectedClaims).length, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(safeArr(r?.affectedClaims).length)}</span> },
+              { key: "blastRadius", header: "Score", sortValue: (r) => (typeof r?.blastRadius === "number" ? r.blastRadius : null), cell: (r) => <span className="font-mono text-text-muted">{fmt(typeof r?.blastRadius === "number" ? r.blastRadius : null, 3)}</span> },
+            ]}
+            rows={surveyGates.map((g: any) => ({ ...g, id: g?.id ?? "" }))}
+            defaultSortKey="blastRadius"
+            defaultSortDir="desc"
+            maxRows={12}
+          />
         </CardSection>
       )}
-
-      {/* Per-claim table */}
-      <CardSection title="Per-Claim Scores">
-        <SortableTable
-          columns={[
-            {
-              key: "label", header: "Claim", cell: (r) => (
-                <span className={clsx("text-[10px] truncate max-w-[140px] inline-block", r.suppressed && "line-through text-text-muted", selectedClaimId === r.claimId && "text-brand-400")}>
-                  {r.label || r.claimId}
-                </span>
-              )
-            },
-            {
-              key: "composite", header: "Score", sortValue: (r) => r.composite, cell: (r) => (
-                <span className={clsx("font-mono", r.suppressed ? "text-rose-400/60 line-through" : (r.composite ?? 0) > 0.5 ? "text-amber-400" : "text-text-secondary")}>
-                  {fmt(r.composite, 3)}
-                </span>
-              )
-            },
-            { key: "cascadeBreadth", header: "Casc", sortValue: (r) => r.cascadeBreadth, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeBreadth, 2)}</span> },
-            { key: "exclusiveEvidence", header: "Excl", sortValue: (r) => r.exclusiveEvidence, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.exclusiveEvidence, 2)}</span> },
-            { key: "leverage", header: "Levg", sortValue: (r) => r.leverage, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.leverage, 2)}</span> },
-          ]}
-          rows={scoreRows}
-          defaultSortKey="composite"
-          defaultSortDir="desc"
-          maxRows={12}
-        />
-      </CardSection>
-
-      {/* Axes */}
       {axes.length > 0 && (
         <CardSection title={`Survey Axes (${axes.length})`}>
           <div className="space-y-1">
@@ -1128,6 +1017,421 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
         </CardSection>
       )}
     </div>
+  );
+}
+
+// ── Blast Surface (Layers B/C/D) — inline in instrument panel ─────────────
+
+function BlastSurfaceInline({ artifact }: { artifact: any }) {
+  const bs = artifact?.blastSurface;
+  const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
+  const meta = bs?.meta ?? null;
+
+  type SurfaceRow = {
+    id: string; label: string;
+    orphanCount: number; exclusiveCount: number;
+    carrierRate: string; orphanRatio: number | null;
+    gate2OrphanRatio: number | null;
+    canonicalCount: number;
+    coreCount: number; cascadeExposure: number | null;
+  };
+
+  const surfaceRows = useMemo<SurfaceRow[]>(() =>
+    scores.map((s: any) => {
+      const b = s?.layerB || {};
+      const b2 = s?.layerBGate2 || null;
+      const c = s?.layerC || {};
+      const d = s?.layerD || {};
+      const exclCount = b.exclusiveCount ?? 0;
+      const orphanCount = b.orphanCount ?? 0;
+      const absorbableCount = b.absorbableCount ?? Math.max(0, exclCount - orphanCount);
+      return {
+        id: s?.claimId || "",
+        label: s?.claimLabel || "",
+        orphanCount,
+        exclusiveCount: exclCount,
+        carrierRate: exclCount > 0 ? `${absorbableCount}/${exclCount}` : "—",
+        orphanRatio: typeof b?.orphanRatio === "number" && Number.isFinite(b.orphanRatio) ? b.orphanRatio : null,
+        gate2OrphanRatio: typeof b2?.orphanRatio === "number" && Number.isFinite(b2.orphanRatio) ? b2.orphanRatio : null,
+        canonicalCount: c.canonicalCount ?? 0,
+        coreCount: c.coreCount ?? 0,
+        cascadeExposure: typeof d.cascadeExposure === "number" && Number.isFinite(d.cascadeExposure) ? d.cascadeExposure : null,
+      };
+    }),
+    [scores]
+  );
+
+  const totalOrphans = useMemo(() => surfaceRows.reduce((s, r) => s + r.orphanCount, 0), [surfaceRows]);
+  const maxCascade = useMemo(() => {
+    const vals = surfaceRows.map(r => r.cascadeExposure).filter((v): v is number => v != null);
+    return vals.length > 0 ? Math.max(...vals) : null;
+  }, [surfaceRows]);
+
+  if (!bs || scores.length === 0) return null;
+
+  return (
+    <>
+      <div className="border-t border-white/10 my-3" />
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+        <span className="text-xs font-semibold text-text-secondary">Blast Surface — Provenance-Derived (B/C/D)</span>
+      </div>
+
+      <CardSection title="Summary">
+        <div className="grid grid-cols-4 gap-x-4">
+          <StatRow label="Claims Scored" value={fmtInt(scores.length)} />
+          <StatRow label="Total Orphans" value={fmtInt(totalOrphans)} color={totalOrphans > 0 ? "text-amber-400" : "text-emerald-400"} />
+          <StatRow label="Max Cascade Exp" value={fmt(maxCascade, 3)} />
+          <StatRow label="Proc (ms)" value={fmt(meta?.processingTimeMs, 1)} />
+        </div>
+      </CardSection>
+
+      <CardSection title="Per-Claim Surface Scores">
+        <SortableTable
+          columns={[
+            { key: "label", header: "Claim", cell: (r) => <span className="text-[10px] truncate max-w-[120px] inline-block">{r.label || r.id}</span> },
+            { key: "orphanCount", header: "Orph", sortValue: (r) => r.orphanCount, cell: (r) => <span className={clsx("font-mono", r.orphanCount > 0 ? "text-amber-400" : "text-emerald-400")}>{r.orphanCount}</span> },
+            { key: "exclusiveCount", header: "Excl", sortValue: (r) => r.exclusiveCount, cell: (r) => <span className="font-mono text-text-muted">{r.exclusiveCount}</span> },
+            { key: "carrierRate", header: "Carr", cell: (r) => <span className="font-mono text-text-muted">{r.carrierRate}</span> },
+            { key: "orphanRatio", header: "%", sortValue: (r) => r.orphanRatio, cell: (r) => <span className="font-mono text-text-muted">{r.orphanRatio == null ? "—" : `${(r.orphanRatio * 100).toFixed(0)}%`}</span> },
+            { key: "gate2OrphanRatio", header: "%(G2)", sortValue: (r) => r.gate2OrphanRatio, cell: (r) => <span className="font-mono text-text-muted">{r.gate2OrphanRatio == null ? "—" : `${(r.gate2OrphanRatio * 100).toFixed(0)}%`}</span> },
+            { key: "canonicalCount", header: "Canon", sortValue: (r) => r.canonicalCount, cell: (r) => <span className="font-mono text-text-muted">{r.canonicalCount}</span> },
+            { key: "coreCount", header: "Core", sortValue: (r) => r.coreCount, cell: (r) => <span className="font-mono text-text-muted">{r.coreCount}</span> },
+            { key: "cascadeExposure", header: "CascExp", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
+          ]}
+          rows={surfaceRows}
+          defaultSortKey="orphanRatio"
+          defaultSortDir="desc"
+          maxRows={12}
+        />
+      </CardSection>
+    </>
+  );
+}
+
+function BlastVernalInline({ artifact }: { artifact: any }) {
+  const bs = artifact?.blastSurface;
+  const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
+  const vMeta = bs?.meta?.vernal ?? null;
+  const statementTextById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+      const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
+      if (!id) continue;
+      const text = String(s?.text ?? "");
+      if (!m.has(id)) m.set(id, text);
+    }
+    return m;
+  }, [artifact]);
+
+  type VernalRow = {
+    id: string; label: string;
+    compositeScore: number | null;
+    structuralMass: number | null;
+    vulnerableCount: number;
+    cascadeExposure: number | null;
+    destroyedQueryMean: number | null;
+    queryTilt: number | null;
+  };
+
+  const rows = useMemo<VernalRow[]>(() =>
+    scores.map((s: any) => {
+      const v = s?.vernal || {};
+      return {
+        id: s?.claimId || "",
+        label: s?.claimLabel || "",
+        compositeScore: typeof v.compositeScore === "number" && Number.isFinite(v.compositeScore) ? v.compositeScore : null,
+        structuralMass: typeof v.structuralMass === "number" && Number.isFinite(v.structuralMass) ? v.structuralMass : null,
+        vulnerableCount: typeof v.vulnerableCount === "number" && Number.isFinite(v.vulnerableCount) ? v.vulnerableCount : 0,
+        cascadeExposure: typeof v.cascadeExposure === "number" && Number.isFinite(v.cascadeExposure) ? v.cascadeExposure : null,
+        destroyedQueryMean: typeof v.destroyedQueryMean === "number" && Number.isFinite(v.destroyedQueryMean) ? v.destroyedQueryMean : null,
+        queryTilt: typeof v.queryTilt === "number" && Number.isFinite(v.queryTilt) ? v.queryTilt : null,
+      };
+    }),
+    [scores]
+  );
+
+  const maxComposite = useMemo(() => {
+    const vals = rows.map(r => r.compositeScore).filter((v): v is number => v != null);
+    return vals.length > 0 ? Math.max(...vals) : null;
+  }, [rows]);
+
+  const lambda = typeof vMeta?.lambda === "number" && Number.isFinite(vMeta.lambda) ? vMeta.lambda : null;
+  const structuralStep = typeof vMeta?.structuralStep === "number" && Number.isFinite(vMeta.structuralStep) ? vMeta.structuralStep : null;
+  const sigmaM = typeof vMeta?.sigmaM === "number" && Number.isFinite(vMeta.sigmaM) ? vMeta.sigmaM : null;
+  const sigmaQ = typeof vMeta?.sigmaQ === "number" && Number.isFinite(vMeta.sigmaQ) ? vMeta.sigmaQ : null;
+  const adaptive = typeof vMeta?.adaptiveAccelerator === "number" && Number.isFinite(vMeta.adaptiveAccelerator) ? vMeta.adaptiveAccelerator : null;
+
+  type VulnerableStatementRow = { id: string; claimId: string; claimLabel: string; statementId: string; text: string };
+  const vulnerableRows = useMemo<VulnerableStatementRow[]>(() => {
+    const out: VulnerableStatementRow[] = [];
+    for (const s of scores) {
+      const claimId = String(s?.claimId ?? "");
+      const claimLabel = String(s?.claimLabel ?? claimId);
+      const ids = Array.isArray(s?.vernal?.vulnerableStatementIds) ? s.vernal.vulnerableStatementIds : [];
+      for (const sidRaw of ids) {
+        const sid = String(sidRaw ?? "").trim();
+        if (!sid) continue;
+        const text = statementTextById.get(sid) ?? "";
+        out.push({ id: `${claimId}::${sid}`, claimId, claimLabel, statementId: sid, text });
+      }
+    }
+    return out;
+  }, [scores, statementTextById]);
+
+  const hasAny = rows.some(r => r.compositeScore != null || r.structuralMass != null || r.vulnerableCount > 0);
+  if (!bs || scores.length === 0 || !hasAny) return null;
+
+  return (
+    <>
+      <div className="border-t border-white/10 my-3" />
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+        <span className="text-xs font-semibold text-text-secondary">Blast — Merged Append 2.0 + 2.5</span>
+      </div>
+
+      <CardSection title="Summary">
+        <div className="grid grid-cols-3 gap-x-4">
+          <StatRow label="Claims Scored" value={fmtInt(scores.length)} />
+          <StatRow label="Max Composite" value={fmt(maxComposite, 3)} />
+          <StatRow label="Lambda" value={fmt(lambda, 4)} />
+          <StatRow label="Structural Step" value={fmt(structuralStep, 4)} />
+          <StatRow label="Sigma M" value={fmt(sigmaM, 4)} />
+          <StatRow label="Sigma Q" value={fmt(sigmaQ, 4)} />
+          <StatRow label="Adaptive" value={fmt(adaptive, 3)} />
+        </div>
+      </CardSection>
+
+      <CardSection title="Per-Claim Vernal Scores">
+        <SortableTable
+          columns={[
+            { key: "label", header: "Claim", cell: (r) => <span className="text-[10px] truncate max-w-[120px] inline-block">{r.label || r.id}</span> },
+            { key: "compositeScore", header: "BR", sortValue: (r) => r.compositeScore, cell: (r) => <span className="font-mono text-text-secondary">{fmt(r.compositeScore, 3)}</span> },
+            { key: "structuralMass", header: "M", sortValue: (r) => r.structuralMass, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.structuralMass, 3)}</span> },
+            { key: "vulnerableCount", header: "V", sortValue: (r) => r.vulnerableCount, cell: (r) => <span className={clsx("font-mono", r.vulnerableCount > 0 ? "text-amber-400" : "text-emerald-400")}>{r.vulnerableCount}</span> },
+            { key: "cascadeExposure", header: "D", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
+            { key: "destroyedQueryMean", header: "Q", sortValue: (r) => r.destroyedQueryMean, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.destroyedQueryMean, 3)}</span> },
+            { key: "queryTilt", header: "Tilt", sortValue: (r) => r.queryTilt, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryTilt, 3)}</span> },
+          ]}
+          rows={rows}
+          defaultSortKey="compositeScore"
+          defaultSortDir="desc"
+          maxRows={12}
+        />
+      </CardSection>
+
+      {vulnerableRows.length > 0 && (
+        <CardSection title="Irreplaceable Statements (Destroyed Mass)">
+          <SortableTable
+            columns={[
+              { key: "claimLabel", header: "Claim", cell: (r) => <span className="text-[10px] truncate max-w-[140px] inline-block">{r.claimLabel || r.claimId}</span> },
+              { key: "statementId", header: "Stmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[110px] inline-block">{r.statementId}</span> },
+              {
+                key: "text",
+                header: "Text",
+                cell: (r) => (
+                  <span title={r.text} className="text-[10px] text-text-secondary truncate max-w-[260px] inline-block">
+                    {r.text || "(missing text)"}
+                  </span>
+                ),
+              },
+            ]}
+            rows={vulnerableRows}
+            defaultSortKey="claimLabel"
+            defaultSortDir="asc"
+            maxRows={200}
+          />
+        </CardSection>
+      )}
+    </>
+  );
+}
+
+function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selectedEntity: SelectedEntity }) {
+  const bs = artifact?.blastSurface;
+  const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
+
+  const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
+  const statementTextById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+      const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
+      if (!id) continue;
+      const text = String(s?.text ?? "");
+      if (!m.has(id)) m.set(id, text);
+    }
+    return m;
+  }, [artifact]);
+
+  type TwinRow = {
+    id: string;
+    claimId: string;
+    claimLabel: string;
+    statementId: string;
+    text: string;
+    orphan: boolean;
+    carrierCount: number;
+    tauSim: number | null;
+    bestCarrierClaimId: string | null;
+    bestSim: number | null;
+    bestCandidateId: string | null;
+    bestCoreAffinity: number | null;
+    bestCorpusAffinity: number | null;
+    bestDifferential: number | null;
+    differentialGate: boolean | null;
+    gate2CarrierCount: number | null;
+    tauDir: number | null;
+    gate2BestSim: number | null;
+    gate2BestDifferential: number | null;
+  };
+
+  const rows = useMemo<TwinRow[]>(() => {
+    const out: TwinRow[] = [];
+    for (const s of scores) {
+      const claimId = String(s?.claimId ?? "").trim();
+      if (!claimId) continue;
+      if (selectedClaimId && claimId !== selectedClaimId) continue;
+      const claimLabel = String(s?.claimLabel ?? claimId);
+      const statements: any[] = Array.isArray(s?.layerB?.statements) ? s.layerB.statements : [];
+      const gate2Statements: any[] = Array.isArray(s?.layerBGate2?.statements) ? s.layerBGate2.statements : [];
+      const gate2ById = new Map<string, any>();
+      for (const gs of gate2Statements) {
+        const sid = String(gs?.statementId ?? "").trim();
+        if (sid) gate2ById.set(sid, gs);
+      }
+
+      for (const st of statements) {
+        const statementId = String(st?.statementId ?? "").trim();
+        if (!statementId) continue;
+        const carriers: any[] = Array.isArray(st?.carriers) ? st.carriers : [];
+        let bestSim = -Infinity;
+        let bestCandidateId: string | null = null;
+        let bestCarrierClaimId: string | null = null;
+        let bestCoreAffinity: number | null = null;
+        let bestCorpusAffinity: number | null = null;
+        let bestDifferential: number | null = null;
+        let differentialGate: boolean | null = null;
+        for (const c of carriers) {
+          const sim = typeof c?.bestSim === "number" && Number.isFinite(c.bestSim) ? c.bestSim : -Infinity;
+          if (sim > bestSim) {
+            bestSim = sim;
+            bestCandidateId = typeof c?.bestCandidateId === "string" && c.bestCandidateId.trim() ? String(c.bestCandidateId).trim() : null;
+            bestCarrierClaimId = typeof c?.targetClaimId === "string" && c.targetClaimId.trim() ? String(c.targetClaimId).trim() : null;
+            bestCoreAffinity = typeof c?.bestCandidateCoreAffinity === "number" && Number.isFinite(c.bestCandidateCoreAffinity) ? c.bestCandidateCoreAffinity : null;
+            bestCorpusAffinity = typeof c?.bestCandidateCorpusAffinity === "number" && Number.isFinite(c.bestCandidateCorpusAffinity) ? c.bestCandidateCorpusAffinity : null;
+            bestDifferential = typeof c?.differential === "number" && Number.isFinite(c.differential) ? c.differential : null;
+            differentialGate = typeof c?.differentialGate === "boolean" ? c.differentialGate : null;
+          }
+        }
+
+        const gate2 = gate2ById.get(statementId) ?? null;
+        const gate2Carriers: any[] = gate2 && Array.isArray(gate2?.carriers) ? gate2.carriers : [];
+        let gate2BestSim = -Infinity;
+        let gate2BestDifferential: number | null = null;
+        for (const gc of gate2Carriers) {
+          const sim = typeof gc?.bestSim === "number" && Number.isFinite(gc.bestSim) ? gc.bestSim : -Infinity;
+          if (sim > gate2BestSim) {
+            gate2BestSim = sim;
+            gate2BestDifferential = typeof gc?.differential === "number" && Number.isFinite(gc.differential) ? gc.differential : null;
+          }
+        }
+
+        out.push({
+          id: `${claimId}::${statementId}`,
+          claimId,
+          claimLabel,
+          statementId,
+          text: statementTextById.get(statementId) ?? "",
+          orphan: !!st?.orphan,
+          carrierCount: typeof st?.carrierCount === "number" && Number.isFinite(st.carrierCount) ? st.carrierCount : 0,
+          tauSim: typeof st?.tauSim === "number" && Number.isFinite(st.tauSim) ? st.tauSim : null,
+          bestCarrierClaimId,
+          bestSim: bestSim > -Infinity ? bestSim : null,
+          bestCandidateId,
+          bestCoreAffinity,
+          bestCorpusAffinity,
+          bestDifferential,
+          differentialGate,
+          gate2CarrierCount: gate2 && typeof gate2?.carrierCount === "number" && Number.isFinite(gate2.carrierCount) ? gate2.carrierCount : null,
+          tauDir: typeof s?.layerBGate2?.tauDir === "number" && Number.isFinite(s.layerBGate2.tauDir) ? s.layerBGate2.tauDir : null,
+          gate2BestSim: gate2BestSim > -Infinity ? gate2BestSim : null,
+          gate2BestDifferential,
+        });
+      }
+    }
+    return out;
+  }, [scores, selectedClaimId, statementTextById]);
+
+  if (!bs || scores.length === 0) return null;
+  if (!selectedClaimId) {
+    return (
+      <>
+        <div className="border-t border-white/10 my-3" />
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+          <span className="text-xs font-semibold text-text-secondary">Blast Absorption — Layer B Details</span>
+        </div>
+        <div className="text-xs text-text-muted italic py-2">Select a claim to view its absorption diagnostics.</div>
+      </>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <>
+        <div className="border-t border-white/10 my-3" />
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+          <span className="text-xs font-semibold text-text-secondary">Blast Absorption — Layer B Details</span>
+        </div>
+        <div className="text-xs text-text-muted italic py-2">No Layer B absorption rows for this claim.</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="border-t border-white/10 my-3" />
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+        <span className="text-xs font-semibold text-text-secondary">Blast Absorption — Layer B Details</span>
+      </div>
+
+      <CardSection title={`Exclusive Statements — ${rows.length}`}>
+        <SortableTable
+          columns={[
+            { key: "statementId", header: "Stmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[110px] inline-block">{r.statementId}</span> },
+            {
+              key: "text",
+              header: "Text",
+              cell: (r) => (
+                <span title={r.text} className="text-[10px] text-text-secondary truncate max-w-[280px] inline-block">
+                  {r.text || "(missing text)"}
+                </span>
+              )
+            },
+            { key: "orphan", header: "Orph", sortValue: (r) => (r.orphan ? 1 : 0), cell: (r) => <span className={clsx("font-mono", r.orphan ? "text-amber-400" : "text-emerald-400")}>{r.orphan ? "✓" : "—"}</span> },
+            { key: "carrierCount", header: "Carriers", sortValue: (r) => r.carrierCount, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(r.carrierCount)}</span> },
+            { key: "bestCarrierClaimId", header: "BestClaim", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.bestCarrierClaimId ?? "—"}</span> },
+            { key: "bestSim", header: "bestSim", sortValue: (r) => r.bestSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestSim, 3)}</span> },
+            { key: "tauSim", header: "τ_sim", sortValue: (r) => r.tauSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.tauSim, 3)}</span> },
+            { key: "bestDifferential", header: "Δ", sortValue: (r) => r.bestDifferential, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestDifferential, 3)}</span> },
+            { key: "differentialGate", header: "ΔG", sortValue: (r) => r.differentialGate == null ? -1 : r.differentialGate ? 1 : 0, cell: (r) => <span className="font-mono text-text-muted">{r.differentialGate == null ? "—" : r.differentialGate ? "✓" : "✕"}</span> },
+            { key: "bestCandidateId", header: "BestStmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.bestCandidateId ?? "—"}</span> },
+            { key: "bestCoreAffinity", header: "A(core)", sortValue: (r) => r.bestCoreAffinity, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestCoreAffinity, 3)}</span> },
+            { key: "bestCorpusAffinity", header: "A(corp)", sortValue: (r) => r.bestCorpusAffinity, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestCorpusAffinity, 3)}</span> },
+            { key: "gate2CarrierCount", header: "G2 Carr", sortValue: (r) => r.gate2CarrierCount, cell: (r) => <span className="font-mono text-text-muted">{r.gate2CarrierCount == null ? "—" : fmtInt(r.gate2CarrierCount)}</span> },
+            { key: "gate2BestSim", header: "G2 best", sortValue: (r) => r.gate2BestSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.gate2BestSim, 3)}</span> },
+            { key: "gate2BestDifferential", header: "Δ(G2)", sortValue: (r) => r.gate2BestDifferential, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.gate2BestDifferential, 3)}</span> },
+            { key: "tauDir", header: "τ_dir", sortValue: (r) => r.tauDir, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.tauDir, 3)}</span> },
+          ]}
+          rows={rows}
+          defaultSortKey="orphan"
+          defaultSortDir="desc"
+          maxRows={30}
+        />
+      </CardSection>
+    </>
   );
 }
 
@@ -1501,6 +1805,8 @@ export function ContinuousFieldCard({ artifact }: { artifact: any }) {
 
 export function CarrierDetectionCard({ artifact }: { artifact: any }) {
   const fatesObj: Record<string, any> = artifact?.completeness?.statementFates ?? {};
+  const qsi = artifact?.questionSelectionInstrumentation ?? null;
+  const surveyGates = useMemo(() => safeArr<any>(artifact?.surveyGates), [artifact]);
   const fateRows = useMemo(() => Object.values(fatesObj).map((f: any) => ({
     id: String(f.statementId ?? ""),
     fate: String(f.fate ?? ""),
@@ -1594,6 +1900,181 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
           maxRows={15}
         />
       </CardSection>
+
+      {qsi ? (
+        <>
+          <CardSection title="Conflict Validation (F1)">
+            {(() => {
+              const rows = safeArr<any>(qsi?.validatedConflicts).map((c: any, idx: number) => ({
+                id: `${c?.edgeFrom ?? ""}_${c?.edgeTo ?? ""}_${idx}`,
+                from: String(c?.edgeFrom ?? ""),
+                to: String(c?.edgeTo ?? ""),
+                centroidSimilarity: typeof c?.centroidSimilarity === "number" ? c.centroidSimilarity : null,
+                muInterClaim: typeof c?.muInterClaim === "number" ? c.muInterClaim : null,
+                validated: !!c?.validated,
+              }));
+              const validatedCount = rows.filter((r: any) => r.validated).length;
+              const muInter = rows.length > 0 ? rows[0].muInterClaim : null;
+              return (
+                <div className="space-y-2">
+                  <div className="text-[9px] text-text-muted">
+                    {fmtInt(validatedCount)}/{fmtInt(rows.length)} conflict edges validated (centroid sim &lt; μ_inter = {muInter != null ? fmt(muInter, 3) : "—"})
+                  </div>
+                  <SortableTable
+                    columns={[
+                      { key: "from", header: "From", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.from}</span> },
+                      { key: "to", header: "To", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.to}</span> },
+                      { key: "centroidSimilarity", header: "Centroid Sim", sortValue: (r: any) => r.centroidSimilarity ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.centroidSimilarity != null ? fmt(r.centroidSimilarity, 3) : "—"}</span> },
+                      { key: "muInterClaim", header: "μ_inter", sortValue: (r: any) => r.muInterClaim ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.muInterClaim != null ? fmt(r.muInterClaim, 3) : "—"}</span> },
+                      {
+                        key: "validated",
+                        header: "Validated",
+                        sortValue: (r: any) => (r.validated ? 1 : 0),
+                        cell: (r: any) => (
+                          <span className={clsx("font-mono text-[10px]", r.validated ? "text-emerald-400" : "text-text-muted")}>
+                            {r.validated ? "YES" : "no"}
+                          </span>
+                        ),
+                      },
+                    ]}
+                    rows={rows}
+                    defaultSortKey="validated"
+                    defaultSortDir="desc"
+                    maxRows={12}
+                  />
+                </div>
+              );
+            })()}
+          </CardSection>
+
+          <CardSection title="Question Selection Profile (F2–F4)">
+            {(() => {
+              const rows = safeArr<any>(qsi?.claimProfiles).map((p: any) => ({
+                id: String(p?.claimId ?? ""),
+                claimId: String(p?.claimId ?? ""),
+                label: String(p?.claimLabel ?? ""),
+                vernalComposite: typeof p?.vernalComposite === "number" ? p.vernalComposite : null,
+                orphanRatio: typeof p?.orphanRatio === "number" ? p.orphanRatio : null,
+                supportRatio: typeof p?.supportRatio === "number" ? p.supportRatio : null,
+                consensusDiscount: typeof p?.consensusDiscount === "number" ? p.consensusDiscount : null,
+                soleSource: !!p?.soleSource,
+                queryRelevanceRaw: typeof p?.queryRelevanceRaw === "number" ? p.queryRelevanceRaw : null,
+                wouldPenalize: !!p?.wouldPenalize,
+                damageBand: typeof p?.damageBand === "number" ? p.damageBand : 0,
+              }));
+              return (
+                <SortableTable
+                  columns={[
+                    { key: "claimId", header: "Claim", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.claimId}</span> },
+                    { key: "label", header: "Label", cell: (r: any) => <span className="text-[10px] truncate max-w-[160px] inline-block" title={r.label}>{r.label}</span> },
+                    { key: "vernalComposite", header: "Vernal BR", sortValue: (r: any) => r.vernalComposite ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.vernalComposite != null ? fmt(r.vernalComposite, 4) : "—"}</span> },
+                    { key: "orphanRatio", header: "Orphan%", sortValue: (r: any) => r.orphanRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.orphanRatio != null ? `${(r.orphanRatio * 100).toFixed(1)}%` : "—"}</span> },
+                    { key: "supportRatio", header: "Support%", sortValue: (r: any) => r.supportRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.supportRatio != null ? `${(r.supportRatio * 100).toFixed(0)}%` : "—"}</span> },
+                    {
+                      key: "consensusDiscount",
+                      header: "Consensus Disc",
+                      sortValue: (r: any) => r.consensusDiscount ?? -Infinity,
+                      cell: (r: any) => (
+                        <span className={clsx("font-mono", (r.consensusDiscount ?? 0) > 0.25 ? "text-amber-400" : "text-text-muted")}>
+                          {r.consensusDiscount != null ? fmt(r.consensusDiscount, 3) : "—"}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "soleSource",
+                      header: "Sole?",
+                      sortValue: (r: any) => (r.soleSource ? 1 : 0),
+                      cell: (r: any) => (
+                        <span className={clsx("font-mono text-[10px]", r.soleSource ? "text-amber-400" : "text-text-muted")}>
+                          {r.soleSource ? "YES" : "no"}
+                        </span>
+                      ),
+                    },
+                    { key: "queryRelevanceRaw", header: "QRel Raw", sortValue: (r: any) => r.queryRelevanceRaw ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.queryRelevanceRaw != null ? fmt(r.queryRelevanceRaw, 3) : "—"}</span> },
+                    {
+                      key: "wouldPenalize",
+                      header: "Would Penalize",
+                      sortValue: (r: any) => (r.wouldPenalize ? 1 : 0),
+                      cell: (r: any) => (
+                        <span className={clsx("font-mono text-[10px]", r.wouldPenalize ? "text-rose-400" : "text-text-muted")}>
+                          {r.wouldPenalize ? "YES" : "no"}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "damageBand",
+                      header: "Band",
+                      sortValue: (r: any) => r.damageBand,
+                      cell: (r: any) => (
+                        <span className={clsx("font-mono text-[10px]", r.damageBand === 0 ? "text-text-secondary" : "text-text-muted")}>
+                          {fmtInt(r.damageBand)}
+                        </span>
+                      ),
+                    },
+                  ]}
+                  rows={rows}
+                  defaultSortKey="vernalComposite"
+                  defaultSortDir="desc"
+                  maxRows={12}
+                />
+              );
+            })()}
+          </CardSection>
+
+          <CardSection title="Survey Gate & Ceiling (G)">
+            {(() => {
+              const gate = qsi?.gate ?? null;
+              const ceil = qsi?.ceiling ?? null;
+              const outliers = Array.isArray(ceil?.damageOutlierClaimIds) ? ceil.damageOutlierClaimIds : [];
+              return (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    <StatRow label="σ_damage" value={gate?.sigmaDamage != null ? fmt(gate.sigmaDamage, 4) : "—"} />
+                    <StatRow label="μ_damage" value={gate?.meanDamage != null ? fmt(gate.meanDamage, 4) : "—"} />
+                    <StatRow label="ε threshold" value={gate?.epsilon != null ? fmt(gate.epsilon, 4) : "—"} />
+                    <StatRow label="Would Skip" value={gate?.wouldSkip ? "YES" : "no"} color={gate?.wouldSkip ? "text-rose-400" : undefined} />
+                    <StatRow label="Has Conflicts" value={gate?.hasValidatedConflicts ? "YES" : "no"} color={gate?.hasValidatedConflicts ? "text-emerald-400" : undefined} />
+                    <StatRow label="Override Skip" value={gate?.overrideSkip ? "YES" : "no"} color={gate?.overrideSkip ? "text-amber-400" : undefined} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    <StatRow label="Validated Conflicts" value={ceil?.validatedConflictCount != null ? fmtInt(ceil.validatedConflictCount) : "—"} />
+                    <StatRow label="Independent Clusters" value={ceil?.independentConflictClusters != null ? fmtInt(ceil.independentConflictClusters) : "—"} />
+                    <StatRow label="Damage Outliers" value={ceil?.damageOutlierCount != null ? fmtInt(ceil.damageOutlierCount) : "—"} />
+                    <StatRow label="Theoretical Ceiling" value={ceil?.theoreticalCeiling != null ? fmtInt(ceil.theoreticalCeiling) : "—"} />
+                    <StatRow label="Claims Actually Sent" value={ceil?.actualClaimsSent != null ? fmtInt(ceil.actualClaimsSent) : "—"} />
+                    <StatRow label="Outlier IDs" value={outliers.length > 0 ? outliers.join(", ") : "—"} />
+                  </div>
+                </div>
+              );
+            })()}
+          </CardSection>
+
+          <CardSection title="Survey Mapper Output">
+            <div className="space-y-2">
+              <div className="text-[9px] text-text-muted">{fmtInt(surveyGates.length)} gate(s) produced</div>
+              {surveyGates.length > 0 ? (
+                <SortableTable
+                  columns={[
+                    { key: "id", header: "Gate", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r?.id ?? "")}</span> },
+                    { key: "question", header: "Question", cell: (r: any) => <span className="text-[10px] truncate max-w-[240px] inline-block" title={String(r?.question ?? "")}>{String(r?.question ?? "")}</span> },
+                    { key: "affected", header: "Affected", sortValue: (r: any) => safeArr(r?.affectedClaims).length, cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(safeArr(r?.affectedClaims).length)}</span> },
+                  ]}
+                  rows={surveyGates}
+                  defaultSortKey="affected"
+                  defaultSortDir="desc"
+                  maxRows={6}
+                />
+              ) : (
+                <div className="text-xs text-text-muted italic py-1">No survey gates generated.</div>
+              )}
+            </div>
+          </CardSection>
+        </>
+      ) : (
+        <CardSection title="Question Selection Instrumentation">
+          <div className="text-xs text-text-muted italic py-1">Question selection instrumentation not available in artifact.</div>
+        </CardSection>
+      )}
     </div>
   );
 }

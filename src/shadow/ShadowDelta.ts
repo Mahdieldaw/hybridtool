@@ -151,10 +151,10 @@ export function computeShadowDelta(
                 claims: referencedStatementIds.size, // Approximation of claims count
             },
             extraction: {
-                survivalRate: shadowStatementCount > 0
+                survivalRate: shadowStatementCount > 0 && shadowResult.meta?.sentencesProcessed
                     ? shadowStatementCount / shadowResult.meta.sentencesProcessed
                     : 0,
-                pass1Candidates: shadowResult.meta.candidatesProcessed,
+                pass1Candidates: shadowResult.meta?.candidatesProcessed ?? 0,
             }
         },
         processingTimeMs: performance.now() - startTime,

@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { m } from "framer-motion";
 import MarkdownDisplay from "../MarkdownDisplay";
 import { SupporterOrbs } from "./SupporterOrbs";
@@ -8,6 +8,9 @@ interface ClaimDetailDrawerProps {
   artifact: any;
   narrativeText: string;
   citationSourceOrder?: Record<string | number, string>;
+  variant?: "side" | "bottom";
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onClose: () => void;
   onClaimNavigate?: (claimId: string) => void;
 }
@@ -67,7 +70,15 @@ function MiniBar({ value, max, color = "bg-brand-500" }: { value: number; max: n
 // ── Main Component ────────────────────────────────────────────────────────
 
 export function ClaimDetailDrawer({
-  claim, artifact, narrativeText, citationSourceOrder, onClose, onClaimNavigate,
+  claim,
+  artifact,
+  narrativeText,
+  citationSourceOrder,
+  variant = "side",
+  collapsed = false,
+  onToggleCollapsed,
+  onClose,
+  onClaimNavigate,
 }: ClaimDetailDrawerProps) {
   // Keyboard: Escape to close
   useEffect(() => {
@@ -138,31 +149,53 @@ export function ClaimDetailDrawer({
 
   const roleClass = ROLE_COLORS[claim.role] || ROLE_COLORS.supplement;
 
+  const [showAllCanonical, setShowAllCanonical] = useState(false);
+  useEffect(() => {
+    setShowAllCanonical(false);
+  }, [claim?.id]);
+
+  const containerClassName = variant === "bottom"
+    ? "w-full h-full border-t border-white/10 bg-surface-raised flex flex-col overflow-hidden z-50"
+    : "absolute right-0 top-0 w-[400px] h-full border-l border-white/10 bg-surface-raised flex flex-col overflow-hidden z-50";
+
   return (
     <m.div
-      initial={{ x: 320, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 320, opacity: 0 }}
+      initial={variant === "bottom" ? { y: 96, opacity: 0 } : { x: 320, opacity: 0 }}
+      animate={variant === "bottom" ? { y: 0, opacity: 1 } : { x: 0, opacity: 1 }}
+      exit={variant === "bottom" ? { y: 96, opacity: 0 } : { x: 320, opacity: 0 }}
       transition={{ type: "spring", damping: 26, stiffness: 300 }}
-      className="w-[400px] h-full border-l border-white/10 bg-surface-raised flex flex-col overflow-hidden flex-none"
+      className={containerClassName}
     >
       {/* Header */}
       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-text-primary truncate flex-1">{claim.label}</h3>
-        <button
-          type="button"
-          className="text-text-muted hover:text-text-primary transition-colors p-1"
-          onClick={onClose}
-          title="Close (Esc)"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              className="text-text-muted hover:text-text-primary transition-colors px-2 py-1 rounded-md hover:bg-white/5 text-[11px]"
+              onClick={onToggleCollapsed}
+              title={collapsed ? "Expand" : "Collapse"}
+            >
+              {collapsed ? "Expand" : "Collapse"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="text-text-muted hover:text-text-primary transition-colors p-1"
+            onClick={onClose}
+            title="Close (Esc)"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-5">
+      {!collapsed && (
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-5">
         {/* Role + Type badges */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${roleClass}`}>
@@ -345,7 +378,7 @@ export function ClaimDetailDrawer({
                   {(mixedClaim.statements ?? [])
                     .filter((s: any) => (s.zone === 'core' || s.zone === 'boundary-promoted') && s.fromSupporterModel)
                     .sort((a: any, b: any) => b.globalSim - a.globalSim)
-                    .slice(0, 12)
+                    .slice(0, showAllCanonical ? (mixedClaim.statements?.length ?? 9999) : 12)
                     .map((s: any) => {
                       const text = stmtTextMap.get(s.statementId) ?? s.statementId;
                       const truncText = text.length > 90 ? text.slice(0, 90) + "\u2026" : text;
@@ -361,8 +394,23 @@ export function ClaimDetailDrawer({
                         </div>
                       );
                     })}
-                  {mixedClaim.canonicalStatementIds.length > 12 && (
-                    <div className="text-[9px] text-text-muted italic">+{mixedClaim.canonicalStatementIds.length - 12} more</div>
+                  {mixedClaim.canonicalStatementIds.length > 12 && !showAllCanonical && (
+                    <button
+                      type="button"
+                      className="text-left text-[9px] text-text-muted italic hover:text-text-secondary"
+                      onClick={() => setShowAllCanonical(true)}
+                    >
+                      +{mixedClaim.canonicalStatementIds.length - 12} more
+                    </button>
+                  )}
+                  {showAllCanonical && (
+                    <button
+                      type="button"
+                      className="text-left text-[9px] text-text-muted italic hover:text-text-secondary"
+                      onClick={() => setShowAllCanonical(false)}
+                    >
+                      Show less
+                    </button>
                   )}
                 </div>
               )}
@@ -380,7 +428,8 @@ export function ClaimDetailDrawer({
             </div>
           )}
         </div>
-      </div>
+        </div>
+      )}
     </m.div>
   );
 }

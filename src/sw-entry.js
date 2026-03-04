@@ -764,14 +764,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           if (!turnRaw) { sendResponse({ success: false, error: "Turn not found" }); return; }
 
           const { generateStatementEmbeddings, generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, structuredTruncate, DEFAULT_CONFIG } = await import('./clustering');
-          const { generateClaimEmbeddings, reconstructProvenance, computeElbowDiagnosticsFromEmbeddings, computeCompetitiveAssignmentDiagnostics } = await import('./ConciergeService/claimAssembly');
-          const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('./ConciergeService/claimProvenance');
+          const { generateClaimEmbeddings, reconstructProvenance } = await import('./ConciergeService/claimAssembly');
           const { parseSemanticMapperOutput } = await import('./ConciergeService/semanticMapper');
           const { packEmbeddingMap, unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
           const { buildCognitiveArtifact } = await import('../shared/cognitive-artifact');
-          const { computeBasinInversion } = await import('../shared/geometry/basinInversion');
-          const { extractForcingPoints } = await import('./utils/cognitive/traversalEngine');
-          const { computeShadowDelta, getTopUnreferenced } = await import('./shadow/ShadowDelta');
           const { buildGeometricSubstrate } = await import('./geometry/substrate');
           const { buildPreSemanticInterpretation, computePerModelQueryRelevance } = await import('./geometry/interpretation');
           const { computeQueryRelevance } = await import('./geometry/queryRelevance');
@@ -1024,11 +1020,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           console.log(`[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${claimEmbeddings?.size || 0} claims`);
 
-          // ── E. Deterministic pipeline (all math, no LLM) ──
+          // ── E. Deterministic pipeline (shared with live path) ──
+          const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
+            await import('./core/execution/deterministicPipeline');
 
-
-
-          // 1. Reconstruct provenance (cosine math: claims × statements/paragraphs)
           const enrichedClaims = await reconstructProvenance(
             mapperClaimsForProvenance,
             shadowStatements,
@@ -1040,326 +1035,49 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             claimEmbeddings,
           );
 
-          // 2. Claim provenance (ownership/exclusivity/overlap)
-          let claimProvenance = null;
-          let claimProvenanceExclusivity = null;
-          let claimProvenanceOverlap = null;
-          try {
-            const ownership = computeStatementOwnership(enrichedClaims);
-            claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
-            claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
-            let elbowDiagnostics = null;
-            try {
-              elbowDiagnostics = computeElbowDiagnosticsFromEmbeddings(
-                claimEmbeddings, paragraphEmbeddings,
-                mapperClaimsForProvenance.map((c) => ({ id: c.id })),
-              );
-            } catch (_) { }
-            let competitiveAssignmentDiagnostics = null;
-            try {
-              competitiveAssignmentDiagnostics = computeCompetitiveAssignmentDiagnostics(
-                mapperClaimsForProvenance.map((c) => ({ id: c.id })),
-                paragraphEmbeddings,
-                claimEmbeddings,
-                shadowParagraphs,
-              );
-              const cadKeys = competitiveAssignmentDiagnostics ? Object.keys(competitiveAssignmentDiagnostics) : [];
-              console.log(`[Regenerate] competitiveAssignmentDiagnostics: ${cadKeys.length} claims, paraEmb=${paragraphEmbeddings.size}, claimEmb=${claimEmbeddings.size}, paras=${shadowParagraphs.length}`);
-            } catch (cadErr) {
-              console.warn('[Regenerate] competitiveAssignmentDiagnostics failed:', cadErr);
-            }
-            claimProvenance = {
-              statementOwnership: Object.fromEntries(Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])),
-              claimExclusivity: Object.fromEntries(claimProvenanceExclusivity),
-              claimOverlap: claimProvenanceOverlap,
-              ...(elbowDiagnostics ? { elbowDiagnostics } : {}),
-              ...(competitiveAssignmentDiagnostics ? { competitiveAssignmentDiagnostics } : {}),
-            };
-          } catch (err) {
-            console.warn('[Regenerate] Claim provenance failed:', getErrorMessage(err));
-          }
-
-          // 3. Structural analysis
-          let cachedStructuralAnalysis = null;
-          try {
-            const { computeStructuralAnalysis } = await import('./core/PromptMethods');
-            const tempCognitive = buildCognitiveArtifact({
-              claims: enrichedClaims, edges: parsedEdges,
-              conditionals: parsedConditionals, narrative: '', ghosts: null,
-            }, null);
-            cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
-          } catch (err) {
-            console.warn('[Regenerate] Structural analysis failed:', getErrorMessage(err));
-          }
-
-          // 4. Blast radius filter
-          let blastRadiusResult = null;
-          try {
-            if (cachedStructuralAnalysis && claimProvenanceExclusivity && claimProvenanceOverlap) {
-              const { computeBlastRadiusFilter } = await import('./core/blast-radius/blastRadiusFilter');
-              const qrMap = queryRelevance?.statementScores && typeof queryRelevance.statementScores.get === 'function'
-                ? queryRelevance.statementScores
-                : null;
-              blastRadiusResult = computeBlastRadiusFilter({
-                claims: cachedStructuralAnalysis.claimsWithLeverage,
-                edges: parsedEdges,
-                cascadeRisks: cachedStructuralAnalysis.patterns.cascadeRisks,
-                exclusivity: claimProvenanceExclusivity,
-                overlap: claimProvenanceOverlap,
-                articulationPoints: cachedStructuralAnalysis.graph?.articulationPoints || [],
-                queryRelevanceScores: qrMap,
-                modelCount,
-                convergenceRatio: cachedStructuralAnalysis.landscape.convergenceRatio,
-              });
-            }
-          } catch (err) {
-            console.warn('[Regenerate] Blast radius failed:', getErrorMessage(err));
-          }
-
-          const blastRadiusActive = blastRadiusResult && !blastRadiusResult.skipSurvey;
-
-          // 5. Shadow delta
-          let shadowDelta = null;
-          let topUnindexed = [];
-          try {
-            const referencedIds = new Set(enrichedClaims.flatMap((c) => Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : []));
-            shadowDelta = computeShadowDelta({ statements: shadowStatements }, referencedIds, queryText);
-            topUnindexed = getTopUnreferenced(shadowDelta, 10);
-          } catch (_) { }
-
-          // 6. Traversal assembly (mechanical — same as StepExecutor)
-          const foundationClaimIds = enrichedClaims.map((c) => c.id);
-          const tiers = [{ tierIndex: 0, claimIds: foundationClaimIds, gates: [] }];
-          const tierByClaimId = new Map();
-          for (const t of tiers) { for (const id of t.claimIds) { if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex); } }
-
-          const serializedClaims = enrichedClaims.map((c) => {
-            const supporters = Array.isArray(c.supporters) ? c.supporters : [];
-            const sourceStatementIds = Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds.map(String).filter(Boolean) : [];
-            return {
-              id: String(c.id || ''), label: String(c.label || c.id),
-              stance: 'NEUTRAL', gates: { conditionals: [] },
-              enables: [], conflicts: [],
-              sourceStatementIds, supporterModels: supporters,
-              supportRatio: typeof c.supportRatio === 'number' ? c.supportRatio : 0,
-              hasConditionalSignal: Boolean(c.hasConditionalSignal),
-              hasSequenceSignal: Boolean(c.hasSequenceSignal),
-              hasTensionSignal: Boolean(c.hasTensionSignal),
-              tier: tierByClaimId.get(c.id) ?? 0,
-            };
+          const derived = await computeDerivedFields({
+            enrichedClaims,
+            mapperClaimsForProvenance,
+            parsedEdges,
+            parsedConditionals,
+            shadowStatements,
+            shadowParagraphs,
+            statementEmbeddings,
+            paragraphEmbeddings,
+            claimEmbeddings,
+            queryEmbedding,
+            substrate,
+            preSemantic,
+            regions,
+            geoRecord,
+            existingQueryRelevance: queryRelevance,
+            modelCount,
+            queryText,
           });
 
-          const traversalEdges = blastRadiusActive ? [] : parsedEdges
-            .filter((e) => e && e.from && e.to && String(e.type || '').trim() === 'conflicts')
-            .map((e) => ({ ...e, type: 'conflicts' }));
+          const shadowDelta = derived.shadowDelta;
 
-          const traversalGraph = {
-            claims: serializedClaims, edges: traversalEdges,
-            conditionals: parsedConditionals, tiers,
-            maxTier: tiers.length - 1, roots: [], tensions: [], cycles: [],
-          };
-
-          let forcingPoints = [];
-          try {
-            forcingPoints = extractForcingPoints(traversalGraph).map((fp) => ({
-              id: String(fp?.id || ''), type: fp?.type, tier: typeof fp?.tier === 'number' ? fp.tier : 0,
-              question: String(fp?.question || ''), condition: String(fp?.condition || ''),
-              ...(Array.isArray(fp?.options) ? { options: fp.options.map((o) => ({ claimId: String(o?.claimId || ''), label: String(o?.label || '') })).filter((o) => o.claimId && o.label) } : {}),
-              unlocks: [], prunes: [],
-              blockedBy: Array.isArray(fp?.blockedByGateIds) ? fp.blockedByGateIds.map(String).filter(Boolean) : [],
-              sourceStatementIds: Array.isArray(fp?.sourceStatementIds) ? fp.sourceStatementIds.map(String).filter(Boolean) : [],
-            }));
-          } catch (_) { }
-
-          // 7. Completeness
-          let completeness = null;
-          try {
-            if (substrate && regions.length > 0) {
-              const { buildStatementFates } = await import('./geometry/interpretation/fateTracking');
-              const { findUnattendedRegions } = await import('./geometry/interpretation/coverageAudit');
-              const { buildCompletenessReport } = await import('./geometry/interpretation/completenessReport');
-              const qrMap = queryRelevance?.statementScores && typeof queryRelevance.statementScores.get === 'function'
-                ? queryRelevance.statementScores
-                : null;
-              const statementFates = buildStatementFates(shadowStatements, enrichedClaims, qrMap);
-              const unattendedRegions = findUnattendedRegions(substrate, shadowParagraphs, enrichedClaims, regions, shadowStatements);
-              const completenessReport = buildCompletenessReport(statementFates, unattendedRegions, shadowStatements, regions.length);
-              completeness = { report: completenessReport, statementFates: Object.fromEntries(statementFates), unattendedRegions };
-            }
-          } catch (_) { }
-
-          // 8. Semantic edges (normalize types)
-          const EDGE_SUPPORTS = 'supports';
-          const EDGE_CONFLICTS = 'conflicts';
-          const EDGE_PREREQUISITE = 'prerequisite';
-          const semanticEdges = parsedEdges
-            .filter((e) => e && e.from && e.to)
-            .map((e) => {
-              const t = String(e.type || '').trim();
-              if (t === 'conflicts') return { ...e, type: EDGE_CONFLICTS };
-              if (t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
-              return e;
-            })
-            .filter((e) => [EDGE_SUPPORTS, EDGE_CONFLICTS, 'tradeoff', EDGE_PREREQUISITE].includes(String(e.type || '').trim()));
-
-          // ── D.2 Basin inversion (deterministic based on embeddings) ──
-          let basinInversion = undefined;
-          try {
-            const paraIds = geoRecord.meta?.paragraphIndex || [];
-            const paraVectors = [];
-            if (geoRecord.paragraphEmbeddings && paraIds.length > 0) {
-              const view = new Float32Array(geoRecord.paragraphEmbeddings);
-              for (let i = 0; i < paraIds.length; i++) {
-                paraVectors.push(view.subarray(i * dims, (i + 1) * dims));
-              }
-              basinInversion = computeBasinInversion(paraIds, paraVectors);
-            }
-          } catch (err) {
-            console.warn('[Regenerate] Basin inversion failed:', err);
-          }
-
-          // ── E.2 Phase 1: Statement-level competitive allocation ──
-          let statementAllocationResult = null;
-          try {
-            const { computeStatementCompetitiveAllocation } = await import('./ConciergeService/claimAssembly');
-            statementAllocationResult = computeStatementCompetitiveAllocation(
-              enrichedClaims.map(c => ({ id: c.id, supporters: Array.isArray(c.supporters) ? c.supporters : [] })),
-              statementEmbeddings,
-              claimEmbeddings,
-              shadowStatements,
-            );
-          } catch (err) {
-            console.warn('[Regenerate] Phase 1 statement allocation failed:', err);
-          }
-
-          // ── E.2b Geometry correlation ──
-          if (statementAllocationResult && enrichedClaims && shadowParagraphs) {
-            try {
-              const { computeGeometryCorrelation } = await import('./ConciergeService/claimAssembly');
-              const corr = computeGeometryCorrelation(enrichedClaims, statementAllocationResult, shadowParagraphs);
-              statementAllocationResult.geometryCorrelation = corr;
-              console.log(`[Regenerate] Geometry correlation: ${corr != null ? corr.toFixed(4) : 'null'}`);
-            } catch (err) {
-              console.warn('[Regenerate] Geometry correlation failed:', err);
-            }
-          }
-
-          // ── E.3 Phase 2: Continuous field ──
-          let continuousFieldResult = null;
-          try {
-            const { computeContinuousField } = await import('./ConciergeService/claimAssembly');
-            continuousFieldResult = computeContinuousField(
-              enrichedClaims.map(c => ({ id: c.id })),
-              statementEmbeddings,
-              claimEmbeddings,
-              shadowStatements,
-              statementAllocationResult,
-            );
-          } catch (err) {
-            console.warn('[Regenerate] Phase 2 continuous field failed:', err);
-          }
-
-          // ── E.3b Phase 3: Paragraph similarity field ──
-          let paragraphSimilarityResult = null;
-          try {
-            const { computeParagraphSimilarityField } = await import('./ConciergeService/claimAssembly');
-            paragraphSimilarityResult = computeParagraphSimilarityField(
-              enrichedClaims.map(c => ({ id: c.id })),
-              paragraphEmbeddings,
-              claimEmbeddings,
-              shadowParagraphs,
-            );
-            console.log(`[Regenerate] Phase 3 paragraph similarity: ${Object.keys(paragraphSimilarityResult?.perClaim || {}).length} claims`);
-          } catch (err) {
-            console.warn('[Regenerate] Phase 3 paragraph similarity failed:', err);
-          }
-
-          // ── E.3c Mixed-method provenance ──
-          let mixedProvenanceResult = null;
-          try {
-            const { computeMixedMethodProvenance } = await import('./ConciergeService/claimAssembly');
-            const stmtToParaId = new Map();
-            for (const para of shadowParagraphs) {
-              for (const sid of (para.statementIds ?? [])) {
-                stmtToParaId.set(sid, para.id);
-              }
-            }
-            const competitivePools = new Map();
-            for (const ec of enrichedClaims) {
-              const paraSet = new Set();
-              for (const sid of (ec.sourceStatementIds ?? [])) {
-                const pid = stmtToParaId.get(sid);
-                if (pid) paraSet.add(pid);
-              }
-              competitivePools.set(ec.id, paraSet);
-            }
-            mixedProvenanceResult = computeMixedMethodProvenance(
-              mapperClaimsForProvenance.map(c => ({ id: c.id, supporters: c.supporters })),
-              shadowParagraphs,
-              shadowStatements,
-              paragraphEmbeddings,
-              statementEmbeddings,
-              claimEmbeddings,
-              competitivePools,
-            );
-            const rr = mixedProvenanceResult.recoveryRate ?? 0;
-            const er = mixedProvenanceResult.expansionRate ?? 0;
-            const rmr = mixedProvenanceResult.removalRate ?? 0;
-            console.log(`[Regenerate][MixedProvenance] recovery=${(rr * 100).toFixed(1)}% expansion=${(er * 100).toFixed(1)}% removal=${(rmr * 100).toFixed(1)}%`);
-          } catch (err) {
-            console.warn('[Regenerate] Mixed-method provenance failed:', err);
-          }
-
-          // ── E.4 Claim↔Geometry Alignment ───────────────────────────
-          let alignmentResult = null;
-          try {
-            const regionProfiles = preSemantic?.regionProfiles || null;
-            console.log(`[Regenerate] Alignment prereqs: stmtEmb=${statementEmbeddings.size}, regions=${regions.length}, claims=${enrichedClaims.length}, regionProfiles=${Array.isArray(regionProfiles) ? regionProfiles.length : 'null'}`);
-            if (statementEmbeddings.size > 0 && regions.length > 0 && enrichedClaims.length > 0 && regionProfiles) {
-              const { buildClaimVectors, computeAlignment } = await import('./geometry');
-              const dimensions = geoRecord.meta?.dimensions || (statementEmbeddings.values().next().value?.length || 0);
-              const claimVectors = buildClaimVectors(enrichedClaims, statementEmbeddings, dimensions);
-              console.log(`[Regenerate] claimVectors=${claimVectors.length}, dims=${dimensions}`);
-              if (claimVectors.length > 0) {
-                alignmentResult = computeAlignment(claimVectors, regions, regionProfiles, statementEmbeddings);
-                console.log(`[Regenerate] Alignment computed: globalCoverage=${alignmentResult?.globalCoverage}, regionCoverages=${alignmentResult?.regionCoverages?.length}`);
-              }
-            }
-          } catch (err) {
-            console.warn('[Regenerate] Alignment failed:', err);
-          }
-
-          // ── F. Assemble mapper artifact (same shape as StepExecutor) ──
-          const mapperArtifact = {
-            id: `artifact-regen-${Date.now()}`,
-            query: queryText,
-            timestamp: new Date().toISOString(),
-            model_count: modelCount,
-            claims: enrichedClaims,
-            edges: semanticEdges,
-            ghosts: null,
-            narrative: parsedNarrative,
+          // Traversal (no survey mapper in regenerate — no LLM)
+          const { traversalGraph } = buildTraversalData({
+            enrichedClaims,
+            edges: parsedEdges,
             conditionals: parsedConditionals,
+            conflictTiering: false,
+          });
+          const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
+
+          const mapperArtifact = assembleMapperArtifact({
+            derived,
+            enrichedClaims,
             traversalGraph,
             forcingPoints,
-            traversalAnalysis: null,
-            ...(blastRadiusResult ? { blastRadiusFilter: blastRadiusResult } : {}),
-            surveyRationale: null,
-            preSemantic: preSemantic || null,
-            ...(completeness ? { completeness } : {}),
-            shadow: {
-              statements: shadowStatements,
-              audit: shadowDelta?.audit ?? {},
-              topUnreferenced: Array.isArray(topUnindexed) ? topUnindexed.map((u) => u?.statement).filter(Boolean) : [],
-            },
-            ...(claimProvenance ? { claimProvenance } : {}),
-            ...(basinInversion ? { basinInversion } : {}),
-            ...(statementAllocationResult ? { statementAllocation: statementAllocationResult } : {}),
-            ...(continuousFieldResult ? { continuousField: continuousFieldResult } : {}),
-            ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
-            ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
-            ...(alignmentResult ? { alignment: alignmentResult } : {}),
-          };
+            parsedNarrative,
+            parsedConditionals,
+            queryText,
+            modelCount,
+            shadowStatements,
+          });
+          mapperArtifact.preSemantic = preSemantic || null;
 
           // ── G. Build full cognitive artifact ──
           const coords = substrate?.layout2d?.coordinates || {};
@@ -1415,6 +1133,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             `alignment=${cognitiveArtifact?.geometry?.alignment ? 'present' : 'missing'}`,
             `basinInversion=${cognitiveArtifact?.geometry?.basinInversion ? cognitiveArtifact.geometry.basinInversion.status : 'missing'}`,
             `statementAllocation=${cognitiveArtifact?.statementAllocation ? 'present' : 'missing'}`,
+            `blastSurface=${cognitiveArtifact?.blastSurface ? 'present' : 'missing'}`,
+            `blastVernal=${Array.isArray(cognitiveArtifact?.blastSurface?.scores) && cognitiveArtifact.blastSurface.scores.length > 0 && cognitiveArtifact.blastSurface.scores[0]?.vernal ? 'present' : 'missing'}`,
           );
 
           // ── H. Persist as provider-specific artifact ──
@@ -1454,10 +1174,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             const updated = { ...mappingResp, artifact: dehydrated, updatedAt: Date.now() };
             await sm.adapter.put("provider_responses", updated, mappingResp.id);
             artifactPatched = true;
-            console.log(`[Regenerate] Full artifact persisted for provider ${providerId}: ${enrichedClaims.length} claims, ${semanticEdges.length} edges`);
+            console.log(`[Regenerate] Full artifact persisted for provider ${providerId}: ${enrichedClaims.length} claims, ${(mapperArtifact.edges?.length || 0)} edges`);
           }
 
-          sendResponse({ success: true, data: { artifactPatched, artifact: artifactForUi, claimCount: enrichedClaims.length, edgeCount: semanticEdges.length } });
+          sendResponse({ success: true, data: { artifactPatched, artifact: artifactForUi, claimCount: enrichedClaims.length, edgeCount: mapperArtifact.edges?.length || 0 } });
         })().catch(e => { console.error('[Regenerate] Failed:', e); sendResponse({ success: false, error: getErrorMessage(e) }); });
         return true;
 

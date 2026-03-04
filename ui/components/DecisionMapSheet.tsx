@@ -523,28 +523,39 @@ function RefSection({
   copyText?: string;
   children: React.ReactNode;
 }) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onToggle();
+    }
+  };
+
   return (
     <div className="border-b border-white/5 last:border-b-0">
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
         onClick={onToggle}
+        onKeyDown={handleKeyDown}
       >
         <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
           {label}
         </span>
         <div className="flex items-center gap-2">
           {copyText && expanded && (
-            <CopyButton
-              text={copyText}
-              label={`Copy ${label}`}
-              variant="icon"
-              disabled={!copyText}
-            />
+            <div onClick={(e) => e.stopPropagation()}>
+              <CopyButton
+                text={copyText}
+                label={`Copy ${label}`}
+                variant="icon"
+                disabled={!copyText}
+              />
+            </div>
           )}
           <span className="text-text-muted text-[10px]">{expanded ? '▲' : '▼'}</span>
         </div>
-      </button>
+      </div>
       {expanded && (
         <div className="px-3 pb-3">
           {children}
@@ -628,8 +639,52 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       return ser(artifact?.completeness?.statementFates);
     case 'model-ordering':
       return ser(artifact?.geometry?.preSemantic?.modelOrdering);
-    case 'blast-radius':
-      return ser(artifact?.blastRadiusFilter);
+    case 'blast-radius': {
+      const stmtText = new Map<string, string>();
+      for (const s of safeArr(artifact?.shadow?.statements)) {
+        stmtText.set(String(s.id), String(s.text ?? ''));
+      }
+      const expandStmtRefs = (value: any): any => {
+        if (Array.isArray(value)) return value.map(expandStmtRefs);
+        if (!value || typeof value !== 'object') return value;
+        const out: any = {};
+        for (const [k, v] of Object.entries(value)) {
+          const key = String(k);
+          const isIdsKey = /statementids/i.test(key);
+          const isIdKey = /statementid/i.test(key);
+          if (Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number')) {
+            const ids = (v as any[]).map((x) => String(x));
+            const allKnown = ids.length > 0 && ids.every((id) => stmtText.has(id));
+            if (isIdsKey || allKnown) {
+              out[k] = ids;
+              out[`${key}Resolved`] = ids.map((id) => ({ id, text: stmtText.get(id) ?? '' }));
+              continue;
+            }
+          }
+          if ((typeof v === 'string' || typeof v === 'number')) {
+            const sid = String(v);
+            const known = stmtText.has(sid);
+            if (isIdKey || (known && /id$/i.test(key))) {
+              out[k] = sid;
+              out[`${key}Text`] = stmtText.get(sid) ?? '';
+              continue;
+            }
+          }
+          if (isIdsKey && Array.isArray(v)) {
+            const ids = (v as any[]).map((id) => String(id));
+            out[k] = ids;
+            out[`${key}Resolved`] = ids.map((id) => ({ id, text: stmtText.get(id) ?? '' }));
+            continue;
+          }
+          out[k] = expandStmtRefs(v);
+        }
+        return out;
+      };
+      return ser({
+        blastRadiusFilter: expandStmtRefs(artifact?.blastRadiusFilter),
+        blastSurface: expandStmtRefs(artifact?.blastSurface),
+      });
+    }
     case 'alignment':
       return ser(artifact?.alignment ?? artifact?.geometry?.alignment);
     case 'raw-artifacts':
@@ -680,12 +735,23 @@ export const DecisionMapSheet = React.memo(() => {
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(
     () => DEFAULT_VIEW_MAP.get('provenance')?.columns ?? DEFAULT_VIEWS[0].columns
   );
+  const [isGraphCollapsed, setIsGraphCollapsed] = useState(false);
+  const [isTableCollapsed, setIsTableCollapsed] = useState(false);
+  const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState(false);
 
   // Reset column visibility when view changes
   useEffect(() => {
     const view = DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0];
     setVisibleColumnIds(view.columns);
   }, [selectedView]);
+
+  useEffect(() => {
+    if (openState) {
+      setIsGraphCollapsed(false);
+      setIsTableCollapsed(false);
+      setIsClaimPanelCollapsed(false);
+    }
+  }, [openState?.turnId]);
 
   const allColumns = useMemo(
     () => [...BUILT_IN_COLUMNS, ...extraColumns],
@@ -808,7 +874,13 @@ export const DecisionMapSheet = React.memo(() => {
     const hasGeometry = Array.isArray(mappingArtifact?.geometry?.substrate?.nodes) && mappingArtifact.geometry.substrate.nodes.length > 0;
     const hasShadow = !!mappingArtifact?.shadow && (Array.isArray(mappingArtifact.shadow.statements) ? mappingArtifact.shadow.statements.length > 0 : typeof mappingArtifact.shadow.statements === "object");
     const hasParagraphSimilarity = !!mappingArtifact?.paragraphSimilarityField;
-    if (hasGeometry && hasShadow && hasParagraphSimilarity) return;
+    const hasStatementAllocation = !!mappingArtifact?.statementAllocation;
+    const hasContinuousField = !!mappingArtifact?.continuousField;
+    const bs = (mappingArtifact as any)?.blastSurface;
+    const scores = Array.isArray(bs?.scores) ? bs.scores : [];
+    const hasBlastSurface = !!bs && scores.length > 0;
+    const hasBlastVernal = hasBlastSurface && typeof scores[0]?.vernal === "object" && scores[0].vernal != null;
+    if (hasGeometry && hasShadow && hasParagraphSimilarity && hasStatementAllocation && hasContinuousField && hasBlastVernal) return;
 
     const key = `${aiTurnId}::${pid}`;
     if (viewArtifactRequestRef.current === key) return;
@@ -1050,6 +1122,10 @@ export const DecisionMapSheet = React.memo(() => {
     return semanticClaims.find((c: any) => c.id === instrumentSelectedClaimId) || null;
   }, [instrumentSelectedClaimId, semanticClaims]);
 
+  useEffect(() => {
+    if (selectedClaimObj) setIsClaimPanelCollapsed(false);
+  }, [selectedClaimObj]);
+
   const stringifyForDebug = useMemo(() => {
     return (value: any) => {
       const seen = new WeakSet();
@@ -1077,7 +1153,12 @@ export const DecisionMapSheet = React.memo(() => {
   const shadowParagraphs = useMemo(() => {
     const paras = safeArr((mappingArtifact as any)?.shadow?.paragraphs);
     if (mappingArtifact) {
-      console.log(`[DecisionMapSheet] shadow.paragraphs=${paras.length}, shadow.statements=${safeArr((mappingArtifact as any)?.shadow?.statements).length}, claimProvenance=${!!(mappingArtifact as any)?.claimProvenance}, competitiveDiag=${Object.keys((mappingArtifact as any)?.claimProvenance?.competitiveAssignmentDiagnostics || {}).length}, alignment=${!!(mappingArtifact as any)?.geometry?.alignment}, basinInversion=${(mappingArtifact as any)?.geometry?.basinInversion?.status || 'missing'}`);
+      const bs = (mappingArtifact as any)?.blastSurface;
+      const bsScores = Array.isArray(bs?.scores) ? bs.scores : [];
+      const hasVernal = bsScores.length > 0 && bsScores.some((s: any) => s?.vernal && typeof s.vernal === "object");
+      console.log(
+        `[DecisionMapSheet] shadow.paragraphs=${paras.length}, shadow.statements=${safeArr((mappingArtifact as any)?.shadow?.statements).length}, claimProvenance=${!!(mappingArtifact as any)?.claimProvenance}, competitiveDiag=${Object.keys((mappingArtifact as any)?.claimProvenance?.competitiveAssignmentDiagnostics || {}).length}, alignment=${!!(mappingArtifact as any)?.geometry?.alignment}, basinInversion=${(mappingArtifact as any)?.geometry?.basinInversion?.status || 'missing'}, blastSurface=${bsScores.length}, blastVernal=${hasVernal}`
+      );
     }
     return paras;
   }, [mappingArtifact]);
@@ -1311,34 +1392,59 @@ export const DecisionMapSheet = React.memo(() => {
             <div className="flex-1 flex overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
 
               {/* Zone 2: ParagraphSpaceView as primary canvas (~40%) */}
-              <div className="w-[40%] min-w-[320px] border-r border-white/10 flex flex-col overflow-hidden flex-none">
-                <ToggleBar
-                  state={instrumentState}
-                  actions={instrumentActions}
-                  hasBasinData={!!(mappingArtifact as any)?.geometry?.basinInversion}
-                />
-                <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden">
-                  <ParagraphSpaceView
-                    graph={(mappingArtifact as any)?.geometry?.substrate || null}
-                    mutualEdges={(mappingArtifact as any)?.geometry?.substrate?.mutualEdges || null}
-                    regions={preSemanticRegions}
-                    basinResult={(mappingArtifact as any)?.geometry?.basinInversion || null}
-                    paragraphs={(mappingArtifact as any)?.shadow?.paragraphs || null}
-                    claimCentroids={claimCentroids}
-                    mapperEdges={semanticEdges}
-                    selectedClaimId={instrumentSelectedClaimId}
-                    onClaimClick={(id) => instrumentActions.selectClaim(id, id ? (semanticClaims.find((c: any) => c.id === id)?.label) : undefined)}
-                    showMutualEdges={instrumentState.showMutualEdges}
-                    showClaimDiamonds={instrumentState.showClaimDiamonds}
-                    showMapperEdges={instrumentState.showMapperEdges}
-                    showRegionHulls={instrumentState.showRegionHulls}
-                    showBasinRects={instrumentState.showBasinRects}
-                    highlightSourceParagraphs={instrumentState.highlightSourceParagraphs}
-                    highlightInternalEdges={instrumentState.highlightInternalEdges}
-                    highlightSpannedHulls={instrumentState.highlightSpannedHulls}
-                  />
+              {isGraphCollapsed ? (
+                <div className="w-8 border-r border-white/10 flex flex-col items-center justify-center flex-none bg-black/10">
+                  <button
+                    type="button"
+                    className="text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors rounded-md px-2 py-1 text-xs"
+                    onClick={() => setIsGraphCollapsed(false)}
+                    title="Expand graph"
+                  >
+                    ▶
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <div className="w-[40%] min-w-[320px] border-r border-white/10 flex flex-col overflow-hidden flex-none">
+                  <div className="flex items-stretch flex-none">
+                    <div className="flex-1 min-w-0">
+                      <ToggleBar
+                        state={instrumentState}
+                        actions={instrumentActions}
+                        hasBasinData={!!(mappingArtifact as any)?.geometry?.basinInversion}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="px-3 text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors text-xs border-l border-white/10"
+                      onClick={() => setIsGraphCollapsed(true)}
+                      title="Collapse graph"
+                    >
+                      ◀
+                    </button>
+                  </div>
+                  <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden">
+                    <ParagraphSpaceView
+                      graph={(mappingArtifact as any)?.geometry?.substrate || null}
+                      mutualEdges={(mappingArtifact as any)?.geometry?.substrate?.mutualEdges || null}
+                      regions={preSemanticRegions}
+                      basinResult={(mappingArtifact as any)?.geometry?.basinInversion || null}
+                      paragraphs={(mappingArtifact as any)?.shadow?.paragraphs || null}
+                      claimCentroids={claimCentroids}
+                      mapperEdges={semanticEdges}
+                      selectedClaimId={instrumentSelectedClaimId}
+                      onClaimClick={(id) => instrumentActions.selectClaim(id, id ? (semanticClaims.find((c: any) => c.id === id)?.label) : undefined)}
+                      showMutualEdges={instrumentState.showMutualEdges}
+                      showClaimDiamonds={instrumentState.showClaimDiamonds}
+                      showMapperEdges={instrumentState.showMapperEdges}
+                      showRegionHulls={instrumentState.showRegionHulls}
+                      showBasinRects={instrumentState.showBasinRects}
+                      highlightSourceParagraphs={instrumentState.highlightSourceParagraphs}
+                      highlightInternalEdges={instrumentState.highlightInternalEdges}
+                      highlightSpannedHulls={instrumentState.highlightSpannedHulls}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Zone 3: Right panel with Instrument/Narrative toggle (~60%) */}
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -1424,7 +1530,7 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
 
                         {/* Column picker */}
-                        <div className="ml-auto">
+                        <div className="ml-auto flex items-center gap-2">
                           <ColumnPicker
                             allColumns={allColumns}
                             visibleColumnIds={visibleColumnIds}
@@ -1442,26 +1548,79 @@ export const DecisionMapSheet = React.memo(() => {
                             }}
                             onReset={() => setVisibleColumnIds(activeViewConfig.columns)}
                           />
+                          <button
+                            type="button"
+                            className={clsx(
+                              "px-2.5 py-1 rounded-md border text-[10px] transition-colors",
+                              isTableCollapsed
+                                ? "border-brand-500/40 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20"
+                                : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
+                            )}
+                            onClick={() => setIsTableCollapsed(v => !v)}
+                            title={isTableCollapsed ? "Expand table" : "Collapse table"}
+                          >
+                            {isTableCollapsed ? "Expand table" : "Collapse table"}
+                          </button>
                         </div>
                       </div>
 
                       {/* ── Evidence Table (flex-1) ── */}
-                      <div className="flex-1 min-h-0 overflow-hidden">
-                        <EvidenceTable
-                          rows={evidenceRows}
-                          columns={activeColumns}
-                          viewConfig={activeViewConfig}
-                          scope={scope}
-                          onRowClick={(row) => {
-                            if (row.statementId) {
-                              instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
-                            }
-                          }}
-                        />
-                      </div>
+                      {isTableCollapsed ? (
+                        <div className="flex-none px-3 py-2 text-[11px] text-text-muted border-b border-white/10 flex items-center justify-between">
+                          <span>Table collapsed</span>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] text-text-muted hover:text-text-primary transition-colors"
+                            onClick={() => setIsTableCollapsed(false)}
+                          >
+                            Expand
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex-1 min-h-0 overflow-hidden relative">
+                          <EvidenceTable
+                            rows={evidenceRows}
+                            columns={activeColumns}
+                            viewConfig={activeViewConfig}
+                            scope={scope}
+                            bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 320) : 0}
+                            onRowClick={(row) => {
+                              if (row.statementId) {
+                                instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
+                              }
+                            }}
+                          />
+                          <AnimatePresence>
+                            {selectedClaimObj && (
+                              <div
+                                className={clsx(
+                                  "absolute left-0 right-0 bottom-0 z-40 shadow-elevated",
+                                  isClaimPanelCollapsed ? "h-14" : "h-[320px]"
+                                )}
+                              >
+                                <ClaimDetailDrawer
+                                  variant="bottom"
+                                  collapsed={isClaimPanelCollapsed}
+                                  onToggleCollapsed={() => setIsClaimPanelCollapsed(v => !v)}
+                                  claim={selectedClaimObj}
+                                  artifact={mappingArtifact}
+                                  narrativeText={mappingText}
+                                  onClose={() => instrumentActions.selectClaim(null)}
+                                  onClaimNavigate={(id) => instrumentActions.selectClaim(id, semanticClaims.find((c: any) => c.id === id)?.label)}
+                                />
+                              </div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )}
 
                       {/* ── Reference Shelf (collapsible sections) ── */}
-                      <div className="flex-none border-t border-white/10 overflow-y-auto custom-scrollbar max-h-72">
+                      <div
+                        className={clsx(
+                          "border-t border-white/10 overflow-y-auto custom-scrollbar",
+                          isTableCollapsed ? "flex-1 min-h-0" : "flex-none max-h-72"
+                        )}
+                      >
                         {([
                           { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
                           { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
@@ -1494,19 +1653,6 @@ export const DecisionMapSheet = React.memo(() => {
                           </RefSection>
                         ))}
                       </div>
-
-                      {/* ClaimDetailDrawer overlay */}
-                      <AnimatePresence>
-                        {selectedClaimObj && (
-                          <ClaimDetailDrawer
-                            claim={selectedClaimObj}
-                            artifact={mappingArtifact}
-                            narrativeText={mappingText}
-                            onClose={() => instrumentActions.selectClaim(null)}
-                            onClaimNavigate={(id) => instrumentActions.selectClaim(id, semanticClaims.find((c: any) => c.id === id)?.label)}
-                          />
-                        )}
-                      </AnimatePresence>
                     </>
                   ) : (
                     <NarrativePanel

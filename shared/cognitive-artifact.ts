@@ -20,7 +20,7 @@ export function buildCognitiveArtifact(
     };
   }
 
-  return {
+  const result: any = {
     paragraphClustering: mapper?.paragraphClustering ?? undefined,
     shadow: {
       statements:
@@ -107,15 +107,35 @@ export function buildCognitiveArtifact(
       turn: mapper?.turn ?? undefined,
       timestamp: mapper?.timestamp ?? undefined,
     },
-    claimProvenance: mapper?.claimProvenance ?? undefined,
-    blastRadiusFilter: mapper?.blastRadiusFilter ?? undefined,
-    surveyGates: mapper?.surveyGates ?? undefined,
-    surveyRationale: mapper?.surveyRationale ?? undefined,
-    completeness: mapper?.completeness ?? undefined,
+    // Renamed field: mapper.substrate → substrateSummary
     substrateSummary: mapper?.substrate ?? undefined,
-    statementAllocation: mapper?.statementAllocation ?? undefined,
-    continuousField: mapper?.continuousField ?? undefined,
-    paragraphSimilarityField: mapper?.paragraphSimilarityField ?? undefined,
-    mixedProvenance: mapper?.mixedProvenance ?? undefined,
   };
+
+  // Auto-forward: any mapper field NOT consumed into structured sections above
+  // passes through automatically. Adding a new field to deterministicPipeline.js
+  // is sufficient — no need to touch this file.
+  const consumedMapperKeys = new Set([
+    // → semantic
+    'claims', 'edges', 'conditionals', 'narrative', 'ghosts',
+    // → traversal
+    'traversalGraph', 'forcingPoints', 'traversalQuestions',
+    // → geometry
+    'diagnostics', 'structuralValidation', 'convergence', 'alignment',
+    'basinInversion', 'preSemantic',
+    // → meta
+    'model_count', 'modelCount', 'query', 'turn', 'timestamp',
+    // → special / renamed / nested
+    'paragraphClustering', 'shadow', 'substrate', 'traversalAnalysis',
+    'id',
+  ]);
+
+  if (mapper && typeof mapper === 'object') {
+    for (const [key, value] of Object.entries(mapper)) {
+      if (!consumedMapperKeys.has(key) && value !== undefined && !(key in result)) {
+        (result as any)[key] = value;
+      }
+    }
+  }
+
+  return result;
 }

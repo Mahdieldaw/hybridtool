@@ -39,17 +39,22 @@ What the UI actually draws depends on what data exists:
 
 ## Mutual Graph (L1)
 
-The undirected reciprocal agreement graph. An edge exists between two paragraphs only when both have each other in their top-K neighbors above the soft threshold. Source: `artifact.geometry.substrate.mutualEdges`.
+Two reciprocal graphs exist in the system today:
+
+- **Canonical (in-play): Mutual recognition (μ+σ)** — built from the full pairwise field. Edge (i,j) exists when `sim(i,j) > μ_i + σ_i` and `sim(i,j) > μ_j + σ_j`. This graph drives topology, regionization, and pipeline gating. It is computed in the geometry layer as `mutualRankGraph`, but is not yet exported into `artifact.geometry.substrate.*` for the UI.
+- **Legacy/UI (diagnostic): Mutual kNN (+ strong)** — kNN-reciprocal edges (`mutualEdges`) and the thresholded subset (`strongEdges` at `softThreshold`). These remain exported for visualization and backward-compatible diagnostics.
+
+This section documents the measurements as the UI currently computes and displays them from `artifact.geometry.substrate.mutualEdges`, and notes where the canonical (μ+σ) interpretation differs.
 
 | Measurement | What it is | What it tells you |
 |---|---|---|
-| **Participation rate** | Fraction of paragraphs with mutualDegree > 0 | How much of the field is connected. < 5% = insufficient structure; the graph cannot support regionization. |
-| **Components** | Connected components in the mutual graph | Number of isolated clusters. Ideally ≤ number of claims. Many small components = fragmented discourse. |
-| **Largest component %** | Fraction of nodes in the biggest component | A single giant component means the models broadly agree. Many equal-sized components = no consensus topology. |
-| **Avg MutualDeg** | Mean reciprocal connections per node | Average node centrality. Low = sparse mutual agreement. |
-| **Max MutualDeg** | Highest-degree node | The most-agreed-upon paragraph. Sometimes a proxy for the epistemic center of the conversation. |
+| **Participation rate** | Fraction of paragraphs with `mutualDegree > 0` (UI) | Connectivity in the legacy mutual-kNN view. Canonical gating uses mutual recognition participation (`μ+σ`), not `mutualDegree`. |
+| **Components** | Connected components on the UI mutual edges | Fragmentation in the legacy mutual-kNN view. Canonical topology/components are computed from mutual recognition edges. |
+| **Largest component %** | Fraction of nodes in the biggest UI component | Convergence indicator in the legacy mutual-kNN view. Canonical convergence checks use mutual-recognition topology. |
+| **Avg MutualDeg** | Mean `mutualDegree` across nodes | Average reciprocal connections per node in the legacy mutual-kNN view. |
+| **Max MutualDeg** | Maximum `mutualDegree` over nodes | The most-agreed-upon paragraph under the legacy mutual-kNN view. |
 
-**Gate:** participation > 5% AND at least one mutual edge = structure present. Below this, regionization is unreliable.
+**Canonical gate (in-play):** `mutual_recognition_edges > 0` AND `D = P90 − P10 ≥ 0.10` AND participation > 5%. The UI mutual-kNN gate above remains a helpful diagnostic proxy, but it is not the authoritative routing criterion anymore.
 
 ---
 
@@ -480,6 +485,87 @@ Graph-theoretic analysis of the semantic edge graph:
 
 Same as instrument Blast Radius tab but with histograms of composite score distribution and detailed modifier breakdown.
 
+### Blast Surface (Vernal / “Bernal” twin method)
+
+Blast Surface is a provenance-derived damage assessment that runs alongside the legacy blast radius filter. It is intended to replace L3 structural heuristics with L1 measurements derived from embeddings + set membership, and to make “why this claim is dangerous” legible.
+
+Where results are stored
+- `artifact.blastSurface` (`BlastSurfaceResult`)
+- Per-claim scores: `artifact.blastSurface.scores[]`
+- Vernal meta (variance-bounded query tilt): `artifact.blastSurface.meta.vernal`
+
+Where it runs
+- Producer: `computeBlastSurface(...)` in [blastSurface.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/blastSurface.ts)
+- Wired in deterministic regen pipeline: [deterministicPipeline.js](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/execution/deterministicPipeline.js#L249-L291)
+
+Layers (A–D) as implemented
+
+- **Layer A — Per-claim evidence inventory (inputs, already computed elsewhere)**
+  - Canonical statement sets come from mixed-method provenance:
+    - `artifact.mixedProvenance.perClaim[claimId].canonicalStatementIds`
+  - Canonical exclusivity is derived from those canonical sets:
+    - A canonical statement is “exclusive” to claim C if it appears in no other claim’s canonical set (owner count ≤ 1).
+
+- **Layer B — Exclusive vulnerability via speculative twin detection (L1)**
+  - Goal: for each claim’s exclusive canonical statement `S`, determine whether a “twin” exists in other claims’ canonical territory that could plausibly replace it.
+  - Output per claim: `scores[i].layerB` (`ClaimAbsorptionProfile`)
+    - `exclusiveCount`, `orphanCount`, `absorbableCount`, `orphanRatio`
+    - `statements[]` with per-exclusive-statement twin diagnostics
+    - `absorptionByTarget` counts (which other claim “absorbs” how many exclusives)
+  - Candidate pool (for μ/σ baselines):
+    - `crossClaimCandidateIds = (⋃ canonical(otherClaims)) \ canonical(thisClaim)`
+  - Gate 1 (similarity, adaptive per statement):
+    - For each exclusive `S`, compute `μ_S` and `σ_S` over `cos(S, T)` for all `T ∈ crossClaimCandidateIds`.
+    - Similarity threshold: `τ_sim = clamp01( μ_S + 2·σ_S )`.
+    - For each target claim D, find the single best-matching candidate `T* ∈ canonical(D)`; it is eligible only if `cos(S, T*) > τ_sim`.
+  - Gate 2 (core-vs-corpus differential, always applied in `layerB`):
+    - `coreAffinity(T*) = mean cos(T*, C)` over `C ∈ canonical(thisClaim)` excluding `S`
+    - `corpusAffinity(T*) = mean cos(T*, X)` over all statement embeddings `X` (excluding `T*`)
+    - `differential = coreAffinity - corpusAffinity`
+    - A twin “exists” only when `differential > 0` (prevents generic corpus-wide paraphrases from counting as replacements).
+  - Optional stricter variant: `scores[i].layerBGate2` (`ClaimAbsorptionProfileGate2`)
+    - Adds a claim-territory gate: candidate must also satisfy `cos(T*, claimEmbedding) > territoryThreshold`
+    - `territoryThreshold` prefers an adaptive directionality threshold `τ_dir`; falls back to mixed-provenance `globalMu` when direction stats are unavailable.
+
+- **Layer C — Evidence mass trio (L1/L1.5)**
+  - Output per claim: `scores[i].layerC`
+    - `canonicalCount`: mixed-method canonical statement count
+    - `exclusiveCount`: exclusive statement count within canonical set
+    - `coreCount`: dense core count from mixed-method provenance
+
+- **Layer D — Cascade echo via provenance overlap (L1)**
+  - Goal: estimate collateral destabilization if claim C is pruned by counting how much other claims’ canonical evidence overlaps.
+  - Output per claim: `scores[i].layerD`
+    - `cascadeExposure`: sum over other claims D of `(sharedCount / D.canonicalCount) × D.exclusivityRatio`
+    - `overlappingClaims[]`: per-overlap breakdown for inspection
+
+Vernal / “Bernal” merged score (Append 2.0 + 2.5, instrumentation)
+- Output per claim: `scores[i].vernal`
+  - Vulnerability: `vulnerableStatementIds` are the `layerB` orphans; `vulnerableCount = |vulnerableStatementIds|`.
+  - Query loss: `destroyedQueryMean` is the mean query relevance over vulnerable statements (prefers `queryRelevanceScores[statementId].querySimilarity`; falls back to `(cos(stmt, query)+1)/2`; clamped to [0,1]).
+  - Cascade exposure (vernal): for each other claim D that shares canonical statements with C, add `(sharedCount / |canonical(D)|) × vulnerableCount(D)`.
+  - `structuralMass = vulnerableCount(C) + cascadeExposure`
+  - `queryTilt = λ × destroyedQueryMean`
+  - `compositeScore = structuralMass + queryTilt`
+- Meta: `artifact.blastSurface.meta.vernal`
+  - `sigmaM`, `sigmaQ`: stddev across claims of `structuralMass` and `destroyedQueryMean`
+  - `structuralStep`: `sigmaM` (when `sigmaM > 0.01`), else `max(median(structuralMass)×0.1, 0.1)`
+  - `adaptiveAccelerator = min(1, sigmaQ / 0.25)`
+  - `lambda = structuralStep × adaptiveAccelerator`
+- Status: this merged score is currently surfaced for diagnostics; it is not yet the sole driver of survey question selection (see “Blast Radius Filter” below).
+
+Blast Radius Filter status (did we pivot to Layers F+?)
+- The current production question selection logic still uses the legacy blast radius filter:
+  - `artifact.blastRadiusFilter` computed by `computeBlastRadiusFilter(...)` in `src/core/blast-radius/blastRadiusFilter.ts`
+- This means we have **not** fully pivoted to the `blastlogic.xml` Layers E–G on top of Blast Surface yet. Today:
+  - Parts of Layer F exist in the legacy filter as continuous modifiers:
+    - F3 consensus discount, F4 sole-source off-topic discount, F5 redundancy discount (implemented in `applyModifiers`)
+  - A gate + ceiling exists (Layer G), but it is still expressed in legacy terms:
+    - `shouldSkipSurvey(...)` checks convergence + leverage inversions + sole-source outliers + conflicts
+    - `computeQuestionCeiling(...)` uses conflict cluster count and axis count with a hard ceiling of 3
+  - The `blastlogic.xml` F1 “conflict axis grouping with geometric validation (centroid similarity < μ_interClaim)” is **not** implemented in the legacy filter.
+  - The `blastlogic.xml` F2 “query relevance tiebreaker within 0.5σ of damage score” is **not** implemented as written; query relevance currently appears as a modifier component and the sole-source off-topic discount.
+
 ### Skeletonization
 
 Statement-level triage diagnostics combining completeness + shadow audit.
@@ -531,6 +617,7 @@ Below are the canonical artifact property paths the UI reads for each major meas
 - Claim provenance (paragraph legacy + exclusivity) → `artifact.claimProvenance` (including `claimExclusivity`, `competitiveAssignmentDiagnostics`, `geometryCorrelation`)
 - Continuous field → `artifact.continuousField` (includes `perClaim`, `disagreementMatrix`)
 - Blast radius → `artifact.blastRadiusFilter` (includes `scores`, component breakdown)
+- Blast surface (Vernal twins A–D) → `artifact.blastSurface` (includes per-claim `layerB/layerC/layerD` and `vernal`)
 - Paragraph similarity / ranked paragraphs → `artifact.paragraphSimilarityField?.perClaim`
 - Shadow corpus (statements / paragraphs) → `artifact.shadow.statements`, `artifact.shadow.paragraphs`
 - Instrumentation overrides / computed geometry correlation → `artifact.instrumentation.*`

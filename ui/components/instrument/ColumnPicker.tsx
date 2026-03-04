@@ -14,11 +14,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   competitive: 'Competitive §1',
   continuous: 'Continuous Field',
   mixed: 'Mixed Provenance',
+  blast: 'Blast Surface',
   metadata: 'Metadata',
   computed: 'Computed',
 };
 
-const CATEGORY_ORDER = ['identity', 'geometry', 'competitive', 'continuous', 'mixed', 'metadata', 'computed'];
+const CATEGORY_ORDER = ['identity', 'geometry', 'competitive', 'continuous', 'mixed', 'blast', 'metadata', 'computed'];
 
 // ============================================================================
 // EXPRESSION INPUT

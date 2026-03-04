@@ -184,12 +184,13 @@ export function ContextStrip({ artifact }: ContextStripProps) {
       if (qValues.length >= 2) {
         const sorted = [...qValues].sort((a, b) => a - b);
         const n = sorted.length;
-        const p10 = sorted[Math.min(Math.floor(0.1 * n), n - 1)];
-        const p90 = sorted[Math.min(Math.floor(0.9 * n), n - 1)];
+        const p10Idx = Math.floor(0.1 * (n - 1));
+        const p90Idx = Math.ceil(0.9 * (n - 1));
+        const p10 = sorted[p10Idx];
+        const p90 = sorted[Math.min(p90Idx, n - 1)];
         qSpread = p90 - p10;
       }
     }
-
     // All pairwise similarities for D histogram
     const pairSims: number[] = [];
     if (basin?.bins && basin?.binMin != null && basin?.binWidth != null) {

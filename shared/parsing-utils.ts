@@ -692,21 +692,25 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     // 1. Try Unified Tagged Parser
     const unified = parseUnifiedMapperOutput(text);
     if (unified.artifact && unified.artifact.claims && unified.artifact.claims.length > 0) {
-        return {
+        const artifact = {
             ...unified.artifact,
             narrative: unified.narrative || unified.artifact.narrative,
             anchors: unified.anchors || unified.artifact.anchors
         };
+        if ((artifact as any).blastRadiusFilter !== undefined) delete (artifact as any).blastRadiusFilter;
+        return artifact;
     }
 
     // 2. Try raw JSON fallback (if the text IS just the JSON object)
     try {
         const extracted = extractJsonFromContent(text);
         if (extracted && Array.isArray(extracted.claims)) {
-            return {
+            const artifact = {
                 ...createEmptyMapperArtifact(),
                 ...extracted
             };
+            if ((artifact as any).blastRadiusFilter !== undefined) delete (artifact as any).blastRadiusFilter;
+            return artifact;
         }
     } catch { }
 

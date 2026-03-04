@@ -1137,6 +1137,7 @@ export class StepExecutor {
                   console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
                 }
 
+                try {
                 enrichedClaims = await reconstructProvenance(
                   mapperClaimsForProvenance,
                   shadowResult.statements,
@@ -1148,237 +1149,68 @@ export class StepExecutor {
                   claimEmbeddings,
                 );
 
-                // ── PHASE 1: STATEMENT-LEVEL COMPETITIVE ALLOCATION ────────
-                let statementAllocationResult = null;
+                // ── DETERMINISTIC PIPELINE (shared with regenerate flow) ──
+                const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
+                  await import('./deterministicPipeline');
+
+                const derived = await computeDerivedFields({
+                  enrichedClaims,
+                  mapperClaimsForProvenance,
+                  parsedEdges: unifiedEdges,
+                  parsedConditionals: unifiedConditionals,
+                  shadowStatements: shadowResult.statements,
+                  shadowParagraphs: paragraphResult.paragraphs,
+                  statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
+                  paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
+                  claimEmbeddings: claimEmbeddings || new Map(),
+                  queryEmbedding,
+                  substrate,
+                  preSemantic: preSemanticInterpretation,
+                  regions,
+                  geoRecord: null,
+                  existingQueryRelevance: queryRelevance,
+                  modelCount: citationOrder.length,
+                  queryText: payload.originalPrompt,
+                });
+
+                const cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
+                const blastSurfaceResult = derived.blastSurfaceResult;
+                const mapperArtifact_claimProvenance = derived.claimProvenance;
+
+                let questionSelectionInstrumentation = null;
                 try {
-                  const { computeStatementCompetitiveAllocation } = await import('../../ConciergeService/claimAssembly');
-                  statementAllocationResult = computeStatementCompetitiveAllocation(
-                    mapperClaimsForProvenance.map(c => ({
-                      id: c.id,
-                      supporters: Array.isArray(c.supporters) ? c.supporters : [],
-                    })),
-                    statementEmbeddingResult?.embeddings || new Map(),
-                    claimEmbeddings || new Map(),
-                    shadowResult.statements,
-                  );
-                  const ent = statementAllocationResult?.entropy;
-                  console.log(`[Phase1] Statement allocation: ${ent?.total ?? 0} stmts assigned (1-claim:${ent?.one ?? 0}, 2-claim:${ent?.two ?? 0}, 3+:${ent?.threePlus ?? 0})`);
+                  const { computeQuestionSelectionInstrumentation } =
+                    await import('../blast-radius/questionSelection');
+                  questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
+                    blastSurfaceResult: blastSurfaceResult ?? null,
+                    edges: unifiedEdges,
+                    enrichedClaims,
+                    queryRelevanceScores: queryRelevance?.statementScores ?? null,
+                    modelCount: citationOrder.length,
+                    claimCentroids: claimEmbeddings ?? new Map(),
+                  });
                 } catch (err) {
-                  console.warn('[Phase1] Statement competitive allocation failed:', getErrorMessage(err));
-                  statementAllocationResult = null;
+                  console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
+                  questionSelectionInstrumentation = null;
                 }
 
-                // ── GEOMETRY CORRELATION ────────────────────────────────────
-                if (statementAllocationResult && enrichedClaims && paragraphResult?.paragraphs) {
-                  try {
-                    const { computeGeometryCorrelation } = await import('../../ConciergeService/claimAssembly');
-                    const corr = computeGeometryCorrelation(enrichedClaims, statementAllocationResult, paragraphResult.paragraphs);
-                    statementAllocationResult.geometryCorrelation = corr;
-                    console.log(`[Phase1] Geometry correlation: ${corr != null ? corr.toFixed(4) : 'null'}`);
-                  } catch (err) {
-                    console.warn('[Phase1] Geometry correlation failed:', getErrorMessage(err));
-                  }
-                }
-
-                // ── PHASE 2: CONTINUOUS FIELD ───────────────────────────────
-                let continuousFieldResult = null;
-                try {
-                  const { computeContinuousField } = await import('../../ConciergeService/claimAssembly');
-                  continuousFieldResult = computeContinuousField(
-                    mapperClaimsForProvenance.map(c => ({ id: c.id })),
-                    statementEmbeddingResult?.embeddings || new Map(),
-                    claimEmbeddings || new Map(),
-                    shadowResult.statements,
-                    statementAllocationResult,
-                  );
-                  const claimIds = Object.keys(continuousFieldResult?.perClaim || {});
-                  const totalCore = claimIds.reduce((s, cid) => s + (continuousFieldResult.perClaim[cid]?.coreSetSize || 0), 0);
-                  console.log(`[Phase2] Continuous field: ${claimIds.length} claims, ${totalCore} core statements, ${continuousFieldResult.disagreementMatrix?.length || 0} disagreements`);
-                } catch (err) {
-                  console.warn('[Phase2] Continuous field failed:', getErrorMessage(err));
-                  continuousFieldResult = null;
-                }
-
-                // ── PHASE 3: PARAGRAPH SIMILARITY FIELD ─────────────────────
-                let paragraphSimilarityResult = null;
-                try {
-                  const { computeParagraphSimilarityField } = await import('../../ConciergeService/claimAssembly');
-                  paragraphSimilarityResult = computeParagraphSimilarityField(
-                    mapperClaimsForProvenance.map(c => ({ id: c.id })),
-                    embeddingResult?.embeddings || new Map(),
-                    claimEmbeddings || new Map(),
-                    paragraphResult.paragraphs,
-                  );
-                  console.log(`[Phase3] Paragraph similarity field: ${Object.keys(paragraphSimilarityResult?.perClaim || {}).length} claims`);
-                } catch (err) {
-                  console.warn('[Phase3] Paragraph similarity field failed:', getErrorMessage(err));
-                  paragraphSimilarityResult = null;
-                }
-
-                // ── PHASE 3b: MIXED-METHOD PROVENANCE ───────────────────────
-                let mixedProvenanceResult = null;
-                try {
-                  const { computeMixedMethodProvenance } = await import('../../ConciergeService/claimAssembly');
-                  // Build competitive paragraph pools from enrichedClaims
-                  const stmtToParaId = new Map();
-                  for (const para of (paragraphResult?.paragraphs ?? [])) {
-                    for (const sid of (para.statementIds ?? [])) {
-                      stmtToParaId.set(sid, para.id);
-                    }
-                  }
-                  const competitivePools = new Map();
-                  for (const ec of (enrichedClaims ?? [])) {
-                    const paraSet = new Set();
-                    for (const sid of (ec.sourceStatementIds ?? [])) {
-                      const pid = stmtToParaId.get(sid);
-                      if (pid) paraSet.add(pid);
-                    }
-                    competitivePools.set(ec.id, paraSet);
-                  }
-                  mixedProvenanceResult = computeMixedMethodProvenance(
-                    mapperClaimsForProvenance.map(c => ({ id: c.id, supporters: c.supporters })),
-                    paragraphResult?.paragraphs ?? [],
-                    shadowResult.statements,
-                    embeddingResult?.embeddings || new Map(),
-                    statementEmbeddingResult?.embeddings || new Map(),
-                    claimEmbeddings || new Map(),
-                    competitivePools,
-                  );
-                  console.log(`[MixedProvenance] recovery=${(mixedProvenanceResult.recoveryRate * 100).toFixed(1)}% expansion=${(mixedProvenanceResult.expansionRate * 100).toFixed(1)}% removal=${(mixedProvenanceResult.removalRate * 100).toFixed(1)}%`);
-                } catch (err) {
-                  console.warn('[MixedProvenance] Failed:', getErrorMessage(err));
-                  mixedProvenanceResult = null;
-                }
-
-                // ── CLAIM PROVENANCE (moved before blast radius filter) ────
-
-                let mapperArtifact_claimProvenance = null;
-                let claimProvenanceOwnership = null;
-                let claimProvenanceExclusivity = null;
-                let claimProvenanceOverlap = null;
-                try {
-                  const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
-                  claimProvenanceOwnership = computeStatementOwnership(enrichedClaims);
-                  claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, claimProvenanceOwnership);
-                  claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
-                  // Compute elbow diagnostics from pre-computed embeddings (pure math, no ONNX)
-                  let elbowDiagnostics = null;
-                  try {
-                    const { computeElbowDiagnostics } = await import('../../ConciergeService/claimAssembly');
-                    elbowDiagnostics = computeElbowDiagnostics(
-                      mapperClaimsForProvenance,
-                      embeddingResult?.embeddings || new Map(),
-                      claimEmbeddings || new Map(),
-                    );
-                  } catch (elbowErr) {
-                    console.warn('[StepExecutor] Elbow diagnostics failed:', getErrorMessage(elbowErr));
-                  }
-
-                  let competitiveAssignmentDiagnostics = null;
-                  try {
-                    const { computeCompetitiveAssignmentDiagnostics } = await import('../../ConciergeService/claimAssembly');
-                    competitiveAssignmentDiagnostics = computeCompetitiveAssignmentDiagnostics(
-                      mapperClaimsForProvenance,
-                      embeddingResult?.embeddings || new Map(),
-                      claimEmbeddings || new Map(),
-                      paragraphResult.paragraphs,
-                    );
-                  } catch (cadErr) {
-                    console.warn('[StepExecutor] Competitive assignment diagnostics failed:', getErrorMessage(cadErr));
-                  }
-
-                  mapperArtifact_claimProvenance = {
-                    statementOwnership: Object.fromEntries(
-                      Array.from(claimProvenanceOwnership.entries()).map(([k, v]) => [k, Array.from(v)])
-                    ),
-                    claimExclusivity: Object.fromEntries(claimProvenanceExclusivity),
-                    claimOverlap: claimProvenanceOverlap,
-                    ...(elbowDiagnostics ? { elbowDiagnostics } : {}),
-                    ...(competitiveAssignmentDiagnostics ? { competitiveAssignmentDiagnostics } : {}),
-                  };
-                } catch (err) {
-                  console.warn('[StepExecutor] Claim provenance (pre-filter) failed:', getErrorMessage(err));
-                }
-
-                // ── STRUCTURAL ANALYSIS (moved before blast radius filter) ──
-                let cachedStructuralAnalysis = null;
-                try {
-                  if (enrichedClaims.length > 0) {
-                    const { computeStructuralAnalysis } = await import('../PromptMethods');
-                    const tempCognitive = buildCognitiveArtifact({
-                      claims: enrichedClaims,
-                      edges: unifiedEdges,
-                      conditionals: unifiedConditionals,
-                      narrative: '',
-                      ghosts: null,
-                    }, null);
-                    cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
-                  }
-                } catch (err) {
-                  console.warn('[StepExecutor] Structural analysis (pre-filter) failed:', getErrorMessage(err));
-                }
-
-                // ── BLAST RADIUS FILTER ─────────────────────────────────────
-                let blastRadiusResult = null;
-                try {
-                  if (cachedStructuralAnalysis && claimProvenanceExclusivity && claimProvenanceOverlap) {
-                    const { computeBlastRadiusFilter } = await import('../blast-radius/blastRadiusFilter');
-                    blastRadiusResult = computeBlastRadiusFilter({
-                      claims: cachedStructuralAnalysis.claimsWithLeverage,
-                      edges: unifiedEdges,
-                      cascadeRisks: cachedStructuralAnalysis.patterns.cascadeRisks,
-                      exclusivity: claimProvenanceExclusivity,
-                      overlap: claimProvenanceOverlap,
-                      articulationPoints: cachedStructuralAnalysis.graph?.articulationPoints || [],
-                      queryRelevanceScores: queryRelevance?.statementScores || null,
-                      modelCount: citationOrder.length,
-                      convergenceRatio: cachedStructuralAnalysis.landscape.convergenceRatio,
-                    });
-                    console.log(`[BlastRadius] ceiling=${blastRadiusResult.questionCeiling}, skip=${blastRadiusResult.skipSurvey}, axes=${blastRadiusResult.axes.length}, suppressed=${blastRadiusResult.meta.suppressedCount}/${blastRadiusResult.meta.totalClaims}`);
-                  }
-                } catch (err) {
-                  console.warn('[BlastRadius] Filter failed, falling back to full survey mapper:', getErrorMessage(err));
-                  blastRadiusResult = null;
-                }
-
-                // ── SURVEY MAPPER (gated by blast radius filter) ────────────
-                // When the blast radius filter says skipSurvey, no LLM call is made.
-                // When the filter provides axes, only those claims are sent.
-                // Fallback: if filter failed (null), runs the mapper on all claims.
                 let surveyRationale = null;
                 const useSurveyMapper = true;
                 const shouldRunSurvey = useSurveyMapper
                   && enrichedClaims.length > 0
-                  && (!blastRadiusResult || !blastRadiusResult.skipSurvey);
+                  ;
 
                 if (shouldRunSurvey) {
                   try {
                     const { buildSurveyMapperPrompt, parseSurveyMapperOutput: parseSurveyOutput } =
                       await import('../../ConciergeService/surveyMapper');
 
-                    // If blast radius filter provided axes, scope to those claims only.
-                    // Otherwise fall back to all enriched claims.
-                    let claimsForSurvey;
-                    if (blastRadiusResult && blastRadiusResult.axes.length > 0) {
-                      const axisClaims = new Set(blastRadiusResult.axes.flatMap(a => a.claimIds));
-                      const scoreMap = new Map(blastRadiusResult.scores.map(s => [s.claimId, s.composite]));
-                      claimsForSurvey = enrichedClaims
-                        .filter(c => axisClaims.has(c.id))
-                        .map((c) => ({
-                          id: String(c?.id || ''),
-                          label: String(c?.label || ''),
-                          text: String(c?.text || ''),
-                          supporters: Array.isArray(c?.supporters) ? c.supporters : [],
-                          blastRadius: scoreMap.get(c.id) || 0,
-                        }));
-                    } else {
-                      claimsForSurvey = enrichedClaims.map((c) => ({
-                        id: String(c?.id || ''),
-                        label: String(c?.label || ''),
-                        text: String(c?.text || ''),
-                        supporters: Array.isArray(c?.supporters) ? c.supporters : [],
-                      }));
-                    }
+                    const claimsForSurvey = enrichedClaims.map((c) => ({
+                      id: String(c?.id || ''),
+                      label: String(c?.label || ''),
+                      text: String(c?.text || ''),
+                      supporters: Array.isArray(c?.supporters) ? c.supporters : [],
+                    }));
 
                     const surveyPrompt = buildSurveyMapperPrompt(
                       payload.originalPrompt,
@@ -1446,423 +1278,83 @@ export class StepExecutor {
                   }
                 }
 
-                let completeness = null;
-                try {
-                  if (substrate && Array.isArray(regions) && regions.length > 0) {
-                    const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims, queryRelevance?.statementScores ?? null);
-                    const unattendedRegions = findUnattendedRegions(
-                      substrate,
-                      paragraphResult.paragraphs,
-                      enrichedClaims,
-                      regions,
-                      shadowResult.statements
-                    );
-                    const completenessReport = buildCompletenessReport(
-                      statementFates,
-                      unattendedRegions,
-                      shadowResult.statements,
-                      regions.length
-                    );
-                    completeness = {
-                      report: completenessReport,
-                      statementFates: Object.fromEntries(statementFates),
-                      unattendedRegions,
-                    };
-                    console.log('[Reconciliation] Completeness:', {
-                      statementCoverage: `${(completenessReport.statements.coverageRatio * 100).toFixed(1)}%`,
-                      regionCoverage: `${(completenessReport.regions.coverageRatio * 100).toFixed(1)}%`,
-                      unaddressed: completenessReport.statements.unaddressed
-                    });
-                  }
-                } catch (err) {
-                  completeness = null;
-                  console.warn('[Reconciliation] Failed:', getErrorMessage(err));
-                }
-
-                // ── CLAIM↔GEOMETRY ALIGNMENT ─────────────────────────────
-                let alignmentResult = null;
-                try {
-                  if (statementEmbeddingResult?.embeddings && regions.length > 0 && enrichedClaims.length > 0) {
-                    const { buildClaimVectors, computeAlignment } = await import('../../geometry');
-                    // Ensure dimensions are valid (fallback to length of first embedding if dimensions missing)
-                    const dimensions = statementEmbeddingResult.dimensions ||
-                      (statementEmbeddingResult.embeddings.size > 0
-                        ? (statementEmbeddingResult.embeddings.values().next().value?.length || 0)
-                        : 0);
-
-                    const claimVectors = buildClaimVectors(
-                      enrichedClaims,
-                      statementEmbeddingResult.embeddings,
-                      dimensions
-                    );
-                    if (claimVectors.length > 0) {
-                      alignmentResult = computeAlignment(
-                        claimVectors,
-                        regions,
-                        regionProfiles,
-                        statementEmbeddingResult.embeddings
-                      );
-                      console.log('[Alignment]', {
-                        globalCoverage: `${(alignmentResult.globalCoverage * 100).toFixed(1)}%`,
-                        unattended: alignmentResult.unattendedRegionIds.length,
-                        splits: alignmentResult.splitAlerts.length,
-                        merges: alignmentResult.mergeAlerts.length,
-                      });
-                    }
-                  }
-                } catch (err) {
-                  alignmentResult = null;
-                  console.warn('[Alignment] Failed:', getErrorMessage(err));
-                }
-
-                const claimOrder = new Map();
-                for (let i = 0; i < enrichedClaims.length; i++) {
-                  const id = enrichedClaims[i]?.id;
-                  if (id) claimOrder.set(id, i);
-                }
-
-                // ── CONFLICT TIERING ──────────────────────────────────────
-                // When the blast radius filter ran successfully, conflict edges
-                // are NOT used for tiering or forcing points. The filter already
-                // analyzed all structural tensions and routed the important ones
-                // through the survey mapper as conditional gates. All claims go
-                // to tier 0 (foundation) and conflict forcing points are suppressed.
-                // Blast radius is "active" whenever the filter ran successfully (not null).
-                // Whether it skipped the survey (zero questions) or produced axes, the
-                // filter has already analyzed all tensions. The mechanical conflict path
-                // is only needed as fallback when the filter itself failed.
-                const blastRadiusActive = blastRadiusResult != null;
-
-                const conflictClaimIdSet = new Set();
-                const conflictAdj = new Map();
-
-                if (!blastRadiusActive) {
-                  // Legacy path: blast radius filter failed or wasn't computed.
-                  // Build conflict tiering from semantic mapper edges.
-                  for (const e of unifiedEdges) {
-                    if (!e || e.type !== 'conflicts') continue;
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-
-                    conflictClaimIdSet.add(from);
-                    conflictClaimIdSet.add(to);
-
-                    if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
-                    if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
-                    conflictAdj.get(from).add(to);
-                    conflictAdj.get(to).add(from);
-                  }
-                }
-
-                const foundationClaimIds = [];
-                for (const c of enrichedClaims) {
-                  if (!conflictClaimIdSet.has(c.id)) foundationClaimIds.push(c.id);
-                }
-
-                const conflictComponents = [];
-                if (!blastRadiusActive) {
-                  const visited = new Set();
-                  for (const id of Array.from(conflictClaimIdSet)) {
-                    if (visited.has(id)) continue;
-                    const stack = [id];
-                    const component = [];
-                    visited.add(id);
-                    while (stack.length > 0) {
-                      const cur = stack.pop();
-                      component.push(cur);
-                      const neighbors = conflictAdj.get(cur);
-                      if (!neighbors) continue;
-                      for (const n of Array.from(neighbors)) {
-                        if (visited.has(n)) continue;
-                        visited.add(n);
-                        stack.push(n);
-                      }
-                    }
-                    component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
-                    conflictComponents.push(component);
-                  }
-
-                  conflictComponents.sort((a, b) => {
-                    const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
-                    const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
-                    return amin - bmin;
-                  });
-                }
-
-                const tiers = [
-                  { tierIndex: 0, claimIds: foundationClaimIds, gates: [] },
-                  ...conflictComponents.map((claimIds, i) => ({ tierIndex: i + 1, claimIds, gates: [] })),
-                ];
-
-                const tierByClaimId = new Map();
-                for (const t of tiers) {
-                  const ids = Array.isArray(t?.claimIds) ? t.claimIds : [];
-                  for (const id of ids) {
-                    if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex);
-                  }
-                }
-
-                const claimLabelById = new Map(
-                  enrichedClaims.map((c) => [c.id, c.label]),
-                );
-
-                const enablesById = new Map();
-                const conflictsById = new Map();
-
-                // Only build per-claim conflict data when blast radius filter is NOT active.
-                // When active, conflicts are handled via conditional gates, not mechanical forcing points.
-                if (!blastRadiusActive) {
-                  for (const e of unifiedEdges) {
-                    if (!e) continue;
-                    const edgeType = String(e.type || '').trim();
-                    if (edgeType === 'conflicts') {
-                      const from = String(e.from || '').trim();
-                      const to = String(e.to || '').trim();
-                      if (!from || !to) continue;
-                      if (!conflictsById.has(from)) conflictsById.set(from, []);
-                      const fromLabel = claimLabelById.get(from) || from;
-                      const toLabel = claimLabelById.get(to) || to;
-                      const gateKey = [from, to].sort().join('::');
-                      const gateQuestion = gateQuestionByClaimPair.get(gateKey) || '';
-                      conflictsById.get(from).push({
-                        claimId: to,
-                        question: gateQuestion || String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
-                        sourceStatementIds: [],
-                      });
-                    }
-                  }
-                }
-
-                const serializedClaims = enrichedClaims.map((c) => {
-                  const id = String(c?.id || '').trim();
-                  const supporters = Array.isArray(c?.supporters) ? c.supporters : [];
-                  const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
-                    ? c.sourceStatementIds.map((s) => String(s)).filter(Boolean)
-                    : [];
-
-                  const tier = tierByClaimId.get(id) ?? 0;
-                  const enables = enablesById.has(id) ? Array.from(enablesById.get(id)) : [];
-                  const conflicts = conflictsById.has(id) ? conflictsById.get(id) : [];
-
-                  return {
-                    id,
-                    label: String(c?.label || id),
-                    stance: 'NEUTRAL',
-                    gates: {
-                      conditionals: [],
-                    },
-                    enables,
-                    conflicts,
-                    sourceStatementIds,
-                    supporterModels: supporters,
-                    supportRatio: typeof c?.supportRatio === 'number' ? c.supportRatio : 0,
-                    hasConditionalSignal: Boolean(c?.hasConditionalSignal),
-                    hasSequenceSignal: Boolean(c?.hasSequenceSignal),
-                    hasTensionSignal: Boolean(c?.hasTensionSignal),
-                    tier,
-                  };
-                });
-
-                // When blast radius filter is active, no conflict edges go into
-                // the traversal graph — the filter already routed important tensions
-                // through conditional gates. Only the legacy path uses conflict edges.
-                const traversalEdges = blastRadiusActive
-                  ? []
-                  : unifiedEdges
-                    .filter((e) => e && e.from && e.to && String(e.type || '').trim() === 'conflicts')
-                    .map((e) => ({ ...e, type: 'conflicts' }));
-
-                const traversalGraph = {
-                  claims: serializedClaims,
-                  edges: traversalEdges,
+                // ── TRAVERSAL + ARTIFACT ASSEMBLY (uses shared pipeline) ──
+                const { traversalGraph } = buildTraversalData({
+                  enrichedClaims,
+                  edges: unifiedEdges,
                   conditionals: unifiedConditionals,
-                  tiers,
-                  maxTier: tiers.length - 1,
-                  roots: [],
-                  tensions: [],
-                  cycles: [],
-                };
-
-                const forcingPoints = extractForcingPoints(traversalGraph).map((fp) => {
-                  const options = Array.isArray(fp?.options)
-                    ? fp.options
-                      .map((o) => ({
-                        claimId: String(o?.claimId || '').trim(),
-                        label: String(o?.label || '').trim(),
-                      }))
-                      .filter((o) => o.claimId && o.label)
-                    : undefined;
-
-                  return {
-                    id: String(fp?.id || '').trim(),
-                    type: fp?.type,
-                    tier: typeof fp?.tier === 'number' ? fp.tier : 0,
-                    question: String(fp?.question || '').trim(),
-                    condition: String(fp?.condition || '').trim(),
-                    ...(options ? { options } : {}),
-                    unlocks: [],
-                    prunes: [],
-                    blockedBy: Array.isArray(fp?.blockedByGateIds)
-                      ? fp.blockedByGateIds.map((g) => String(g)).filter(Boolean)
-                      : [],
-                    sourceStatementIds: Array.isArray(fp?.sourceStatementIds)
-                      ? fp.sourceStatementIds.map((s) => String(s)).filter(Boolean)
-                      : [],
-                  };
+                  conflictTiering: true,
                 });
+                const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
 
+                mapperArtifact = assembleMapperArtifact({
+                  derived,
+                  enrichedClaims,
+                  traversalGraph,
+                  forcingPoints,
+                  parsedNarrative: String(parseResult.narrative || '').trim(),
+                  parsedConditionals: unifiedConditionals,
+                  queryText: payload.originalPrompt,
+                  modelCount: citationOrder.length,
+                  shadowStatements: shadowResult.statements,
+                  turn: context.turn || 0,
+                  surveyGates: rawGates.length > 0 ? rawGates : undefined,
+                  surveyRationale,
+                });
+                // Add StepExecutor-specific fields
+                mapperArtifact.preSemantic = preSemanticInterpretation || null;
+                if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
+                if (paragraphClusteringSummary) mapperArtifact.paragraphClustering = paragraphClusteringSummary;
+                if (substrateSummary) mapperArtifact.substrate = substrateSummary;
+                if (questionSelectionInstrumentation) {
+                  mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+                }
+
+                let diagnosticsResult = null;
                 try {
-                  referencedIds = new Set(
-                    enrichedClaims
-                      .map((c) => (Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : []))
-                      .flat()
-                  );
-                  shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
-                  topUnindexed = getTopUnreferenced(shadowDelta, 10);
-
-                  const EDGE_SUPPORTS = 'supports';
-                  const EDGE_CONFLICTS = 'conflicts';
-                  const EDGE_PREREQUISITE = 'prerequisite';
-
-                  const semanticEdges = unifiedEdges
-                    .filter((e) => e && e.from && e.to)
-                    .map((e) => {
-                      const t = String(e.type || '').trim();
-                      if (t === 'conflicts') return { ...e, type: EDGE_CONFLICTS };
-                      if (t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
-                      return e;
-                    })
-                    .filter((e) => {
-                      const t = String(e.type || '').trim();
-                      return t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE;
-                    });
-
-                  const derivedSupportEdges = [];
-                  const supportKey = new Set();
-
-                  // TODO: Derive support relationships from claim provenance embeddings/geometry.
-                  // - High similarity between claim source paragraphs + compatible stance => support.
-                  // - Consider geometry/topology proximity as an additional signal.
-
-                  const hasAnySupportEdges = semanticEdges.some((e) => String(e?.type || '') === EDGE_SUPPORTS);
-                  if (!hasAnySupportEdges) {
-                    for (const cond of unifiedConditionals) {
-                      const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
-                      for (let i = 0; i < affected.length; i++) {
-                        const a = String(affected[i] || '').trim();
-                        if (!a) continue;
-                        for (let j = i + 1; j < affected.length; j++) {
-                          const b = String(affected[j] || '').trim();
-                          if (!b || a === b) continue;
-                          const k1 = `${a}::${b}::supports`;
-                          if (!supportKey.has(k1)) {
-                            supportKey.add(k1);
-                            derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
-                          }
-                          const k2 = `${b}::${a}::supports`;
-                          if (!supportKey.has(k2)) {
-                            supportKey.add(k2);
-                            derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
-                          }
-                        }
-                      }
+                  if (preSemanticInterpretation && mapperArtifact) {
+                    const { validateStructuralMapping } = await import('../../geometry/interpretation');
+                    let postSemantic = cachedStructuralAnalysis;
+                    if (!postSemantic) {
+                      const { computeStructuralAnalysis } = await import('../PromptMethods');
+                      const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
+                      postSemantic = computeStructuralAnalysis(tempCognitive);
                     }
+                    diagnosticsResult = validateStructuralMapping(
+                      preSemanticInterpretation,
+                      postSemantic,
+                      substrate,
+                      statementEmbeddingResult?.embeddings ?? null,
+                      paragraphResult?.paragraphs ?? null
+                    );
                   }
+                } catch (_) {
+                  diagnosticsResult = null;
+                }
 
-                  const ghosts = null;
-                  const traversalAnalysis = null;
-
-                  mapperArtifact = {
-                    id: `artifact-${Date.now()}`,
-                    query: payload.originalPrompt,
-                    turn: context.turn || 0,
-                    timestamp: new Date().toISOString(),
-                    model_count: citationOrder.length,
-
-                    claims: enrichedClaims,
-                    edges: [...semanticEdges, ...derivedSupportEdges],
-                    ghosts,
-                    narrative: String(parseResult.narrative || '').trim(),
-                    conditionals: unifiedConditionals,
-
-                    // NEW DATA (not in V1)
-                    traversalGraph,
-                    forcingPoints,
-                    traversalAnalysis,
-                    ...(blastRadiusResult ? { blastRadiusFilter: blastRadiusResult } : {}),
-                    ...(rawGates.length > 0 ? { surveyGates: rawGates, surveyRationale } : { surveyRationale }),
-                    preSemantic: preSemanticInterpretation || null,
-                    ...(completeness ? { completeness } : {}),
-                    ...(statementAllocationResult ? { statementAllocation: statementAllocationResult } : {}),
-                    ...(continuousFieldResult ? { continuousField: continuousFieldResult } : {}),
-                    ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
-                    ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
-                    ...(alignmentResult ? { alignment: alignmentResult } : {}),
-
-                    // SHADOW DATA
-                    shadow: {
-                      statements: shadowResult.statements,
-                      audit: shadowDelta.audit,
-                      topUnreferenced: Array.isArray(topUnindexed)
-                        ? topUnindexed.map((u) => u?.statement).filter(Boolean)
-                        : []
-                    },
-                    ...(paragraphResult?.meta ? { paragraphProjection: paragraphResult.meta } : {}),
-                    ...(paragraphClusteringSummary ? { paragraphClustering: paragraphClusteringSummary } : {}),
-                    ...(substrateSummary ? { substrate: substrateSummary } : {}),
-                  };
-
-                  let diagnosticsResult = null;
+                if (mapperArtifact) {
                   try {
-                    if (preSemanticInterpretation && mapperArtifact) {
-                      const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                      // Reuse cached structural analysis (computed before blast radius filter)
-                      // instead of recomputing — same input data, same result.
-                      let postSemantic = cachedStructuralAnalysis;
-                      if (!postSemantic) {
-                        const { computeStructuralAnalysis } = await import('../PromptMethods');
-                        const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
-                        postSemantic = computeStructuralAnalysis(tempCognitive);
-                      }
-                      diagnosticsResult = validateStructuralMapping(
-                        preSemanticInterpretation,
-                        postSemantic,
-                        substrate,
-                        statementEmbeddingResult?.embeddings ?? null,
-                        paragraphResult?.paragraphs ?? null
-                      );
-                    }
-                  } catch (_) {
-                    diagnosticsResult = null;
-                  }
-
-                  if (mapperArtifact) {
-                    try {
-                      const diagnostics = diagnosticsResult;
-                      mapperArtifact.diagnostics = diagnostics;
-
-                      const claimMeasurements = diagnostics?.measurements?.claimMeasurements;
-                      if (Array.isArray(claimMeasurements)) {
-                        const coherenceById = new Map(claimMeasurements.map(m => [m.claimId, m]));
-                        for (const c of (mapperArtifact.claims ?? [])) {
-                          const m = coherenceById.get(c?.id);
-                          if (m && typeof m.sourceCoherence === 'number') {
-                            c.sourceCoherence = m.sourceCoherence;
-                          }
+                    mapperArtifact.diagnostics = diagnosticsResult;
+                    const claimMeasurements = diagnosticsResult?.measurements?.claimMeasurements;
+                    if (Array.isArray(claimMeasurements)) {
+                      const coherenceById = new Map(claimMeasurements.map(m => [m.claimId, m]));
+                      for (const c of (mapperArtifact.claims ?? [])) {
+                        const m = coherenceById.get(c?.id);
+                        if (m && typeof m.sourceCoherence === 'number') {
+                          c.sourceCoherence = m.sourceCoherence;
                         }
                       }
-                    } catch (err) {
-                      console.error('[StepExecutor] Diagnostics stamp failed', err);
                     }
-
-                    // Claim Provenance — reuse pre-computed data from blast radius filter stage
-                    if (mapperArtifact_claimProvenance) {
-                      mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
-                    }
+                  } catch (err) {
+                    console.error('[StepExecutor] Diagnostics stamp failed', err);
                   }
 
-                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${semanticEdges.length} edges`);
+                  if (mapperArtifact_claimProvenance) {
+                    mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
+                  }
+                }
+
+                console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(derived.semanticEdges?.length || 0) + (derived.derivedSupportEdges?.length || 0)} edges`);
                 } catch (err) {
                   // processLogger.error or console.error with context
                   console.error('[StepExecutor] Mapper artifact build failed:', err);

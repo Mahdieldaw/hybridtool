@@ -841,56 +841,188 @@ export interface CascadeRiskInfo {
 export type CascadeRisk = CascadeRiskInfo;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BLAST RADIUS FILTER
-// Pure-math filter that identifies which claims, if removed, would most
-// drastically alter the synthesis. Consumes structural analysis + claim
-// provenance. Output gates the survey mapper.
+// BLAST SURFACE — Provenance-derived damage assessment (instrumentation)
+//
+// Replaces L3 structural heuristics (leverage, cascade edges, articulation)
+// with L1 measurements derived from mixed-method provenance.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface BlastRadiusScore {
+export interface CrossClaimTwinEntry {
+  targetClaimId: string;
+  hasTwin: boolean;
+  bestSim: number;
+  bestCandidateId: string | null;
+  bestCandidateCoreAffinity: number | null;
+  bestCandidateCorpusAffinity: number | null;
+  differential: number | null;
+  differentialGate: boolean | null;
+}
+
+export interface StatementAbsorption {
+  statementId: string;
+  muS: number;
+  sigmaS: number;
+  tauSim: number;
+  carriers: CrossClaimTwinEntry[];
+  carrierCount: number;
+  orphan: boolean;
+}
+
+export interface ClaimAbsorptionProfile {
+  claimId: string;
+  exclusiveCount: number;
+  orphanCount: number;
+  absorbableCount: number;
+  orphanRatio: number;
+  statements: StatementAbsorption[];
+  absorptionByTarget: Record<string, number>;
+}
+
+export interface CrossClaimTwinEntryGate2 {
+  targetClaimId: string;
+  hasTwin: boolean;
+  bestSim: number;
+  bestCandidateId: string | null;
+  bestCandidateClaimSim: number | null;
+  bestCandidateCoreAffinity: number | null;
+  bestCandidateCorpusAffinity: number | null;
+  differential: number | null;
+  differentialGate: boolean | null;
+}
+
+export interface StatementAbsorptionGate2 {
+  statementId: string;
+  muS: number;
+  sigmaS: number;
+  tauSim: number;
+  muC: number | null;
+  sigmaC: number | null;
+  tauDir: number | null;
+  claimCentroidCeil: number | null;
+  carriers: CrossClaimTwinEntryGate2[];
+  carrierCount: number;
+  orphan: boolean;
+}
+
+export interface ClaimAbsorptionProfileGate2 {
+  claimId: string;
+  exclusiveCount: number;
+  orphanCount: number;
+  absorbableCount: number;
+  orphanRatio: number;
+  statements: StatementAbsorptionGate2[];
+  absorptionByTarget: Record<string, number>;
+  muC: number | null;
+  sigmaC: number | null;
+  tauDir: number | null;
+  claimCentroidCeil: number | null;
+}
+
+/** Layer C: Evidence mass trio — how much territory does this claim cover? */
+export interface BlastSurfaceLayerC {
+  canonicalCount: number;       // total canonical statements from mixed provenance
+  exclusiveCount: number;       // exclusive statements within mixed provenance canonical set
+  coreCount: number;            // dense core from mixed provenance (globalSim >= globalMu)
+}
+
+export interface BlastSurfaceCascadeDetail {
+  claimId: string;
+  sharedCount: number;
+  dCanonicalCount: number;
+  dExclusivityRatio: number;
+  contribution: number;         // (sharedCount / dCanonicalCount) × dExclusivityRatio
+}
+
+/** Layer D: If this claim is pruned, how much of other claims' evidence is destabilized? */
+export interface BlastSurfaceLayerD {
+  cascadeExposure: number;
+  overlappingClaims: BlastSurfaceCascadeDetail[];
+}
+
+export interface BlastSurfaceVernalScore {
+  vulnerableCount: number;
+  vulnerableStatementIds: string[];
+  destroyedQueryMean: number;
+  cascadeExposure: number;
+  structuralMass: number;
+  queryTilt: number;
+  compositeScore: number;
+}
+
+export interface BlastSurfaceVernalMeta {
+  sigmaM: number;
+  sigmaQ: number;
+  adaptiveAccelerator: number;
+  lambda: number;
+  structuralStep: number;
+}
+
+export interface BlastSurfaceClaimScore {
   claimId: string;
   claimLabel: string;
-  /** Final adjusted composite after continuous modifiers (consensus, redundancy, etc.). 0-1. */
-  composite: number;
-  /** Raw composite before modifiers. Same five-dimension weighted sum. For debug comparison. */
-  rawComposite: number;
-  components: {
-    cascadeBreadth: number;      // dependentIds.length / (totalClaims - 1), clamped [0,1]
-    exclusiveEvidence: number;   // exclusivityRatio from claimProvenance, [0,1]
-    leverage: number;            // min-max normalized leverage from structural analysis
-    queryRelevance: number;      // avg querySimilarity of source statements, [0,1]
-    articulationPoint: number;   // 1 if graph cut vertex, 0 otherwise
-  };
-  suppressed: boolean;
-  suppressionReason: string | null;
-  /** Step 12: Geometric source model diversity disagrees with mapper supporters count */
-  fragileConsensus?: {
-    mapperSupporterCount: number;
-    geometricModelDiversity: number;
-  };
+  layerB: ClaimAbsorptionProfile;
+  layerBGate2?: ClaimAbsorptionProfileGate2;
+  layerC: BlastSurfaceLayerC;
+  layerD: BlastSurfaceLayerD;
+  vernal?: BlastSurfaceVernalScore;
 }
 
-export interface BlastRadiusAxis {
-  id: string;
-  claimIds: string[];
-  representativeClaimId: string;
-  maxBlastRadius: number;
-}
-
-export interface BlastRadiusFilterResult {
-  scores: BlastRadiusScore[];
-  axes: BlastRadiusAxis[];
-  /** 0, 1, 2, or 3. Determines how many axes are forwarded to the survey mapper. */
-  questionCeiling: number;
-  skipSurvey: boolean;
-  skipReason: string | null;
+export interface BlastSurfaceResult {
+  scores: BlastSurfaceClaimScore[];
   meta: {
-    totalClaims: number;
-    suppressedCount: number;
-    candidateCount: number;
-    conflictEdgeCount: number;
-    axisCount: number;
-    convergenceRatio: number;
+    totalCorpusStatements: number;
+    processingTimeMs: number;
+    vernal?: BlastSurfaceVernalMeta;
+  };
+}
+
+export interface ValidatedConflict {
+  edgeFrom: string;
+  edgeTo: string;
+  centroidSimilarity: number;
+  muInterClaim: number;
+  validated: boolean;
+}
+
+export interface QuestionSelectionClaimProfile {
+  claimId: string;
+  claimLabel: string;
+  vernalComposite: number | null;
+  orphanRatio: number | null;
+  supportRatio: number;
+  modelCount: number;
+  consensusDiscount: number;
+  soleSource: boolean;
+  queryRelevanceRaw: number;
+  wouldPenalize: boolean;
+  damageBand: number;
+  queryTiltReorder: boolean;
+}
+
+export interface QuestionSelectionGate {
+  sigmaDamage: number;
+  meanDamage: number;
+  wouldSkip: boolean;
+  hasValidatedConflicts: boolean;
+  overrideSkip: boolean;
+  epsilon: number;
+}
+
+export interface QuestionSelectionCeiling {
+  validatedConflictCount: number;
+  independentConflictClusters: number;
+  damageOutlierCount: number;
+  damageOutlierClaimIds: string[];
+  theoreticalCeiling: number;
+  actualClaimsSent: number;
+}
+
+export interface QuestionSelectionInstrumentation {
+  claimProfiles: QuestionSelectionClaimProfile[];
+  validatedConflicts: ValidatedConflict[];
+  gate: QuestionSelectionGate;
+  ceiling: QuestionSelectionCeiling;
+  meta: {
     processingTimeMs: number;
   };
 }
@@ -940,8 +1072,10 @@ export interface MapperArtifact extends MapperOutput {
   preSemantic?: PreSemanticInterpretation | null;
   structuralValidation?: any | null;
 
-  // Blast Radius Filter (runs before survey mapper; null when filter fails or is bypassed)
-  blastRadiusFilter?: BlastRadiusFilterResult | null;
+  // Blast Surface — provenance-derived damage assessment (instrumentation, runs alongside old filter)
+  blastSurface?: BlastSurfaceResult | null;
+
+  questionSelectionInstrumentation?: QuestionSelectionInstrumentation | null;
 
   // Survey Mapper output (runs after blast radius filter; null when skipped or found no gates)
   surveyGates?: SurveyGate[];

@@ -32,7 +32,14 @@ function tokenize(input: string): Token[] {
     // Numbers
     if (/[0-9]/.test(input[i]) || (input[i] === '.' && /[0-9]/.test(input[i + 1] ?? ''))) {
       let num = '';
-      while (i < input.length && /[0-9.]/.test(input[i])) num += input[i++];
+      let hasDot = false;
+      while (i < input.length && /[0-9.]/.test(input[i])) {
+       if (input[i] === '.') {
+          if (hasDot) break; // Stop at second decimal
+          hasDot = true;
+        }
+        num += input[i++];
+      }
       tokens.push({ type: 'NUMBER', value: parseFloat(num) });
       continue;
     }
@@ -41,7 +48,18 @@ function tokenize(input: string): Token[] {
     if (input[i] === '"' || input[i] === "'") {
       const quote = input[i++];
       let str = '';
-      while (i < input.length && input[i] !== quote) str += input[i++];
+      while (i < input.length && input[i] !== quote) {
+        if (input[i] === '\\' && i + 1 < input.length) {
+          const next = input[i + 1];
+          if (next === quote || next === '\\') { str += next; i += 2; }
+          else if (next === 'n') { str += '\n'; i += 2; }
+          else if (next === 't') { str += '\t'; i += 2; }
+          else { str += next; i += 2; }
+        } else {
+          str += input[i++];
+        }
+      }
+      if (i >= input.length) throw new Error(`Unclosed string literal starting with ${quote}`);
       i++; // closing quote
       tokens.push({ type: 'STRING', value: str });
       continue;
@@ -215,13 +233,13 @@ class Parser {
   private parseUnary(env: Env): number | string | boolean | null {
     if (this.peek().type === 'MINUS') {
       this.consume();
-      const v = this.parsePrimary(env);
+      const v = this.parseUnary(env);
       if (v == null) return null;
       return -Number(v);
     }
     if (this.peek().type === 'NOT') {
       this.consume();
-      return !this.parsePrimary(env);
+      return !this.parseUnary(env);
     }
     return this.parsePrimary(env);
   }
