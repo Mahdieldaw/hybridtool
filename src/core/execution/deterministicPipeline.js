@@ -56,7 +56,6 @@ export async function computeDerivedFields({
     claimProvenanceOverlap: null,
     cachedStructuralAnalysis: null,
     blastSurfaceResult: null,
-    statementAllocationResult: null,
     continuousFieldResult: null,
     paragraphSimilarityResult: null,
     mixedProvenanceResult: null,
@@ -100,40 +99,12 @@ export async function computeDerivedFields({
     result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
     result.claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
 
-    // Elbow diagnostics
-    let elbowDiagnostics = null;
-    try {
-      const { computeElbowDiagnosticsFromEmbeddings } = await import('../../ConciergeService/claimAssembly');
-      elbowDiagnostics = computeElbowDiagnosticsFromEmbeddings(
-        claimEmbeddings, paragraphEmbeddings,
-        mapperClaimsForProvenance.map(c => ({ id: c.id })),
-      );
-    } catch (err) {
-      console.warn('[DeterministicPipeline] Elbow diagnostics failed:', getErrorMessage(err));
-    }
-
-    // Competitive assignment diagnostics
-    let competitiveAssignmentDiagnostics = null;
-    try {
-      const { computeCompetitiveAssignmentDiagnostics } = await import('../../ConciergeService/claimAssembly');
-      competitiveAssignmentDiagnostics = computeCompetitiveAssignmentDiagnostics(
-        mapperClaimsForProvenance.map(c => ({ id: c.id })),
-        paragraphEmbeddings,
-        claimEmbeddings,
-        shadowParagraphs,
-      );
-    } catch (err) {
-      console.warn('[DeterministicPipeline] Competitive assignment diagnostics failed:', getErrorMessage(err));
-    }
-
     result.claimProvenance = {
       statementOwnership: Object.fromEntries(
         Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
       ),
       claimExclusivity: Object.fromEntries(result.claimProvenanceExclusivity),
       claimOverlap: result.claimProvenanceOverlap,
-      ...(elbowDiagnostics ? { elbowDiagnostics } : {}),
-      ...(competitiveAssignmentDiagnostics ? { competitiveAssignmentDiagnostics } : {}),
     };
   } catch (err) {
     console.warn('[DeterministicPipeline] Claim provenance failed:', getErrorMessage(err));
@@ -157,33 +128,6 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Structural analysis failed:', getErrorMessage(err));
   }
 
-  // ── 4. Statement competitive allocation ─────────────────────────────
-  try {
-    const { computeStatementCompetitiveAllocation } = await import('../../ConciergeService/claimAssembly');
-    result.statementAllocationResult = computeStatementCompetitiveAllocation(
-      mapperClaimsForProvenance.map(c => ({
-        id: c.id,
-        supporters: Array.isArray(c.supporters) ? c.supporters : [],
-      })),
-      statementEmbeddings || new Map(),
-      claimEmbeddings || new Map(),
-      shadowStatements,
-    );
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Statement allocation failed:', getErrorMessage(err));
-  }
-
-  // ── 5b. Geometry correlation ────────────────────────────────────────
-  if (result.statementAllocationResult && enrichedClaims && shadowParagraphs) {
-    try {
-      const { computeGeometryCorrelation } = await import('../../ConciergeService/claimAssembly');
-      const corr = computeGeometryCorrelation(enrichedClaims, result.statementAllocationResult, shadowParagraphs);
-      result.statementAllocationResult.geometryCorrelation = corr;
-    } catch (err) {
-      console.warn('[DeterministicPipeline] Geometry correlation failed:', getErrorMessage(err));
-    }
-  }
-
   // ── 6. Continuous field ─────────────────────────────────────────────
   try {
     const { computeContinuousField } = await import('../../ConciergeService/claimAssembly');
@@ -192,7 +136,6 @@ export async function computeDerivedFields({
       statementEmbeddings || new Map(),
       claimEmbeddings || new Map(),
       shadowStatements,
-      result.statementAllocationResult,
     );
   } catch (err) {
     console.warn('[DeterministicPipeline] Continuous field failed:', getErrorMessage(err));
@@ -242,6 +185,19 @@ export async function computeDerivedFields({
     const er = result.mixedProvenanceResult.expansionRate ?? 0;
     const rmr = result.mixedProvenanceResult.removalRate ?? 0;
     console.log(`[DeterministicPipeline] MixedProvenance: recovery=${(rr * 100).toFixed(1)}% expansion=${(er * 100).toFixed(1)}% removal=${(rmr * 100).toFixed(1)}%`);
+
+    // PATCH: Upgrade Layer 1 assignment into final Layer 2 canonical assignment for all downstream consumers
+    let upgradedCount = 0;
+    for (const ec of enrichedClaims) {
+      const canonical = result.mixedProvenanceResult.perClaim[ec.id]?.canonicalStatementIds;
+      if (Array.isArray(canonical)) {
+        ec.sourceStatementIds = canonical;
+        upgradedCount++;
+      }
+    }
+    if (upgradedCount > 0) {
+      console.log(`[DeterministicPipeline] Upgraded ${upgradedCount} claims to canonical statement provenance`);
+    }
   } catch (err) {
     console.warn('[DeterministicPipeline] Mixed-method provenance failed:', getErrorMessage(err));
   }
@@ -366,13 +322,20 @@ export async function computeDerivedFields({
   result.semanticEdges = (parsedEdges || [])
     .filter(e => e && e.from && e.to)
     .map(e => {
-      const t = String(e.type || '').trim();
-      if (t === 'conflicts') return { ...e, type: EDGE_CONFLICTS };
-      if (t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
-      return e;
+      const raw = String(e.type || '').trim();
+      const t = raw.toLowerCase();
+      if (t === 'conflicts' || t === 'conflict' || t === 'challenges' || t === 'challenge') {
+        return { ...e, type: EDGE_CONFLICTS };
+      }
+      if (t === 'prerequisite' || t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
+      if (t === 'supports' || t === 'support') return { ...e, type: EDGE_SUPPORTS };
+      if (t === 'tradeoff' || t === 'tradeoffs' || t === 'trade-off' || t === 'trade-offs') {
+        return { ...e, type: 'tradeoff' };
+      }
+      return { ...e, type: raw };
     })
     .filter(e => {
-      const t = String(e.type || '').trim();
+      const t = String(e.type || '').trim().toLowerCase();
       return t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE;
     });
 
@@ -575,6 +538,14 @@ export async function extractForcingPointsFromGraph(traversalGraph) {
 /**
  * Assemble the mapper artifact from derived fields + traversal.
  */
+let artifactIdCounter = 0;
+function generateMapperArtifactId() {
+  const c = globalThis?.crypto;
+  if (c && typeof c.randomUUID === 'function') return `artifact-${c.randomUUID()}`;
+  artifactIdCounter += 1;
+  return `artifact-${Date.now()}-${artifactIdCounter}`;
+}
+
 export function assembleMapperArtifact({
   derived,
   enrichedClaims,
@@ -591,7 +562,6 @@ export function assembleMapperArtifact({
 }) {
   const {
     blastSurfaceResult,
-    statementAllocationResult,
     continuousFieldResult,
     paragraphSimilarityResult,
     mixedProvenanceResult,
@@ -606,7 +576,7 @@ export function assembleMapperArtifact({
   } = derived;
 
   return {
-    id: `artifact-${Date.now()}`,
+    id: generateMapperArtifactId(),
     query: queryText,
     ...(turn != null ? { turn } : {}),
     timestamp: new Date().toISOString(),
@@ -630,7 +600,6 @@ export function assembleMapperArtifact({
     },
     ...(claimProvenance ? { claimProvenance } : {}),
     ...(basinInversion ? { basinInversion } : {}),
-    ...(statementAllocationResult ? { statementAllocation: statementAllocationResult } : {}),
     ...(continuousFieldResult ? { continuousField: continuousFieldResult } : {}),
     ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),

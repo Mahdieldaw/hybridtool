@@ -1129,7 +1129,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             `shadow.paragraphs=${Array.isArray(cognitiveArtifact?.shadow?.paragraphs) ? cognitiveArtifact.shadow.paragraphs.length : 'missing'}`,
             `shadow.statements=${Array.isArray(cognitiveArtifact?.shadow?.statements) ? cognitiveArtifact.shadow.statements.length : 'missing'}`,
             `claimProvenance=${cognitiveArtifact?.claimProvenance ? 'present' : 'missing'}`,
-            `competitiveAssignmentDiagnostics=${cognitiveArtifact?.claimProvenance?.competitiveAssignmentDiagnostics ? Object.keys(cognitiveArtifact.claimProvenance.competitiveAssignmentDiagnostics).length + ' claims' : 'missing'}`,
             `alignment=${cognitiveArtifact?.geometry?.alignment ? 'present' : 'missing'}`,
             `basinInversion=${cognitiveArtifact?.geometry?.basinInversion ? cognitiveArtifact.geometry.basinInversion.status : 'missing'}`,
             `statementAllocation=${cognitiveArtifact?.statementAllocation ? 'present' : 'missing'}`,
@@ -1181,38 +1180,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         })().catch(e => { console.error('[Regenerate] Failed:', e); sendResponse({ success: false, error: getErrorMessage(e) }); });
         return true;
 
-      case "DERIVE_ELBOW_DIAGNOSTICS":
-        (async () => {
-          const { aiTurnId, providerId } = message.payload || {};
-          if (!aiTurnId || !providerId) {
-            sendResponse({ success: true, data: null });
-            return;
-          }
-          // Load geometry embeddings (turn-level) + claim embeddings (provider-level)
-          const [geoRecord, claimRecord] = await Promise.all([
-            sm.loadEmbeddings(aiTurnId),
-            sm.loadClaimEmbeddings(aiTurnId, providerId),
-          ]);
-          if (!geoRecord?.paragraphEmbeddings || !geoRecord?.meta?.paragraphIndex) {
-            sendResponse({ success: true, data: null });
-            return;
-          }
-          if (!claimRecord?.claimEmbeddings || !claimRecord?.meta?.claimIndex) {
-            sendResponse({ success: true, data: null });
-            return;
-          }
-          const { unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
-          const { computeElbowDiagnosticsFromEmbeddings } = await import('./ConciergeService/claimAssembly');
-          const geoMeta = geoRecord.meta;
-          const claimMeta = claimRecord.meta;
-          // Pure math — all embeddings from cache, zero ONNX calls
-          const paragraphEmbeddings = unpackEmbeddingMap(geoRecord.paragraphEmbeddings, geoMeta.paragraphIndex, geoMeta.dimensions);
-          const claimEmbeddings = unpackEmbeddingMap(claimRecord.claimEmbeddings, claimMeta.claimIndex, claimMeta.dimensions);
-          const claims = claimMeta.claimIndex.map(id => ({ id }));
-          const diagnostics = computeElbowDiagnosticsFromEmbeddings(claimEmbeddings, paragraphEmbeddings, claims);
-          sendResponse({ success: true, data: diagnostics });
-        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
-        return true;
+
 
       case "DEHYDRATE_ALL_STORED_ARTIFACTS":
         (async () => {

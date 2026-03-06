@@ -1,4 +1,4 @@
-import { parseMapperArtifact } from '../../../shared/parsing-utils';
+import { parseSemanticMapperOutput, createEmptyMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
@@ -649,12 +649,16 @@ export class CognitivePipelineHandler {
         const latestMappingText = mappingResponses?.[0]?.text || "";
         const latestMappingMeta = mappingResponses?.[0]?.meta || {};
 
-        // Fallback: parse raw text into legacy shape, then convert to cognitive
+        // Fallback: parse raw text via canonical V4 parser, then convert to cognitive
         if (!mappingArtifact && mappingResponses?.[0]) {
-          const parsed = parseMapperArtifact(String(latestMappingText));
-          if (parsed) {
-            parsed.query = originalPrompt;
-            mappingArtifact = buildCognitiveArtifact(parsed, null);
+          const parsed = parseSemanticMapperOutput(String(latestMappingText));
+          if (parsed.success && parsed.output) {
+            const shell = createEmptyMapperArtifact();
+            shell.claims = parsed.output.claims;
+            shell.edges = parsed.output.edges;
+            shell.narrative = parsed.narrative || '';
+            shell.query = originalPrompt;
+            mappingArtifact = buildCognitiveArtifact(shell, null);
           }
         }
 
@@ -799,6 +803,7 @@ export class CognitivePipelineHandler {
                 claims: mappingArtifact?.semantic?.claims || mappingArtifact?.claims || [],
                 traversalState: normalizedTraversalState,
                 sourceData,
+                blastSurface: mappingArtifact?.blastSurface || null,
               });
 
               console.log('🍖 Chewed substrate built:', {

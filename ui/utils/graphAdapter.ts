@@ -11,12 +11,13 @@ const isClaimType = (value: unknown): value is Claim["type"] =>
     typeof value === "string" && (CLAIM_TYPES as string[]).includes(value);
 
 const mapGraphEdgeTypeToEdgeType = (value: unknown): Edge["type"] => {
-    if (value === "conflicts") return "conflicts";
-    if (value === "tradeoff") return "tradeoff";
-    if (value === "prerequisite") return "prerequisite";
-    if (value === "supports") return "supports";
-    if (value === "complements") return "supports";
-    if (value === "bifurcation") return "supports";
+    const t = typeof value === "string" ? value.toLowerCase() : "";
+    if (t === "conflicts" || t === "conflict" || t === "challenges" || t === "challenge") return "conflicts";
+    if (t === "tradeoff") return "tradeoff";
+    if (t === "prerequisite") return "prerequisite";
+    if (t === "supports") return "supports";
+    if (t === "complements") return "supports";
+    if (t === "bifurcation") return "supports";
     return "supports";
 };
 

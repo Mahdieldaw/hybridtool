@@ -2,7 +2,7 @@ import { AiTurn, GraphTopology, ProviderResponse, UserTurn, isUserTurn, isAiTurn
 import { TurnMessage, ParsedTheme } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
-import { parseUnifiedMapperOutput } from "../../shared/parsing-utils";
+import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 import { getProviderArtifact } from "./turn-helpers";
 
 // ============================================================================
@@ -325,14 +325,14 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                     const fromText = typeof latest.text === "string" ? latest.text : "";
                     const rawText = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
 
-                    const parsed = parseUnifiedMapperOutput(rawText);
-                    const narrative = parsed.narrative;
+                    const parsed = parseSemanticMapperOutput(rawText);
+                    const narrative = parsed.narrative || '';
 
                     decisionMap = {
                         narrative,
-                        claims: parsed.claims || [],
-                        edges: parsed.edges || [],
-                        topology: meta.graphTopology || parsed.topology || null
+                        claims: parsed.output?.claims || [],
+                        edges: parsed.output?.edges || [],
+                        topology: meta.graphTopology || null
                     };
                 }
             }

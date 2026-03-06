@@ -157,9 +157,10 @@ function Pill({ metric }: { metric: MetricPill }) {
 
 export interface ContextStripProps {
   artifact: any;
+  className?: string;
 }
 
-export function ContextStrip({ artifact }: ContextStripProps) {
+export function ContextStrip({ artifact, className }: ContextStripProps) {
   const metrics = useMemo((): MetricPill[] => {
     const basin = artifact?.geometry?.basinInversion;
     const substrate = artifact?.geometry?.substrate;
@@ -280,7 +281,7 @@ export function ContextStrip({ artifact }: ContextStripProps) {
   }, [artifact]);
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-white/10 bg-black/5 flex-none flex-wrap min-h-[40px]">
+    <div className={clsx("flex items-center gap-2 px-4 py-1.5 border-b border-white/10 bg-black/5 flex-none flex-wrap min-h-[40px]", className)}>
       {metrics.map((m) => (
         <Pill key={m.label} metric={m} />
       ))}

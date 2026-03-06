@@ -95,6 +95,12 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
   const normalizeShadowStatements = (input: any): any[] => {
     if (!input) return [];
     if (Array.isArray(input)) return input;
+    if (input instanceof Map) {
+      return Array.from(input.entries()).map(([k, v]) => ({
+        ...(v && typeof v === "object" ? v : {}),
+        id: (v as any)?.id ?? (v as any)?.statementId ?? (v as any)?.sid ?? k,
+      }));
+    }
     if (typeof input === "object") {
       return Object.entries(input).map(([k, v]) => ({
         ...(v && typeof v === "object" ? v : {}),
@@ -103,7 +109,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     }
     return [];
   };
-
   const normalizeStatementId = (stmt: any): string => {
     const id = stmt?.id ?? stmt?.statementId ?? stmt?.sid;
     return String(id ?? "").trim();
@@ -124,12 +129,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       a?.derived?.completeness ??
       null;
 
-    // Query scores: statementId -> querySimilarity
     const queryScoreByStmt = new Map<string, number>();
     const queryScores = a?.geometry?.query?.relevance?.statementScores;
     for (const [stmtId, val] of normalizeEntries(queryScores)) {
-      const qs = (val as any)?.querySimilarity;
-      if (typeof qs === "number") queryScoreByStmt.set(String(stmtId), qs);
+      const qs = typeof val === "number" ? val : (val as any)?.querySimilarity;
+      if (typeof qs === "number" && Number.isFinite(qs)) queryScoreByStmt.set(String(stmtId), qs);
     }
 
     // Fates: statementId -> { fate, claimIds }

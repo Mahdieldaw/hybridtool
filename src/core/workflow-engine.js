@@ -5,7 +5,6 @@ import { ContextManager } from './execution/ContextManager';
 import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
 import { TurnEmitter } from './execution/turnemitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
-import { parseMapperArtifact } from '../../shared/parsing-utils';
 import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';
 import { classifyError } from './error-classifier';
 
@@ -19,29 +18,29 @@ function minifyMappingArtifactForPersistence(artifact) {
       .filter((c) => !!c && typeof c === "object" && !Array.isArray(c))
       .map((c) => {
         const cc = { ...c };
-      if (cc.sourceStatements !== undefined) {
-        const existingIds = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
-        if (existingIds.length === 0 && Array.isArray(cc.sourceStatements)) {
-          const ids = cc.sourceStatements
-            .map((s) => s?.id ?? s?.statementId ?? s?.sid ?? null)
-            .filter((x) => x != null && String(x).trim().length > 0)
-            .map((x) => String(x));
-          if (ids.length > 0) cc.sourceStatementIds = ids;
+        if (cc.sourceStatements !== undefined) {
+          const existingIds = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
+          if (existingIds.length === 0 && Array.isArray(cc.sourceStatements)) {
+            const ids = cc.sourceStatements
+              .map((s) => s?.id ?? s?.statementId ?? s?.sid ?? null)
+              .filter((x) => x != null && String(x).trim().length > 0)
+              .map((x) => String(x));
+            if (ids.length > 0) cc.sourceStatementIds = ids;
+          }
+          delete cc.sourceStatements;
         }
-        delete cc.sourceStatements;
-      }
-      if (cc.sourceRegions !== undefined) {
-        const existingIds = Array.isArray(cc.sourceRegionIds) ? cc.sourceRegionIds : [];
-        if (existingIds.length === 0 && Array.isArray(cc.sourceRegions)) {
-          const ids = cc.sourceRegions
-            .map((r) => r?.id ?? r?.regionId ?? null)
-            .filter((x) => x != null && String(x).trim().length > 0)
-            .map((x) => String(x));
-          if (ids.length > 0) cc.sourceRegionIds = ids;
+        if (cc.sourceRegions !== undefined) {
+          const existingIds = Array.isArray(cc.sourceRegionIds) ? cc.sourceRegionIds : [];
+          if (existingIds.length === 0 && Array.isArray(cc.sourceRegions)) {
+            const ids = cc.sourceRegions
+              .map((r) => r?.id ?? r?.regionId ?? null)
+              .filter((x) => x != null && String(x).trim().length > 0)
+              .map((x) => String(x));
+            if (ids.length > 0) cc.sourceRegionIds = ids;
+          }
+          delete cc.sourceRegions;
         }
-        delete cc.sourceRegions;
-      }
-      return cc;
+        return cc;
       })
     : [];
   return {
@@ -180,7 +179,6 @@ export class WorkflowEngine {
       }
 
       this._seedContexts(resolvedContext, stepResults, workflowContexts);
-      this._hydrateV1Artifacts(context, resolvedContext);
 
       // ✅ SINGLE LOOP - Steps are already ordered by WorkflowCompiler
       for (const step of steps) {
@@ -526,24 +524,6 @@ export class WorkflowEngine {
         }
       } catch (e) {
         console.warn("[WorkflowEngine] Failed to cache provider contexts from extend:", e);
-      }
-    }
-  }
-
-  _hydrateV1Artifacts(context, resolvedContext) {
-    if (!context.mappingArtifact) {
-      try {
-        const previousOutputs = resolvedContext?.providerContexts || {};
-        const v1MappingText = Object.values(previousOutputs)
-          .map(ctx => ctx?.text || "")
-          .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>"));
-
-        if (v1MappingText) {
-          const mapperArtifact = parseMapperArtifact(v1MappingText);
-          context.mappingArtifact = buildCognitiveArtifact(mapperArtifact, null);
-        }
-      } catch (err) {
-        console.warn("[WorkflowEngine] Cross-version hydration failed:", err);
       }
     }
   }

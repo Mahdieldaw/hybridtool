@@ -1,7 +1,7 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { parseMapperArtifact } from '../../../shared/parsing-utils';
+import { parseSemanticMapperOutput, createEmptyMapperArtifact } from '../../../shared/parsing-utils';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
 import { classifyError } from '../error-classifier';
 import {
@@ -401,7 +401,7 @@ export class StepExecutor {
   }
 
   async executeMappingStep(step, context, stepResults, workflowContexts, options) {
-    const { streamingManager } = options;
+    const { streamingManager, sessionManager } = options;
     const artifactProcessor = new ArtifactProcessor();
     const payload = step.payload;
     const rawSourceData = await this._resolveSourceData(
@@ -537,44 +537,43 @@ export class StepExecutor {
     let enrichmentResult = null;
     let basinInversionResult = null;
     let clusteringModule = null;
-
-    if (Array.isArray(shadowResult?.statements) && shadowResult.statements.length > 0) {
+    const geometryPromise = (async () => {
+      const startedAtMs = nowMs();
       try {
-        clusteringModule = await import('../../clustering');
-        const { generateStatementEmbeddings, DEFAULT_CONFIG } = clusteringModule;
-        statementEmbeddingResult = await generateStatementEmbeddings(
-          shadowResult.statements,
-          DEFAULT_CONFIG
-        );
-        geometryDiagnostics.stages.statementEmbeddings = {
-          status: 'ok',
-          statements: shadowResult.statements.length,
-          embedded: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
-        };
-      } catch (embeddingError) {
-        console.warn('[StepExecutor] Statement embedding generation failed, continuing without embeddings:', getErrorMessage(embeddingError));
-        geometryDiagnostics.embeddingBackendFailure = true;
-        geometryDiagnostics.stages.statementEmbeddings = {
-          status: 'failed',
-          error: getErrorMessage(embeddingError),
-        };
-        statementEmbeddingResult = null;
-        clusteringModule = null;
-      }
-    } else {
-      geometryDiagnostics.stages.statementEmbeddings = {
-        status: 'skipped',
-        reason: 'no_statements',
-      };
-    }
-
-    if (paragraphResult.paragraphs.length > 0 && statementEmbeddingResult?.embeddings) {
-      try {
-        if (!clusteringModule) {
-          clusteringModule = await import('../../clustering');
+        if (paragraphResult.paragraphs.length === 0) {
+          geometryDiagnostics.stages.embeddingsSkipped = {
+            startedAtMs,
+            timeMs: 0,
+            reason: 'no_paragraphs',
+          };
+          return;
         }
 
-        const { generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, structuredTruncate, getEmbeddingStatus, DEFAULT_CONFIG } = clusteringModule;
+        const ensureOffscreenReady = async () => {
+          if (typeof chrome === 'undefined' || !chrome?.runtime?.getContexts || !chrome?.offscreen) return;
+          const existingContexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+          if (existingContexts.length > 0) return;
+          await chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: [chrome.offscreen.Reason.WORKERS],
+            justification: 'Embedding model inference for semantic clustering',
+          });
+        };
+
+        const offscreenReadyPromise = ensureOffscreenReady().catch((err) => {
+          geometryDiagnostics.embeddingBackendFailure = true;
+          geometryDiagnostics.stages.offscreen = { status: 'failed', error: getErrorMessage(err) };
+        });
+
+        clusteringModule = await import('../../clustering');
+        const {
+          generateEmbeddings,
+          generateTextEmbeddings,
+          generateStatementEmbeddings,
+          stripInlineMarkdown,
+          structuredTruncate,
+          getEmbeddingStatus,
+        } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
@@ -583,55 +582,114 @@ export class StepExecutor {
           (context && typeof context.userMessage === 'string' && context.userMessage) ||
           '';
         const cleanedQuery = stripInlineMarkdown(String(rawQuery || '')).trim();
-        // BGE-base-en-v1.5: 512 token limit ≈ 1800 chars. Reserve 60 for the query prefix.
         const truncatedQuery = structuredTruncate(cleanedQuery, 1740);
         const queryTextForEmbedding =
           truncatedQuery && !truncatedQuery.toLowerCase().startsWith('represent this sentence for searching relevant passages:')
             ? `Represent this sentence for searching relevant passages: ${truncatedQuery}`
             : truncatedQuery;
-        try {
-          console.log(`[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`);
-          const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG);
-          console.log(`[StepExecutor] Query embedding batch: size=${queryEmbeddingBatch?.size ?? 'null'}, keys=[${queryEmbeddingBatch ? Array.from(queryEmbeddingBatch.keys()).join(',') : 'null'}]`);
-          queryEmbedding = queryEmbeddingBatch.get('0') || null;
-          if (queryEmbedding && queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
-            throw new Error(
-              `[StepExecutor] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${queryEmbedding.length}`
-            );
+
+        const queryEmbeddingPromise = (async () => {
+          try {
+            await offscreenReadyPromise;
+            console.log(`[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`);
+            const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG);
+            queryEmbedding = queryEmbeddingBatch.get('0') || null;
+            if (queryEmbedding && queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
+              throw new Error(
+                `[StepExecutor] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${queryEmbedding.length}`
+              );
+            }
+            geometryDiagnostics.stages.queryEmbedding = {
+              status: queryEmbedding ? 'ok' : 'failed',
+              dimensions: queryEmbedding ? queryEmbedding.length : null,
+            };
+          } catch (err) {
+            queryEmbedding = null;
+            console.warn(`[StepExecutor] Query embedding failed:`, getErrorMessage(err));
+            geometryDiagnostics.stages.queryEmbedding = {
+              status: 'failed',
+              error: getErrorMessage(err),
+            };
           }
-          console.log(`[StepExecutor] Query embedding: ${queryEmbedding ? `ok (dim=${queryEmbedding.length})` : 'FAILED - null result from batch.get("0")'}`);
-          geometryDiagnostics.stages.queryEmbedding = {
-            status: queryEmbedding ? 'ok' : 'failed',
-            dimensions: queryEmbedding ? queryEmbedding.length : null,
-          };
-        } catch (err) {
-          queryEmbedding = null;
-          console.warn(`[StepExecutor] Query embedding THREW:`, getErrorMessage(err));
-          geometryDiagnostics.stages.queryEmbedding = {
-            status: 'failed',
-            error: getErrorMessage(err),
-          };
-        }
+        })();
 
-        const paragraphEmbeddingResult = await generateEmbeddings(
-          paragraphResult.paragraphs,
-          shadowResult.statements,
-          DEFAULT_CONFIG
-        );
-        geometryDiagnostics.stages.paragraphEmbeddings = {
-          status: 'ok',
-          paragraphs: paragraphResult.paragraphs.length,
-          paragraphEmbeddings: paragraphEmbeddingResult.embeddings.size,
-        };
+        const paragraphEmbeddingPromise = (async () => {
+          try {
+            await offscreenReadyPromise;
+            const paragraphEmbeddingResult = await generateEmbeddings(
+              paragraphResult.paragraphs,
+              shadowResult.statements,
+              DEFAULT_CONFIG
+            );
+            embeddingResult = paragraphEmbeddingResult;
+            geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
+            geometryDiagnostics.stages.paragraphEmbeddings = {
+              status: 'ok',
+              paragraphs: paragraphResult.paragraphs.length,
+              paragraphEmbeddings: paragraphEmbeddingResult.embeddings.size,
+            };
+          } catch (err) {
+            embeddingResult = null;
+            geometryParagraphEmbeddings = null;
+            geometryDiagnostics.embeddingBackendFailure = true;
+            geometryDiagnostics.stages.paragraphEmbeddings = {
+              status: 'failed',
+              error: getErrorMessage(err),
+            };
+          }
+        })();
 
-        const firstParagraphEmbedding = paragraphEmbeddingResult.embeddings.values().next().value;
+        const statementEmbeddingPromise = (async () => {
+          if (!Array.isArray(shadowResult?.statements) || shadowResult.statements.length === 0) {
+            geometryDiagnostics.stages.statementEmbeddings = {
+              status: 'skipped',
+              reason: 'no_statements',
+            };
+            statementEmbeddingResult = null;
+            return;
+          }
+          try {
+            await offscreenReadyPromise;
+            statementEmbeddingResult = await generateStatementEmbeddings(
+              shadowResult.statements,
+              DEFAULT_CONFIG
+            );
+            geometryDiagnostics.stages.statementEmbeddings = {
+              status: 'ok',
+              statements: shadowResult.statements.length,
+              embedded: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
+            };
+          } catch (embeddingError) {
+            console.warn('[StepExecutor] Statement embedding generation failed, continuing without embeddings:', getErrorMessage(embeddingError));
+            geometryDiagnostics.embeddingBackendFailure = true;
+            geometryDiagnostics.stages.statementEmbeddings = {
+              status: 'failed',
+              error: getErrorMessage(embeddingError),
+            };
+            statementEmbeddingResult = null;
+          }
+        })();
+
+        await queryEmbeddingPromise;
+        await paragraphEmbeddingPromise;
+        await statementEmbeddingPromise;
+
+        const firstParagraphEmbedding = geometryParagraphEmbeddings?.values?.().next?.().value;
         if (queryEmbedding && firstParagraphEmbedding && firstParagraphEmbedding.length !== queryEmbedding.length) {
           throw new Error(
             `[StepExecutor] Query/paragraph embedding dimension mismatch: query=${queryEmbedding.length}, paragraph=${firstParagraphEmbedding.length}`
           );
         }
 
-        embeddingResult = paragraphEmbeddingResult;
+        if (!geometryParagraphEmbeddings || geometryParagraphEmbeddings.size === 0) {
+          console.log(`[StepExecutor] Skipping embeddings/geometry (paragraph_embeddings_unavailable)`);
+          geometryDiagnostics.stages.embeddingsSkipped = {
+            startedAtMs,
+            timeMs: 0,
+            reason: 'paragraph_embeddings_unavailable',
+          };
+          return;
+        }
 
         /** @type {"none" | "webgpu" | "wasm"} */
         let embeddingBackend = 'none';
@@ -641,8 +699,6 @@ export class StepExecutor {
             embeddingBackend = status.backend;
           }
         } catch (_) { }
-
-        geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
 
         substrate = buildGeometricSubstrate(
           paragraphResult.paragraphs,
@@ -725,7 +781,6 @@ export class StepExecutor {
             `conv=${substrate.shape.signals.convergentScore.toFixed(2)})`
           );
         }
-
 
         let perModelQueryRelevance = undefined;
         if (queryEmbedding && statementEmbeddingResult?.embeddings && paragraphResult?.paragraphs) {
@@ -922,90 +977,82 @@ export class StepExecutor {
           console.warn('[Enrichment] Failed:', getErrorMessage(err));
         }
 
+        try {
+          if (options.sessionManager && context.canonicalAiTurnId) {
+            const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
+            const stmtDim = statementEmbeddingResult?.embeddings?.values?.().next?.().value?.length;
+            const paraDim = geometryParagraphEmbeddings?.values?.().next?.().value?.length;
+            const queryDim = queryEmbedding?.length;
+            const dims = Number.isFinite(queryDim) && queryDim > 0
+              ? queryDim
+              : Number.isFinite(paraDim) && paraDim > 0
+                ? paraDim
+                : Number.isFinite(stmtDim) && stmtDim > 0
+                  ? stmtDim
+                  : DEFAULT_CONFIG.embeddingDimensions;
+
+            const packedStatements = statementEmbeddingResult?.embeddings
+              ? packEmbeddingMap(statementEmbeddingResult.embeddings, dims)
+              : null;
+            const packedParagraphs = geometryParagraphEmbeddings
+              ? packEmbeddingMap(geometryParagraphEmbeddings, dims)
+              : null;
+            const queryBuffer = queryEmbedding
+              ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
+              : null;
+
+            if (packedStatements || packedParagraphs || queryBuffer) {
+              options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
+                ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
+                ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
+                ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
+                meta: {
+                  embeddingModelId: DEFAULT_CONFIG.modelId,
+                  dimensions: dims,
+                  hasStatements: Boolean(packedStatements),
+                  hasParagraphs: Boolean(packedParagraphs),
+                  hasQuery: Boolean(queryBuffer),
+                  ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
+                  ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
+                  timestamp: Date.now(),
+                },
+              }).catch((err) => console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err));
+            }
+          }
+        } catch (err) {
+          console.warn('[StepExecutor] Embedding persistence setup failed (non-blocking):', err);
+        }
 
       } catch (geometryError) {
-        // Per design: skip geometry entirely on failure, continue without
         console.warn('[StepExecutor] Geometry pipeline failed, continuing without:', getErrorMessage(geometryError));
         geometryDiagnostics.embeddingBackendFailure = true;
         geometryDiagnostics.stages.geometryFailure = {
-          startedAtMs: nowMs(),
+          startedAtMs,
           timeMs: 0,
           error: getErrorMessage(geometryError),
         };
       }
-    } else {
-      const reason = paragraphResult.paragraphs.length === 0
-        ? 'no_paragraphs'
-        : 'statement_embeddings_unavailable';
-      console.log(`[StepExecutor] Skipping embeddings/geometry (${reason})`);
-      geometryDiagnostics.stages.embeddingsSkipped = {
-        startedAtMs: nowMs(),
-        timeMs: 0,
-        reason,
-      };
-    }
-
-    // 2.7 PERSIST EMBEDDINGS (fire-and-forget)
-    try {
-      if (options.sessionManager && context.canonicalAiTurnId) {
-        const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
-        const stmtDim = statementEmbeddingResult?.embeddings?.values?.().next?.().value?.length;
-        const paraDim = geometryParagraphEmbeddings?.values?.().next?.().value?.length;
-        const queryDim = queryEmbedding?.length;
-        const dims = Number.isFinite(queryDim) && queryDim > 0
-          ? queryDim
-          : Number.isFinite(paraDim) && paraDim > 0
-            ? paraDim
-            : Number.isFinite(stmtDim) && stmtDim > 0
-              ? stmtDim
-              : DEFAULT_CONFIG.embeddingDimensions;
-
-        const packedStatements = statementEmbeddingResult?.embeddings
-          ? packEmbeddingMap(statementEmbeddingResult.embeddings, dims)
-          : null;
-        const packedParagraphs = geometryParagraphEmbeddings
-          ? packEmbeddingMap(geometryParagraphEmbeddings, dims)
-          : null;
-        const queryBuffer = queryEmbedding
-          ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
-          : null;
-
-        if (packedStatements || packedParagraphs || queryBuffer) {
-          options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
-            ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
-            ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
-            ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
-            meta: {
-              embeddingModelId: DEFAULT_CONFIG.modelId,
-              dimensions: dims,
-              hasStatements: Boolean(packedStatements),
-              hasParagraphs: Boolean(packedParagraphs),
-              hasQuery: Boolean(queryBuffer),
-              ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
-              ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
-              timestamp: Date.now(),
-            },
-          }).catch((err) => console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err));
-        }
-      }
-    } catch (err) {
-      console.warn('[StepExecutor] Embedding persistence setup failed (non-blocking):', err);
-    }
+    })();
 
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
-    // Apply geometry-informed model ordering if available (outside-in: most irreplaceable at edges).
-    // Falls back to citationOrder if pre-semantic didn't run or produced no ordering.
-    const orderedModelIndices = preSemanticInterpretation?.modelOrdering?.orderedModelIndices;
-    const orderedSourceData = (Array.isArray(orderedModelIndices) && orderedModelIndices.length > 0)
-      ? (() => {
-        const positionByModelIndex = new Map(orderedModelIndices.map((mi, pos) => [mi, pos]));
-        return [...indexedSourceData].sort((a, b) => {
-          const pa = positionByModelIndex.get(a.modelIndex) ?? indexedSourceData.length;
-          const pb = positionByModelIndex.get(b.modelIndex) ?? indexedSourceData.length;
-          return pa - pb;
-        });
-      })()
-      : indexedSourceData;
+    const orderedModelIndices = (() => {
+      const observed = new Set();
+      for (const p of (paragraphResult?.paragraphs || [])) {
+        const mi = Number(p?.modelIndex);
+        if (Number.isFinite(mi) && mi > 0) observed.add(mi);
+      }
+      const base = Array.from(observed).sort((a, b) => a - b);
+      const all = indexedSourceData.map(s => s.modelIndex);
+      if (base.length === 0) return all;
+      const missing = all.filter(mi => !observed.has(mi));
+      return base.concat(missing);
+    })();
+    const positionByModelIndex = new Map(orderedModelIndices.map((mi, pos) => [mi, pos]));
+    const orderedSourceData = [...indexedSourceData].sort((a, b) => {
+      const pa = positionByModelIndex.get(a.modelIndex) ?? indexedSourceData.length;
+      const pb = positionByModelIndex.get(b.modelIndex) ?? indexedSourceData.length;
+      return pa - pb;
+    });
 
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
@@ -1021,6 +1068,79 @@ export class StepExecutor {
       throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
     }
 
+    const mappingProviderContexts = await (async () => {
+      const pid = String(payload?.mappingProvider || '').trim();
+      if (!pid) return undefined;
+
+      const explicit = payload?.providerContexts;
+      if (explicit && typeof explicit === 'object' && explicit[pid]) {
+        const entry = explicit[pid];
+        const meta =
+          entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
+        if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+          return { [pid]: { meta, continueThread: true } };
+        }
+      }
+
+      const sourceStepIds = Array.isArray(payload?.sourceStepIds)
+        ? payload.sourceStepIds
+        : [];
+      for (const sourceStepId of sourceStepIds) {
+        const stepResult = stepResults?.get?.(sourceStepId);
+        if (!stepResult || stepResult.status !== 'completed') continue;
+        const providerResult = stepResult?.result?.results?.[pid];
+        const meta = providerResult?.meta;
+        if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+          return { [pid]: { meta, continueThread: true } };
+        }
+      }
+
+      const historicalTurnId = payload?.sourceHistorical?.turnId;
+      const historicalResponseType = payload?.sourceHistorical?.responseType;
+      if (
+        historicalTurnId &&
+        typeof historicalTurnId === 'string' &&
+        sessionManager?.adapter?.getResponsesByTurnId
+      ) {
+        try {
+          const records = await sessionManager.adapter.getResponsesByTurnId(historicalTurnId);
+          const candidates = Array.isArray(records)
+            ? records.filter(
+              (r) =>
+                r &&
+                r.providerId === pid &&
+                r.responseType === historicalResponseType &&
+                r.meta &&
+                typeof r.meta === 'object',
+            )
+            : [];
+          candidates.sort((a, b) => {
+            const ai = (a.responseIndex ?? 0);
+            const bi = (b.responseIndex ?? 0);
+            if (bi !== ai) return bi - ai;
+            const at = (a.updatedAt ?? a.createdAt ?? 0);
+            const bt = (b.updatedAt ?? b.createdAt ?? 0);
+            return bt - at;
+          });
+          const meta = candidates[0]?.meta;
+          if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+            return { [pid]: { meta, continueThread: true } };
+          }
+        } catch (_) { }
+      }
+
+      try {
+        if (!sessionManager?.getProviderContexts) return undefined;
+        const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, { contextRole: 'batch' });
+        const meta = ctxs?.[pid]?.meta;
+        if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+          return { [pid]: { meta, continueThread: true } };
+        }
+      } catch (_) { }
+
+      return undefined;
+    })();
+
     return new Promise((resolve, reject) => {
       this.orchestrator.executeParallelFanout(
         mappingPrompt,
@@ -1028,6 +1148,7 @@ export class StepExecutor {
         {
           sessionId: context.sessionId,
           useThinking: payload.useThinking,
+          providerContexts: mappingProviderContexts,
           providerMeta: step?.payload?.providerMeta,
           onPartial: (providerId, chunk) => {
             streamingManager.dispatchPartialDelta(
@@ -1065,6 +1186,9 @@ export class StepExecutor {
             const paragraphClusteringSummary = null; // clustering not implemented in this path
 
             if (finalResult?.text) {
+              try {
+                await geometryPromise;
+              } catch (_) { }
               // 4. Parse (New Parser)
               const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
 
@@ -1138,223 +1262,260 @@ export class StepExecutor {
                 }
 
                 try {
-                enrichedClaims = await reconstructProvenance(
-                  mapperClaimsForProvenance,
-                  shadowResult.statements,
-                  paragraphResult.paragraphs,
-                  embeddingResult?.embeddings || new Map(),
-                  regions,
-                  citationOrder.length,
-                  statementEmbeddingResult?.embeddings || null,
-                  claimEmbeddings,
-                );
+                  enrichedClaims = await reconstructProvenance(
+                    mapperClaimsForProvenance,
+                    shadowResult.statements,
+                    paragraphResult.paragraphs,
+                    embeddingResult?.embeddings || new Map(),
+                    regions,
+                    citationOrder.length,
+                    statementEmbeddingResult?.embeddings || null,
+                    claimEmbeddings,
+                  );
 
-                // ── DETERMINISTIC PIPELINE (shared with regenerate flow) ──
-                const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
-                  await import('./deterministicPipeline');
+                  // ── DETERMINISTIC PIPELINE (shared with regenerate flow) ──
+                  const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
+                    await import('./deterministicPipeline');
 
-                const derived = await computeDerivedFields({
-                  enrichedClaims,
-                  mapperClaimsForProvenance,
-                  parsedEdges: unifiedEdges,
-                  parsedConditionals: unifiedConditionals,
-                  shadowStatements: shadowResult.statements,
-                  shadowParagraphs: paragraphResult.paragraphs,
-                  statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
-                  paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
-                  claimEmbeddings: claimEmbeddings || new Map(),
-                  queryEmbedding,
-                  substrate,
-                  preSemantic: preSemanticInterpretation,
-                  regions,
-                  geoRecord: null,
-                  existingQueryRelevance: queryRelevance,
-                  modelCount: citationOrder.length,
-                  queryText: payload.originalPrompt,
-                });
-
-                const cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
-                const blastSurfaceResult = derived.blastSurfaceResult;
-                const mapperArtifact_claimProvenance = derived.claimProvenance;
-
-                let questionSelectionInstrumentation = null;
-                try {
-                  const { computeQuestionSelectionInstrumentation } =
-                    await import('../blast-radius/questionSelection');
-                  questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
-                    blastSurfaceResult: blastSurfaceResult ?? null,
-                    edges: unifiedEdges,
+                  let derived = await computeDerivedFields({
                     enrichedClaims,
-                    queryRelevanceScores: queryRelevance?.statementScores ?? null,
+                    mapperClaimsForProvenance,
+                    parsedEdges: unifiedEdges,
+                    parsedConditionals: unifiedConditionals,
+                    shadowStatements: shadowResult.statements,
+                    shadowParagraphs: paragraphResult.paragraphs,
+                    statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
+                    paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
+                    claimEmbeddings: claimEmbeddings || new Map(),
+                    queryEmbedding,
+                    substrate,
+                    preSemantic: preSemanticInterpretation,
+                    regions,
+                    geoRecord: null,
+                    existingQueryRelevance: queryRelevance,
                     modelCount: citationOrder.length,
-                    claimCentroids: claimEmbeddings ?? new Map(),
+                    queryText: payload.originalPrompt,
                   });
-                } catch (err) {
-                  console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
-                  questionSelectionInstrumentation = null;
-                }
 
-                let surveyRationale = null;
-                const useSurveyMapper = true;
-                const shouldRunSurvey = useSurveyMapper
-                  && enrichedClaims.length > 0
-                  ;
+                  let cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
+                  let blastSurfaceResult = derived.blastSurfaceResult;
+                  let mapperArtifact_claimProvenance = derived.claimProvenance;
 
-                if (shouldRunSurvey) {
+                  let questionSelectionInstrumentation = null;
                   try {
-                    const { buildSurveyMapperPrompt, parseSurveyMapperOutput: parseSurveyOutput } =
-                      await import('../../ConciergeService/surveyMapper');
-
-                    const claimsForSurvey = enrichedClaims.map((c) => ({
-                      id: String(c?.id || ''),
-                      label: String(c?.label || ''),
-                      text: String(c?.text || ''),
-                      supporters: Array.isArray(c?.supporters) ? c.supporters : [],
-                    }));
-
-                    const surveyPrompt = buildSurveyMapperPrompt(
-                      payload.originalPrompt,
-                      claimsForSurvey,
-                      unifiedEdges,
-                      indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
-                    );
-
-                    const surveyResult = await new Promise((resolve) => {
-                      let surveyText = '';
-                      this.orchestrator.executeParallelFanout(
-                        surveyPrompt,
-                        [payload.mappingProvider],
-                        {
-                          sessionId: context.sessionId,
-                          useThinking: false,
-                          onPartial: () => { },
-                          onAllComplete: (results) => {
-                            const r = results?.get?.(payload.mappingProvider);
-                            surveyText = r?.text || '';
-                            resolve({ text: surveyText });
-                          },
-                          onError: () => resolve({ text: '' }),
-                        }
-                      );
+                    const { computeQuestionSelectionInstrumentation } =
+                      await import('../blast-radius/questionSelection');
+                    questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
+                      blastSurfaceResult: blastSurfaceResult ?? null,
+                      edges: unifiedEdges,
+                      enrichedClaims,
+                      queryRelevanceScores: queryRelevance?.statementScores ?? null,
+                      modelCount: citationOrder.length,
+                      claimCentroids: claimEmbeddings ?? new Map(),
                     });
-
-                    if (surveyResult?.text) {
-                      const parsed = parseSurveyOutput(surveyResult.text);
-                      rawGates = parsed.gates;
-                      surveyRationale = parsed.rationale;
-                      if (parsed.errors.length > 0) {
-                        console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
-                      }
-                      console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
-
-                      // Rebuild unifiedConditionals from survey gates.
-                      // With the blast radius filter, all gates are conditional —
-                      // the forced_choice/conditional_gate distinction is removed.
-                      unifiedConditionals = [];
-                      gateQuestionByClaimPair = new Map();
-
-                      for (const gate of rawGates) {
-                        if (!gate || !gate.id) continue;
-                        const affected = Array.isArray(gate.affectedClaims)
-                          ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
-                          : [];
-                        if (affected.length === 0) continue;
-
-                        unifiedConditionals.push({
-                          id: gate.id,
-                          question: String(gate.question || '').trim(),
-                          affectedClaims: affected,
-                          construct: null,
-                          hinge: null,
-                          classification: 'conditional_gate',
-                        });
-
-                      }
-                    }
                   } catch (err) {
-                    console.warn('[SurveyMapper] Failed, continuing without gates:', getErrorMessage(err));
-                    rawGates = [];
-                    surveyRationale = null;
+                    console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
+                    questionSelectionInstrumentation = null;
                   }
-                }
 
-                // ── TRAVERSAL + ARTIFACT ASSEMBLY (uses shared pipeline) ──
-                const { traversalGraph } = buildTraversalData({
-                  enrichedClaims,
-                  edges: unifiedEdges,
-                  conditionals: unifiedConditionals,
-                  conflictTiering: true,
-                });
-                const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
+                  let surveyRationale = null;
+                  const semanticContinuationMeta = (() => {
+                    try {
+                      const meta = finalResult?.meta;
+                      if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+                        return { ...meta };
+                      }
+                    } catch (_) { }
+                    return null;
+                  })();
+                  const useSurveyMapper = true;
+                  const shouldRunSurvey = useSurveyMapper
+                    && enrichedClaims.length > 0
+                    ;
 
-                mapperArtifact = assembleMapperArtifact({
-                  derived,
-                  enrichedClaims,
-                  traversalGraph,
-                  forcingPoints,
-                  parsedNarrative: String(parseResult.narrative || '').trim(),
-                  parsedConditionals: unifiedConditionals,
-                  queryText: payload.originalPrompt,
-                  modelCount: citationOrder.length,
-                  shadowStatements: shadowResult.statements,
-                  turn: context.turn || 0,
-                  surveyGates: rawGates.length > 0 ? rawGates : undefined,
-                  surveyRationale,
-                });
-                // Add StepExecutor-specific fields
-                mapperArtifact.preSemantic = preSemanticInterpretation || null;
-                if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
-                if (paragraphClusteringSummary) mapperArtifact.paragraphClustering = paragraphClusteringSummary;
-                if (substrateSummary) mapperArtifact.substrate = substrateSummary;
-                if (questionSelectionInstrumentation) {
-                  mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
-                }
+                  if (shouldRunSurvey) {
+                    try {
+                      const { buildSurveyMapperPrompt, parseSurveyMapperOutput: parseSurveyOutput } =
+                        await import('../../ConciergeService/surveyMapper');
 
-                let diagnosticsResult = null;
-                try {
-                  if (preSemanticInterpretation && mapperArtifact) {
-                    const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                    let postSemantic = cachedStructuralAnalysis;
-                    if (!postSemantic) {
-                      const { computeStructuralAnalysis } = await import('../PromptMethods');
-                      const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
-                      postSemantic = computeStructuralAnalysis(tempCognitive);
-                    }
-                    diagnosticsResult = validateStructuralMapping(
-                      preSemanticInterpretation,
-                      postSemantic,
-                      substrate,
-                      statementEmbeddingResult?.embeddings ?? null,
-                      paragraphResult?.paragraphs ?? null
-                    );
-                  }
-                } catch (_) {
-                  diagnosticsResult = null;
-                }
+                      const claimsForSurvey = enrichedClaims.map((c) => ({
+                        id: String(c?.id || ''),
+                        label: String(c?.label || ''),
+                        text: String(c?.text || ''),
+                        supporters: Array.isArray(c?.supporters) ? c.supporters : [],
+                      }));
 
-                if (mapperArtifact) {
-                  try {
-                    mapperArtifact.diagnostics = diagnosticsResult;
-                    const claimMeasurements = diagnosticsResult?.measurements?.claimMeasurements;
-                    if (Array.isArray(claimMeasurements)) {
-                      const coherenceById = new Map(claimMeasurements.map(m => [m.claimId, m]));
-                      for (const c of (mapperArtifact.claims ?? [])) {
-                        const m = coherenceById.get(c?.id);
-                        if (m && typeof m.sourceCoherence === 'number') {
-                          c.sourceCoherence = m.sourceCoherence;
+                      const surveyPrompt = buildSurveyMapperPrompt(
+                        payload.originalPrompt,
+                        claimsForSurvey,
+                        unifiedEdges,
+                        indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
+                      );
+
+                      const surveyResult = await new Promise((resolve) => {
+                        let surveyText = '';
+                        this.orchestrator.executeParallelFanout(
+                          surveyPrompt,
+                          [payload.mappingProvider],
+                          {
+                            sessionId: context.sessionId,
+                            useThinking: false,
+                            providerContexts: semanticContinuationMeta
+                              ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
+                              : mappingProviderContexts,
+                            onPartial: () => { },
+                            onAllComplete: (results) => {
+                              const r = results?.get?.(payload.mappingProvider);
+                              surveyText = r?.text || '';
+                              resolve({ text: surveyText });
+                            },
+                            onError: () => resolve({ text: '' }),
+                          }
+                        );
+                      });
+
+                      if (surveyResult?.text) {
+                        const parsed = parseSurveyOutput(surveyResult.text);
+                        rawGates = parsed.gates;
+                        surveyRationale = parsed.rationale;
+                        if (parsed.errors.length > 0) {
+                          console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
+                        }
+                        console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
+
+                        // Rebuild unifiedConditionals from survey gates.
+                        // With the blast radius filter, all gates are conditional —
+                        // the forced_choice/conditional_gate distinction is removed.
+                        unifiedConditionals = [];
+                        gateQuestionByClaimPair = new Map();
+
+                        for (const gate of rawGates) {
+                          if (!gate || !gate.id) continue;
+                          const affected = Array.isArray(gate.affectedClaims)
+                            ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
+                            : [];
+                          if (affected.length === 0) continue;
+
+                          unifiedConditionals.push({
+                            id: gate.id,
+                            question: String(gate.question || '').trim(),
+                            affectedClaims: affected,
+                            construct: null,
+                            hinge: null,
+                            classification: 'conditional_gate',
+                          });
+
                         }
                       }
+                    } catch (err) {
+                      console.warn('[SurveyMapper] Failed, continuing without gates:', getErrorMessage(err));
+                      rawGates = [];
+                      surveyRationale = null;
                     }
-                  } catch (err) {
-                    console.error('[StepExecutor] Diagnostics stamp failed', err);
                   }
 
-                  if (mapperArtifact_claimProvenance) {
-                    mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
+                  if (Array.isArray(rawGates) && rawGates.length > 0) {
+                    derived = await computeDerivedFields({
+                      enrichedClaims,
+                      mapperClaimsForProvenance,
+                      parsedEdges: unifiedEdges,
+                      parsedConditionals: unifiedConditionals,
+                      shadowStatements: shadowResult.statements,
+                      shadowParagraphs: paragraphResult.paragraphs,
+                      statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
+                      paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
+                      claimEmbeddings: claimEmbeddings || new Map(),
+                      queryEmbedding,
+                      substrate,
+                      preSemantic: preSemanticInterpretation,
+                      regions,
+                      geoRecord: null,
+                      existingQueryRelevance: queryRelevance,
+                      modelCount: citationOrder.length,
+                      queryText: payload.originalPrompt,
+                    });
+                    cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
+                    blastSurfaceResult = derived.blastSurfaceResult;
+                    mapperArtifact_claimProvenance = derived.claimProvenance;
                   }
-                }
 
-                console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(derived.semanticEdges?.length || 0) + (derived.derivedSupportEdges?.length || 0)} edges`);
+                  // ── TRAVERSAL + ARTIFACT ASSEMBLY (uses shared pipeline) ──
+                  const { traversalGraph } = buildTraversalData({
+                    enrichedClaims,
+                    edges: unifiedEdges,
+                    conditionals: unifiedConditionals,
+                    conflictTiering: true,
+                  });
+                  const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
+
+                  mapperArtifact = assembleMapperArtifact({
+                    derived,
+                    enrichedClaims,
+                    traversalGraph,
+                    forcingPoints,
+                    parsedNarrative: String(parseResult.narrative || '').trim(),
+                    parsedConditionals: unifiedConditionals,
+                    queryText: payload.originalPrompt,
+                    modelCount: citationOrder.length,
+                    shadowStatements: shadowResult.statements,
+                    turn: context.turn || 0,
+                    surveyGates: rawGates.length > 0 ? rawGates : undefined,
+                    surveyRationale,
+                  });
+                  // Add StepExecutor-specific fields
+                  mapperArtifact.preSemantic = preSemanticInterpretation || null;
+                  if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
+                  if (paragraphClusteringSummary) mapperArtifact.paragraphClustering = paragraphClusteringSummary;
+                  if (substrateSummary) mapperArtifact.substrate = substrateSummary;
+                  if (questionSelectionInstrumentation) {
+                    mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+                  }
+
+                  let diagnosticsResult = null;
+                  try {
+                    if (preSemanticInterpretation && mapperArtifact) {
+                      const { validateStructuralMapping } = await import('../../geometry/interpretation');
+                      let postSemantic = cachedStructuralAnalysis;
+                      if (!postSemantic) {
+                        const { computeStructuralAnalysis } = await import('../PromptMethods');
+                        const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
+                        postSemantic = computeStructuralAnalysis(tempCognitive);
+                      }
+                      diagnosticsResult = validateStructuralMapping(
+                        preSemanticInterpretation,
+                        postSemantic,
+                        substrate,
+                        statementEmbeddingResult?.embeddings ?? null,
+                        paragraphResult?.paragraphs ?? null
+                      );
+                    }
+                  } catch (_) {
+                    diagnosticsResult = null;
+                  }
+
+                  if (mapperArtifact) {
+                    try {
+                      mapperArtifact.diagnostics = diagnosticsResult;
+                      const claimMeasurements = diagnosticsResult?.measurements?.claimMeasurements;
+                      if (Array.isArray(claimMeasurements)) {
+                        const coherenceById = new Map(claimMeasurements.map(m => [m.claimId, m]));
+                        for (const c of (mapperArtifact.claims ?? [])) {
+                          const m = coherenceById.get(c?.id);
+                          if (m && typeof m.sourceCoherence === 'number') {
+                            c.sourceCoherence = m.sourceCoherence;
+                          }
+                        }
+                      }
+                    } catch (err) {
+                      console.error('[StepExecutor] Diagnostics stamp failed', err);
+                    }
+
+                    if (mapperArtifact_claimProvenance) {
+                      mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
+                    }
+                  }
+
+                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(derived.semanticEdges?.length || 0) + (derived.derivedSupportEdges?.length || 0)} edges`);
                 } catch (err) {
                   // processLogger.error or console.error with context
                   console.error('[StepExecutor] Mapper artifact build failed:', err);
@@ -1410,9 +1571,18 @@ export class StepExecutor {
               citationSourceOrder[idx + 1] = pid;
             });
 
+            const providerThreadMeta = (() => {
+              try {
+                const meta = finalResult?.meta;
+                if (meta && typeof meta === 'object') return { ...meta };
+              } catch (_) { }
+              return {};
+            })();
+
             const finalResultWithMeta = {
               ...finalResult,
               meta: {
+                ...providerThreadMeta,
                 citationSourceOrder,
                 rawMappingText: rawText,
                 semanticMapperPrompt: mappingPrompt,
@@ -1437,7 +1607,7 @@ export class StepExecutor {
             try {
               if (finalResultWithMeta?.meta) {
                 workflowContexts[payload.mappingProvider] =
-                  finalResultWithMeta.meta;
+                  providerThreadMeta;
               }
             } catch (_) { }
 
@@ -1796,9 +1966,13 @@ export class StepExecutor {
 
     // Fallback: parse from raw mapping text and convert to cognitive shape
     if (!mappingArtifact && payload.mappingText) {
-      const parsed = parseMapperArtifact(payload.mappingText);
-      if (parsed) {
-        mappingArtifact = buildCognitiveArtifact(parsed, null);
+      const parsed = parseSemanticMapperOutput(payload.mappingText);
+      if (parsed.success && parsed.output) {
+        const shell = createEmptyMapperArtifact();
+        shell.claims = parsed.output.claims;
+        shell.edges = parsed.output.edges;
+        shell.narrative = parsed.narrative || '';
+        mappingArtifact = buildCognitiveArtifact(shell, null);
       }
     }
 

@@ -42,7 +42,7 @@ scripts/
 docs/
 *.txt
 *.d.ts
-
+*.test.ts
 .*test.ts
 src/core/V31Verification.ts
 docs/*
@@ -60,4 +60,4 @@ ui/styles/index.css
 north star plan.md
 instrumenting carrier.xml
 
-ui\components\entity-profiles
+ui/components/entity-profiles/

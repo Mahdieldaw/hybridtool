@@ -3,7 +3,6 @@ import { generateTextEmbeddings } from '../clustering/embeddings';
 import { cosineSimilarity } from '../clustering/distance';
 import { detectCarriers } from './CarrierDetector';
 import { DEFAULT_THRESHOLDS } from './types';
-import { findElbow } from '../core/structural-analysis/utils';
 import type { CarrierThresholds, SkeletonizationInput, StatementFate, TriageResult } from './types';
 
 function nowMs(): number {
@@ -134,43 +133,60 @@ export async function triageStatements(
   // Phase 2 + 3: paragraph-first triangulation then carrier detection
   const paragraphEmbeddings = input.paragraphEmbeddings;
 
-  // Pre-compute dynamic relevance threshold via elbow on all source-to-centroid similarities
-  const allRelevances: Array<{ relevance: number }> = [];
-  for (const prunedClaim of prunedClaims) {
-    const sourceIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
-    const centroid = claimEmbeddings.get(prunedClaim.id);
-    if (!centroid) continue;
-    for (const sid of sourceIds) {
-      if (!validStatementIds.has(sid)) continue;
-      if (protectedStatementIds.has(sid)) continue;
-      const emb = statementEmbeddings.get(sid);
-      if (!emb) continue;
-      allRelevances.push({ relevance: cosineSimilarity(emb, centroid) });
+  // Use blast surface vernal/exclusivity data or fallback to static cutoffs
+  // No longer computing dynamicRelevanceMin via findElbow
+  const dynamicRelevanceMin = 0.55;
+
+  const blastScoreByClaimId = new Map<string, typeof input.blastSurface.scores[0]>();
+  if (input.blastSurface && Array.isArray(input.blastSurface.scores)) {
+    for (const score of input.blastSurface.scores) {
+      blastScoreByClaimId.set(score.claimId, score);
     }
   }
-  allRelevances.sort((a, b) => b.relevance - a.relevance);
-  const relevanceSims = allRelevances.map(r => r.relevance);
-  const relevanceElbow = findElbow(relevanceSims);
-  // dynamicRelevanceMin: raw cosine threshold for "is this statement about the pruned claim?"
-  // Computed via elbow detection on source-to-centroid similarities. Fallback: 0.55 (raw cosine, ~0.77 normalized)
-  const dynamicRelevanceMin = (() => {
-    if (relevanceSims.length === 0) return 0.55; // fallback: raw cosine [-1,1]
-    const safeIndex = Number.isFinite(relevanceElbow.index)
-      ? Math.max(0, Math.min(relevanceSims.length - 1, Math.floor(relevanceElbow.index)))
-      : -1;
-    if (relevanceElbow.boundaryFound && safeIndex >= 0) {
-      return relevanceSims[safeIndex]; // elbow value: raw cosine
-    }
-    return 0.55; // fallback: raw cosine [-1,1]
-  })();
 
   for (const prunedClaim of prunedClaims) {
     const sourceStatementIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
     const claimCentroid = claimEmbeddings.get(prunedClaim.id);
 
-    // Paragraph-first: pre-filter candidate statements via elbow detection
+    // If blastSurface tells us which statements are vulnerable, use those instead of elbow cuts
+    const blastScore = blastScoreByClaimId.get(prunedClaim.id);
     let candidateStatementIds: Set<string> | undefined;
-    if (paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
+
+    if (blastScore) {
+      candidateStatementIds = new Set<string>();
+      // Use exclusivity and vernal vulnerability data to seed initial candidates
+      if (blastScore.vernal?.vulnerableStatementIds) {
+        for (const vid of blastScore.vernal.vulnerableStatementIds) {
+          candidateStatementIds.add(vid);
+        }
+      }
+      if (blastScore.layerB?.statements) {
+        for (const bState of blastScore.layerB.statements) {
+          // If it's an orphan or exclusive to this claim
+          if (bState.orphan || bState.carrierCount === 0) {
+            candidateStatementIds.add(bState.statementId);
+          }
+        }
+      }
+
+      // If we didn't find any solid candidates from blast surface, 
+      // fallback to top paragraph statements
+      if (candidateStatementIds.size === 0 && paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
+        const paraScores = paragraphs
+          .map(para => {
+            const paraEmb = paragraphEmbeddings.get(para.id);
+            return paraEmb ? { para, sim: cosineSimilarity(paraEmb, claimCentroid) } : null;
+          })
+          .filter((x): x is { para: typeof paragraphs[0]; sim: number } => x !== null)
+          .sort((a, b) => b.sim - a.sim);
+
+        const paraCutoff = Math.min(3, paraScores.length);
+        for (const { para } of paraScores.slice(0, paraCutoff)) {
+          for (const sid of para.statementIds) candidateStatementIds.add(sid);
+        }
+      }
+    } else if (paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
+      // Fallback pre-filter candidate statements
       const paraScores = paragraphs
         .map(para => {
           const paraEmb = paragraphEmbeddings.get(para.id);
@@ -180,15 +196,7 @@ export async function triageStatements(
         .filter((x): x is { para: typeof paragraphs[0]; sim: number } => x !== null)
         .sort((a, b) => b.sim - a.sim);
 
-      const paraSims = paraScores.map(s => s.sim);
-      const paraElbow = findElbow(paraSims);
-      const paragraphCount = paraScores.length;
-      const safeIndex = Number.isFinite(paraElbow.index)
-        ? Math.max(0, Math.min(paragraphCount - 1, Math.floor(paraElbow.index)))
-        : -1;
-      const paraCutoff = paraElbow.boundaryFound && safeIndex >= 0
-        ? Math.max(safeIndex + 1, Math.min(2, paragraphCount))
-        : Math.min(3, paragraphCount);
+      const paraCutoff = Math.min(3, paraScores.length);
 
       candidateStatementIds = new Set<string>();
       for (const { para } of paraScores.slice(0, paraCutoff)) {

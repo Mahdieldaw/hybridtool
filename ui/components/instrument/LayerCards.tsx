@@ -1482,7 +1482,7 @@ export function CompetitiveProvenanceCard({
   const ownershipObj = safeObj(claimProvenance?.statementOwnership);
   const exclusivityObj = safeObj(claimProvenance?.claimExclusivity);
   const overlapArr = safeArr<any>(claimProvenance?.claimOverlap);
-  const assignmentDiagnostics = safeObj(claimProvenance?.competitiveAssignmentDiagnostics);
+
   // Phase 1 statement-level competitive allocation
   const statementAllocation = artifact?.statementAllocation ?? null;
   const saPerClaim = safeObj(statementAllocation?.perClaim);
@@ -1528,16 +1528,14 @@ export function CompetitiveProvenanceCard({
       const bulk = typeof c?.provenanceBulk === "number" && Number.isFinite(c.provenanceBulk) ? c.provenanceBulk : null;
       const ex = exclusivityObj[id];
       const exclusivityRatio = typeof ex?.exclusivityRatio === "number" && Number.isFinite(ex.exclusivityRatio) ? ex.exclusivityRatio : null;
-      const poolSize =
-        mapSize(c?.provenanceWeights) ??
-        (typeof assignmentDiagnostics?.[id]?.poolSize === "number" ? assignmentDiagnostics[id].poolSize : null);
+      const poolSize = mapSize(c?.provenanceWeights);
       const stmtCount = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds.length : 0;
       const regionIds = Array.isArray(c?.sourceRegionIds) ? c.sourceRegionIds : [];
       const regionCount = regionIds.length;
       const dom = dominantRegionId(regionIds);
       return { id, label, bulk, exclusivityRatio, poolSize, stmtCount, regionCount, dominantRegion: dom };
     });
-  }, [claims, exclusivityObj, assignmentDiagnostics]);
+  }, [claims, exclusivityObj]);
 
   const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
   const selectedClaim = selectedClaimId ? claims.find((c: any) => String(c?.id ?? "") === selectedClaimId) : null;
@@ -1642,7 +1640,7 @@ export function CompetitiveProvenanceCard({
             <div>
               <StatRow label="Claim" value={String(selectedClaim?.label ?? selectedClaimId)} />
               <StatRow label="Bulk" value={fmt((selectedClaim as any)?.provenanceBulk ?? null, 3)} />
-              <StatRow label="Pool Size" value={fmtInt(mapSize((selectedClaim as any)?.provenanceWeights) ?? assignmentDiagnostics?.[selectedClaimId]?.poolSize ?? null)} />
+              <StatRow label="Pool Size" value={fmtInt(mapSize((selectedClaim as any)?.provenanceWeights))} />
             </div>
             <div>
               <StatRow label="Exclusivity" value={selectedEx?.exclusivityRatio != null ? `${(selectedEx.exclusivityRatio * 100).toFixed(1)}%` : "—"} />
@@ -1652,6 +1650,7 @@ export function CompetitiveProvenanceCard({
           </div>
         </CardSection>
       )}
+
 
       <CardSection title={selectedClaimId ? "Statement Allocation (claim scope)" : "Statement Allocation (field scope)"}>
         {selectedClaimId ? (() => {
@@ -1709,22 +1708,24 @@ export function CompetitiveProvenanceCard({
         )}
       </CardSection>
 
-      {overlapArr.length > 0 && (
-        <CardSection title="Claim Overlap (Jaccard)">
-          <SortableTable
-            columns={[
-              { key: "claimA", header: "A", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r.claimA)}</span> },
-              { key: "claimB", header: "B", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r.claimB)}</span> },
-              { key: "jaccard", header: "J", sortValue: (r: any) => r.jaccard, cell: (r: any) => <span className="font-mono">{fmt(r.jaccard, 3)}</span> },
-            ]}
-            rows={overlapArr}
-            defaultSortKey="jaccard"
-            defaultSortDir="desc"
-            maxRows={10}
-          />
-        </CardSection>
-      )}
-    </div>
+      {
+        overlapArr.length > 0 && (
+          <CardSection title="Claim Overlap (Jaccard)">
+            <SortableTable
+              columns={[
+                { key: "claimA", header: "A", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r.claimA)}</span> },
+                { key: "claimB", header: "B", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r.claimB)}</span> },
+                { key: "jaccard", header: "J", sortValue: (r: any) => r.jaccard, cell: (r: any) => <span className="font-mono">{fmt(r.jaccard, 3)}</span> },
+              ]}
+              rows={overlapArr}
+              defaultSortKey="jaccard"
+              defaultSortDir="desc"
+              maxRows={10}
+            />
+          </CardSection>
+        )
+      }
+    </div >
   );
 }
 

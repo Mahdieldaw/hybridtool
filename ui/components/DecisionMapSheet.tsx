@@ -715,7 +715,7 @@ export const DecisionMapSheet = React.memo(() => {
     expandedRefSections,
   } = instrumentState;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [sheetHeightRatio, setSheetHeightRatio] = useState(0.72);
+  const [sheetHeightRatio, setSheetHeightRatio] = useState(0.95);
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -726,7 +726,7 @@ export const DecisionMapSheet = React.memo(() => {
   useEffect(() => {
     if (openState) {
       instrumentActions.selectClaim(null);
-      setSheetHeightRatio(0.72);
+      setSheetHeightRatio(0.95);
     }
   }, [openState?.turnId]);
 
@@ -879,7 +879,7 @@ export const DecisionMapSheet = React.memo(() => {
     const bs = (mappingArtifact as any)?.blastSurface;
     const scores = Array.isArray(bs?.scores) ? bs.scores : [];
     const hasBlastSurface = !!bs && scores.length > 0;
-    const hasBlastVernal = hasBlastSurface && typeof scores[0]?.vernal === "object" && scores[0].vernal != null;
+    const hasBlastVernal = hasBlastSurface && scores.some((s: any) => typeof s?.vernal === "object" && s.vernal != null);
     if (hasGeometry && hasShadow && hasParagraphSimilarity && hasStatementAllocation && hasContinuousField && hasBlastVernal) return;
 
     const key = `${aiTurnId}::${pid}`;
@@ -966,11 +966,9 @@ export const DecisionMapSheet = React.memo(() => {
       : Array.isArray(mappingArtifact?.semantic?.edges)
         ? mappingArtifact.semantic.edges
         : [];
-    const conditionals = Array.isArray(parsedSemanticFromText?.output?.conditionals)
-      ? parsedSemanticFromText.output.conditionals
-      : Array.isArray(mappingArtifact?.semantic?.conditionals)
-        ? mappingArtifact.semantic.conditionals
-        : [];
+    const conditionals = Array.isArray(mappingArtifact?.semantic?.conditionals)
+      ? mappingArtifact.semantic.conditionals
+      : [];
     const topology = mappingArtifact?.traversal?.graph || null;
     return { claims, edges, conditionals, topology, map: { claims, edges } } as any;
   }, [mappingArtifact, parsedSemanticFromText]);
@@ -1093,7 +1091,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const mappingText = useMemo(() => {
     const fromArtifact = (mappingArtifact as any)?.semantic?.narrative ?? (parsedMapping as any)?.narrative ?? '';
-    const fromParsed = typeof parsedSemanticFromText?.output?.narrative === 'string' ? parsedSemanticFromText.output.narrative.trim() : '';
+    const fromParsed = typeof parsedSemanticFromText?.narrative === 'string' ? parsedSemanticFromText.narrative.trim() : '';
     if (fromParsed) return fromParsed;
     return typeof fromArtifact === 'string' ? fromArtifact : String(fromArtifact || '');
   }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
@@ -1157,7 +1155,7 @@ export const DecisionMapSheet = React.memo(() => {
       const bsScores = Array.isArray(bs?.scores) ? bs.scores : [];
       const hasVernal = bsScores.length > 0 && bsScores.some((s: any) => s?.vernal && typeof s.vernal === "object");
       console.log(
-        `[DecisionMapSheet] shadow.paragraphs=${paras.length}, shadow.statements=${safeArr((mappingArtifact as any)?.shadow?.statements).length}, claimProvenance=${!!(mappingArtifact as any)?.claimProvenance}, competitiveDiag=${Object.keys((mappingArtifact as any)?.claimProvenance?.competitiveAssignmentDiagnostics || {}).length}, alignment=${!!(mappingArtifact as any)?.geometry?.alignment}, basinInversion=${(mappingArtifact as any)?.geometry?.basinInversion?.status || 'missing'}, blastSurface=${bsScores.length}, blastVernal=${hasVernal}`
+        `[DecisionMapSheet] shadow.paragraphs=${paras.length}, shadow.statements=${safeArr((mappingArtifact as any)?.shadow?.statements).length}, claimProvenance=${!!(mappingArtifact as any)?.claimProvenance}, alignment=${!!(mappingArtifact as any)?.geometry?.alignment}, basinInversion=${(mappingArtifact as any)?.geometry?.basinInversion?.status || 'missing'}, blastSurface=${bsScores.length}, blastVernal=${hasVernal}`
       );
     }
     return paras;
@@ -1278,62 +1276,109 @@ export const DecisionMapSheet = React.memo(() => {
             </div>
 
             {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}
-            <div className="flex items-center px-6 py-4 border-b border-white/10 relative z-20 gap-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 relative z-20 gap-4">
 
-              {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
-              <div className="flex-none">
+              {/* Left: Provider Selector and Info Dropdown */}
+              <div className="flex-none flex items-center gap-3">
                 {aiTurnSafe && (
                   <MapperSelector
                     aiTurn={aiTurnSafe}
                     activeProviderId={activeMappingPid}
                   />
                 )}
+                <div className="group relative">
+                  <div className="px-3 py-1.5 rounded-full border border-white/10 bg-black/20 text-[10px] text-text-muted flex items-center gap-1.5 cursor-pointer hover:bg-white/10 hover:text-text-primary transition-colors">
+                    <span className="opacity-70">Info</span>
+                    <span className="opacity-50 text-[8px]">▼</span>
+                  </div>
+                  <div className="absolute top-full left-0 mt-2 w-80 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 cursor-default overflow-hidden">
+                    <div className="p-3 space-y-1.5 text-[11px] text-text-muted border-b border-white/5 bg-surface">
+                      <div className="flex justify-between"><span>Turn</span> <span className="text-text-primary font-mono">{sheetMeta.idShort}</span></div>
+                      <div className="flex justify-between"><span>Created</span> <span className="text-text-primary">{sheetMeta.createdAtLabel || '—'}</span></div>
+                      <div className="flex justify-between"><span>Mapper</span> <span className="text-text-primary">{sheetMeta.mapper || '—'}</span></div>
+                      <div className="flex justify-between"><span>Models</span> <span className="text-text-primary">{sheetMeta.modelCount}</span></div>
+                      <div className="flex justify-between"><span>Claims</span> <span className="text-text-primary">{sheetMeta.claimCount}</span></div>
+                    </div>
+                    <div className="p-3 bg-surface-highlight/30">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">Metrics</div>
+                      <div className="-mx-4 -my-1.5">
+                        <ContextStrip artifact={mappingArtifact} className="bg-transparent border-none min-h-0" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Right: Actions */}
-              <div className="flex-none flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleRegenerateEmbeddings}
-                  disabled={!aiTurnSafe?.id || !activeMappingPid || regenState === "running"}
-                  className={clsx(
-                    "text-[10px] px-2.5 py-1.5 rounded-md border transition-colors",
-                    regenState === "done"
-                      ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
-                      : regenState === "error"
-                        ? "border-rose-500/40 text-rose-400 bg-rose-500/10"
-                        : "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50"
-                  )}
-                  title="Regenerate embeddings + geometry for this turn (persists to storage)"
-                >
-                  {regenState === "running" ? "Regenerating…" : regenState === "error" ? "Failed" : regenState === "done" ? "Regenerated" : "Regen"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRetryActiveMapper}
-                  disabled={!aiTurn || !activeMappingPid}
-                  className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-highlight rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Retry mapping for current mapper"
-                >
-                  <span className="text-sm leading-none">↻</span>
-                </button>
-                <CopyButton
-                  text={formatDecisionMapForMd(
-                    mappingText,
-                    graphData.claims,
-                    graphData.edges,
-                    graphTopology
-                  )}
-                  label="Copy full decision map"
-                  buttonText="Copy Map"
-                  className="mr-2"
-                />
-                <CopyButton
-                  text={sheetData.mappingArtifactJson}
-                  label="Copy mapping artifact JSON"
-                  variant="icon"
-                  disabled={!sheetData.mappingArtifactJson}
-                />
+              <div className="flex-none flex items-center gap-3">
+                {/* Actions Menu */}
+                <div className="group relative">
+                  <button type="button" className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted flex items-center gap-2 hover:bg-white/10 transition-colors">
+                    <span>Actions</span>
+                    <span className="opacity-60 text-[9px]">▼</span>
+                  </button>
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-1 flex flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={handleRegenerateEmbeddings}
+                      disabled={!aiTurnSafe?.id || !activeMappingPid || regenState === "running"}
+                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
+                    >
+                      {regenState === "running" ? "Regenerating…" : regenState === "error" ? "Regen Failed" : regenState === "done" ? "Regenerated" : "Regenerate Embeddings"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRetryActiveMapper}
+                      disabled={!aiTurn || !activeMappingPid}
+                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
+                    >
+                      Retry Mapper
+                    </button>
+                  </div>
+                </div>
+
+                {/* Copy Menu */}
+                <div className="group relative">
+                  <button type="button" className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted flex items-center gap-2 hover:bg-white/10 transition-colors">
+                    <span>Copy</span>
+                    <span className="opacity-60 text-[9px]">▼</span>
+                  </button>
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-1 flex flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const text = formatDecisionMapForMd(
+                          mappingText,
+                          graphData.claims,
+                          graphData.edges,
+                          graphTopology
+                        );
+                        navigator.clipboard.writeText(text).then(() => {
+                          setToast({ id: Date.now(), message: "Map Copied!", type: "success" });
+                        });
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 text-text-secondary hover:text-text-primary"
+                    >
+                      Copy Map
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!sheetData.mappingArtifactJson}
+                      onClick={() => {
+                        const text = sheetData.mappingArtifactJson || "";
+                        navigator.clipboard.writeText(text).then(() => {
+                          setToast({ id: Date.now(), message: "Artifacts Copied!", type: "success" });
+                        });
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
+                    >
+                      Copy Artifacts
+                    </button>
+                  </div>
+                </div>
+
+                <div className="w-px h-4 bg-white/10 mx-1"></div>
+
                 <button
                   type="button"
                   className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-highlight rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1370,23 +1415,6 @@ export const DecisionMapSheet = React.memo(() => {
                 </button>
               </div>
             </div>
-
-            {(sheetMeta.idShort || sheetMeta.createdAtLabel || sheetMeta.mapper) && (
-              <div className="px-6 py-2 border-b border-white/10 bg-black/10 flex items-center justify-between gap-3 text-[11px] text-text-muted">
-                <div className="flex items-center gap-3 flex-wrap">
-                  {sheetMeta.idShort && <div>Turn: <span className="text-text-primary font-mono">{sheetMeta.idShort}</span></div>}
-                  {sheetMeta.createdAtLabel && <div>Created: <span className="text-text-primary">{sheetMeta.createdAtLabel}</span></div>}
-                  {sheetMeta.mapper && <div>Mapper: <span className="text-text-primary">{sheetMeta.mapper}</span></div>}
-                </div>
-                <div className="flex items-center gap-3">
-                  <div>Models: <span className="text-text-primary">{sheetMeta.modelCount}</span></div>
-                  <div>Claims: <span className="text-text-primary">{sheetMeta.claimCount}</span></div>
-                </div>
-              </div>
-            )}
-
-            {/* ── Context Strip (geometry health) ──────────────────── */}
-            <ContextStrip artifact={mappingArtifact} />
 
             {/* ── Instrument: Two-zone layout (v3) ───────────────── */}
             <div className="flex-1 flex overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
@@ -1583,7 +1611,7 @@ export const DecisionMapSheet = React.memo(() => {
                             columns={activeColumns}
                             viewConfig={activeViewConfig}
                             scope={scope}
-                            bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 320) : 0}
+                            bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 260) : 0}
                             onRowClick={(row) => {
                               if (row.statementId) {
                                 instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
@@ -1595,7 +1623,7 @@ export const DecisionMapSheet = React.memo(() => {
                               <div
                                 className={clsx(
                                   "absolute left-0 right-0 bottom-0 z-40 shadow-elevated",
-                                  isClaimPanelCollapsed ? "h-14" : "h-[320px]"
+                                  isClaimPanelCollapsed ? "h-14" : "h-[260px]"
                                 )}
                               >
                                 <ClaimDetailDrawer
@@ -1630,14 +1658,16 @@ export const DecisionMapSheet = React.memo(() => {
                           { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifact} /> },
                           { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifact} /> },
                           { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifact} /> },
-                          { id: 'raw-artifacts', label: 'Raw Artifacts', content: (
-                            <div>
-                              <CopyButton text={mappingArtifactJson || ''} label="Copy raw artifact JSON" variant="icon" disabled={!mappingArtifactJson} />
-                              <pre className="text-[10px] text-text-muted font-mono whitespace-pre-wrap break-all leading-relaxed mt-2">
-                                {mappingArtifactJson || '(no artifact data)'}
-                              </pre>
-                            </div>
-                          )},
+                          {
+                            id: 'raw-artifacts', label: 'Raw Artifacts', content: (
+                              <div>
+                                <CopyButton text={mappingArtifactJson || ''} label="Copy raw artifact JSON" variant="icon" disabled={!mappingArtifactJson} />
+                                <pre className="text-[10px] text-text-muted font-mono whitespace-pre-wrap break-all leading-relaxed mt-2">
+                                  {mappingArtifactJson || '(no artifact data)'}
+                                </pre>
+                              </div>
+                            )
+                          },
                         ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
                           <RefSection
                             key={id}

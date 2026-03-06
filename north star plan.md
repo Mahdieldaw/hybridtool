@@ -7,7 +7,7 @@
 - **Diagnostic**: computed and surfaced for inspection/comparison, but not used to make pipeline decisions.
 - **L1/L2**: epistemic tier as defined below.
 
-The instrument panel reference remains the authoritative UI-facing glossary of artifact fields: [MEASUREMENTS.md](file:///c:/Users/Mahdi/Desktop/hybrid/ui/components/instrument/MEASUREMENTS.md).
+The instrument panel reference remains the authoritative UI-facing glossary of artifact fields: [MEASUREMENTS.md](ui/components/instrument/MEASUREMENTS.md).
 ---
 
 ## Part I: Governing Principles
@@ -32,9 +32,11 @@ Every derived threshold, boundary, or classification must define its behavior wh
 
 The pipeline's protective bias is toward preservation. Every measurement is calibrated to answer "can this be safely subtracted?" rather than "is this important?" Importance is a semantic judgment belonging to the mapper and the user. Irreplaceability is a geometric fact belonging to the substrate.
 
-This orientation is visible at every layer. Model ordering measures which model carries terrain no other model covers. Exclusivity measures which claim owns evidence no other claim protects. Blast radius measures the cost of removal — cascade breadth, exclusive evidence loss, structural disconnection — and suppresses questions where that cost is low enough that the user's attention isn't warranted. Carrier detection checks whether a pruned statement's content survives in a carrier before allowing removal. Skeletonization preserves structural bones even when arguments are removed.
+This orientation is visible at every layer. Model ordering measures which model carries terrain no other model covers. Exclusivity measures which claim owns evidence no other claim protects. Blast Surface measures removal cost using embeddings + set membership, and Question Selection Instrumentation measures what a future gate/ceiling might do without enforcing it. Carrier detection checks whether a pruned statement's content survives in a carrier before allowing removal. Skeletonization preserves structural bones even when arguments are removed.
 
 The default is survival. Removal requires the user's explicit decision, scoped by geometric evidence of what can't be recovered from elsewhere. The system does not decide what is valuable. It ensures the user is never allowed to destroy something irreplaceable without being shown what they're destroying, and that even chosen destruction is as minimal as the evidence permits.
+ 
+**Current truth**: Survey question selection is not gated by blast scoring. All claims are passed to the survey mapper. Blast Surface and Question Selection Instrumentation compute observation-only measurements so we can compare them against real queries before granting them runtime authority.
 
 **Consequence for calibration**: When a measurement fails to discriminate (0% exclusivity, 82% carrier pass rate), the failure mode is under-protection of irreplaceable content — the system treats everything as redundant and cannot distinguish what would genuinely be lost. Calibration work (elbow detection, per-distribution thresholds) restores the system's ability to protect selectively rather than uniformly.
 
@@ -244,7 +246,7 @@ Computed from the substrate + region membership. All L1.
 
 |Measurement|Level|What it honestly measures|Consumer|Current status|Target status|
 |---|---|---|---|---|---|
-|Raw cosine (query, statement)|L1|Geometric proximity of statement to query in embedding space|Fate tracking (orphan ranking), model ordering (per-model mean), recovery worklist (sort order), blast radius (claim-level mean)|**Active — canonical signal**|Active|
+|Raw cosine (query, statement)|L1|Geometric proximity of statement to query in embedding space|Fate tracking (orphan ranking), model ordering (per-model mean), recovery worklist (sort order), Blast Surface (vernal query tilt), question selection instrumentation (sole-source off-topic)|**Active — canonical signal**|Active|
 |Raw cosine (query, paragraph)|L1|Geometric proximity of paragraph to query in embedding space|Diagnostic comparison with statement-level. Empirical question post-model-change: which granularity discriminates better?|Computed as `paragraphSimRaw`|Diagnostic until empirical resolution|
 |`(cos+1)/2` normalized|L1 (math is honest, but compresses observed range into top 20% of [0,1])|Same as raw cosine, rescaled|Legacy consumers — diagnostics only|**Diagnostic**|Diagnostic|
 |Per-distribution stats: mean, stddev, P10, P90 of raw query similarities|L1|Shape of the query relevance field|Consumer threshold calibration (elbow detection for unaddressed promotion)|Partial (summary cards in diagnostics)|**Active** — feeds per-distribution threshold derivation|
@@ -263,7 +265,7 @@ Computed from the substrate + region membership. All L1.
 |---|---|---|---|
 | Fate tracking: orphan → unaddressed | Static 0.55 on `(cos+1)/2` | **No binary gate** | Orphans ranked by raw cosine descending. Optional secondary sort: query affinity relative to mean claim affinity (query cosine − mean cosine across all claim centroids). Continuous list, user decides cutoff. |
 | Model ordering: per-model mean | Raw mean, feeds adaptive alpha | No change needed | Alpha already scales with stddev. Collapses to 0 when all models equally on-topic. |
-| Blast radius: per-claim query relevance | Mean raw cosine across claim's source statements | No change needed | Continuous input to composite score. |
+| Blast Surface + question selection instrumentation | No hard threshold (distribution-derived where needed) | No change needed | Blast Surface uses query similarity over vulnerable statements; question selection instrumentation computes per-claim `queryRelevanceRaw` and derives a bottom-band threshold as `μ - σ` across claims. |
 | Recovery worklist | Sorted by raw cosine descending | No change needed | Signal change only. |
 
 ---
@@ -292,7 +294,7 @@ reconstruction.
 ---
 ### Layer 5: Provenance Reconstruction
 
-**What this layer does**: Links mapper claims back to source evidence using geometric proximity, without relying on the mapper to enumerate supporters accurately. This is the lynchpin: provenance quality determines whether exclusivity is meaningful, whether blast radius measures real damage, and whether pruning removes actual evidence.
+**What this layer does**: Links mapper claims back to source evidence using geometric proximity, without relying on the mapper to enumerate supporters accurately. This is the lynchpin: provenance quality determines whether exclusivity is meaningful, whether Blast Surface measures real damage, and whether pruning removes actual evidence.
 
 **Inputs**: Claim centroids (L2), paragraph embeddings (L1), statement embeddings (L1)
 
@@ -347,13 +349,13 @@ to all claims.
 
 |Measurement|Level|What it honestly measures|Consumer|Status|
 |---|---|---|---|---|
-|Per-claim source statement IDs|L2 (depends on claim centroid)|Which statements live in paragraphs that competitively select this claim|Fate tracking, exclusivity, blast radius, skeletonization, completeness|Active|
+|Per-claim source statement IDs|L2 (depends on claim centroid)|Which statements live in paragraphs that competitively select this claim|Fate tracking, exclusivity, Blast Surface, skeletonization, completeness|Active|
 |Per-claim pool size|L1 (count)|How many paragraphs competitively assigned to this claim. Emergent from centroid geometry, not imposed.|Diagnostics, provenance quality assessment|Active|
 |Per-claim source region IDs|L1 (set lookup: statement → paragraph → region)|Which regions this claim draws evidence from|Diagnostics (region span), alignment|Active|
 |`supportRatio`|L2|sourceStatementIds.length / totalStatements|Survey mapper prompt, structural analysis|Active|
-|Statement ownership (inverse index: statement → claiming claim IDs)|L1 (set membership)|Which claims compete for the same evidence|Blast radius, triage, synthesis deduplication|Active|
-|`exclusivityRatio` per claim|L1 (set membership)|Exclusive source statements / total. Emerges from centroid geometry.|Blast radius (exclusive evidence loss), triage, skeletonization|Active|
-|Pairwise Jaccard on source statement sets|L1 (set overlap)|Evidence overlap between claim pairs|Blast radius axis clustering, deduplication, mapper quality check|Active|
+|Statement ownership (inverse index: statement → claiming claim IDs)|L1 (set membership)|Which claims compete for the same evidence|Diagnostics, deduplication, mixed provenance audits|Active|
+|`exclusivityRatio` per claim|L1 (set membership)|Exclusive source statements / total. Emerges from centroid geometry.|Blast Surface (overlap exposure weighting), triage, skeletonization|Active|
+|Pairwise Jaccard on source statement sets|L1 (set overlap)|Evidence overlap between claim pairs|Diagnostics (deduplication, mapper quality check)|Active|
 |Per-claim excess affinity distribution|L1|Distribution of (sim - μ) values for assigned paragraphs. High excess = strong ownership. Low excess = marginal membership.|Diagnostics (provenance confidence per claim)|Diagnostic|
 
 ---
@@ -370,7 +372,7 @@ to all claims.
 - Apply supporter constraint: keep only statements whose `modelIndex ∈ claim.supporters` when supporters exist.
 
 **Where it lives**:
-- Producer: `computeStatementCompetitiveAllocation(...)` in [claimAssembly.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/ConciergeService/claimAssembly.ts)
+- Producer: `computeStatementCompetitiveAllocation(...)` in [claimAssembly.ts](src/ConciergeService/claimAssembly.ts)
 - Artifact: `artifact.statementAllocation` (per-claim pools, weights, entropy, assignment counts)
 
 ---
@@ -380,11 +382,11 @@ to all claims.
 **What it does**: Produces a conservative canonical statement set per claim (`canonicalStatementIds`) by merging paragraph-level competitive pools with claim-centric paragraph scoring, then filtering statements by a preservation-by-default rule.
 
 **Where it lives**:
-- Producer: `computeMixedMethodProvenance(...)` in [claimAssembly.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/ConciergeService/claimAssembly.ts)
+- Producer: `computeMixedMethodProvenance(...)` in [claimAssembly.ts](src/ConciergeService/claimAssembly.ts)
 - Artifact: `artifact.mixedProvenance.perClaim[claimId].canonicalStatementIds`
 
 **Primary consumers today**:
-- Blast surface (vernal twin) comparison score: [blastSurface.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/blastSurface.ts)
+- Blast surface (vernal twin) comparison score: [blastSurface.ts](src/core/blast-radius/blastSurface.ts)
 ---
 
 ### Layer 6: Carrier Detection
@@ -445,50 +447,36 @@ to all claims.
 
 ### Layer 9: Structural Analysis
 
-**What this layer does**: Analyzes the claim graph (mapper's output) for structural properties that inform blast radius and survey gating. Operates on the claim graph topology, not on embeddings directly.
+**What this layer does**: Analyzes the claim graph (mapper's output) for structural properties used for diagnostics (and any future consumers). Operates on the claim graph topology, not on embeddings directly.
 
 **Note**: This layer takes mapper output at face value — it does not geometrically validate claim relationships. Geometric validation signals (`centroidSimilarity`, `crossesRegionBoundary`) exist in diagnostics but are not currently consumed here. Promotion of those signals into structural analysis is a future improvement.
 
 |Measurement|Source|Consumer|Status|
 |---|---|---|---|
-|`leverage` per claim|Structural analysis|Blast radius composite|Active|
-|`isLeverageInversion`|Structural analysis|Blast radius modifier|Active|
-|`isKeystone`|Structural analysis|Blast radius modifier|Active|
-|`cascadeRisks`|Structural analysis|Blast radius cascade breadth|Active|
-|`articulationPoints`|Structural analysis|Blast radius articulation signal|Active|
-|`convergenceRatio`|Structural analysis|Blast radius zero-question gate|Active|
+|`leverage` per claim|Structural analysis|Diagnostics (instrument panel) and traversal context|Active|
+|`isLeverageInversion`|Structural analysis|Diagnostics (instrument panel)|Active|
+|`isKeystone`|Structural analysis|Diagnostics (instrument panel)|Active|
+|`cascadeRisks`|Structural analysis|Diagnostics (instrument panel)|Active|
+|`articulationPoints`|Structural analysis|Diagnostics (instrument panel)|Active|
+|`convergenceRatio`|Structural analysis|Diagnostics (instrument panel)|Active|
 
-**Gap**: Structural analysis trusts mapper edges without geometric validation. A `supports` edge between claims with centroid similarity 0.3 is geometrically implausible. Adding a "geometric plausibility" filter using `centroidSimilarity` would improve claim graph quality before blast radius. Deferred — geometry provides the measurement; structural analysis decides whether to consume it.
+**Gap**: Structural analysis trusts mapper edges without geometric validation. A `supports` edge between claims with centroid similarity 0.3 is geometrically implausible. Adding a "geometric plausibility" filter using `centroidSimilarity` would improve claim graph quality for any future consumer that treats mapper edges as policy authority. Deferred — geometry provides the measurement; structural analysis decides whether to consume it.
 
 ---
 
 ### Layer 10: Blast Radius
 
-**What this layer does**: Computes per-claim "question-worthiness" scores that gate which claims become survey questions. This is an L2 policy-weighted blend of L1 inputs. The weights are explicit choices, not derived from data.
-
-|Measurement|Level|What it honestly measures|Consumer|Status|
-|---|---|---|---|---|
-|Per-claim composite score|L2 (policy blend)|`0.30×cascadeBreadth + 0.25×exclusiveEvidence + 0.20×normalizedLeverage + 0.15×queryRelevance + 0.10×articulationPoint`|Axes ordering, gate priority|Active|
-|Floor suppression (composite < 0.20)|L2 (policy threshold)|"Below this, the claim is noise for survey purposes"|Candidate set filtering|Active|
-|Consensus discount|L2 (policy modifier)|Penalizes claims with broad model support (less controversial → less question-worthy)|Composite modifier|Active|
-|Sole-source off-topic discount|L2 (policy modifier)|Penalizes single-model claims with low query relevance (< 0.30 raw cosine)|Guards against hallucinated tangents|Active|
-|Redundancy discount|L2 (policy modifier)|Penalizes claims whose evidence pool is largely shared with other claims|Composite modifier|Active|
-|Axis clustering|L1 (Jaccard overlap)|Connected components over claim pairs with provenance Jaccard > 0.30. One axis ≈ one decision surface.|Groups overlapping claims into single questions|Active|
-|Question ceiling (hard cap 3)|L2 (policy)|Max axes passed to survey mapper. Based on conflict cluster count + sole-source outliers.|Survey mapper scoping|Active|
-
-**Dependency**: Blast radius is currently inert because its key inputs (exclusivity, overlap) are non-discriminating. Once provenance produces meaningful exclusivity, blast radius activates without code changes to this layer.
-
-**Principle**: The L2 weights (0.30/0.25/0.20/0.15/0.10) are policy, not measurement. They should be visible, tunable, and not disguised as derivations. The current implementation is honest about this.
+**Current truth**: The legacy blast radius filter is not an in-play survey gate. It may exist as historical code, but it does not decide which claims are sent to the survey mapper. Survey question selection is ungated: when N claims exist, all N are eligible for question generation.
 
 ---
 
 ### Layer 10.5: Blast Surface (Vernal twin) — L1 comparison score
 
-**What this layer does**: Computes a provenance-derived damage assessment from mixed-method canonical statement sets. This runs alongside the legacy blast radius filter and is designed to replace L3 structural heuristics with L1 measurements (cosines + set membership).
+**What this layer does**: Computes a provenance-derived damage assessment from mixed-method canonical statement sets. Designed to replace L3 structural heuristics with L1 measurements (cosines + set membership).
 
 **Where it runs**:
-- Producer: `computeBlastSurface(...)` in [blastSurface.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/blastSurface.ts)
-- Wiring: deterministic pipeline step “Blast surface” in [deterministicPipeline.js](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/execution/deterministicPipeline.js)
+- Producer: `computeBlastSurface(...)` in [blastSurface.ts](src/core/blast-radius/blastSurface.ts)
+- Wiring: deterministic pipeline step “Blast surface” in [deterministicPipeline.js](src/core/execution/deterministicPipeline.js)
 - Artifact: `artifact.blastSurface`
 
 **Layers (as implemented)**:
@@ -508,6 +496,19 @@ to all claims.
 - Query tilt is variance-bounded: `queryTilt = λ × destroyedQueryMean` where `λ` scales with cross-claim spread in structural mass and query loss.
 
 This layer is **diagnostic until it becomes the sole blast gate**, but its measurements are L1 and computed deterministically.
+
+---
+
+### Layer 10.6: Question Selection Instrumentation (Layers F + G) — observation only
+
+**What this layer does**: Computes measurements that describe what a future survey gate/ceiling might do, but does not actually gate anything at runtime. It exists so we can observe these scores against real queries and later decide whether any should earn authority.
+
+**Inputs**: Blast Surface scores (vernal composite/orphan ratio), mapper edges (conflicts), enriched claim metadata (supporters/supportRatio), query relevance (statement scores), claim centroids (claim text embeddings).
+
+**Outputs**: `artifact.questionSelectionInstrumentation`
+- Conflict validation (F1): for each conflict edge, geometric validation by centroid similarity vs μ_interClaim
+- Claim profiles (F2–F4): per-claim banding, consensus discount (counterfactual), sole-source off-topic flag (distribution-derived threshold)
+- Gate + ceiling summary (G): informational wouldSkip/overrideSkip + theoreticalCeiling, with `actualClaimsSent = totalClaims`
 
 ### Layer 11: Fate Tracking and Completeness
 
@@ -533,7 +534,7 @@ This layer is **diagnostic until it becomes the sole blast gate**, but its measu
 |`sourceCoherence` per claim|L1|Mean pairwise cosine of source statement embeddings. High (>0.8) = focused claim. Low (<0.5) = mapper stapled unrelated content.|Debug panel|**Vetoed for promotion.** Legitimate broad claims naturally have low coherence — penalizing them would suppress integrative insights. Keep in diagnostics for human inspection only.|
 |`embeddingSpread` per claim|L1|Stddev of pairwise cosines among source statements. Complements coherence.|Debug panel|Diagnostic (companion to coherence)|
 |`regionSpan` per claim|L1|How many distinct regions source statements come from. 1 = concentrated, 3+ = broad synthesis or mapper error.|Debug panel|**Promote to traversal** — claims spanning many regions are either genuine syntheses or mapper fabrications. Present this information at forcing points.|
-|`sourceModelDiversity` per claim (exact)|L1|Which specific models authored source statements. Traced: sourceStatementId → paragraph → modelIndex. Different from mapper's `supporters[]` (mapper's assessment vs actual geometric sourcing).|Debug panel|**Promote to blast radius** — cross-check mapper `supporters[]` against actual geometric sourcing. If mapper claims 4 supporters but geometry traces to 1 model, flag as fragile consensus. Safe to promote now.|
+|`sourceModelDiversity` per claim (exact)|L1|Which specific models authored source statements. Traced: sourceStatementId → paragraph → modelIndex. Different from mapper's `supporters[]` (mapper's assessment vs actual geometric sourcing).|Debug panel|**Promote to question selection instrumentation** — cross-check mapper `supporters[]` against actual geometric sourcing for sole-source fragility signals.|
 |`crossesRegionBoundary` per edge|L1|Whether two connected claims draw from different regions. Cross-region relationships are more likely real tensions. Same-region relationships may be mapper over-fragmentation.|Debug panel|**Hold.** Meaningful only when field has genuine structure (not convergent). Promote conditionally after pipeline gates include discrimination range floor.|
 |`centroidSimilarity` per edge|L1|Cosine between two claims' source statement centroids. Continuous version of geographic separation.|Debug panel|**Hold.** Legitimate semantic links can bridge geometric distance (prerequisites, cross-domain dependencies). Risk of penalizing long-range connections. Keep diagnostic, promote only with empirical validation.|
 
@@ -560,7 +561,7 @@ This layer is **diagnostic until it becomes the sole blast gate**, but its measu
 
 **What this layer does**: Decides whether enough geometric structure exists to proceed with geometry-dependent pipeline steps.
 
-**Mechanism today** (see [pipelineGates.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/geometry/interpretation/pipelineGates.ts)):
+**Mechanism today** (see [pipelineGates.ts](src/geometry/interpretation/pipelineGates.ts)):
 - **Skip geometry** if substrate is degenerate, OR mutual recognition edge count is 0, OR discrimination range `D < 0.10`.
 - **Insufficient structure** if participation rate `< 5%` (few spurious dyads), or if isolation is extreme with no meaningful components.
 - **Trivial convergence** if the largest component dominates (`> 85%`) with high model diversity and low isolation.
@@ -623,10 +624,13 @@ STORED PRIMITIVES
     │   ├── leverage, cascadeRisks, articulationPoints
     │   └── convergenceRatio
     │
-    ├── LAYER 10: blast_radius (structural analysis + exclusivity + query relevance)
-    │   ├── per_claim: composite score, suppression
-    │   ├── axes (Jaccard clustering)
-    │   └── questionCeiling
+    ├── LAYER 10: blast_surface (mixed-method canonical sets → L1 damage)
+    │   ├── per_claim: layers B/C/D + vernal composite
+    │   └── meta: variance-bounded query tilt parameters
+    │
+    ├── LAYER 10.6: question_selection_instrumentation (F+G, observation-only)
+    │   ├── validatedConflicts, claimProfiles
+    │   └── informational gate + ceiling (no filtering; all claims pass through)
     │
     ├── LAYER 11: fate_tracking (provenance + query relevance → statement fates)
     │   ├── completeness_report (coverage ratios, recovery worklist)
@@ -648,14 +652,14 @@ This section is retained as historical engineering notes and validation prompts.
 |---|---|---|---|---|
 | 1. Embedding storage | Persist statement + paragraph + claim text embeddings in IndexedDB | Navigate to old turn, embeddings load | Nothing | **Complete** |
 | 2. View-time elbow diagnostics | Elbow diagnostic panel derives from cached embeddings + cached claims | Old turn shows full elbow table without recompute | Step 1 | **Complete** |
-| 3. Provenance competitive assignment | `reconstructProvenance` uses competitive assignment (μ+σ per paragraph across claim centroids) instead of global thresholds | Exclusivity nonzero. Pool sizes 6-29 (homogeneous), tighter (heterogeneous). Blast radius differentiates claims. | Step 1 | **Complete** |
-| 4. Raw cosine as canonical query signal | Replace `(cos+1)/2` with raw cosine throughout pipeline consumers | Fate tracking, blast radius, recovery worklist use raw values. Diagnostics still show both. | Nothing | **Complete** |
+| 3. Provenance competitive assignment | `reconstructProvenance` uses competitive assignment (μ+σ per paragraph across claim centroids) instead of global thresholds | Exclusivity nonzero. Pool sizes 6-29 (homogeneous), tighter (heterogeneous). Blast Surface differentiates claims. | Step 1 | **Complete** |
+| 4. Raw cosine as canonical query signal | Replace `(cos+1)/2` with raw cosine throughout pipeline consumers | Fate tracking, Blast Surface, recovery worklist use raw values. Diagnostics still show both. | Nothing | **Complete** |
 | 5. Full pairwise matrix as foundation | Store complete N×N paragraph matrix + distribution stats as named substrate entity | Per-consumer threshold calibration reads from this field | Step 1 | **Complete** |
 | 6. Mutual recognition graph | Replace mutual KNN (fixed top-5) with mutual recognition (per-node μ+σ). Connected components for regionization. | Regions reflect local density. Convergent fields reported honestly. | Step 5 | **Implemented — validation pending** |
 | 7. Strong graph removal + gating | Remove strong graph, softThreshold, clamp, strongDegree. Rewire all consumers to mutual recognition. Shape classification and lens become diagnostic-only. Pipeline gates use mutual recognition edge count + discrimination range ≥ 0.10 + participation_rate > 5%. | All consumers of strong graph switched. Pipeline gates fire correctly on edge cases. | Step 6 | **Implemented — validation pending** |
 | 8. Unaddressed recovery ranking | Eliminate binary gate for orphan → unaddressed promotion. Orphans ranked by raw cosine descending, optionally weighted by competitive affinity (query cosine − mean claim cosine). Continuous list, no threshold. | Recovery worklist shows all orphans ranked by query affinity. No false negatives from binary gate. | Steps 3, 4 | **Complete** |
 | 9. Carrier detection calibration | Replace static 0.60 with gate-specific thresholds `threshold_claim` and `threshold_statement` (see Mechanism). | Carrier pass rate drops from 82% to meaningful range. Isolated statements protected by P75 floor. | Steps 3, 5 | **Implemented — validation pending** |
-| 10. Provenance weights | Add linear excess affinity weights to competitive assignment. excess = sim − (μ+σ), normalized per paragraph. Graduated blast radius, weight-aware carrier detection. | Blast radius distinguishes high-weight vs low-weight evidence loss. | Step 3 validated | **Implemented — validation pending** |
+| 10. Provenance weights | Add linear excess affinity weights to competitive assignment. excess = sim − (μ+σ), normalized per paragraph. Graduated evidence-loss diagnostics, weight-aware carrier detection. | Blast Surface differentiates high-weight vs low-weight evidence loss. | Step 3 validated | **Implemented — validation pending** |
 | 11. Paraphrase Jaccard gate | Add token Jaccard > 0.5 as secondary gate alongside cosine > 0.85 | Stance-flipped near-duplicates rejected. True paraphrases still pass. | Nothing | **Implemented — validation pending** |
-| 12. Diagnostic promotions | Promote `sourceModelDiversity` → blast radius (hallucination check). Veto `sourceCoherence` promotion. Hold `centroidSimilarity` and `crossesRegionBoundary` for empirical validation. | sourceModelDiversity disagreements flagged in blast radius. | Steps 3, 6 | **Implemented — validation pending** |
+| 12. Diagnostic promotions | Promote `sourceModelDiversity` → question selection instrumentation (hallucination/sole-source checks). Veto `sourceCoherence` promotion. Hold `centroidSimilarity` and `crossesRegionBoundary` for empirical validation. | sourceModelDiversity disagreements flagged in instrumentation. | Steps 3, 6 | **Implemented — validation pending** |
 

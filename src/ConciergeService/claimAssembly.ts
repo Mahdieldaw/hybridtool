@@ -8,109 +8,6 @@ import type { Region } from '../geometry/interpretation/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
 
-export interface ClaimElbowDiagnostic {
-    totalSources: number;
-    meanGap: number | null;
-    stddevGap: number | null;
-    maxGap: number | null;
-    elbowPosition: number | null;
-    totalRange: number | null;
-    maxGapSigma: number | null;
-    cv: number | null;
-    exclusionElbow: number | null;
-    poolSize: number | null;
-}
-
-/**
- * Pure computation: derive elbow diagnostics from pre-computed embeddings.
- * No async, no ONNX — just cosine similarity + gap statistics.
- */
-export function computeElbowDiagnosticsFromEmbeddings(
-    claimEmbeddings: Map<string, Float32Array>,
-    paragraphEmbeddings: Map<string, Float32Array>,
-    claims: Array<{ id: string }>,
-): Record<string, ClaimElbowDiagnostic> {
-    const result: Record<string, ClaimElbowDiagnostic> = {};
-    const paragraphIds = Array.from(paragraphEmbeddings.keys());
-
-    for (const claim of claims) {
-        const claimEmbedding = claimEmbeddings.get(claim.id);
-        if (!claimEmbedding) continue;
-
-        const sims: number[] = [];
-        for (const pid of paragraphIds) {
-            const paraEmb = paragraphEmbeddings.get(pid);
-            if (!paraEmb) continue;
-            sims.push(cosineSimilarity(claimEmbedding, paraEmb));
-        }
-
-        // 1. Descending Sort (Original)
-        sims.sort((a, b) => b - a);
-
-        if (sims.length < 2) {
-            result[claim.id] = {
-                totalSources: sims.length,
-                meanGap: null, stddevGap: null, maxGap: null,
-                elbowPosition: null,
-                totalRange: null, maxGapSigma: null, cv: null,
-                exclusionElbow: null, poolSize: null,
-            };
-            continue;
-        }
-
-        const gaps: number[] = [];
-        for (let i = 0; i < sims.length - 1; i++) {
-            gaps.push(sims[i] - sims[i + 1]);
-        }
-
-        const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-        const variance = gaps.reduce((s, g) => s + (g - meanGap) ** 2, 0) / gaps.length;
-        const stddevGap = Math.sqrt(variance);
-        const maxGap = gaps.length > 0 ? gaps.reduce((m, v) => (v > m ? v : m), -Infinity) : 0;
-        const elbowThreshold = meanGap + 2 * stddevGap;
-
-        const elbowPosition = (() => {
-            for (let i = 0; i < gaps.length; i++) {
-                if (gaps[i] > elbowThreshold) return i;
-            }
-            return null;
-        })();
-
-        const totalRange = sims[0] - sims[sims.length - 1];
-        const maxGapSigma = stddevGap > 0 ? maxGap / stddevGap : null;
-        const cv = meanGap > 0 ? stddevGap / meanGap : null;
-
-        // 2. Ascending Sort (Exclusion/Pool Size)
-        // Since sims is descending, reversing it gives ascending.
-        // Gaps in ascending are the reverse of descending gaps? 
-        // No, gap[i] = asc[i+1] - asc[i]. 
-        // If asc = [0.1, 0.5, 0.9], gaps = [0.4, 0.4].
-        // If desc = [0.9, 0.5, 0.1], gaps = [0.4, 0.4].
-        // The set of gaps is the same. The order is reversed.
-
-        const ascendingGaps = [...gaps].reverse();
-        const exclusionElbow = (() => {
-            for (let i = 0; i < ascendingGaps.length; i++) {
-                if (ascendingGaps[i] > elbowThreshold) return i;
-            }
-            return null;
-        })();
-
-        const poolSize = exclusionElbow !== null ? Math.max(0, sims.length - (exclusionElbow + 1)) : null;
-
-        result[claim.id] = {
-            totalSources: sims.length,
-            meanGap, stddevGap, maxGap,
-            elbowPosition,
-            totalRange, maxGapSigma, cv,
-            exclusionElbow,
-            poolSize
-        };
-    }
-
-    return result;
-}
-
 /**
  * Generate claim embeddings once. Returns a Map keyed by claim ID.
  * This is the only place ONNX should be called for claim text.
@@ -126,14 +23,6 @@ export async function generateClaimEmbeddings(
         if (emb) result.set(claims[idx].id, emb);
     }
     return result;
-}
-
-export function computeElbowDiagnostics(
-    claims: Array<{ id: string }>,
-    paragraphEmbeddings: Map<string, Float32Array>,
-    claimEmbeddings: Map<string, Float32Array>,
-): Record<string, ClaimElbowDiagnostic> {
-    return computeElbowDiagnosticsFromEmbeddings(claimEmbeddings, paragraphEmbeddings, claims);
 }
 
 export async function reconstructProvenance(
@@ -396,343 +285,8 @@ export async function reconstructProvenance(
     return results;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPETITIVE ASSIGNMENT DIAGNOSTICS
-// ═══════════════════════════════════════════════════════════════════════════
 
-export interface CompetitiveAssignmentDiagnostic {
-    claimId: string;
-    poolSize: number;
-    meanExcess: number;
-    sourceStatementCount: number;
-}
 
-export function computeCompetitiveAssignmentDiagnostics(
-    claims: Array<{ id: string }>,
-    paragraphEmbeddings: Map<string, Float32Array>,
-    claimEmbeddings: Map<string, Float32Array>,
-    paragraphs: ShadowParagraph[],
-): Record<string, CompetitiveAssignmentDiagnostic> {
-    const result: Record<string, CompetitiveAssignmentDiagnostic> = {};
-    if (claims.length === 0 || paragraphEmbeddings.size === 0 || claimEmbeddings.size === 0) return result;
-
-    // Build full C×N similarity matrix once
-    // allSims[paraId] = Map<claimId, similarity>
-    const allSims = new Map<string, Map<string, number>>();
-    for (const para of paragraphs) {
-        const paraEmb = paragraphEmbeddings.get(para.id);
-        if (!paraEmb) continue;
-        const sims = new Map<string, number>();
-        for (const claim of claims) {
-            const centroid = claimEmbeddings.get(claim.id);
-            if (!centroid) continue;
-            sims.set(claim.id, cosineSimilarity(centroid, paraEmb));
-        }
-        allSims.set(para.id, sims);
-    }
-
-    const paragraphById = new Map(paragraphs.map(p => [p.id, p]));
-
-    // Precompute per-paragraph mean/threshold to use the same threshold rule
-    const perParaStats = new Map<string, { mean: number; threshold: number }>();
-    for (const [paraId, sims] of allSims) {
-        const values = Array.from(sims.values());
-        if (values.length === 0) continue;
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-
-        // Special case: N=2 uses mean-only threshold
-        // N≥3 uses μ + σ for selectivity
-        let threshold: number;
-        if (claims.length === 2) {
-            threshold = mean;
-        } else {
-            const variance = values.reduce((s, g) => s + (g - mean) ** 2, 0) / values.length;
-            const stddev = Math.sqrt(variance);
-            threshold = mean + stddev; // μ + σ
-        }
-        perParaStats.set(paraId, { mean, threshold });
-    }
-
-    // Compute diagnostics using threshold per paragraph
-    for (const claim of claims) {
-        let poolCount = 0;
-        let totalExcess = 0;
-        let stmtCount = 0;
-
-        for (const [paraId, sims] of allSims) {
-            const stats = perParaStats.get(paraId);
-            if (!stats) continue;
-            const sim = sims.get(claim.id);
-            if (sim !== undefined && sim > stats.threshold) {
-                poolCount++;
-                totalExcess += (sim - stats.threshold);
-                const para = paragraphById.get(paraId);
-                if (para) stmtCount += para.statementIds.length;
-            }
-        }
-
-        result[claim.id] = {
-            claimId: claim.id,
-            poolSize: poolCount,
-            meanExcess: poolCount > 0 ? totalExcess / poolCount : 0,
-            sourceStatementCount: stmtCount,
-        };
-    }
-
-    return result;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PHASE 1: STATEMENT-LEVEL COMPETITIVE PROVENANCE ALLOCATION
-// ═══════════════════════════════════════════════════════════════════════════
-
-export interface StatementProvenanceEntry {
-    statementId: string;
-    similarity: number;
-    threshold: number;
-    excess: number;
-    weight: number;
-}
-
-export interface StatementAllocationClaimResult {
-    claimId: string;
-    directStatementProvenance: StatementProvenanceEntry[];
-    provenanceBulk: number;
-    poolSize: number;
-    meanExcess: number;
-}
-
-export interface StatementAllocationResult {
-    perClaim: Record<string, StatementAllocationClaimResult>;
-    entropy: { one: number; two: number; threePlus: number; total: number };
-    /** Pearson r between paragraph-level weights (old system) and statement-level weights (new system) */
-    geometryCorrelation: number | null;
-    dualCoordinateActive: boolean;
-    /** Per-statement assignment count for entropy analysis */
-    assignmentCounts: Record<string, number>;
-}
-
-export function computeStatementCompetitiveAllocation(
-    claims: Array<{ id: string; supporters?: number[] }>,
-    statementEmbeddings: Map<string, Float32Array>,
-    claimEmbeddings: Map<string, Float32Array>,
-    statements: Array<{ id: string; modelIndex?: number }>,
-): StatementAllocationResult {
-    const result: Record<string, StatementAllocationClaimResult> = {};
-    const assignmentCounts: Record<string, number> = {};
-
-    if (claims.length === 0 || statementEmbeddings.size === 0 || claimEmbeddings.size === 0) {
-        for (const c of claims) {
-            result[c.id] = { claimId: c.id, directStatementProvenance: [], provenanceBulk: 0, poolSize: 0, meanExcess: 0 };
-        }
-        return { perClaim: result, entropy: { one: 0, two: 0, threePlus: 0, total: 0 }, geometryCorrelation: null, dualCoordinateActive: true, assignmentCounts };
-    }
-
-    // §1.2 Build statement × claim similarity matrix
-    const simMatrix = new Map<string, Map<string, number>>();
-    for (const stmt of statements) {
-        const stmtEmb = statementEmbeddings.get(stmt.id);
-        if (!stmtEmb) continue;
-        const sims = new Map<string, number>();
-        for (const claim of claims) {
-            const claimEmb = claimEmbeddings.get(claim.id);
-            if (!claimEmb) continue;
-            sims.set(claim.id, cosineSimilarity(stmtEmb, claimEmb));
-        }
-        simMatrix.set(stmt.id, sims);
-    }
-
-    // §1.3 Competitive assignment per statement
-    // assigned[claimId] = [{ statementId, similarity, threshold, excess, rawWeight }]
-    const claimAssignments = new Map<string, { statementId: string; similarity: number; threshold: number; excess: number; weight: number }[]>();
-    for (const c of claims) claimAssignments.set(c.id, []);
-
-    let oneCount = 0;
-    let twoCount = 0;
-    let threePlusCount = 0;
-    let totalAssigned = 0;
-
-    for (const [stmtId, sims] of simMatrix) {
-        const values = Array.from(sims.values());
-        if (values.length === 0) continue;
-
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        let threshold: number;
-        if (claims.length === 2) {
-            threshold = mean; // §1.3: N=2 uses mean
-        } else {
-            const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
-            threshold = mean + Math.sqrt(variance); // §1.3: N≥3 uses μ+σ
-        }
-
-        // §1.4 Excess and normalized weights
-        const assigned: { claimId: string; sim: number; excess: number }[] = [];
-        let totalExcess = 0;
-
-        for (const [claimId, sim] of sims) {
-            if (sim > threshold) {
-                const excess = sim - threshold;
-                assigned.push({ claimId, sim, excess });
-                totalExcess += excess;
-            }
-        }
-
-        // §1.7 Edge case: all σ=0 → assign equally
-        if (assigned.length === 0) {
-            // Degenerate — check if all sims are identical
-            const allSame = values.every(v => Math.abs(v - values[0]) < 1e-9);
-            if (allSame && claims.length > 0) {
-                const weight = 1 / claims.length;
-                for (const [claimId, sim] of sims) {
-                    claimAssignments.get(claimId)!.push({
-                        statementId: stmtId, similarity: sim, threshold, excess: 0, weight,
-                    });
-                }
-                assignmentCounts[stmtId] = claims.length;
-                threePlusCount++;
-                totalAssigned++;
-            }
-            continue;
-        }
-
-        // Normalize weights
-        for (const a of assigned) {
-            const weight = totalExcess > 0 ? a.excess / totalExcess : 1 / assigned.length;
-            claimAssignments.get(a.claimId)!.push({
-                statementId: stmtId, similarity: a.sim, threshold, excess: a.excess, weight,
-            });
-        }
-
-        assignmentCounts[stmtId] = assigned.length;
-        if (assigned.length === 1) oneCount++;
-        else if (assigned.length === 2) twoCount++;
-        else threePlusCount++;
-        totalAssigned++;
-    }
-
-    // §1.5 Build canonical provenance per claim with supporter constraint
-    const stmtModelIndex = new Map<string, number>();
-    for (const stmt of statements) {
-        if (typeof (stmt as any).modelIndex === 'number') {
-            stmtModelIndex.set(stmt.id, (stmt as any).modelIndex);
-        }
-    }
-
-    for (const claim of claims) {
-        const raw = claimAssignments.get(claim.id) || [];
-        const supporters = Array.isArray(claim.supporters) ? new Set(claim.supporters) : null;
-
-        // Apply supporter constraint: retain only S where S.modelIndex ∈ claim.supporters
-        const retained = supporters && supporters.size > 0
-            ? raw.filter(r => {
-                const mi = stmtModelIndex.get(r.statementId);
-                return mi !== undefined && supporters.has(mi);
-            })
-            : raw;
-
-        let bulk = 0;
-        let totalExcess = 0;
-        for (const r of retained) {
-            bulk += r.weight;
-            totalExcess += r.excess;
-        }
-
-        result[claim.id] = {
-            claimId: claim.id,
-            directStatementProvenance: retained.map(r => ({
-                statementId: r.statementId,
-                similarity: r.similarity,
-                threshold: r.threshold,
-                excess: r.excess,
-                weight: r.weight,
-            })),
-            provenanceBulk: bulk,
-            poolSize: retained.length,
-            meanExcess: retained.length > 0 ? totalExcess / retained.length : 0,
-        };
-    }
-
-    return {
-        perClaim: result,
-        entropy: { one: oneCount, two: twoCount, threePlus: threePlusCount, total: totalAssigned },
-        geometryCorrelation: null, // populated by computeGeometryCorrelation after enrichedClaims are available
-        dualCoordinateActive: true, // Phase 1 always uses claim-text embeddings
-        assignmentCounts,
-    };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GEOMETRY CORRELATION
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Computes Pearson r between the old paragraph-level provenance weights
- * (from reconstructProvenance) and the new statement-level weights
- * (from computeStatementCompetitiveAllocation).
- *
- * For each (claim, statement) assignment in the new system, maps the statement
- * back to its parent paragraph and pairs w_stmt with w_para from the old system.
- * Returns null if fewer than 3 paired values exist or variance is zero.
- */
-export function computeGeometryCorrelation(
-    enrichedClaims: LinkedClaim[],
-    statementAllocation: StatementAllocationResult,
-    paragraphs: ShadowParagraph[],
-): number | null {
-    // Build statement → paragraph lookup
-    const stmtToPara = new Map<string, string>();
-    for (const para of paragraphs) {
-        for (const sid of para.statementIds) {
-            stmtToPara.set(sid, para.id);
-        }
-    }
-
-    // Build enrichedClaim lookup (provenanceWeights is extra field not in LinkedClaim interface)
-    const claimById = new Map<string, any>();
-    for (const c of enrichedClaims) {
-        claimById.set((c as any).id, c);
-    }
-
-    // Collect paired (w_stmt, w_para) values across all (claim, statement) assignments
-    const xs: number[] = [];
-    const ys: number[] = [];
-
-    for (const [claimId, alloc] of Object.entries(statementAllocation.perClaim)) {
-        const linkedClaim = claimById.get(claimId);
-        const provenanceWeights: Map<string, number> | undefined = (linkedClaim as any)?.provenanceWeights;
-        if (!provenanceWeights || provenanceWeights.size === 0) continue;
-
-        for (const entry of alloc.directStatementProvenance) {
-            const paraId = stmtToPara.get(entry.statementId);
-            if (!paraId) continue;
-            const paraWeight = provenanceWeights.get(paraId);
-            if (paraWeight == null) continue;
-            xs.push(entry.weight);
-            ys.push(paraWeight);
-        }
-    }
-
-    if (xs.length < 3) return null;
-
-    const n = xs.length;
-    const xMean = xs.reduce((a, b) => a + b, 0) / n;
-    const yMean = ys.reduce((a, b) => a + b, 0) / n;
-
-    let num = 0;
-    let xVar = 0;
-    let yVar = 0;
-    for (let i = 0; i < n; i++) {
-        const dx = xs[i] - xMean;
-        const dy = ys[i] - yMean;
-        num += dx * dy;
-        xVar += dx * dx;
-        yVar += dy * dy;
-    }
-
-    const den = Math.sqrt(xVar) * Math.sqrt(yVar);
-    if (den < 1e-12) return null;
-    return num / den;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 2: CONTINUOUS PER-CLAIM RELEVANCE FIELD
@@ -754,17 +308,8 @@ export interface ContinuousFieldClaimResult {
     sigma_claim: number;
 }
 
-export interface DisagreementEntry {
-    statementId: string;
-    competitiveWinner: string;
-    continuousWinner: string;
-    competitiveWeight: number;
-    continuousScore: number;
-}
-
 export interface ContinuousFieldResult {
     perClaim: Record<string, ContinuousFieldClaimResult>;
-    disagreementMatrix: DisagreementEntry[];
 }
 
 export function computeContinuousField(
@@ -772,13 +317,11 @@ export function computeContinuousField(
     statementEmbeddings: Map<string, Float32Array>,
     claimEmbeddings: Map<string, Float32Array>,
     statements: Array<{ id: string }>,
-    /** Optional: pre-computed statement allocation for disagreement matrix */
-    statementAllocation?: StatementAllocationResult | null,
 ): ContinuousFieldResult {
     const perClaim: Record<string, ContinuousFieldClaimResult> = {};
 
     if (claims.length === 0 || statementEmbeddings.size === 0 || claimEmbeddings.size === 0) {
-        return { perClaim, disagreementMatrix: [] };
+        return { perClaim };
     }
 
     // For each claim, build continuous field over ALL statements
@@ -876,57 +419,7 @@ export function computeContinuousField(
         };
     }
 
-    // §2.5 Disagreement matrix
-    const disagreementMatrix: DisagreementEntry[] = [];
-    if (statementAllocation) {
-        // For each statement, find competitive winner and continuous winner
-        const stmtIds = new Set<string>();
-        for (const c of claims) {
-            const claimField = perClaim[c.id]?.field || [];
-            for (const e of claimField) stmtIds.add(e.statementId);
-        }
-
-        for (const sid of stmtIds) {
-            // Competitive winner: claim with highest weight for this statement
-            let compWinner = '';
-            let compWeight = -1;
-            for (const c of claims) {
-                const alloc = statementAllocation.perClaim[c.id];
-                if (!alloc) continue;
-                const entry = alloc.directStatementProvenance.find(e => e.statementId === sid);
-                if (entry && entry.weight > compWeight) {
-                    compWeight = entry.weight;
-                    compWinner = c.id;
-                }
-            }
-
-            // Continuous winner: claim with highest evidenceScore for this statement
-            let contWinner = '';
-            let contScore = -Infinity;
-            for (const c of claims) {
-                const entry = perClaim[c.id]?.field.find(e => e.statementId === sid);
-                if (entry && entry.evidenceScore > contScore) {
-                    contScore = entry.evidenceScore;
-                    contWinner = c.id;
-                }
-            }
-
-            // Flag disagreement
-            if (compWinner && contWinner && compWinner !== contWinner && compWeight > 0) {
-                disagreementMatrix.push({
-                    statementId: sid,
-                    competitiveWinner: compWinner,
-                    continuousWinner: contWinner,
-                    competitiveWeight: compWeight,
-                    continuousScore: contScore,
-                });
-            }
-        }
-
-        disagreementMatrix.sort((a, b) => b.competitiveWeight - a.competitiveWeight);
-    }
-
-    return { perClaim, disagreementMatrix };
+    return { perClaim };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1140,8 +633,8 @@ export function computeMixedMethodProvenance(
                 // Initial zone: core vs boundary-candidate vs floor-removed
                 const initialZone: 'core' | 'boundary' | 'floor-removed' =
                     globalSim >= globalMu ? 'core'
-                    : globalSim >= boundaryFloor ? 'boundary'
-                    : 'floor-removed';
+                        : globalSim >= boundaryFloor ? 'boundary'
+                            : 'floor-removed';
 
                 candidateStatements.push({
                     statementId: sid,

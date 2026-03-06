@@ -106,6 +106,7 @@ export interface SkeletonizationInput {
   }>;
   statementEmbeddings?: Map<string, Float32Array>;
   paragraphEmbeddings?: Map<string, Float32Array>;
+  blastSurface?: any | null;
 }
 
 export interface CarrierThresholds {

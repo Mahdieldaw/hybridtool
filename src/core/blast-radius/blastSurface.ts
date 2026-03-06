@@ -62,14 +62,15 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         queryRelevanceScores, queryEmbedding,
     } = input;
 
-    // Build canonical sets from mixed provenance
-    const canonicalSets = new Map<string, Set<string>>();
-    for (const [claimId, cr] of Object.entries(mixedProvenance.perClaim)) {
-        canonicalSets.set(claimId, new Set(cr.canonicalStatementIds));
-    }
+    const corpusAffinityByStatement = precomputeCorpusAffinity(statementEmbeddings);
 
+    // 1. Build canonical sets and exclusive IDs from the patched claims
+    const canonicalSets = new Map<string, Set<string>>();
     const canonicalOwnerCounts = new Map<string, number>();
-    for (const set of canonicalSets.values()) {
+
+    for (const claim of claims) {
+        const set = new Set(Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : []);
+        canonicalSets.set(claim.id, set);
         for (const sid of set) {
             canonicalOwnerCounts.set(sid, (canonicalOwnerCounts.get(sid) ?? 0) + 1);
         }
@@ -117,6 +118,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             claims,
             canonicalSets,
             statementEmbeddings,
+            corpusAffinityByStatement,
         });
 
         const layerBGate2 = computeLayerBGate2({
@@ -129,6 +131,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             claimCentroidThreshold: mpClaim?.globalMu ?? 0,
             claimCentroidCeil,
             statementEmbeddings,
+            corpusAffinityByStatement,
         });
 
         const vernalVulnerableStatementIds = layerB.statements.filter(s => s.orphan).map(s => s.statementId);
@@ -284,6 +287,33 @@ function median(values: number[]): number {
     return (a + b) / 2;
 }
 
+function precomputeCorpusAffinity(statementEmbeddings: Map<string, Float32Array>): Map<string, number> {
+    const ids = Array.from(statementEmbeddings.keys());
+    const embeddings = ids.map((id) => statementEmbeddings.get(id)).filter(Boolean) as Float32Array[];
+    const n = Math.min(ids.length, embeddings.length);
+
+    const sums = new Array<number>(n).fill(0);
+    const counts = new Array<number>(n).fill(0);
+
+    for (let i = 0; i < n; i++) {
+        const a = embeddings[i];
+        for (let j = i + 1; j < n; j++) {
+            const b = embeddings[j];
+            const sim = cosineSimilarity(a, b);
+            sums[i] += sim;
+            sums[j] += sim;
+            counts[i]++;
+            counts[j]++;
+        }
+    }
+
+    const out = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+        out.set(ids[i], counts[i] > 0 ? sums[i] / counts[i] : 0);
+    }
+    return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // LAYER B — EXCLUSIVE VULNERABILITY
 //
@@ -298,8 +328,9 @@ function computeLayerB(input: {
     claims: Array<{ id: string }>;
     canonicalSets: Map<string, Set<string>>;
     statementEmbeddings: Map<string, Float32Array>;
+    corpusAffinityByStatement: Map<string, number>;
 }): ClaimAbsorptionProfile {
-    const { claimId, exclusiveIds, canonicalSet, claims, canonicalSets, statementEmbeddings } = input;
+    const { claimId, exclusiveIds, canonicalSet, claims, canonicalSets, statementEmbeddings, corpusAffinityByStatement } = input;
 
     const absorptionByTarget: Record<string, number> = {};
     const statements: ClaimAbsorptionProfile['statements'] = [];
@@ -314,22 +345,6 @@ function computeLayerB(input: {
             crossClaimCandidateIds.add(tid);
         }
     }
-
-    const corpusAffinityCache = new Map<string, number>();
-    const getCorpusAffinity = (tid: string, tEmb: Float32Array): number => {
-        const cached = corpusAffinityCache.get(tid);
-        if (cached !== undefined) return cached;
-        let sum = 0;
-        let count = 0;
-        for (const [anyId, anyEmb] of statementEmbeddings.entries()) {
-            if (anyId === tid) continue;
-            sum += cosineSimilarity(tEmb, anyEmb);
-            count++;
-        }
-        const v = count > 0 ? sum / count : 0;
-        corpusAffinityCache.set(tid, v);
-        return v;
-    };
 
     for (const sid of exclusiveIds) {
         const sEmb = statementEmbeddings.get(sid);
@@ -371,7 +386,7 @@ function computeLayerB(input: {
             ? candidateSims.reduce((s, v) => s + (v - muS) ** 2, 0) / candidateSims.length
             : 0;
         const sigmaS = Math.sqrt(variance);
-        const tauSim = clamp01(muS + 2*sigmaS);
+        const tauSim = clamp01(muS + 2 * sigmaS);
 
         const carriers: ClaimAbsorptionProfile['statements'][number]['carriers'] = [];
         let carrierCount = 0;
@@ -413,7 +428,7 @@ function computeLayerB(input: {
                         coreCount++;
                     }
                     bestCandidateCoreAffinity = coreCount > 0 ? coreSum / coreCount : 0;
-                    bestCandidateCorpusAffinity = getCorpusAffinity(bestCandidateId, tEmb);
+                    bestCandidateCorpusAffinity = corpusAffinityByStatement.get(bestCandidateId) ?? 0;
                     differential = bestCandidateCoreAffinity - bestCandidateCorpusAffinity;
                     differentialGate = differential > 0;
                     hasTwin = differentialGate;
@@ -474,6 +489,7 @@ function computeLayerBGate2(input: {
     claimCentroidThreshold: number;
     claimCentroidCeil: number | null;
     statementEmbeddings: Map<string, Float32Array>;
+    corpusAffinityByStatement: Map<string, number>;
 }): ClaimAbsorptionProfileGate2 {
     const {
         claimId,
@@ -485,6 +501,7 @@ function computeLayerBGate2(input: {
         claimCentroidThreshold,
         claimCentroidCeil,
         statementEmbeddings,
+        corpusAffinityByStatement,
     } = input;
 
     const absorptionByTarget: Record<string, number> = {};
@@ -499,22 +516,6 @@ function computeLayerBGate2(input: {
             crossClaimCandidateIds.add(tid);
         }
     }
-
-    const corpusAffinityCache = new Map<string, number>();
-    const getCorpusAffinity = (tid: string, tEmb: Float32Array): number => {
-        const cached = corpusAffinityCache.get(tid);
-        if (cached !== undefined) return cached;
-        let sum = 0;
-        let count = 0;
-        for (const [anyId, anyEmb] of statementEmbeddings.entries()) {
-            if (anyId === tid) continue;
-            sum += cosineSimilarity(tEmb, anyEmb);
-            count++;
-        }
-        const v = count > 0 ? sum / count : 0;
-        corpusAffinityCache.set(tid, v);
-        return v;
-    };
 
     let muC: number | null = null;
     let sigmaC: number | null = null;
@@ -582,7 +583,7 @@ function computeLayerBGate2(input: {
             ? candidateSims.reduce((s, v) => s + (v - muS) ** 2, 0) / candidateSims.length
             : 0;
         const sigmaS = Math.sqrt(variance);
-        const tauSim = clamp01(muS + 2*sigmaS);
+        const tauSim = clamp01(muS + 2 * sigmaS);
 
         const carriers: ClaimAbsorptionProfileGate2['statements'][number]['carriers'] = [];
         let carrierCount = 0;
@@ -631,7 +632,7 @@ function computeLayerBGate2(input: {
                             coreCount++;
                         }
                         const coreAffinity = coreCount > 0 ? coreSum / coreCount : 0;
-                        const corpusAffinity = getCorpusAffinity(tid, tEmb);
+                        const corpusAffinity = corpusAffinityByStatement.get(tid) ?? 0;
                         const differential = coreAffinity - corpusAffinity;
                         const differentialGate = differential > 0;
 

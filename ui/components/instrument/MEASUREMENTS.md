@@ -229,7 +229,7 @@ Computed / surfaced fields:
   - `provenanceBulk` (claim field)
   - `supportCount` (legacy: `claim.support_count` or `claim.supporters.length`)
   - `exclusivityRatio` (displayed as a percent in the scatter UI: `exclusivityRatio * 100`)
-  - `blastRadius` (uses `score.composite` or `score.score` from `artifact.blastRadiusFilter.scores`)
+  - `blastRadius` (legacy; only when `artifact.blastRadiusFilter` is present)
   - `avgStatementRelevance` (attempts to average per-statement values over `claim.sourceStatementIds`)
 - Pearson r (correlation): computed locally via `pearsonR(xs, ys)` when there are at least 3 points.
 - Linear regression fit (slope `b`, intercept `a`): computed via ordinary least squares on visible points — used for a visual trend line.
@@ -238,7 +238,7 @@ Computed / surfaced fields:
 Source paths / hints:
 - Measure values are resolved from claim objects and auxiliary artifact maps:
   - `artifact.claimProvenance.claimExclusivity[claimId].exclusivityRatio`
-  - `artifact.blastRadiusFilter.scores` → mapped by claim id
+  - `artifact.blastRadiusFilter.scores` → mapped by claim id (legacy/optional)
   - `artifact.geometry.query.relevance.statementScores` → per-statement scores aggregated to `avgStatementRelevance` by claim via `sourceStatementIds`
   - Legacy `support_count` lives on the claim object as `claim.support_count` or `claim.supporters.length`
 
@@ -269,7 +269,7 @@ Important artifact paths used by these computations:
 - `artifact.continuousField` (perClaim, disagreementMatrix)
 - `artifact.paragraphSimilarityField` (perClaim)
 - `artifact.shadow.paragraphs`, `artifact.shadow.statements`
-- `artifact.blastRadiusFilter.scores`
+- `artifact.blastRadiusFilter.scores` (legacy/optional)
 
 ---
 
@@ -307,9 +307,9 @@ Ranks models by their geometric irreplaceability — how much unique evidence ea
 
 ---
 
-## Blast Radius (L2 — policy)
+## Blast Radius (legacy, optional)
 
-Composite claim importance score used to gate which claims become survey questions. Components are L1 geometry, but the blend weights are policy decisions, not data. Source: `artifact.blastRadiusFilter`.
+Historical composite claim importance score that used to gate which claims became survey question candidates. The current pipeline does not use this as a runtime gate; if `artifact.blastRadiusFilter` is present, treat it as legacy diagnostics only.
 
 ### Policy Weights (fixed, not learned)
 
@@ -326,7 +326,7 @@ Composite claim importance score used to gate which claims become survey questio
 | Modifier | Effect |
 |---|---|
 | **Consensus discount** | `score *= (1 - supportRatio * discountStrength)`. Claims supported by all models are down-weighted — they don't need to be surveyed because they're already settled. Scales with model count. |
-| **Sole-source off-topic** | `score *= 0.50` when supporters = 1 AND queryRelevance < 0.30. A claim supported by only one off-topic model is penalized. |
+| **Sole-source off-topic** | Legacy: `score *= 0.50` when supporters = 1 AND queryRelevance < 0.30. This specific threshold is not part of the current question-selection instrumentation. |
 | **Redundancy discount** | For pairs with Jaccard > 0.5 (shared statement pool), the lower-scoring claim is discounted: `score *= (1 - jaccard * 0.4)`. |
 
 ### Key metrics
@@ -334,11 +334,11 @@ Composite claim importance score used to gate which claims become survey questio
 | Measurement | What it tells you |
 |---|---|
 | **rawComposite** | Pre-modifier composite score. |
-| **composite** | Post-modifier score. This is what gates inclusion. |
-| **Suppressed** | Claims with composite < 0.20 are excluded from survey axis selection. The floor (0.20) is the only binary kill. |
-| **Convergence ratio** | Fraction of claims with strong model consensus. If > 0.7, no leverage inversions, no sole-source outliers, and no conflicts → survey is skipped entirely. |
-| **Axes** | Claims that survived suppression and were selected as survey question topics. |
-| **Question ceiling** | Hard max of 3 survey questions. |
+| **composite** | Post-modifier score. Legacy: used for candidate ordering/selection. |
+| **Suppressed** | Legacy: composite < 0.20 flagged as below-floor. Not used to filter claims in the current survey mapper flow. |
+| **Convergence ratio** | Legacy: used by a skip-survey policy. Not used to skip the survey mapper today. |
+| **Axes** | Legacy grouping of candidate claims. Not used as a runtime ceiling today. |
+| **Question ceiling** | Legacy hard cap of 3 questions. Not used to limit claims sent to the survey mapper today. |
 
 ---
 
@@ -424,7 +424,7 @@ Fields displayed and how they’re sourced:
 - Connected edges: filters `artifact.semantic.edges[]` where `edge.from === claim.id || edge.to === claim.id`, labels other endpoint via `artifact.semantic.claims[]`
 - Provenance profile: `claim.sourceStatementIds.length`, `claim.supportRatio`, `claim.provenanceBulk`, exclusivity counts from `artifact.claimProvenance.claimExclusivity[claim.id]`
 - Structural profile: `claim.leverage`, `claim.inDegree`, `claim.outDegree`, `claim.chainDepth`, `claim.keystoneScore`
-- Blast radius profile: looks up `artifact.blastRadiusFilter.scores[]` for `claimId === claim.id`, shows `composite` + component fields
+- Blast radius profile (legacy/optional): when present, looks up `artifact.blastRadiusFilter.scores[]` for `claimId === claim.id`
 - Skeletonization profile: uses `artifact.mixedProvenance.perClaim[claim.id]` when present, showing core/boundary/floor counts and the top survived statements (sorted by `globalSim`)
 - Narrative excerpt: extracts up to 3 narrative paragraphs from `narrativeText` that contain the claim label (case-insensitive), and bolds the matched label
 - Flags (badges): `claim.isKeystone`, `claim.isLeverageInversion`, `claim.isEvidenceGap`, `claim.isOutlier`, `claim.isIsolated`
@@ -487,7 +487,7 @@ Same as instrument Blast Radius tab but with histograms of composite score distr
 
 ### Blast Surface (Vernal / “Bernal” twin method)
 
-Blast Surface is a provenance-derived damage assessment that runs alongside the legacy blast radius filter. It is intended to replace L3 structural heuristics with L1 measurements derived from embeddings + set membership, and to make “why this claim is dangerous” legible.
+Blast Surface is a provenance-derived damage assessment. It is intended to replace L3 structural heuristics with L1 measurements derived from embeddings + set membership, and to make “why this claim is dangerous” legible.
 
 Where results are stored
 - `artifact.blastSurface` (`BlastSurfaceResult`)
@@ -495,9 +495,8 @@ Where results are stored
 - Vernal meta (variance-bounded query tilt): `artifact.blastSurface.meta.vernal`
 
 Where it runs
-- Producer: `computeBlastSurface(...)` in [blastSurface.ts](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/blastSurface.ts)
-- Wired in deterministic regen pipeline: [deterministicPipeline.js](file:///c:/Users/Mahdi/Desktop/hybrid/src/core/execution/deterministicPipeline.js#L249-L291)
-
+- Producer: `computeBlastSurface(...)` in [blastSurface.ts](../../../src/core/blast-radius/blastSurface.ts)
+- Wired in deterministic regen pipeline: [deterministicPipeline.js](../../../src/core/execution/deterministicPipeline.js)
 Layers (A–D) as implemented
 
 - **Layer A — Per-claim evidence inventory (inputs, already computed elsewhere)**
@@ -552,19 +551,28 @@ Vernal / “Bernal” merged score (Append 2.0 + 2.5, instrumentation)
   - `structuralStep`: `sigmaM` (when `sigmaM > 0.01`), else `max(median(structuralMass)×0.1, 0.1)`
   - `adaptiveAccelerator = min(1, sigmaQ / 0.25)`
   - `lambda = structuralStep × adaptiveAccelerator`
-- Status: this merged score is currently surfaced for diagnostics; it is not yet the sole driver of survey question selection (see “Blast Radius Filter” below).
+- Status: this merged score is surfaced for diagnostics, and its scalar `compositeScore` is copied into question-selection instrumentation for convenience (`claimProfiles[*].vernalComposite`).
 
-Blast Radius Filter status (did we pivot to Layers F+?)
-- The current production question selection logic still uses the legacy blast radius filter:
-  - `artifact.blastRadiusFilter` computed by `computeBlastRadiusFilter(...)` in `src/core/blast-radius/blastRadiusFilter.ts`
-- This means we have **not** fully pivoted to the `blastlogic.xml` Layers E–G on top of Blast Surface yet. Today:
-  - Parts of Layer F exist in the legacy filter as continuous modifiers:
-    - F3 consensus discount, F4 sole-source off-topic discount, F5 redundancy discount (implemented in `applyModifiers`)
-  - A gate + ceiling exists (Layer G), but it is still expressed in legacy terms:
-    - `shouldSkipSurvey(...)` checks convergence + leverage inversions + sole-source outliers + conflicts
-    - `computeQuestionCeiling(...)` uses conflict cluster count and axis count with a hard ceiling of 3
-  - The `blastlogic.xml` F1 “conflict axis grouping with geometric validation (centroid similarity < μ_interClaim)” is **not** implemented in the legacy filter.
-  - The `blastlogic.xml` F2 “query relevance tiebreaker within 0.5σ of damage score” is **not** implemented as written; query relevance currently appears as a modifier component and the sole-source off-topic discount.
+### Question Selection Instrumentation (Layers F + G)
+
+Observation-only measurements for future question gating/ceiling logic. None of these affect runtime. All claims are sent to the survey mapper regardless of these scores.
+
+Where results are stored
+- `artifact.questionSelectionInstrumentation` (`QuestionSelectionInstrumentation`)
+
+What the UI shows (Carrier Detection card)
+- **Conflict Validation (F1)**: `validatedConflicts[]` rows for conflict edges only, with:
+  - `centroidSimilarity = cosine(claimCentroid[from], claimCentroid[to])`
+  - `muInterClaim = mean cosine across all unique claim centroid pairs`
+  - `validated = centroidSimilarity < muInterClaim` (claims more distant than average → genuine fork)
+- **Question Selection Profile (F2–F4)**: `claimProfiles[]` per claim:
+  - Blast Surface copy fields: `vernalComposite`, `orphanRatio`
+  - Consensus (F3): `supportRatio`, `modelCount`, `consensusDiscount` (what a discount would be; not applied)
+  - Sole-source off-topic (F4): `soleSource`, `queryRelevanceRaw`, `wouldPenalize` where threshold is distribution-derived (`μ - σ` across all claims)
+  - Query tilt banding (F2): `damageBand`, `queryTiltReorder` (rank change within band if sorted by query relevance)
+- **Survey Gate & Ceiling (G)**: `gate` + `ceiling` summaries:
+  - `gate.wouldSkip` and `gate.overrideSkip` are informational only (no skipping occurs)
+  - `ceiling.theoreticalCeiling` is informational only; `ceiling.actualClaimsSent` always equals total claim count
 
 ### Skeletonization
 
@@ -591,8 +599,6 @@ The Diagnostics tab can trigger a regen run:
 
 | Value | Used in | Meaning |
 |---|---|---|
-| 0.20 | Blast radius floor | Below this composite score, a claim is suppressed from survey selection |
-| 0.30 | Query relevance (sole-source) | Blast radius penalty for sole-source off-topic claims |
 | 0.45 | Provenance paragraph anchor | Paragraph-to-claim similarity needed to enter the candidate pool (old system) |
 | 0.55 | Statement refinement / carrier min | Statement-to-claim similarity minimum; also skeletonization elbow fallback |
 | 0.60 | Carrier detection | Source-to-surviving-claim similarity needed to classify as "carried" |
@@ -603,7 +609,7 @@ The Diagnostics tab can trigger a regen run:
 | μ+σ | §1 statement allocation threshold | Per-statement dynamic threshold for cross-claim competition (or just μ when N=2 claims) |
 | T_v | Basin inversion valley | Dynamic threshold from topology; separates "soft" from "strong" similarities |
 
-The §1 competitive allocation and blast radius design goal is to eliminate most of the static values above. After Phase 3, only T_v and the blast radius floor (0.20) should remain.
+The §1 competitive allocation design goal is to eliminate most of the static values above. After Phase 3, only T_v and a small number of clearly-labeled policy clamps (if any) should remain.
 
 ---
 
@@ -616,8 +622,8 @@ Below are the canonical artifact property paths the UI reads for each major meas
 - Statement allocation (competitive §1) → `artifact.statementAllocation.perClaim`, `artifact.statementAllocation.assignmentCounts`, `artifact.statementAllocation.entropy`
 - Claim provenance (paragraph legacy + exclusivity) → `artifact.claimProvenance` (including `claimExclusivity`, `competitiveAssignmentDiagnostics`, `geometryCorrelation`)
 - Continuous field → `artifact.continuousField` (includes `perClaim`, `disagreementMatrix`)
-- Blast radius → `artifact.blastRadiusFilter` (includes `scores`, component breakdown)
 - Blast surface (Vernal twins A–D) → `artifact.blastSurface` (includes per-claim `layerB/layerC/layerD` and `vernal`)
+- Question selection instrumentation (F+G, observation only) → `artifact.questionSelectionInstrumentation`
 - Paragraph similarity / ranked paragraphs → `artifact.paragraphSimilarityField?.perClaim`
 - Shadow corpus (statements / paragraphs) → `artifact.shadow.statements`, `artifact.shadow.paragraphs`
 - Instrumentation overrides / computed geometry correlation → `artifact.instrumentation.*`

@@ -94,7 +94,7 @@ describe('ConciergeService', () => {
         expect(String(result.narrative || '')).not.toContain('"claims"');
     });
 
-    it('should accept intrinsic determinants without questions', () => {
+    it('should ignore intrinsic determinants (legacy field)', () => {
         const raw = JSON.stringify({
             claims: [{
                 id: 'c_0',
@@ -115,13 +115,11 @@ describe('ConciergeService', () => {
 
         const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
-        expect(result.output?.edges?.length).toBe(1);
-        const e0 = result.output?.edges?.[0];
-        expect(e0?.type).toBe('conflicts');
-        expect(((e0 as any)?.question ?? null)).toBe('Which outcome is non-negotiable right now?');
+        expect(result.output?.edges?.length).toBe(0);
+        expect((result.output as any)?.determinants).toBeUndefined();
     });
 
-    it('should accept intrinsic determinants with questions', () => {
+    it('should ignore intrinsic determinants with questions (legacy field)', () => {
         const raw = JSON.stringify({
             claims: [{
                 id: 'c_0',
@@ -149,15 +147,11 @@ describe('ConciergeService', () => {
 
         const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
-        expect(result.output?.edges?.length).toBe(1);
-        const e0 = result.output?.edges?.[0];
-        expect(e0?.type).toBe('conflicts');
-        if (e0 && e0.type === 'conflicts') {
-            expect((e0 as any).question).toBe('Which matters more: speed or flexibility?');
-        }
+        expect(result.output?.edges?.length).toBe(0);
+        expect((result.output as any)?.determinants).toBeUndefined();
     });
 
-    it('should accept intrinsic determinants with paths', () => {
+    it('should ignore intrinsic determinants with paths (legacy field)', () => {
         const raw = JSON.stringify({
             claims: [{
                 id: 'c_0',
@@ -188,12 +182,8 @@ describe('ConciergeService', () => {
 
         const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
-        expect(result.output?.edges?.length).toBe(1);
-        const d0 = result.output?.determinants?.[0];
-        expect(d0?.type).toBe('intrinsic');
-        if (d0?.type === 'intrinsic') {
-            expect(d0.paths).toBeTruthy();
-        }
+        expect(result.output?.edges?.length).toBe(0);
+        expect((result.output as any)?.determinants).toBeUndefined();
     });
 
     it('should treat challenges edges as conflicts for traversal', () => {
@@ -256,7 +246,74 @@ describe('ConciergeService', () => {
         expect([e0?.from, e0?.to].sort()).toEqual(['claim_11', 'claim_2'].sort());
     });
 
-    it('should accept extrinsic determinants with yes/no semantics', () => {
+    it('should derive conflicts edge from claim.challenges even when other edges exist', () => {
+        const raw = JSON.stringify({
+            claims: [{
+                id: 'claim_11',
+                label: 'Add caching',
+                text: 'Cache results to reduce repeated computation.',
+                supporters: [1],
+                role: 'challenger',
+                challenges: 'claim_2',
+            }, {
+                id: 'claim_2',
+                label: 'Avoid caching',
+                text: 'Caching adds complexity and staleness risk.',
+                supporters: [2],
+                role: 'anchor',
+                challenges: null,
+            }],
+            edges: [{
+                from: 'claim_2',
+                to: 'claim_11',
+                type: 'supports',
+            }],
+        });
+
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        const edges = result.output?.edges || [];
+        expect(edges.length).toBe(2);
+        expect(edges.some((e: any) => e?.type === 'supports')).toBe(true);
+        const conflict = edges.find((e: any) => e?.type === 'conflicts');
+        expect(conflict?.from).toBe('claim_11');
+        expect(conflict?.to).toBe('claim_2');
+    });
+
+    it('should orient conflicts edges using claim.challenges direction', () => {
+        const raw = JSON.stringify({
+            claims: [{
+                id: 'claim_11',
+                label: 'Add caching',
+                text: 'Cache results to reduce repeated computation.',
+                supporters: [1],
+                role: 'challenger',
+                challenges: 'claim_2',
+            }, {
+                id: 'claim_2',
+                label: 'Avoid caching',
+                text: 'Caching adds complexity and staleness risk.',
+                supporters: [2],
+                role: 'anchor',
+                challenges: null,
+            }],
+            edges: [{
+                from: 'claim_2',
+                to: 'claim_11',
+                type: 'conflicts',
+            }],
+        });
+
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        expect(result.output?.edges?.length).toBe(1);
+        const e0 = result.output?.edges?.[0] as any;
+        expect(e0?.type).toBe('conflicts');
+        expect(e0?.from).toBe('claim_11');
+        expect(e0?.to).toBe('claim_2');
+    });
+
+    it('should ignore extrinsic determinants with yes/no semantics (legacy field)', () => {
         const raw = JSON.stringify({
             claims: [{
                 id: 'c_0',
@@ -279,13 +336,8 @@ describe('ConciergeService', () => {
 
         const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
-        expect(result.output?.conditionals?.length).toBe(1);
-        const d0 = result.output?.determinants?.[0];
-        expect(d0?.type).toBe('extrinsic');
-        if (d0?.type === 'extrinsic') {
-            expect(d0.yes_means).toBe('The condition holds — these claims remain');
-            expect(d0.no_means).toBe('The condition does not hold — these claims are pruned');
-        }
+        expect(result.output?.conditionals?.length).toBe(0);
+        expect((result.output as any)?.determinants).toBeUndefined();
     });
 
     it('should serialize shadow paragraphs without duplicating statement text', () => {

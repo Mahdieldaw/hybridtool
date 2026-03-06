@@ -137,7 +137,7 @@ export function ParagraphSpaceView({
     }
     const dx = Math.max(1e-6, maxX - minX);
     const dy = Math.max(1e-6, maxY - minY);
-    const pad = 0.08;
+    const pad = 0.05;
     return { minX: minX - dx * pad, maxX: maxX + dx * pad, minY: minY - dy * pad, maxY: maxY + dy * pad };
   }, [nodes]);
 
@@ -278,6 +278,22 @@ export function ParagraphSpaceView({
           </div>
         )}
 
+        {/* Legend Overlay */}
+        <div className="absolute top-4 left-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm pointer-events-none shadow-sm z-10 flex flex-col gap-2">
+          <div className="text-[9px] uppercase font-bold text-text-muted mb-0.5 tracking-wider">Map Legend</div>
+          {[
+            { label: "Supports", color: MAPPER_EDGE_COLORS.supports },
+            { label: "Conflicts", color: MAPPER_EDGE_COLORS.conflicts },
+            { label: "Tradeoff", color: MAPPER_EDGE_COLORS.tradeoff },
+            { label: "Prerequisite", color: MAPPER_EDGE_COLORS.prerequisite },
+          ].map((item) => (
+            <div key={item.label} className="flex items-center gap-2">
+              <svg className="w-6 h-2"><line x1="0" y1="4" x2="24" y2="4" stroke={item.color} strokeWidth="1.5" strokeDasharray="4 2" /></svg>
+              <span className="text-[10px] font-medium text-text-secondary">{item.label}</span>
+            </div>
+          ))}
+        </div>
+
         <svg
           className="w-full h-full bg-black/20"
           viewBox={`0 0 ${W} ${H}`}
@@ -381,7 +397,7 @@ export function ParagraphSpaceView({
             const y = toY(Number(n.y));
             if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
             const degree = typeof n.mutualDegree === "number" ? n.mutualDegree : 0;
-            const r = Math.max(2.8, Math.min(7.5, 3.2 + degree * 0.55));
+            const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7));
 
             const basinId = showBasinColors ? basinResult?.basinByNodeId?.[id] : undefined;
             const basinColor =
@@ -426,7 +442,7 @@ export function ParagraphSpaceView({
             const isHov = hoveredClaimId === c.claimId;
             const isSel = selectedClaimId === c.claimId;
             const bulk = c.provenanceBulk ?? 1;
-            const size = Math.max(7, Math.min(14, 7 + bulk * 0.7));
+            const size = Math.max(9, Math.min(18, 9 + bulk * 1.0));
             const label = c.label.length > 50 ? `${c.label.slice(0, 50)}\u2026` : c.label;
             return (
               <g

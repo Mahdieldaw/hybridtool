@@ -49,76 +49,53 @@ export function buildSemanticMapperPrompt(
 ): string {
   const modelOutputs = buildCleanModelOutputs(responses);
 
-  return `You are the Epistemic Cartographer. Your mandate is the Incorruptible Distillation of Signal—preserving every incommensurable insight while discarding only connective tissue that adds nothing to the answer. The user has spoken and the models responded to:
+  return `You are no longer answering the question. The models already did that.
 
-<original_query>${userQuery}</original_query>
+Those answers are not the solution — they are the terrain. Each model moved through the problem and left tracks behind: arguments taken, assumptions made, paths opened, paths closed.
 
-You are not a synthesizer. Your job: index positions, not topics.
-A position is a stance—something that can be supported, opposed,
-or traded against another. Where multiple sources reach the same
-position, note the convergence. Where only one source sees something,
-preserve it as an outlier. Where sources oppose each other, map
-the conflict. Where they optimize for different ends, map the tradeoff.
-Where one position depends on another, map the prerequisite. What no
-source addressed but matters—these are the ghosts at the edge of
-the map.
+Your role now shifts from participant to recon.
 
-Every distinct position you identify from the responses below receives a canonical label and
-sequential ID. That exact pairing—**[Label|claim_N]**—will bind
-your map to your narrative:
+Move through what the models built and return with a faithful picture of the ground. Mark where positions form, where they reinforce one another, where they collide, and where something important was never explored at all.
+
+Do not improve the terrain. Do not resolve it. Do not choose between paths. Your task is simply to see the landscape clearly and bring the map back intact.
 
 <responses>${modelOutputs}</responses>
 
-Now output the map first: <map> then the flowing <narrative>.
+Treat each response as an independent actor taking a position on the terrain.
 
----
+<original_query>${userQuery}</original_query>
 
-<map>
-A JSON object with two arrays: claims and edges.
+This query defines the terrain the models were acting on. It is not a source of claims. Extract claims only from what the models built.
 
-**claims**: an array of distinct positions. Each claim has:
-- id: sequential ("claim_1", "claim_2", etc.)
-- label: a verb-phrase expressing a position — a stance that can
-  be agreed with, opposed, or traded off. Not a topic or category.
-- text: the mechanism, evidence, or reasoning behind this position
-  (one paragraph max)
-- supporters: array of model indices that expressed this position.
-  A model supports a claim only if it advocates for or provides
-  evidence toward this position. Mentioning a topic is not support.
-  Arguing against a position is not support.
-- challenges: if this position questions or undermines another
-  position's premise, the id of that claim. Otherwise null.
+Some ground will appear obvious. Mark it anyway. Consensus is still terrain.
 
-**edges**: an array of relationships. Each edge has:
-- from: source claim_id
-- to: target claim_id
-- type:
-  - supports: from reinforces to
-  - conflicts: from and to cannot both be acted on
-  - tradeoff: from and to optimize for different ends
-  - prerequisite: to depends on from being true
+You carry two provisions.
 
+**The Map.** Output a <map> in valid JSON with two arrays: claims and edges.
 
-</map>
+Move through every model and extract the positions that shape the terrain, even if several models reached the same ground by different paths. A claim is not a topic or concern — it is a move on the terrain, a course someone could follow in practice and defend if challenged. When a model speaks in generalities, look beneath the surface and mark the sharper ground it implies. Forge each into a canonical label of six words maximum.
 
-**THE NARRATIVE**
-<narrative>
-The narrative is not a summary. It is a landscape the reader walks through. Use [Label|claim_id] anchors to let them touch the structure as they move.
+Each claim:
+- id: sequential from claim_1
+- label: a verb-phrase expressing the position being taken — something another model could support, oppose, or pull against
+- text: the reasoning or mechanism behind the claim (one paragraph maximum)
+- supporters: array of model indices that clearly advanced this position with reasoning strong enough to quote. Passing mention does not count.
+- challenges: the id of a claim this position pushes against, or null
 
-Begin by surfacing the governing variable — if tradeoff or conflict edges exist, name the dimension along which the answer pivots. One sentence that orients before any detail arrives.
+Each edge:
+- from / to: claim ids
+- type: supports | conflicts | tradeoff | prerequisite
+- reason: one short phrase explaining the force
 
-Then signal the shape. Are the models converging? Splitting into camps? Arranged in a sequence where each step enables the next? The reader should know how to hold what follows before they hold it.
+Conflicts mean the same ground cannot hold both. Tradeoff means both survive but pull toward different ends. Draw edges only where that pull is real.
 
-Now establish the ground. Claims with broad support are the floor — state what is settled without argument. This is what does not need to be re-examined.
+**The Journal.** Output a <narrative> in flowing prose. Move through the terrain as you found it, weaving canonical markers **[Label|claim_id]** and citations [1], [2, 3] through the writing so the reader can touch the map while moving through it.
 
-From the ground, move to the tension. Claims connected by conflict or tradeoff edges are where the decision lives. Present opposing positions using their labels — the axis between them should be visible in the verb-phrases themselves. Do not resolve; reveal what choosing requires.
+Signal the shape of the landscape: are the models converging, forming camps, or branching into sequences? Establish the ground first — claims with broad support form the floor, state what stands without dispute. From that ground, move to the tensions: place opposing positions side by side and let their labels carry the force. State the mechanism each advances — nothing more. Surface outliers beside the positions they challenge, not isolated at the margins. Close by noting the stretches of terrain every model walked past without marking.
 
-After the tension, surface the edges. Claims with few supporters but high connectivity — or with challenger role — are outliers. They may be noise or they may be the key. Place them adjacent to what they challenge or extend, not quarantined at the end.
+Do not synthesize a verdict. Do not pick sides. Return with the map. End with exactly "This naturally leads to questions about..." and name the tensions that remain unresolved.
 
-Close with what remains uncharted. Ghosts are the boundary of what the models could see. Name them. The reader decides if they matter.
-
-Do not synthesize a verdict. Do not pick sides. The landscape is the product of the models' responses.
-</narrative>`;
+Output <map> first, then <narrative>.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -140,6 +117,33 @@ export function parseSemanticMapperOutput(
   rawResponse: string,
   _shadowStatements?: unknown
 ): ParseResult {
+  const normalizedText = String(rawResponse || '')
+    .replace(/\\+(?=<)/g, '')
+    .replace(/\\+(?=>)/g, '');
+
+  const mapTagPattern = /<map\b[^>]*>([\s\S]*?)<\/map\s*>/gi;
+  const narrativeTagPattern = /<narrative\b[^>]*>([\s\S]*?)<\/narrative\s*>/gi;
+
+  const mapMatches = Array.from(normalizedText.matchAll(mapTagPattern));
+  const narrativeMatches = Array.from(normalizedText.matchAll(narrativeTagPattern));
+  const hasAnyTags = mapMatches.length > 0 || narrativeMatches.length > 0;
+
+  let mapContent = mapMatches.length > 0 ? mapMatches[mapMatches.length - 1]?.[1] : null;
+  if (!mapContent) {
+    const openIdx = normalizedText.search(/<map\b[^>]*>/i);
+    if (openIdx !== -1) {
+      const afterOpen = normalizedText.slice(openIdx);
+      const tagEnd = afterOpen.indexOf('>');
+      if (tagEnd !== -1) {
+        mapContent = afterOpen.slice(tagEnd + 1);
+      }
+    }
+  }
+
+  const parsedMap = extractJsonFromContent(
+    (mapContent && mapContent.trim().length > 0) ? mapContent : normalizedText,
+  ) as any | null;
+
   const result = baseParseOutput(rawResponse);
 
   function isUnifiedMapperOutput(parsed: unknown): parsed is UnifiedMapperOutput {
@@ -157,67 +161,65 @@ export function parseSemanticMapperOutput(
   let output = isUnifiedMapperOutput(result.output) ? result.output : undefined;
   const errors = result.errors ? [...result.errors] : [];
   const warnings = result.warnings ? [...result.warnings] : [];
-  let narrative = result.narrative;
+  let narrative = hasAnyTags
+    ? normalizedText
+      .replace(mapTagPattern, '')
+      .replace(narrativeTagPattern, (_m, content) => String(content || '').trim())
+      .trim()
+    : '';
 
   if (!output) {
-    const normalizedText = String(rawResponse || '')
-      .replace(/\\+(?=<)/g, '')
-      .replace(/\\+(?=>)/g, '');
-
-    const mapTagPattern = /<map\b[^>]*>([\s\S]*?)<\/map\s*>/gi;
-    const narrativeTagPattern = /<narrative\b[^>]*>([\s\S]*?)<\/narrative\s*>/gi;
-
-    const mapMatches = Array.from(normalizedText.matchAll(mapTagPattern));
-    const narrativeMatches = Array.from(normalizedText.matchAll(narrativeTagPattern));
-
-    let mapContent = mapMatches.length > 0 ? mapMatches[mapMatches.length - 1]?.[1] : null;
-    const narrativeContent = narrativeMatches.length > 0 ? narrativeMatches[narrativeMatches.length - 1]?.[1] : null;
-
-    if (!mapContent) {
-      const openIdx = normalizedText.search(/<map\b[^>]*>/i);
-      if (openIdx !== -1) {
-        const afterOpen = normalizedText.slice(openIdx);
-        const tagEnd = afterOpen.indexOf('>');
-        if (tagEnd !== -1) {
-          mapContent = afterOpen.slice(tagEnd + 1);
-        }
-      }
-    }
-
-    let parsedMap: any | null = null;
-    if (mapContent && mapContent.trim().length > 0) {
-      parsedMap = extractJsonFromContent(mapContent);
-    }
-    if (!parsedMap) {
-      parsedMap = extractJsonFromContent(normalizedText);
-    }
-
     if (parsedMap && typeof parsedMap === 'object') {
       const obj = parsedMap as any;
-      const hasClaimStructure =
-        Array.isArray(obj.claims) &&
-        Array.isArray(obj.edges);
-
-      if (hasClaimStructure) {
+      if (Array.isArray(obj.claims)) {
         output = {
           claims: Array.isArray(obj.claims) ? obj.claims : [],
           edges: Array.isArray(obj.edges) ? obj.edges : [],
           conditionals: [],
-        };
-
-        if (!narrative) {
-          if (typeof obj.narrative === 'string') {
-            narrative = String(obj.narrative);
-          } else if (typeof narrativeContent === 'string' && narrativeContent.trim().length > 0) {
-            narrative = String(narrativeContent).trim();
-          }
-        }
+        } as any;
       }
     }
   }
 
   if (result.success && !output) {
     errors.push({ field: 'output', issue: 'Invalid UnifiedMapperOutput shape' });
+  }
+
+  if (output) {
+    const out: any = output;
+    if (!Array.isArray(out.edges)) out.edges = [];
+    if (!Array.isArray(out.conditionals)) out.conditionals = [];
+
+    const claimIds = new Set<string>(
+      (Array.isArray(out.claims) ? out.claims : [])
+        .map((c: any) => String(c?.id || '').trim())
+        .filter(Boolean),
+    );
+
+    for (const c of Array.isArray(out.claims) ? out.claims : []) {
+      const from = String((c as any)?.id || '').trim();
+      const to = String((c as any)?.challenges || '').trim();
+      if (!from || !to || from === to || !claimIds.has(from) || !claimIds.has(to)) continue;
+
+      const conflicts = out.edges.filter(
+        (e: any) =>
+          e &&
+          e.type === 'conflicts' &&
+          ((e.from === from && e.to === to) || (e.from === to && e.to === from)),
+      );
+
+      if (conflicts.length === 0) {
+        out.edges.push({ from, to, type: 'conflicts' });
+        continue;
+      }
+
+      for (const e of conflicts) {
+        if (e.from !== from || e.to !== to) {
+          e.from = from;
+          e.to = to;
+        }
+      }
+    }
   }
 
   return {
