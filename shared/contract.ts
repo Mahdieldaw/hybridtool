@@ -666,17 +666,11 @@ export interface EnrichedClaim extends Claim {
     sourceRegionIds: string[];
   };
   supportRatio: number;
-  leverage: number;
-  leverageFactors: {
-    supportWeight: number;
-    connectivityWeight: number;
-    positionWeight: number;
-  };
-  keystoneScore: number;
-  evidenceGapScore: number;
-  supportSkew: number;
   inDegree: number;
   outDegree: number;
+  prerequisiteOutDegree: number;
+  conflictEdgeCount: number;
+  hubDominance?: number;
   isChainRoot: boolean;
   isChainTerminal: boolean;
 

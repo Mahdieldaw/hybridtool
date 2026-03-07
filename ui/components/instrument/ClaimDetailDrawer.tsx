@@ -286,18 +286,22 @@ export function ClaimDetailDrawer({
             </div>
           </div>
 
-          {/* Leverage */}
+          {/* Structural */}
           <div className="space-y-1.5">
             <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide">Structural</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-              <div className="text-text-muted">Leverage</div>
-              <div className="text-text-primary text-right">{fmt(claim.leverage)}</div>
               <div className="text-text-muted">In-degree / Out-degree</div>
               <div className="text-text-primary text-right">{claim.inDegree ?? "—"} / {claim.outDegree ?? "—"}</div>
               <div className="text-text-muted">Chain depth</div>
               <div className="text-text-primary text-right">{claim.chainDepth ?? "—"}</div>
-              <div className="text-text-muted">Keystone score</div>
-              <div className="text-text-primary text-right">{fmt(claim.keystoneScore)}</div>
+              <div className="text-text-muted">Prerequisite out-degree</div>
+              <div className="text-text-primary text-right">{claim.prerequisiteOutDegree ?? "—"}</div>
+              <div className="text-text-muted">Conflict edges</div>
+              <div className="text-text-primary text-right">{claim.conflictEdgeCount ?? "—"}</div>
+              <div className="text-text-muted">Hub dominance</div>
+              <div className="text-text-primary text-right">
+                {claim.outDegree >= 2 && claim.hubDominance != null ? fmt(claim.hubDominance, 2) : "—"}
+              </div>
             </div>
           </div>
 

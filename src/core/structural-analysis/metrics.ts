@@ -114,29 +114,6 @@ export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
     };
 };
 
-// AUDIT: computeClaimRatios — HEURISTIC
-// The leverage score combines three weights into a single number per claim.
-// These weights are heuristic (design intuition), not calibrated against outcomes:
-//   supportWeight  = supportRatio * 2         — HEURISTIC: doubles support's contribution
-//   connectivityWeight = prereqOut*2 + prereqIn + conflictEdges*1.5 + degree*0.25 — HEURISTIC:
-//     prerequisite-out is weighted heaviest (you gate others); conflict edges more
-//     than degree edges (conflict is structural not incidental). All multipliers invented.
-//   positionWeight = isChainRoot ? 2 : 0     — HEURISTIC: chain roots get a flat bonus
-//     on the assumption that the first link in a dependency chain is disproportionately
-//     important. The value 2 is not calibrated.
-//   REMOVED: roleWeight (L2 — derived from semantic mapper edges, not structural)
-//
-// keystoneScore = outDegree * supporters.length — HEURISTIC:
-//   Treats outgoing-connection count and supporter count as symmetric contributors to
-//   keystoneness. A claim with 2 out-edges and 6 supporters scores 12; so does one with
-//   6 out-edges and 2 supporters. These are structurally different situations (broad
-//   support vs. broad connectivity) but the formula equates them. The assumption is that
-//   both dimensions independently signal "load-bearing" status. Unvalidated.
-//
-// supportSkew = maxFromSingleModel / supporters.length — HEURISTIC:
-//   Measures whether one model dominates a claim's support. Used only for the isOutlier
-//   flag in assignPercentileFlags. isOutlier is not rendered by any current UI component;
-//   if that remains true, supportSkew and isOutlier are DECORATIVE.
 export const computeClaimRatios = (
     claim: Claim,
     edges: Edge[],
@@ -149,37 +126,19 @@ export const computeClaimRatios = (
     const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
 
     const supportRatio = supporters.length / safeModelCount;
-    const supportWeight = supportRatio * 2;
 
     const outgoing = edges.filter((e) => e.from === claim.id);
     const incoming = edges.filter((e) => e.to === claim.id);
     const inDegree = incoming.length;
     const outDegree = outgoing.length;
 
-    const prereqOut = outgoing.filter((e) => e.type === "prerequisite").length * 2;
-    const prereqIn = incoming.filter((e) => e.type === "prerequisite").length;
-    const conflictEdges = edges.filter(
-        (e) => e.type === "conflicts" && (e.from === claim.id || e.to === claim.id)
-    ).length * 1.5;
-
-    const connectivityWeight = prereqOut + prereqIn + conflictEdges + (outgoing.length + incoming.length) * 0.25;
-
     const hasIncomingPrereq = incoming.some((e) => e.type === "prerequisite");
     const hasOutgoingPrereq = outgoing.some((e) => e.type === "prerequisite");
-    const positionWeight = !hasIncomingPrereq && hasOutgoingPrereq ? 2 : 0;
 
-    const leverage = supportWeight + connectivityWeight + positionWeight;
-    const keystoneScore = outDegree * supporters.length;
-
-    const supporterCounts = supporters.reduce((acc: Record<string, number>, s: number) => {
-        const key = String(s);
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
-    const maxFromSingleModel = Object.values(supporterCounts).length > 0
-        ? Math.max(...(Object.values(supporterCounts) as number[]))
-        : 0;
-    const supportSkew = supporters.length > 0 ? maxFromSingleModel / supporters.length : 0;
+    const prerequisiteOutDegree = outgoing.filter((e) => e.type === "prerequisite").length;
+    const conflictEdgeCount = edges.filter(
+        (e) => e.type === "conflicts" && (e.from === claim.id || e.to === claim.id)
+    ).length;
 
     const isChainRoot = !hasIncomingPrereq && hasOutgoingPrereq;
     const isChainTerminal = hasIncomingPrereq && !hasOutgoingPrereq;
@@ -187,17 +146,10 @@ export const computeClaimRatios = (
     return {
         ...claim,
         supportRatio,
-        leverage,
-        leverageFactors: {
-            supportWeight,
-            connectivityWeight,
-            positionWeight,
-        },
-        keystoneScore,
-        evidenceGapScore: 0,
-        supportSkew,
         inDegree,
         outDegree,
+        prerequisiteOutDegree,
+        conflictEdgeCount,
         isChainRoot,
         isChainTerminal,
     };
@@ -210,10 +162,6 @@ export const assignPercentileFlags = (
     topClaimIds: Set<string>
 ): EnrichedClaim[] => {
     const allSupportRatios = claims.map(c => c.supportRatio);
-    const allLeverages = claims.map(c => c.leverage);
-    const allKeystoneScores = claims.map(c => c.keystoneScore);
-    const allSupportSkews = claims.map(c => c.supportSkew);
-    const consensusIds = new Set(claims.filter(c => c.supportRatio >= 0.5).map(c => c.id));
 
     const cascadeBySource = new Map<string, CascadeRisk>();
     cascadeRisks.forEach(risk => cascadeBySource.set(risk.sourceId, risk));
@@ -223,10 +171,12 @@ export const assignPercentileFlags = (
         connectedIds.add(e.from);
         connectedIds.add(e.to);
     });
-    const allEvidenceGaps = claims.map(c => {
-        const cCascade = cascadeBySource.get(c.id);
-        return cCascade && c.supporters.length > 0
-            ? cCascade.dependentIds.length / c.supporters.length
+
+    // cascadeExposure: dependent count relative to supporters — used for isEvidenceGap
+    const allCascadeExposures = claims.map(c => {
+        const cascade = cascadeBySource.get(c.id);
+        return cascade && c.supporters.length > 0
+            ? cascade.dependentIds.length / c.supporters.length
             : 0;
     });
 
@@ -259,27 +209,25 @@ export const assignPercentileFlags = (
         }
     }
     const unreachableChainDepth = Number.MAX_SAFE_INTEGER;
-    return claims.map(claim => {
-        const cascade = cascadeBySource.get(claim.id);
-        const evidenceGapScore = cascade && claim.supporters.length > 0
-            ? cascade.dependentIds.length / claim.supporters.length
-            : 0;
-
-
+    return claims.map((claim, idx) => {
         const isHighSupport = topClaimIds.has(claim.id);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);
-        const isHighLeverage = isInTopPercentile(claim.leverage, allLeverages, 0.25);
-        const isLeverageInversion = isLowSupport && isHighLeverage;
 
-        const isKeystoneCandidate = isInTopPercentile(claim.keystoneScore, allKeystoneScores, 0.2) && claim.outDegree >= 2;
-        const isKeystone = isKeystoneCandidate && isHubLoadBearing(claim.id, edges);
+        // isLeverageInversion: structurally active (has outgoing edges or conflict edges) but low support
+        const isLeverageInversion = isLowSupport && (claim.outDegree >= 2 || claim.conflictEdgeCount >= 1);
 
-        const isEvidenceGap = isInTopPercentile(evidenceGapScore, allEvidenceGaps, 0.2) && evidenceGapScore > 0;
-        const isOutlier = isInTopPercentile(claim.supportSkew, allSupportSkews, 0.2) && claim.supporters.length >= 2;
+        // isKeystone: outgoing connections + high support + structurally load-bearing hub
+        const isKeystone = claim.outDegree >= 2 && isHighSupport && isHubLoadBearing(claim.id, edges);
 
-        const hasConflict = edges.some(e =>
-            e.type === "conflicts" && (e.from === claim.id || e.to === claim.id)
-        );
+        // isEvidenceGap: high cascade exposure relative to peers, and low support
+        const cascadeExposure = allCascadeExposures[idx];
+        const isEvidenceGap = isInTopPercentile(cascadeExposure, allCascadeExposures, 0.2) && cascadeExposure > 0 && isLowSupport;
+
+        // isOutlier: single-model support with narrow supporter base
+        const distinctModelCount = new Set(claim.supporters.map(String)).size;
+        const isOutlier = claim.supporters.length <= 2 && distinctModelCount === 1;
+
+        const hasConflict = claim.conflictEdgeCount > 0;
         const hasIncomingPrereq = edges.some(e =>
             e.type === "prerequisite" && e.to === claim.id
         );
@@ -289,7 +237,6 @@ export const assignPercentileFlags = (
 
         return {
             ...claim,
-            evidenceGapScore,
             isHighSupport,
             isLeverageInversion,
             isKeystone,

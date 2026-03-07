@@ -284,7 +284,7 @@ export async function triageStatements(
           reason: `Pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)}), ${carrierResult.carriers.length} carrier(s) found`,
           triggerClaimId: prunedClaim.id,
           carriersSkeletonized: carriersSkeletonized.length > 0 ? carriersSkeletonized : undefined,
-          isSoleCarrier: carrierResult.carriers.length === 0,
+          isSoleCarrier: validCarrierCount === 0,
         });
       } else {
         statementFates.set(sourceStatementId, {

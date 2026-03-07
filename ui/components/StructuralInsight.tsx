@@ -25,17 +25,17 @@ interface StructuralInsightProps {
     dependentLabels?: string[];
     cascadeDepth?: number;
     conflictsWith?: string;
-    leverageScore?: number;
-    gapScore?: number;
-    skew?: number;
     supporterCount?: number;
-    // NEW V3.1 metadata
+    // V3.1 metadata
     supportRatio?: number;
     inversionReason?: "challenger_dependency_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
     hubDominance?: number;
     chainLength?: number;
     tradeoffWith?: string;
     symmetry?: string;
+    // Honest signal metadata (replaces composite scores)
+    conflictEdgeCount?: number;
+    distinctModelCount?: number;
   };
 }
 
@@ -78,8 +78,7 @@ export const StructuralInsight: React.FC<StructuralInsightProps> = ({
     high_leverage_singular: {
       icon: "💎",
       title: "Overlooked Insight",
-      description: `"${claim.label}" has low support (${pct(metadata?.supportRatio || 0)}) but high structural importance (leverage: ${metadata?.leverageScore?.toFixed(1) || "?"
-        }). May contain what others missed.`,
+      description: `"${claim.label}" is geometrically isolated from consensus yet conflict-entangled${metadata?.conflictEdgeCount ? ` (${metadata.conflictEdgeCount} conflict edge${metadata.conflictEdgeCount !== 1 ? "s" : ""})` : ""}. May contain what others missed.`,
       color: "indigo" as const,
     },
     cascade_risk: {
@@ -92,15 +91,13 @@ export const StructuralInsight: React.FC<StructuralInsightProps> = ({
     evidence_gap: {
       icon: "🎯",
       title: "Load-Bearing Assumption",
-      description: `"${claim.label}" enables ${metadata?.dependentCount || 0
-        } downstream claims but has only ${pct(metadata?.supportRatio || 0)} support. Gap score: ${metadata?.gapScore?.toFixed(1) || "?"
-        }.`,
+      description: `"${claim.label}" is load-bearing for other claims' evidence pools but its own evidential foundation is thin (${pct(metadata?.supportRatio || 0)} support across ${metadata?.dependentCount || 0} downstream claim${(metadata?.dependentCount || 0) !== 1 ? "s" : ""}).`,
       color: "red" as const,
     },
     support_outlier: {
       icon: "🔍",
       title: "Model-Specific Insight",
-      description: `${pct(metadata?.skew || 0)} of support for "${claim.label}" comes from one model. Either valuable outlier or bias.`,
+      description: `"${claim.label}" is backed by only ${claim.supporters.length} supporter${claim.supporters.length !== 1 ? "s" : ""}${metadata?.distinctModelCount === 1 ? ", all from a single model" : ""}. Either valuable outlier or bias.`,
       color: "blue" as const,
     },
     // NEW V3.1 TYPES

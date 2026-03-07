@@ -35,7 +35,7 @@ export interface DissentVoice {
 
 export const generateWhyItMatters = (
     voice: DissentVoice,
-    peaks: EnrichedClaim[]
+    _peaks: EnrichedClaim[]
 ): string => {
     switch (voice.insightType) {
         case 'leverage_inversion':
@@ -146,7 +146,6 @@ export const buildConvergentData = (
     modelCount: number
 ): SettledShapeData => {
     const floorClaims = claims.filter(c => c.isHighSupport);
-    const floorIds = new Set(floorClaims.map(c => c.id));
     const conflictEdges = edges.filter(e => e.type === "conflicts");
     const floor: FloorClaim[] = floorClaims.map(c => {
         const contestedBy = conflictEdges

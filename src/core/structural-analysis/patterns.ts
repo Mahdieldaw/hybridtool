@@ -46,7 +46,7 @@ export const detectDissentPattern = (
             supportRatio: claim.supportRatio,
             insightType: 'leverage_inversion',
             targets,
-            insightScore: claim.leverage * (1 - claim.supportRatio) * 2
+            insightScore: (claim.outDegree + claim.conflictEdgeCount) * (1 - claim.supportRatio)
         });
     }
     const peakSupporters = new Set(peaks.flatMap(p => p.supporters));
@@ -340,7 +340,7 @@ export const detectAllSecondaryPatterns = (
 export const detectLeverageInversions = (
     claims: EnrichedClaim[],
     edges: Edge[],
-    topClaimIds: Set<string>
+    _topClaimIds: Set<string>
 ): LeverageInversion[] => {
     const inversions: LeverageInversion[] = [];
     const prerequisites = edges.filter((e) => e.type === "prerequisite");
@@ -357,7 +357,7 @@ export const detectLeverageInversions = (
             });
             continue;
         }
-        if (claim.leverageFactors.connectivityWeight > claim.leverage * 0.4) {
+        if (claim.conflictEdgeCount >= 1 || claim.outDegree >= 2) {
             inversions.push({
                 claimId: claim.id,
                 claimLabel: claim.label,

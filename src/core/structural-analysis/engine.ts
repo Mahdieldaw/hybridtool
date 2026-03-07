@@ -6,7 +6,6 @@ import {
     SettledShapeData,
     ContestedShapeData,
     TradeoffShapeData,
-    Edge,
 } from "../../../shared/contract";
 import { computeLandscapeMetrics, computeClaimRatios, assignPercentileFlags, computeCoreRatios } from "./metrics";
 import { getTopNCount, computeSignalStrength } from "./utils";
@@ -44,9 +43,13 @@ export const computeStructuralAnalysis = (artifact: CognitiveArtifact): Structur
     const topCount = getTopNCount(claimsWithRatios.length, 0.3);
     const sortedBySupport = [...claimsWithRatios].sort((a, b) => b.supportRatio - a.supportRatio);
     const topClaimIds = new Set(sortedBySupport.slice(0, topCount).map(c => c.id));
-    const claimsWithLeverage = assignPercentileFlags(claimsWithRatios, edges, cascadeRisks, topClaimIds);
+    const claimsWithFlags = assignPercentileFlags(claimsWithRatios, edges, cascadeRisks, topClaimIds);
+    const graph = analyzeGraph(claimIds, edges, claimsWithFlags);
+    // Attach graph-derived hubDominance to the hub claim (undefined for all others)
+    const claimsWithLeverage: EnrichedClaim[] = graph.hubClaim
+        ? claimsWithFlags.map(c => c.id === graph.hubClaim ? { ...c, hubDominance: graph.hubDominance } : c)
+        : claimsWithFlags;
     const claimMap = new Map<string, EnrichedClaim>(claimsWithLeverage.map((c) => [c.id, c]));
-    const graph = analyzeGraph(claimIds, edges, claimsWithLeverage);
     const ratios = computeCoreRatios(claimsWithLeverage, edges, graph, landscape.modelCount);
     const enrichedConflicts = detectEnrichedConflicts(edges, claimsWithLeverage, landscape);
     const conflictClusters = detectConflictClusters(enrichedConflicts, claimsWithLeverage);
