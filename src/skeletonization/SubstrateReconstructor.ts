@@ -162,6 +162,7 @@ export function reconstructSubstrate(
       untriagedStatementCount: triageResult.meta.untriagedCount,
       skeletonizedStatementCount: triageResult.meta.skeletonizedCount,
       removedStatementCount: triageResult.meta.removedCount,
+      residualFallbackCount: triageResult.meta.residualFallbackCount,
     },
     pathSteps: traversalState.pathSteps,
     meta: {

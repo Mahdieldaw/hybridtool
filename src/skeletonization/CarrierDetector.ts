@@ -3,7 +3,6 @@ import type { ShadowStatement } from '../shadow';
 import { cosineSimilarity } from '../clustering/distance';
 import type {
   CarrierDetectionResult,
-  CarrierThresholds,
   ConfirmedCarrier,
 } from './types';
 
@@ -14,7 +13,6 @@ export interface CarrierDetectionInput {
   protectedStatementIds: Set<string>;
   statementEmbeddings: Map<string, Float32Array>;
   claimEmbeddings: Map<string, Float32Array>;
-  thresholds?: CarrierThresholds;
   candidateStatementIds?: Set<string>;
 }
 

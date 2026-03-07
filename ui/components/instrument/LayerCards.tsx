@@ -1805,6 +1805,7 @@ export function ContinuousFieldCard({ artifact }: { artifact: any }) {
 }
 
 export function CarrierDetectionCard({ artifact }: { artifact: any }) {
+  const substrateSummary = artifact?.chewedSubstrateSummary ?? null;
   const fatesObj: Record<string, any> = artifact?.completeness?.statementFates ?? {};
   const qsi = artifact?.questionSelectionInstrumentation ?? null;
   const surveyGates = useMemo(() => safeArr<any>(artifact?.surveyGates), [artifact]);
@@ -1885,6 +1886,26 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
           <StatRow label="Noise/Orphan" value={fmtInt(counts.orphan + counts.noise)} color={counts.orphan + counts.noise > 0 ? "text-rose-400" : undefined} />
         </div>
       </CardSection>
+
+      {substrateSummary != null && (
+        <CardSection title="Triage Engine">
+          <div className="grid grid-cols-2 gap-x-4">
+            <StatRow label="Protected" value={fmtInt(substrateSummary.protectedStatementCount ?? 0)} />
+            <StatRow label="Skeletonized" value={fmtInt(substrateSummary.skeletonizedStatementCount ?? 0)} />
+            <StatRow label="Removed" value={fmtInt(substrateSummary.removedStatementCount ?? 0)} />
+            <StatRow
+              label="Residual Fallback"
+              value={fmtInt(substrateSummary.residualFallbackCount ?? 0)}
+              color={(substrateSummary.residualFallbackCount ?? 0) > 0 ? "text-amber-400" : "text-text-muted"}
+            />
+          </div>
+          {(substrateSummary.residualFallbackCount ?? 0) > 0 && (
+            <div className="text-[9px] text-amber-400/70 mt-1">
+              {substrateSummary.residualFallbackCount} non-exclusive statement(s) with all owning claims pruned — no blast surface coverage, fell to detectCarriers fallback
+            </div>
+          )}
+        </CardSection>
+      )}
 
       <CardSection title="Statement Fate Table">
         <SortableTable

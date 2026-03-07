@@ -902,8 +902,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           // ── C. Geometry embeddings (immutable, generate if missing) ──
           let geoRecord = await sm.loadEmbeddings(aiTurnId);
 
-          if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings || (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0)) {
-            // Force re-generation if missing or empty despite having paragraphs
+          const needsRegeneration = !geoRecord?.statementEmbeddings
+            || !geoRecord?.paragraphEmbeddings
+            || (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0)
+            || !geoRecord?.meta?.semanticDensityScores
+            || !geoRecord?.meta?.densityRegressionModel;
+          if (needsRegeneration) {
+            // Force re-generation if missing, empty, or lacking density scores
             const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
             const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
             let queryEmbedding = null;
@@ -914,7 +919,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 ? `Represent this sentence for searching relevant passages: ${truncated}` : truncated;
               if (prefixed) {
                 const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG);
-                queryEmbedding = batch.get('0') || null;
+                queryEmbedding = batch.embeddings.get('0') || null;
               }
             }
 
@@ -922,6 +927,11 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             const packedParagraphs = packEmbeddingMap(paraResult.embeddings, dims);
             const queryBuffer = queryEmbedding
               ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
+              : null;
+
+            const densityMap = stmtResult.semanticDensityScores;
+            const densityObj = densityMap && densityMap.size > 0
+              ? Object.fromEntries(densityMap)
               : null;
 
             await sm.persistEmbeddings(aiTurnId, {
@@ -936,6 +946,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 paragraphCount: packedParagraphs.index.length,
                 statementIndex: packedStatements.index,
                 paragraphIndex: packedParagraphs.index,
+                ...(densityObj ? { semanticDensityScores: densityObj } : {}),
+                ...(stmtResult.densityRegressionModel ? { densityRegressionModel: stmtResult.densityRegressionModel } : {}),
                 timestamp: Date.now(),
               },
             });
@@ -1004,7 +1016,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               .join('\u001e')
           );
 
-          const claimEmbeddings = await generateClaimEmbeddings(mapperClaimsForProvenance);
+          const densityModel = geoRecord?.meta?.densityRegressionModel || null;
+          const { embeddings: claimEmbeddings, semanticDensityScores: claimDensityScores } =
+            await generateClaimEmbeddings(mapperClaimsForProvenance, densityModel);
           const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
           await sm.persistClaimEmbeddings(aiTurnId, providerId, {
             claimEmbeddings: packedClaims.buffer,
@@ -1018,6 +1032,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           });
 
           console.log(`[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${claimEmbeddings?.size || 0} claims`);
+
+          // Log semantic density scores if available
+          const cachedDensity = geoRecord?.meta?.semanticDensityScores;
+          if (cachedDensity && typeof cachedDensity === 'object') {
+            const entries = Object.entries(cachedDensity).sort((a, b) => b[1] - a[1]);
+            const values = entries.map(([, v]) => v);
+            const mean = values.reduce((a, b) => a + b, 0) / values.length;
+            console.log(`[Regenerate] Semantic density:`, JSON.stringify({
+              count: entries.length,
+              mean,
+              topDense: entries.slice(0, 3).map(([id, score]) => ({ id, score })),
+              topHollow: entries.slice(-3).reverse().map(([id, score]) => ({ id, score })),
+            }));
+          }
 
           // ── E. Deterministic pipeline (shared with live path) ──
           const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
@@ -1033,6 +1061,19 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             statementEmbeddings,
             claimEmbeddings,
           );
+
+          // Compute densityLift: claim density minus mean density of assigned statements
+          if (claimDensityScores && geoRecord?.meta?.semanticDensityScores) {
+            const stmtDensityObj = geoRecord.meta.semanticDensityScores;
+            for (const claim of enrichedClaims) {
+              const claimScore = claimDensityScores.get(claim.id);
+              if (claimScore == null || !claim.sourceStatementIds?.length) continue;
+              const assigned = claim.sourceStatementIds
+                .map(sid => stmtDensityObj[sid]).filter(v => v != null);
+              if (assigned.length === 0) continue;
+              claim.densityLift = claimScore - assigned.reduce((a, b) => a + b, 0) / assigned.length;
+            }
+          }
 
           const derived = await computeDerivedFields({
             enrichedClaims,
@@ -1075,6 +1116,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             queryText,
             modelCount,
             shadowStatements,
+            statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
           });
           mapperArtifact.preSemantic = preSemantic || null;
 

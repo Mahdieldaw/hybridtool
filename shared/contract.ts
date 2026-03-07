@@ -709,6 +709,7 @@ export interface LinkedClaim {
   hasSequenceSignal: boolean;
   hasTensionSignal: boolean;
   provenanceBulk: number;     // Σ paragraph weights for this claim
+  densityLift?: number;       // claim density - mean(assigned statement density)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

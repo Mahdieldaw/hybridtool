@@ -327,7 +327,7 @@ async function generateEmbeddings(texts, targetDimensions, modelId = 'bge-base-e
 
         const outputs = await embedder(batch, {
             pooling: 'mean',
-            normalize: true,
+            normalize: false,
         });
 
         const maybeDims = outputs?.dims || outputs?.shape;

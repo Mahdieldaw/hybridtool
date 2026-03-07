@@ -7,22 +7,32 @@ import type { LinkedClaim, MapperClaim, MixedProvenanceResult, MixedProvenanceCl
 import type { Region } from '../geometry/interpretation/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
+import type { DensityRegressionModel } from '../clustering/semanticDensity';
 
 /**
- * Generate claim embeddings once. Returns a Map keyed by claim ID.
- * This is the only place ONNX should be called for claim text.
+ * Generate claim embeddings once. Returns embeddings keyed by claim ID,
+ * plus optional density scores projected via the statement regression model.
  */
 export async function generateClaimEmbeddings(
     claims: Array<{ id: string; label: string; text?: string }>,
-): Promise<Map<string, Float32Array>> {
+    densityModel?: DensityRegressionModel,
+): Promise<{ embeddings: Map<string, Float32Array>; semanticDensityScores?: Map<string, number> }> {
     const claimTexts = claims.map(c => `${c.label}. ${c.text || ''}`);
-    const rawClaimEmbeddings = await generateTextEmbeddings(claimTexts);
-    const result = new Map<string, Float32Array>();
-    for (let idx = 0; idx < claims.length; idx++) {
-        const emb = rawClaimEmbeddings.get(String(idx));
-        if (emb) result.set(claims[idx].id, emb);
+    const raw = await generateTextEmbeddings(claimTexts, undefined, densityModel ? { densityModel } : undefined);
+    const embeddings = new Map<string, Float32Array>();
+    let semanticDensityScores: Map<string, number> | undefined;
+    if (raw.semanticDensityScores) {
+        semanticDensityScores = new Map<string, number>();
     }
-    return result;
+    for (let idx = 0; idx < claims.length; idx++) {
+        const emb = raw.embeddings.get(String(idx));
+        if (emb) embeddings.set(claims[idx].id, emb);
+        if (semanticDensityScores) {
+            const s = raw.semanticDensityScores!.get(String(idx));
+            if (s != null) semanticDensityScores.set(claims[idx].id, s);
+        }
+    }
+    return { embeddings, semanticDensityScores };
 }
 
 export async function reconstructProvenance(
@@ -42,7 +52,7 @@ export async function reconstructProvenance(
 
     // Use pre-computed claim embeddings if provided, otherwise generate (legacy path)
     const claimEmbeddings: Map<string, Float32Array> = precomputedClaimEmbeddings
-        ?? await generateTextEmbeddings(claims.map(c => `${c.label}. ${c.text || ''}`));
+        ?? (await generateTextEmbeddings(claims.map(c => `${c.label}. ${c.text || ''}`), undefined, undefined)).embeddings;
 
     // Build paragraph-node → region lookup for sourceRegionIds derivation
     const paragraphToRegionIds = new Map<string, string[]>();

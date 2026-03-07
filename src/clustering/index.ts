@@ -7,7 +7,11 @@ export type {
     EmbeddingVector,
     EmbeddingResult,
     StatementEmbeddingResult,
+    TextEmbeddingResult,
 } from './types';
+
+export type { DensityRegressionModel } from './semanticDensity';
+export { projectSemanticDensity } from './semanticDensity';
 
 // Configuration
 export {

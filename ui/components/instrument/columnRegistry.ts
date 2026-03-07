@@ -15,7 +15,7 @@ export interface ColumnDef {
   description?: string;
   source: 'built-in' | 'computed';
   /** Column category for grouping in ColumnPicker */
-  category: 'identity' | 'geometry' | 'competitive' | 'continuous' | 'mixed' | 'blast' | 'metadata';
+  category: 'identity' | 'geometry' | 'competitive' | 'continuous' | 'mixed' | 'blast' | 'density' | 'metadata';
 }
 
 export interface FilterRule {
@@ -433,6 +433,32 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     category: 'blast',
   },
 
+  // ── Density ────────────────────────────────────────────────────────────────
+  {
+    id: 'semanticDensity',
+    label: 'density',
+    accessor: r => r.semanticDensity,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Statement semantic density: z-scored OLS residual of embedding magnitude vs text length. Positive = more specific than expected, negative = hollow/generic.',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'densityLift',
+    label: 'densityLift',
+    accessor: r => r.densityLift,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Claim density lift: claim embedding density minus mean density of its assigned source statements. Positive = mapper compressed/elevated meaning, negative = mapper diluted.',
+    source: 'built-in',
+    category: 'density',
+  },
+
   // ── Metadata ───────────────────────────────────────────────────────────────
   {
     id: 'fate',
@@ -513,6 +539,14 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
     sortBy: 'sim_query',
     sortDir: 'desc',
     groupBy: 'fate',
+  },
+  {
+    id: 'density',
+    label: 'Density',
+    columns: ['statementId', 'text', 'model', 'semanticDensity', 'densityLift', 'sim_claim', 'zone'],
+    sortBy: 'semanticDensity',
+    sortDir: 'desc',
+    groupBy: null,
   },
   {
     id: 'blast-twins',

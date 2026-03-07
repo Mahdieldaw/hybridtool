@@ -172,6 +172,8 @@ function colWidth(id: string): number {
     bs_pTau: 64,
     bs_nearSim: 220,
     bs_nearDir: 220,
+    semanticDensity: 72,
+    densityLift: 80,
     fate: 96,
     stance: 88,
     isExclusive: 72,

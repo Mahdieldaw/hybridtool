@@ -2,8 +2,7 @@ import type { EnrichedClaim } from '../../shared/contract';
 import { generateTextEmbeddings } from '../clustering/embeddings';
 import { cosineSimilarity } from '../clustering/distance';
 import { detectCarriers } from './CarrierDetector';
-import { DEFAULT_THRESHOLDS } from './types';
-import type { CarrierThresholds, SkeletonizationInput, StatementFate, TriageResult } from './types';
+import type { SkeletonizationInput, StatementFate, TriageResult } from './types';
 
 function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
@@ -55,8 +54,7 @@ function normalizeEmbedding(vec: Float32Array): Float32Array {
 }
 
 export async function triageStatements(
-  input: SkeletonizationInput,
-  thresholds: CarrierThresholds = DEFAULT_THRESHOLDS
+  input: SkeletonizationInput
 ): Promise<TriageResult> {
   const start = nowMs();
   const { statements, claims, traversalState } = input;
@@ -94,7 +92,7 @@ export async function triageStatements(
     embeddingTimeMs = nowMs() - embeddingStart;
     statementEmbeddings = new Map<string, Float32Array>();
     for (let i = 0; i < statements.length; i++) {
-      const emb = rawStatementEmbeddings.get(String(i));
+      const emb = rawStatementEmbeddings.embeddings.get(String(i));
       if (emb) statementEmbeddings.set(statements[i].id, emb);
     }
   }
@@ -123,9 +121,9 @@ export async function triageStatements(
   }
 
   // Phase 2 + 3: paragraph-first triangulation then carrier detection
-  // Use blast surface vernal/exclusivity data or fallback to static cutoffs
-  // No longer computing dynamicRelevanceMin via findElbow
-  const dynamicRelevanceMin = 0.55;
+  // Statement ownership already validated by provenance reconstruction.
+  // Carrier identity already audited by blast surface (tauSim = muS + 2*sigmaS).
+  // No secondary relevance gates — trust the upstream measurements.
 
   const blastScoreByClaimId = new Map<string, typeof input.blastSurface.scores[0]>();
   if (input.blastSurface && Array.isArray(input.blastSurface.scores)) {
@@ -178,16 +176,6 @@ export async function triageStatements(
 
       const relevance = cosineSimilarity(sourceEmbedding, claimCentroid);
 
-      if (relevance < dynamicRelevanceMin) {
-        statementFates.set(sourceStatementId, {
-          statementId: sourceStatementId,
-          action: 'PROTECTED',
-          reason: `Not a confirmed carrier of pruned ${prunedClaim.id} — low relevance (${relevance.toFixed(2)})`,
-          triggerClaimId: prunedClaim.id,
-        });
-        continue;
-      }
-
       const layerBState = layerBByStatementId.get(sourceStatementId);
       if (layerBState) {
         const carrierCount = typeof layerBState.carrierCount === 'number' ? layerBState.carrierCount : 0;
@@ -211,8 +199,8 @@ export async function triageStatements(
             if (statementFates.has(carrierId)) continue;
 
             const carrierEmbedding = statementEmbeddings.get(carrierId);
-            const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
-            if (carrierRelevance < dynamicRelevanceMin) continue;
+            if (!carrierEmbedding) continue;
+            const carrierRelevance = cosineSimilarity(carrierEmbedding, claimCentroid);
 
             statementFates.set(carrierId, {
               statementId: carrierId,
@@ -236,6 +224,7 @@ export async function triageStatements(
         continue;
       }
 
+      residualFallbackCount++;
       const carrierResult = detectCarriers({
         prunedClaim,
         sourceStatementId,
@@ -243,7 +232,6 @@ export async function triageStatements(
         protectedStatementIds,
         statementEmbeddings,
         claimEmbeddings,
-        thresholds,
       });
 
       if (carrierResult.carriers.length > 0) {
@@ -251,26 +239,12 @@ export async function triageStatements(
         let validCarrierCount = 0;
 
         for (const carrier of carrierResult.carriers) {
-          const carrierEmbedding = statementEmbeddings.get(carrier.statementId);
-          const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
-          if (carrierRelevance >= dynamicRelevanceMin) validCarrierCount++;
-
+          validCarrierCount++;
           if (!statementFates.has(carrier.statementId)) {
-            if (carrierRelevance < dynamicRelevanceMin) {
-              statementFates.set(carrier.statementId, {
-                statementId: carrier.statementId,
-                action: 'PROTECTED',
-                reason: `Not a confirmed carrier of pruned ${prunedClaim.id} — low relevance (${carrierRelevance.toFixed(2)})`,
-                triggerClaimId: prunedClaim.id,
-                isSoleCarrier: false,
-              });
-              continue;
-            }
-
             statementFates.set(carrier.statementId, {
               statementId: carrier.statementId,
               action: 'SKELETONIZE',
-              reason: `Carrier of pruned ${prunedClaim.id} (relevance: ${carrierRelevance.toFixed(2)})`,
+              reason: `Carrier of pruned ${prunedClaim.id}`,
               triggerClaimId: prunedClaim.id,
               isSoleCarrier: false,
             });
@@ -338,11 +312,11 @@ export async function triageStatements(
         const claimCentroid = triggerClaimId ? claimEmbeddings.get(triggerClaimId) : null;
         const relevance = claimCentroid ? cosineSimilarity(emb, claimCentroid) : 0;
 
-        if (triggerClaimId && (!claimCentroid || relevance < dynamicRelevanceMin)) {
+        if (triggerClaimId && !claimCentroid) {
           statementFates.set(stmt.id, {
             statementId: stmt.id,
             action: 'PROTECTED',
-            reason: `Not a confirmed carrier paraphrase for pruned ${triggerClaimId} — low relevance (sim: ${similarity.toFixed(2)}, rel: ${relevance.toFixed(2)})`,
+            reason: `Not a confirmed carrier paraphrase for pruned ${triggerClaimId} — missing centroid`,
             triggerClaimId,
             isSoleCarrier: false,
           });
@@ -378,6 +352,7 @@ export async function triageStatements(
   let untriagedCount = 0;
   let skeletonizedCount = 0;
   let removedCount = 0;
+  let residualFallbackCount = 0;
 
   for (const fate of statementFates.values()) {
     if (fate.action === 'PROTECTED') protectedCount++;
@@ -397,6 +372,7 @@ export async function triageStatements(
       removedCount,
       processingTimeMs: nowMs() - start,
       embeddingTimeMs,
+      residualFallbackCount,
     },
   };
 }

@@ -51,6 +51,10 @@ export interface EvidenceRow {
   bs_nearSim: string | null;
   bs_nearDir: string | null;
 
+  // Density
+  semanticDensity: number | null;  // statement-level z-scored OLS residual magnitude
+  densityLift: number | null;      // claim's densityLift (constant for all rows under this claim)
+
   // Metadata
   fate: 'primary' | 'supporting' | 'unaddressed' | 'orphan' | 'noise' | null;
   stance: string | null;
@@ -152,7 +156,15 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       if (typeof count === "number") claimCountByStmt.set(String(stmtId), count);
     }
 
-    return { queryScoreByStmt, fateByStmt, claimCountByStmt };
+    const semanticDensityByStmt = new Map<string, number>();
+    const rawDensity = a?.statementSemanticDensity;
+    if (rawDensity && typeof rawDensity === 'object') {
+      for (const [k, v] of Object.entries(rawDensity)) {
+        if (typeof v === 'number' && Number.isFinite(v)) semanticDensityByStmt.set(String(k), v);
+      }
+    }
+
+    return { queryScoreByStmt, fateByStmt, claimCountByStmt, semanticDensityByStmt };
   }, [artifact]);
 
   // Claim-relative maps — rebuild when selectedClaimId changes
@@ -256,7 +268,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     }
     blastTauDir = typeof bs?.layerBGate2?.tauDir === "number" && Number.isFinite(bs.layerBGate2.tauDir) ? bs.layerBGate2.tauDir : null;
 
-    return { continuousFieldByStmt, competitiveByStmt, mixedByStmt, exclusiveIds, directTopIds, blastAbsorptionByStmt, blastAbsorptionGate2ByStmt, blastTauDir };
+    const densityLiftForClaim = typeof claimObj?.densityLift === 'number' && Number.isFinite(claimObj.densityLift)
+      ? claimObj.densityLift as number
+      : null;
+
+    return { continuousFieldByStmt, competitiveByStmt, mixedByStmt, exclusiveIds, directTopIds, blastAbsorptionByStmt, blastAbsorptionGate2ByStmt, blastTauDir, densityLiftForClaim };
   }, [artifact, selectedClaimId]);
 
   return useMemo(() => {
@@ -269,6 +285,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
       // Global fields
       const sim_query = globalMaps?.queryScoreByStmt.get(stmtId) ?? null;
+      const semanticDensity = globalMaps?.semanticDensityByStmt.get(stmtId) ?? null;
       const fateEntry = globalMaps?.fateByStmt.get(stmtId) ?? null;
       const fate = (fateEntry?.fate as EvidenceRow['fate']) ?? null;
       const claimCount = globalMaps?.claimCountByStmt.get(stmtId) ?? 0;
@@ -333,6 +350,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         bs_pTau: null,
         bs_nearSim: null,
         bs_nearDir: null,
+
+        semanticDensity,
+        densityLift: claimMaps?.densityLiftForClaim ?? null,
 
         fate,
         stance: typeof stmt.stance === 'string' ? stmt.stance : null,

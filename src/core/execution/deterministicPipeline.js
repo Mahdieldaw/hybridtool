@@ -558,6 +558,7 @@ export function assembleMapperArtifact({
   turn = undefined,
   surveyGates = undefined,
   surveyRationale = null,
+  statementSemanticDensity = undefined,
 }) {
   const {
     blastSurfaceResult,
@@ -602,5 +603,6 @@ export function assembleMapperArtifact({
     ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(alignmentResult ? { alignment: alignmentResult } : {}),
+    ...(statementSemanticDensity ? { statementSemanticDensity } : {}),
   };
 }

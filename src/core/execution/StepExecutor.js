@@ -570,6 +570,7 @@ export class StepExecutor {
           generateEmbeddings,
           generateTextEmbeddings,
           generateStatementEmbeddings,
+          projectSemanticDensity,
           stripInlineMarkdown,
           structuredTruncate,
           getEmbeddingStatus,
@@ -588,12 +589,16 @@ export class StepExecutor {
             ? `Represent this sentence for searching relevant passages: ${truncatedQuery}`
             : truncatedQuery;
 
+        let queryRawMagnitude = null;
+        let queryTextLength = null;
         const queryEmbeddingPromise = (async () => {
           try {
             await offscreenReadyPromise;
             console.log(`[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`);
-            const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG);
-            queryEmbedding = queryEmbeddingBatch.get('0') || null;
+            const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG, { captureRawMagnitudes: true });
+            queryEmbedding = queryEmbeddingBatch.embeddings.get('0') || null;
+            queryRawMagnitude = queryEmbeddingBatch.rawMagnitudes?.get('0') ?? null;
+            queryTextLength = queryEmbeddingBatch.textLengths?.get('0') ?? null;
             if (queryEmbedding && queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
               throw new Error(
                 `[StepExecutor] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${queryEmbedding.length}`
@@ -623,10 +628,25 @@ export class StepExecutor {
             );
             embeddingResult = paragraphEmbeddingResult;
             geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
+            const paraDensity = paragraphEmbeddingResult?.semanticDensityScores;
+            let paragraphSemanticDensity = null;
+            if (paraDensity && paraDensity.size > 0) {
+              const entries = Array.from(paraDensity.entries());
+              const values = entries.map(([, v]) => v);
+              const mean = values.reduce((a, b) => a + b, 0) / values.length;
+              const sorted = entries.slice().sort((a, b) => b[1] - a[1]);
+              paragraphSemanticDensity = {
+                count: paraDensity.size,
+                mean,
+                topDense: sorted.slice(0, 3).map(([id, score]) => ({ id, score })),
+                topHollow: sorted.slice(-3).reverse().map(([id, score]) => ({ id, score })),
+              };
+            }
             geometryDiagnostics.stages.paragraphEmbeddings = {
               status: 'ok',
               paragraphs: paragraphResult.paragraphs.length,
               paragraphEmbeddings: paragraphEmbeddingResult.embeddings.size,
+              semanticDensity: paragraphSemanticDensity,
             };
           } catch (err) {
             embeddingResult = null;
@@ -654,11 +674,29 @@ export class StepExecutor {
               shadowResult.statements,
               DEFAULT_CONFIG
             );
+            const densityScores = statementEmbeddingResult?.semanticDensityScores;
+            let semanticDensity = null;
+            if (densityScores && densityScores.size > 0) {
+              const densityEntries = Array.from(densityScores.entries());
+              const densityValues = densityEntries.map(([, v]) => v);
+              const densityMean = densityValues.reduce((a, b) => a + b, 0) / densityValues.length;
+              const sorted = densityEntries.slice().sort((a, b) => b[1] - a[1]);
+              semanticDensity = {
+                count: densityScores.size,
+                mean: densityMean,
+                topDense: sorted.slice(0, 3).map(([id, score]) => ({ id, score })),
+                topHollow: sorted.slice(-3).reverse().map(([id, score]) => ({ id, score })),
+              };
+            }
             geometryDiagnostics.stages.statementEmbeddings = {
               status: 'ok',
               statements: shadowResult.statements.length,
               embedded: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
+              semanticDensity,
             };
+            if (semanticDensity) {
+              console.log('[StepExecutor] Semantic density:', JSON.stringify(semanticDensity));
+            }
           } catch (embeddingError) {
             console.warn('[StepExecutor] Statement embedding generation failed, continuing without embeddings:', getErrorMessage(embeddingError));
             geometryDiagnostics.embeddingBackendFailure = true;
@@ -673,6 +711,20 @@ export class StepExecutor {
         await queryEmbeddingPromise;
         await paragraphEmbeddingPromise;
         await statementEmbeddingPromise;
+
+        // Post-await: project query density using statement regression model
+        if (queryRawMagnitude != null && queryTextLength != null
+            && statementEmbeddingResult?.densityRegressionModel) {
+          const score = projectSemanticDensity(
+            queryRawMagnitude,
+            queryTextLength,
+            statementEmbeddingResult.densityRegressionModel
+          );
+          const querySemanticDensity = { score, projectedFrom: 'statement-regression' };
+          if (geometryDiagnostics.stages.queryEmbedding) {
+            geometryDiagnostics.stages.queryEmbedding.semanticDensity = querySemanticDensity;
+          }
+        }
 
         const firstParagraphEmbedding = geometryParagraphEmbeddings?.values?.().next?.().value;
         if (queryEmbedding && firstParagraphEmbedding && firstParagraphEmbedding.length !== queryEmbedding.length) {
@@ -1002,6 +1054,10 @@ export class StepExecutor {
               : null;
 
             if (packedStatements || packedParagraphs || queryBuffer) {
+              const densityMap = statementEmbeddingResult?.semanticDensityScores;
+              const densityObj = densityMap && densityMap.size > 0
+                ? Object.fromEntries(densityMap)
+                : null;
               options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
                 ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
                 ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
@@ -1014,6 +1070,7 @@ export class StepExecutor {
                   hasQuery: Boolean(queryBuffer),
                   ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
                   ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
+                  ...(densityObj ? { semanticDensityScores: densityObj } : {}),
                   timestamp: Date.now(),
                 },
               }).catch((err) => console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err));
@@ -1218,9 +1275,15 @@ export class StepExecutor {
 
                 // Generate claim embeddings ONCE — reused by provenance + elbow diagnostics
                 let claimEmbeddings = null;
+                let claimDensityScores = null;
                 try {
                   const { generateClaimEmbeddings } = await import('../../ConciergeService/claimAssembly');
-                  claimEmbeddings = await generateClaimEmbeddings(mapperClaimsForProvenance);
+                  const claimEmbResult = await generateClaimEmbeddings(
+                    mapperClaimsForProvenance,
+                    statementEmbeddingResult?.densityRegressionModel
+                  );
+                  claimEmbeddings = claimEmbResult.embeddings;
+                  claimDensityScores = claimEmbResult.semanticDensityScores || null;
                 } catch (claimEmbErr) {
                   console.warn('[StepExecutor] Claim embedding generation failed:', getErrorMessage(claimEmbErr));
                 }
@@ -1271,6 +1334,19 @@ export class StepExecutor {
                     statementEmbeddingResult?.embeddings || null,
                     claimEmbeddings,
                   );
+
+                  // Compute densityLift: claim density minus mean density of assigned statements
+                  if (claimDensityScores && statementEmbeddingResult?.semanticDensityScores) {
+                    const stmtDensity = statementEmbeddingResult.semanticDensityScores;
+                    for (const claim of enrichedClaims) {
+                      const claimScore = claimDensityScores.get(claim.id);
+                      if (claimScore == null || !claim.sourceStatementIds?.length) continue;
+                      const assigned = claim.sourceStatementIds
+                        .map(sid => stmtDensity.get(sid)).filter(v => v != null);
+                      if (assigned.length === 0) continue;
+                      claim.densityLift = claimScore - assigned.reduce((a, b) => a + b, 0) / assigned.length;
+                    }
+                  }
 
                   // ── DETERMINISTIC PIPELINE (shared with regenerate flow) ──
                   const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
@@ -1460,6 +1536,9 @@ export class StepExecutor {
                     turn: context.turn || 0,
                     surveyGates: rawGates.length > 0 ? rawGates : undefined,
                     surveyRationale,
+                    statementSemanticDensity: statementEmbeddingResult?.semanticDensityScores?.size > 0
+                      ? Object.fromEntries(statementEmbeddingResult.semanticDensityScores)
+                      : undefined,
                   });
                   // Add StepExecutor-specific fields
                   mapperArtifact.preSemantic = preSemanticInterpretation || null;

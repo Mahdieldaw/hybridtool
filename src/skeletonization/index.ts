@@ -203,6 +203,7 @@ function createPassthroughSubstrate(input: SkeletonizationInput): ChewedSubstrat
       protectedStatementCount: input.statements.length,
       skeletonizedStatementCount: 0,
       removedStatementCount: 0,
+      residualFallbackCount: 0,
     },
     pathSteps: input.traversalState.pathSteps,
     meta: { triageTimeMs: 0, reconstructionTimeMs: 0, embeddingTimeMs: 0, totalTimeMs: 0 },

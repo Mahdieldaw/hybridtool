@@ -38,6 +38,7 @@ export interface TriageResult {
     removedCount: number;
     processingTimeMs: number;
     embeddingTimeMs: number;
+    residualFallbackCount: number; // non-exclusive statements all of whose owning claims were pruned — no layerB data, fell to detectCarriers
   };
 }
 
@@ -79,6 +80,7 @@ export interface ChewedSubstrate {
     untriagedStatementCount?: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
+    residualFallbackCount: number;
   };
   pathSteps: string[];
   meta: {
@@ -109,12 +111,3 @@ export interface SkeletonizationInput {
   blastSurface?: any | null;
 }
 
-export interface CarrierThresholds {
-  claimSimilarity: number;
-  sourceSimilarity: number;
-}
-
-export const DEFAULT_THRESHOLDS: CarrierThresholds = {
-  claimSimilarity: 0.6,
-  sourceSimilarity: 0.6,
-};
