@@ -263,7 +263,6 @@ export async function reconstructProvenance(
             label: claim.label,
             text: claim.text,
             supporters,
-            challenges: claim.challenges ?? null,
             support_count: supporters.length,
             type: 'assertive' as const,
             role: 'supplement' as const,

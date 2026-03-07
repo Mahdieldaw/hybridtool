@@ -18,7 +18,6 @@ import {
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
   activeProviderTargetAtom,
-  batchAutoRunEnabledAtom,
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
@@ -49,7 +48,6 @@ export function useChat() {
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const turnIds = useAtomValue(turnIdsAtom);
   const singularityProvider = useAtomValue(singularityProviderAtom);
-  const batchAutoRunEnabled = useAtomValue(batchAutoRunEnabledAtom);
 
 
 
@@ -154,11 +152,8 @@ export function useChat() {
             type: "extend",
             sessionId: currentSessionId as string,
             userMessage: prompt,
-            // If gating is active (auto-run disabled), only send the singularity provider
-            providers: !batchAutoRunEnabled && effectiveSingularityProvider
-              ? [effectiveSingularityProvider as ProviderKey]
-              : activeProviders,
-            includeMapping: !batchAutoRunEnabled ? false : shouldUseMapping,
+            providers: activeProviders,
+            includeMapping: shouldUseMapping,
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
@@ -171,7 +166,6 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
-            batchAutoRunEnabled, // FEATURE 1: Gate batch after turn 1
           };
 
         // AI turn will be created upon TURN_CREATED from backend
@@ -198,7 +192,6 @@ export function useChat() {
       singularityProvider,
       thinkOnChatGPT,
       turnIds,
-      batchAutoRunEnabled,
     ],
   );
 

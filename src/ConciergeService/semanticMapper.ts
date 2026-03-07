@@ -80,7 +80,6 @@ Each claim:
 - label: a verb-phrase expressing the position being taken — something another model could support, oppose, or pull against
 - text: the reasoning or mechanism behind the claim (one paragraph maximum)
 - supporters: array of model indices that clearly advanced this position with reasoning strong enough to quote. Passing mention does not count.
-- challenges: the id of a claim this position pushes against, or null
 
 Each edge:
 - from / to: claim ids
@@ -189,37 +188,6 @@ export function parseSemanticMapperOutput(
     const out: any = output;
     if (!Array.isArray(out.edges)) out.edges = [];
     if (!Array.isArray(out.conditionals)) out.conditionals = [];
-
-    const claimIds = new Set<string>(
-      (Array.isArray(out.claims) ? out.claims : [])
-        .map((c: any) => String(c?.id || '').trim())
-        .filter(Boolean),
-    );
-
-    for (const c of Array.isArray(out.claims) ? out.claims : []) {
-      const from = String((c as any)?.id || '').trim();
-      const to = String((c as any)?.challenges || '').trim();
-      if (!from || !to || from === to || !claimIds.has(from) || !claimIds.has(to)) continue;
-
-      const conflicts = out.edges.filter(
-        (e: any) =>
-          e &&
-          e.type === 'conflicts' &&
-          ((e.from === from && e.to === to) || (e.from === to && e.to === from)),
-      );
-
-      if (conflicts.length === 0) {
-        out.edges.push({ from, to, type: 'conflicts' });
-        continue;
-      }
-
-      for (const e of conflicts) {
-        if (e.from !== from || e.to !== to) {
-          e.from = from;
-          e.to = to;
-        }
-      }
-    }
   }
 
   return {

@@ -3,16 +3,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // Runs after the blast radius filter. Receives ONLY the pre-filtered
-// high-blast-radius claims and generates per-claim yes/no questions.
+// high-blast-radius claims.
 //
-// The blast radius filter decides WHICH claims matter.
-// This mapper translates each into a human-readable question about the
-// user's real-world situation.
+// The model's primary output is an assessment of what each claim assumes
+// about the user's world — grounded in the claim text and source
+// responses. Gates emerge as a consequence of that assessment, not as
+// the goal. This mirrors the semantic mapper's "name positions first,
+// draw edges second" — extract before evaluate, so the extraction
+// constrains the evaluation.
 //
-// The LLM's job is narrow: for each claim independently, identify the
-// hidden real-world assumption and write one yes/no question testing it.
-// It does NOT reason across claims or detect conflicts — the math already
-// did that.
+// Why construct→fork→hinge failed: those were abstract categories the
+// model could fill with anything plausible. "What does this claim
+// assume about the user?" is a concrete extraction anchored in the
+// actual text. The model has to point at something real.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { extractJsonFromContent } from '../../shared/parsing-utils';
@@ -43,10 +46,7 @@ function formatClaimsForPrompt(claims: ClaimSummary[]): string {
       const supporters = Array.isArray(c.supporters) && c.supporters.length > 0
         ? ` [Models: ${c.supporters.join(', ')}]`
         : '';
-      const br = typeof c.blastRadius === 'number'
-        ? ` [blast_radius: ${c.blastRadius.toFixed(2)}]`
-        : '';
-      return `[${c.id}] ${c.label}${supporters}${br}\n${c.text || ''}`.trim();
+      return `[${c.id}] ${c.label}${supporters}\n${c.text || ''}`.trim();
     })
     .join('\n\n');
 }
@@ -82,19 +82,9 @@ export function buildSurveyMapperPrompt(
   const claimsBlock = formatClaimsForPrompt(claims);
   const sourcesBlock = formatBatchTexts(batchTexts);
 
-  return `You are a Survey Methodologist. The user asked:
+  return `The models below answered a question. These claims were identified as structurally important to the synthesis.
 
 <original_query>${userQuery}</original_query>
-
-A structural analysis identified the following claims as HIGH-IMPACT: removing any of them would significantly alter the synthesis. Your job: for EACH claim independently, identify the hidden real-world assumption that must be true for this claim to matter to this specific user.
-
-Rules:
-1. Treat each claim independently. Do NOT reason about relationships between claims.
-2. For each claim, ask: "What real-world condition about the user's situation must be true for this claim to be relevant?"
-3. Write a yes/no question about ONE observable fact the user can report — something you could verify by visiting their workplace, checking their calendar, or watching their last five decisions.
-4. The question must be about the user's reality (their constraints, context, goals), NOT about the solution space or technical preferences.
-5. If no meaningful condition exists — the claim applies universally regardless of the user's situation — do NOT generate a gate for that claim. Fewer gates is better. Zero gates is valid.
-6. If the user's answer cannot cause a claim to become *inapplicable* (not less preferred, not lower priority, but structurally irrelevant), you do not have a gate. Do not output it.
 
 <claims>
 ${claimsBlock}
@@ -104,32 +94,56 @@ ${claimsBlock}
 ${sourcesBlock}
 </source_responses>
 
----
+For each claim, state what it assumes about the user's real-world situation — their resources, constraints, environment, setup, or circumstances. Ground this in what the claim text and source responses actually say or imply. Some claims will assume nothing specific; they apply to anyone regardless of situation. Say so.
+
+Then, for each assumption you identified, evaluate: is this assumption unverified, and would it being false make the claim impossible to act on — not less useful, but impossible?
+
+Here is what a genuine dependency looks like:
+
+A claim says "consolidate your three vendors into one." The assumption: the user works with multiple vendors. If false, consolidation is structurally impossible. A non-circular question: "Do you currently work with more than one vendor for this?" This tests a precondition, not whether consolidation is desirable.
+
+That is the bar. The question tests an observable fact. "No" makes the claim impossible, not suboptimal. The question does not circle back to whether the user wants what the claim recommends.
 
 Output JSON:
 
 \`\`\`json
 {
+  "assessments": [
+    {
+      "claimId": "claim_X",
+      "assumes": "This claim assumes [what about the user's world], based on [what in the claim/source text].",
+      "verdict": "stands | vulnerable",
+      "reasoning": "Stands because [why], or vulnerable because if [assumption] is false, [why the claim is dead]."
+    }
+  ],
   "gates": [
     {
       "id": "gate_1",
-      "question": "Do you have [observable real-world condition]?",
-      "reasoning": "This claim assumes [hidden assumption]. If false, the claim is structurally irrelevant because [explanation].",
+      "question": "Do you [observable real-world condition]?",
+      "reasoning": "If no, this claim cannot be acted on because [explanation].",
       "affectedClaims": ["claim_X"]
     }
   ]
 }
 \`\`\`
 
-If no claim has a meaningful hidden assumption — and many will not — output \`{ "gates": [] }\` and explain briefly outside the JSON block which claims you evaluated and why each lacks a gate. This explanation is for debugging only.`;
+Every claim gets an assessment. Only claims with verdict "vulnerable" produce a gate. If a claim assumes nothing specific about the user's world, say so — that is the assessment. If you find yourself writing an assumption that the claim would survive without, the verdict is "stands" and there is no gate.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // PARSER
 // ─────────────────────────────────────────────────────────────────────────
 
+export interface ClaimAssessment {
+  claimId: string;
+  assumes: string;
+  verdict: 'stands' | 'vulnerable';
+  reasoning: string;
+}
+
 export interface SurveyMapperParseResult {
   gates: SurveyGate[];
+  assessments: ClaimAssessment[];
   rationale: string | null;
   errors: string[];
 }
@@ -167,6 +181,27 @@ function validateGate(gate: unknown, errors: string[]): boolean {
   return true;
 }
 
+function validateAssessment(assessment: unknown, errors: string[]): boolean {
+  if (!assessment || typeof assessment !== 'object') {
+    errors.push('Assessment is not an object');
+    return false;
+  }
+  const a = assessment as Record<string, unknown>;
+  if (!a.claimId || typeof a.claimId !== 'string' || !a.claimId.trim()) {
+    errors.push('Assessment missing claimId');
+    return false;
+  }
+  if (!a.assumes || typeof a.assumes !== 'string' || !a.assumes.trim()) {
+    errors.push(`Assessment ${a.claimId}: assumes is empty`);
+    return false;
+  }
+  if (a.verdict !== 'stands' && a.verdict !== 'vulnerable') {
+    // Tolerate missing/wrong verdict — default to 'stands'
+    return true;
+  }
+  return true;
+}
+
 export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResult {
   const errors: string[] = [];
   const text = String(rawText || '');
@@ -195,37 +230,59 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
   const rationale = extractRationale(text, jsonStart, jsonEnd);
 
   if (!jsonContent) {
+    // No JSON at all — if there's rationale text, treat as valid zero-gate result
+    if (rationale && rationale.length > 0) {
+      return { gates: [], assessments: [], rationale, errors };
+    }
     errors.push('No JSON block found in survey mapper output');
-    return { gates: [], rationale, errors };
+    return { gates: [], assessments: [], rationale, errors };
   }
 
   const parsed = extractJsonFromContent(jsonContent);
   if (!parsed || typeof parsed !== 'object') {
     errors.push('Failed to parse JSON from survey mapper output');
-    return { gates: [], rationale, errors };
+    return { gates: [], assessments: [], rationale, errors };
   }
 
   const obj = parsed as Record<string, unknown>;
-  if (!Array.isArray(obj.gates)) {
-    errors.push('Output missing "gates" array');
-    return { gates: [], rationale, errors };
-  }
 
-  const gates: SurveyGate[] = [];
-  for (const raw of obj.gates) {
-    if (validateGate(raw, errors)) {
-      const r = raw as Record<string, unknown>;
-      gates.push({
-        id: String(r.id).trim(),
-        question: String(r.question || '').trim(),
-        reasoning: String(r.reasoning || '').trim(),
-        affectedClaims: Array.isArray(r.affectedClaims)
-          ? r.affectedClaims.map((c: unknown) => String(c).trim()).filter(Boolean)
-          : [],
-        blastRadius: typeof r.blastRadius === 'number' ? r.blastRadius : 0,
-      });
+  // Parse assessments
+  const assessments: ClaimAssessment[] = [];
+  if (Array.isArray(obj.assessments)) {
+    for (const raw of obj.assessments) {
+      if (validateAssessment(raw, errors)) {
+        const a = raw as Record<string, unknown>;
+        assessments.push({
+          claimId: String(a.claimId).trim(),
+          assumes: String(a.assumes || '').trim(),
+          verdict: a.verdict === 'vulnerable' ? 'vulnerable' : 'stands',
+          reasoning: String(a.reasoning || '').trim(),
+        });
+      }
     }
   }
 
-  return { gates, rationale, errors };
+  // Parse gates
+  const gates: SurveyGate[] = [];
+  if (Array.isArray(obj.gates)) {
+    for (const raw of obj.gates) {
+      if (validateGate(raw, errors)) {
+        const r = raw as Record<string, unknown>;
+        gates.push({
+          id: String(r.id).trim(),
+          question: String(r.question || '').trim(),
+          reasoning: String(r.reasoning || '').trim(),
+          affectedClaims: Array.isArray(r.affectedClaims)
+            ? r.affectedClaims.map((c: unknown) => String(c).trim()).filter(Boolean)
+            : [],
+          blastRadius: typeof r.blastRadius === 'number' ? r.blastRadius : 0,
+        });
+      }
+    }
+  } else if (!Array.isArray(obj.assessments)) {
+    // Neither assessments nor gates array found
+    errors.push('Output missing both "assessments" and "gates" arrays');
+  }
+
+  return { gates, assessments, rationale, errors };
 }

@@ -290,15 +290,6 @@ export const traversalStateByTurnAtom = atomWithStorage<Record<string, any>>(
   { getOnInit: true },
 );
 
-/**
- * Batch auto-run toggle for Singularity phases.
- * When OFF (default), batch providers won't run automatically after turn 1.
- * User must explicitly enable to trigger batch fanout on follow-up messages.
- */
-export const batchAutoRunEnabledAtom = atomWithStorage<boolean>(
-  "htos_batch_auto_run",
-  false,
-);
 
 
 

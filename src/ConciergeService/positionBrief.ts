@@ -8,7 +8,7 @@
 // - We transmit geometry (arrangement), not hierarchy or labels
 // - Concierge interprets in context of user's question
 //
-// Concierge sees: Side-by-side boxes (tensions), dividers (buckets), ? (ghosts)
+// Concierge sees: Side-by-side boxes (tensions), dividers (buckets)
 // Concierge does NOT see: Rankings, percentages, shape names, outlier labels
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -227,7 +227,6 @@ export function formatTargetedInsights(
 // NEW function needed in positionBrief.ts
 export function buildPositionBriefFromClaims(
     claims: EnrichedClaim[],
-    ghosts: string[] = []
 ): string {
     // Build a minimal analysis-like wrapper
     const analysisLike = {
@@ -235,25 +234,13 @@ export function buildPositionBriefFromClaims(
         edges: [] as Edge[],
     } as unknown as StructuralAnalysis;
 
-    return buildPositionBriefWithGhosts(analysisLike, ghosts);
+    return buildPositionBrief(analysisLike);
 }
 
 /**
  * Build position brief for concierge using the bucket-anchor algorithm.
- * Wrapper for backward compatibility or cases where ghosts are not available.
  */
 export function buildPositionBrief(analysis: StructuralAnalysis): string {
-    return buildPositionBriefWithGhosts(analysis, []);
-}
-
-/**
- * Build position brief for concierge with explicit ghost strings.
- * This is the primary entry point for the V4 geometry-first handoff.
- */
-export function buildPositionBriefWithGhosts(
-    analysis: StructuralAnalysis,
-    ghosts: string[] = []
-): string {
     const { claimsWithLeverage: allClaims, edges } = analysis;
 
     if (allClaims.length === 0) return "";
@@ -332,14 +319,6 @@ export function buildPositionBriefWithGhosts(
             brief += "───\n\n";
         }
     });
-
-    // 8. Ghosts separate with ? prefix
-    if (ghosts.length > 0) {
-        if (brief) brief += "───\n\n";
-        for (const g of ghosts) {
-            brief += `? ${g}\n\n`;
-        }
-    }
 
     return brief.trim();
 }

@@ -989,7 +989,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const mapperClaimsForProvenance = parsedClaims.map((c) => ({
             id: c.id, label: c.label, text: c.text,
             supporters: Array.isArray(c.supporters) ? c.supporters : [],
-            challenges: c?.challenges || null,
           }));
 
           const hashString = (input) => {

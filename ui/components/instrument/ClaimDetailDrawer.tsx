@@ -206,11 +206,7 @@ export function ClaimDetailDrawer({
               {claim.type}
             </span>
           )}
-          {claim.challenges && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] border bg-red-500/10 border-red-500/30 text-red-300">
-              challenges: {claim.challenges}
-            </span>
-          )}
+
         </div>
 
         {/* Claim text */}

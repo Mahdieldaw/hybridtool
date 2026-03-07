@@ -5,7 +5,6 @@ import {
   selectedModelsAtom,
   isLoadingAtom,
   isContinuationModeAtom,
-  activeProviderCountAtom,
   isReducedMotionAtom,
   chatInputHeightAtom,
   toastAtom,
@@ -15,7 +14,6 @@ import {
   workflowProgressAtom,
   isRoundActiveAtom,
   singularityProviderAtom,
-  batchAutoRunEnabledAtom,
   turnIdsAtom,
   turnsMapAtom,
   activeSplitPanelAtom,
@@ -44,7 +42,6 @@ const ChatInput = ({
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
 
   const [isContinuationMode] = useAtom(isContinuationModeAtom as any) as [boolean, any];
-  const [activeProviderCount] = useAtom(activeProviderCountAtom as any) as [number, any];
 
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
@@ -62,16 +59,12 @@ const ChatInput = ({
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
   const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
-  const [batchAutoRunEnabled, setBatchAutoRunEnabled] = useAtom(batchAutoRunEnabledAtom);
   const closeSplitPanel = useSetAtom(activeSplitPanelAtom);
 
   const setToast = useSetAtom(toastAtom);
 
   const { sendMessage, abort } = useChat();
 
-  const toggleBatchGating = useCallback(() => {
-    setBatchAutoRunEnabled(prev => !prev);
-  }, [setBatchAutoRunEnabled]);
 
   // Callbacks
   const handleSend = useCallback((prompt: string) => {
@@ -236,8 +229,6 @@ const ChatInput = ({
             voiceProviderId={singularityProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
-            isSingularityMode={!batchAutoRunEnabled}
-            forceGating={!batchAutoRunEnabled && turnIds.length > 0}
             collapsed={!isRoundActive}
             onCrownMove={(pid) => {
               setSingularityProvider(pid);
@@ -312,42 +303,6 @@ const ChatInput = ({
               )}
             </div>
           )}
-        </div>
-
-        <div
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 bg-chip-soft border rounded-full text-text-secondary text-xs whitespace-nowrap opacity-90 cursor-pointer transition-colors ${batchAutoRunEnabled ? 'border-border-subtle hover:bg-surface-highlight' : 'border-intent-danger/30 bg-intent-danger/5 hover:bg-intent-danger/10'}`}
-          role="button"
-          aria-live="polite"
-          title={batchAutoRunEnabled ? "Batch Auto-Run Enabled: Providers will run automatically after turn 1" : "Batch Gating Active: Only Singularity will run after turn 1 unless manually triggered"}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleBatchGating();
-          }}
-        >
-          {isLoading ? (
-            <span
-              aria-hidden="true"
-              className="inline-block w-2 h-2 rounded-full bg-intent-warning animate-pulse"
-            />
-          ) : batchAutoRunEnabled ? (
-            <span
-              aria-hidden="true"
-              className={`inline-block w-2 h-2 rounded-full bg-intent-success ${!isReducedMotion ? 'animate-pulse' : ''}`}
-            />
-          ) : (
-            <span
-              aria-hidden="true"
-              className="flex items-center justify-center w-3 h-3 text-intent-danger font-bold text-[10px]"
-            >
-              ⊘
-            </span>
-          )}
-          <span className={batchAutoRunEnabled ? "text-text-muted" : "text-intent-danger/80"}>
-            {batchAutoRunEnabled ? "System" : "Singularity"}
-          </span>
-          <span className={batchAutoRunEnabled ? "" : "text-intent-danger font-medium"}>
-            • {batchAutoRunEnabled ? activeProviderCount : 1}
-          </span>
         </div>
 
         <div className="relative">

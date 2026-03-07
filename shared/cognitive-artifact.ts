@@ -73,7 +73,7 @@ export function buildCognitiveArtifact(
       edges: mapper?.edges ?? [],
       conditionals: mapper?.conditionals ?? [],
       narrative: mapper?.narrative,
-      ghosts: Array.isArray(mapper?.ghosts) ? mapper.ghosts : undefined,
+
     },
     traversal: {
       forcingPoints: mapper?.forcingPoints ?? [],
@@ -116,7 +116,7 @@ export function buildCognitiveArtifact(
   // is sufficient — no need to touch this file.
   const consumedMapperKeys = new Set([
     // → semantic
-    'claims', 'edges', 'conditionals', 'narrative', 'ghosts',
+    'claims', 'edges', 'conditionals', 'narrative',
     // → traversal
     'traversalGraph', 'forcingPoints', 'traversalQuestions',
     // → geometry

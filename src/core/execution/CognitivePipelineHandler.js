@@ -208,8 +208,20 @@ export class CognitivePipelineHandler {
         console.log(`[CognitiveHandler] Orchestrating singularity for Turn = ${context.canonicalAiTurnId}, Provider = ${singularityProviderId}`);
         let singularityStep = null;
         try {
+          // Guarded dynamic import for resilience during partial deploys
+          let ConciergeModule;
+          try {
+            ConciergeModule = await import('../../ConciergeService/ConciergeService');
+          } catch (err) {
+            console.error("[CognitiveHandler] Critical error: ConciergeService module could not be loaded", err);
+          }
+          const ConciergeService = ConciergeModule?.ConciergeService;
+
+          // Handoff V2 feature flag — when false, every turn uses plain buildConciergePrompt
+          const handoffV2Enabled = ConciergeModule?.HANDOFF_V2_ENABLED === true;
+
           // ══════════════════════════════════════════════════════════════════
-          // HANDOFF V2: Determine if fresh instance needed
+          // Determine if fresh instance needed
           // ══════════════════════════════════════════════════════════════════
           const lastProvider = conciergeState?.lastSingularityProviderId;
           const providerChanged = lastProvider && lastProvider !== singularityProviderId;
@@ -217,26 +229,23 @@ export class CognitivePipelineHandler {
           // Fresh instance triggers:
           // 1. First time concierge runs
           // 2. Provider changed
-          // 3. COMMIT was detected in previous turn (commitPending)
+          // 3. COMMIT was detected in previous turn (only when handoff V2 is enabled)
           const needsFreshInstance =
             !conciergeState?.hasRunConcierge ||
             providerChanged ||
-            conciergeState?.commitPending;
+            (handoffV2Enabled && conciergeState?.commitPending);
 
           if (needsFreshInstance) {
-            console.log(`[CognitiveHandler] Fresh instance needed: first=${!conciergeState?.hasRunConcierge}, providerChanged=${providerChanged}, commitPending=${conciergeState?.commitPending}`);
+            console.log(`[CognitiveHandler] Fresh instance needed: first=${!conciergeState?.hasRunConcierge}, providerChanged=${providerChanged}, commitPending=${handoffV2Enabled && conciergeState?.commitPending}`);
           }
 
           // ══════════════════════════════════════════════════════════════════
-          // HANDOFF V2: Calculate turn number within current instance
+          // Calculate turn number within current instance
           // ══════════════════════════════════════════════════════════════════
           // Race Condition Fix: Idempotency Check
           if (conciergeState?.lastProcessedTurnId === context.canonicalAiTurnId) {
             console.log(`[CognitivePipeline] Turn ${context.canonicalAiTurnId} already processed, skipping duplicate execution.`);
-            // Return a result that indicates skipping, consistent with the function's expected output.
-            // Assuming `orchestrateSingularityPhase` should return a boolean or similar to indicate completion/success.
-            // If the caller expects a detailed result object, this return type might need adjustment.
-            return true; // Or a specific object if the caller expects it.
+            return true;
           }
 
           let turnInCurrentInstance = conciergeState?.turnInCurrentInstance || 0;
@@ -252,28 +261,19 @@ export class CognitivePipelineHandler {
           console.log(`[CognitiveHandler] Turn in current instance: ${turnInCurrentInstance}`);
 
           // ══════════════════════════════════════════════════════════════════
-          // HANDOFF V2: Build message based on turn number
+          // Build concierge prompt (handoff V2 turn variants gated by flag)
           // ══════════════════════════════════════════════════════════════════
           let conciergePrompt = null;
           let conciergePromptType = "standard";
           let conciergePromptSeed = null;
-
-          // Guarded dynamic import for resilience during partial deploys
-          let ConciergeModule;
-          try {
-            ConciergeModule = await import('../../ConciergeService/ConciergeService');
-          } catch (err) {
-            console.error("[CognitiveHandler] Critical error: ConciergeService module could not be loaded", err);
-          }
-          const ConciergeService = ConciergeModule?.ConciergeService;
 
           try {
             if (!ConciergeService) {
               throw new Error("ConciergeService not found in module");
             }
 
-            if (turnInCurrentInstance === 1) {
-              // Turn 1: Full buildConciergePrompt with prior context if fresh spawn after COMMIT
+            if (!handoffV2Enabled || turnInCurrentInstance === 1) {
+              // Default path (flag off) OR Turn 1: plain buildConciergePrompt
               conciergePromptType = "full";
               const conciergePromptSeedBase = {
                 isFirstTurn: true,
@@ -282,7 +282,7 @@ export class CognitivePipelineHandler {
               };
 
               conciergePromptSeed =
-                conciergeState?.commitPending && conciergeState?.pendingHandoff
+                handoffV2Enabled && conciergeState?.commitPending && conciergeState?.pendingHandoff
                   ? {
                     ...conciergePromptSeedBase,
                     priorContext: {
@@ -307,7 +307,7 @@ export class CognitivePipelineHandler {
                 console.warn("[CognitiveHandler] ConciergeService.buildConciergePrompt missing");
               }
             } else if (turnInCurrentInstance === 2) {
-              // Turn 2: Optimized followup (No structural analysis)
+              // Handoff V2 only — Turn 2: Optimized followup (No structural analysis)
               conciergePromptType = "followup_optimized";
               if (typeof ConciergeService.buildTurn2Message === 'function') {
                 conciergePrompt = ConciergeService.buildTurn2Message(userMessageForSingularity);
@@ -316,7 +316,7 @@ export class CognitivePipelineHandler {
                 console.warn("[CognitiveHandler] ConciergeService.buildTurn2Message missing, falling back to standard prompt");
               }
             } else {
-              // Turn 3+: Dynamic optimized followup
+              // Handoff V2 only — Turn 3+: Dynamic optimized followup
               conciergePromptType = "handoff_echo";
               const pendingHandoff = conciergeState?.pendingHandoff || null;
               if (typeof ConciergeService.buildTurn3PlusMessage === 'function') {
@@ -397,12 +397,13 @@ export class CognitivePipelineHandler {
 
               // ══════════════════════════════════════════════════════════════════
               // HANDOFF V2: Parse handoff from response (Turn 2+)
+              // Only active when HANDOFF_V2_ENABLED flag is true
               // ══════════════════════════════════════════════════════════════════
               let parsedHandoff = null;
               let commitPending = false;
               let userFacingText = singularityResult?.text || "";
 
-              if (turnInCurrentInstance >= 2) {
+              if (handoffV2Enabled && turnInCurrentInstance >= 2) {
                 try {
                   const { parseHandoffResponse, hasHandoffContent } = await import('../../../shared/parsing-utils');
                   const parsed = parseHandoffResponse(singularityResult?.text || '');

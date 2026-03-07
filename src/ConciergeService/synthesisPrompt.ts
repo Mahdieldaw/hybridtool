@@ -8,13 +8,12 @@ export interface SynthesisContext {
     userQuery: string;
     traversalState: TraversalState;
     graph: TraversalGraph;
-    ghosts: string[];
-    // NEW: For structural insights
+    // For structural insights
     structuralAnalysis?: TargetedAnalysis;
 }
 
 export function buildSynthesisPrompt(ctx: SynthesisContext): string {
-    const { userQuery, traversalState, graph, ghosts, structuralAnalysis } = ctx;
+    const { userQuery, traversalState, graph, structuralAnalysis } = ctx;
 
     // 1. Get active claims (post-traversal)
     const activeClaims = getActiveClaims(graph.claims, traversalState);
@@ -29,7 +28,7 @@ export function buildSynthesisPrompt(ctx: SynthesisContext): string {
         : '';
 
     // 3. LAYER 2: Position Brief (bucket system!)
-    const positionBrief = buildPositionBriefFromClaims(activeClaims, ghosts);
+    const positionBrief = buildPositionBriefFromClaims(activeClaims);
 
     // 4. LAYER 3: Structural Insights (targeted to active claims)
     const insightsSection = targeted

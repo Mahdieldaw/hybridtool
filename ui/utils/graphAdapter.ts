@@ -11,8 +11,8 @@ const isClaimType = (value: unknown): value is Claim["type"] =>
     typeof value === "string" && (CLAIM_TYPES as string[]).includes(value);
 
 const mapGraphEdgeTypeToEdgeType = (value: unknown): Edge["type"] => {
-    const t = typeof value === "string" ? value.toLowerCase() : "";
-    if (t === "conflicts" || t === "conflict" || t === "challenges" || t === "challenge") return "conflicts";
+    const t = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (t === "conflicts" || t === "conflict") return "conflicts";
     if (t === "tradeoff") return "tradeoff";
     if (t === "prerequisite") return "prerequisite";
     if (t === "supports") return "supports";
@@ -40,7 +40,6 @@ export function adaptGraphTopology(topology: GraphTopology | null): {
         support_count: Number((node as any)?.support_count) || 0,
         type: isClaimType((node as any)?.theme) ? (node as any).theme : "factual",
         role: "anchor",
-        challenges: null,
         quote: (node as any)?.quote,
     }));
 

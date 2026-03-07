@@ -49,34 +49,6 @@ export const detectDissentPattern = (
             insightScore: claim.leverage * (1 - claim.supportRatio) * 2
         });
     }
-    const challengers = claims.filter((c: EnrichedClaim) => {
-        if (c.role === 'challenger') return true;
-        if (!c.challenges) return false;
-        const chalList: string[] = Array.isArray(c.challenges) ? c.challenges : [c.challenges];
-        return chalList.some((id: string) => peakIdsSet.has(id));
-    });
-    for (const claim of challengers) {
-        if (dissentVoices.some((v: DissentVoice) => v.id === claim.id)) continue;
-        const chalList: string[] = Array.isArray(claim.challenges)
-            ? claim.challenges
-            : (claim.challenges ? [claim.challenges] : []);
-        const explicitTargets = chalList.filter((id: string) => peakIdsSet.has(id));
-        const targets = explicitTargets.length > 0
-            ? explicitTargets
-            : edges
-                .filter(e => e.from === claim.id && e.type === 'conflicts' && peakIdsSet.has(e.to))
-                .map(e => e.to);
-        if (targets.length === 0 && !claim.challenges) continue;
-        dissentVoices.push({
-            id: claim.id,
-            label: claim.label,
-            text: claim.text,
-            supportRatio: claim.supportRatio,
-            insightType: 'explicit_challenger',
-            targets,
-            insightScore: targets.length * (1 - claim.supportRatio) * 1.5
-        });
-    }
     const peakSupporters = new Set(peaks.flatMap(p => p.supporters));
     const outsiderModels = new Set<number>();
     claims.forEach((c: EnrichedClaim) => {
@@ -375,17 +347,6 @@ export const detectLeverageInversions = (
     for (const claim of claims) {
         if (!claim.isLeverageInversion) continue;
         const prereqTo = prerequisites.filter((e) => e.from === claim.id);
-        const highSupportTargets = prereqTo.filter((e) => topClaimIds.has(e.to));
-        if (claim.role === "challenger" && highSupportTargets.length > 0) {
-            inversions.push({
-                claimId: claim.id,
-                claimLabel: claim.label,
-                supporterCount: claim.supporters.length,
-                reason: "challenger_prerequisite_to_consensus",
-                affectedClaims: highSupportTargets.map((e) => e.to),
-            });
-            continue;
-        }
         if (prereqTo.length > 0) {
             inversions.push({
                 claimId: claim.id,
@@ -544,22 +505,6 @@ export const detectIsolatedClaims = (claims: EnrichedClaim[]): string[] => {
     return claims.filter((c) => c.isIsolated).map((c) => c.id);
 };
 
-// AUDIT: analyzeGhosts — DECORATIVE
-// ghostAnalysis ends up on StructuralAnalysis.ghostAnalysis. As of this audit,
-// no UI component reads structuralAnalysis.ghostAnalysis. The ghost strings
-// themselves flow into shape data builders (buildConvergentData's `blindSpots`,
-// buildParallelData's `gaps`, buildSparseData's clarifyingQuestions) and those
-// fields may be rendered if a component renders shape.data detail views.
-// But the ghostAnalysis summary object itself (count, mayExtendChallenger,
-// challengerIds) has no live consumer. DECORATIVE until wired to UI.
-export const analyzeGhosts = (ghosts: string[], claims: EnrichedClaim[]): StructuralAnalysis["ghostAnalysis"] => {
-    const challengers = claims.filter((c) => c.role === "challenger" || c.isChallenger);
-    return {
-        count: ghosts.length,
-        mayExtendChallenger: ghosts.length > 0 && challengers.length > 0,
-        challengerIds: challengers.map((c) => c.id),
-    };
-};
 
 export const detectEnrichedConflicts = (
     edges: Edge[],
@@ -577,7 +522,6 @@ export const detectEnrichedConflicts = (
         supportRatio: c.supportRatio,
         role: c.role,
         isHighSupport: c.isHighSupport,
-        challenges: c.challenges
     });
     for (const e of conflictEdges) {
         const a = claimMap.get(e.from);
@@ -592,23 +536,21 @@ export const detectEnrichedConflicts = (
             claimA: toConflictClaim(a),
             claimB: toConflictClaim(b),
             axis: {
-                explicit: a.challenges === b.id ? b.text : (b.challenges === a.id ? a.text : null),
+                explicit: b.text,
                 inferred: inferredAxis,
-                resolved: a.challenges === b.id ? b.text : (b.challenges === a.id ? a.text : inferredAxis)
+                resolved: b.text
             },
             combinedSupport,
             supportDelta,
             dynamics,
             isBothHighSupport: a.isHighSupport && b.isHighSupport,
             isHighVsLow: (a.isHighSupport && !b.isHighSupport) || (!a.isHighSupport && b.isHighSupport),
-            involvesChallenger: a.role === 'challenger' || b.role === 'challenger',
-            involvesAnchor: a.role === 'anchor' || b.role === 'anchor',
             involvesKeystone: a.isKeystone || b.isKeystone,
             stakes: {
                 choosingA: `Prioritizing ${a.label}`,
                 choosingB: `Prioritizing ${b.label}`
             },
-            significance: (a.supportRatio + b.supportRatio) * (a.role === 'challenger' || b.role === 'challenger' ? 1.5 : 1.0),
+            significance: a.supportRatio + b.supportRatio,
             clusterId: null
         });
     }
@@ -623,25 +565,10 @@ export const detectConflictClusters = (
     const clusters: ConflictCluster[] = [];
     const conflictsByClaim = new Map<string, string[]>();
     for (const c of conflicts) {
-        if (c.claimA.challenges === c.claimB.id) {
-            const list = conflictsByClaim.get(c.claimB.id) || [];
-            list.push(c.claimA.id);
-            conflictsByClaim.set(c.claimB.id, list);
-        } else if (c.claimB.challenges === c.claimA.id) {
-            const list = conflictsByClaim.get(c.claimA.id) || [];
-            list.push(c.claimB.id);
-            conflictsByClaim.set(c.claimA.id, list);
-        } else {
-            if (c.claimB.isHighSupport && !c.claimA.isHighSupport) {
-                const list = conflictsByClaim.get(c.claimB.id) || [];
-                list.push(c.claimA.id);
-                conflictsByClaim.set(c.claimB.id, list);
-            } else if (c.claimA.isHighSupport && !c.claimB.isHighSupport) {
-                const list = conflictsByClaim.get(c.claimA.id) || [];
-                list.push(c.claimB.id);
-                conflictsByClaim.set(c.claimA.id, list);
-            }
-        }
+        // claimA=from (challenger side), claimB=to (target side) — always group as claimA challenges claimB
+        const list = conflictsByClaim.get(c.claimB.id) || [];
+        list.push(c.claimA.id);
+        conflictsByClaim.set(c.claimB.id, list);
     }
     let clusterIdx = 0;
     for (const [targetId, challengers] of Array.from(conflictsByClaim.entries())) {

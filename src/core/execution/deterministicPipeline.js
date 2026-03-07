@@ -120,7 +120,6 @@ export async function computeDerivedFields({
         edges: parsedEdges,
         conditionals: parsedConditionals,
         narrative: '',
-        ghosts: null,
       }, null);
       result.cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
     }
@@ -189,7 +188,7 @@ export async function computeDerivedFields({
     // PATCH: Upgrade Layer 1 assignment into final Layer 2 canonical assignment for all downstream consumers
     let upgradedCount = 0;
     for (const ec of enrichedClaims) {
-      const canonical = result.mixedProvenanceResult.perClaim[ec.id]?.canonicalStatementIds;
+      const canonical = result.mixedProvenanceResult.perClaim?.[ec.id]?.canonicalStatementIds;
       if (Array.isArray(canonical)) {
         ec.sourceStatementIds = canonical;
         upgradedCount++;
@@ -324,7 +323,7 @@ export async function computeDerivedFields({
     .map(e => {
       const raw = String(e.type || '').trim();
       const t = raw.toLowerCase();
-      if (t === 'conflicts' || t === 'conflict' || t === 'challenges' || t === 'challenge') {
+      if (t === 'conflicts' || t === 'conflict') {
         return { ...e, type: EDGE_CONFLICTS };
       }
       if (t === 'prerequisite' || t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
@@ -583,7 +582,6 @@ export function assembleMapperArtifact({
     model_count: modelCount,
     claims: enrichedClaims,
     edges: [...(semanticEdges || []), ...(derivedSupportEdges || [])],
-    ghosts: null,
     narrative: String(parsedNarrative || '').trim(),
     conditionals: parsedConditionals,
     traversalGraph,

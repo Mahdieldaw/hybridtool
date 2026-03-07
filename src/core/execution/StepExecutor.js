@@ -1214,7 +1214,6 @@ export class StepExecutor {
                   label: c.label,
                   text: c.text,
                   supporters: Array.isArray(c.supporters) ? c.supporters : [],
-                  challenges: c?.challenges || null,
                 }));
 
                 // Generate claim embeddings ONCE — reused by provenance + elbow diagnostics
@@ -1981,9 +1980,11 @@ export class StepExecutor {
     }
 
     let ConciergeService;
+    let handoffV2Enabled = false;
     try {
       const module = await import('../../ConciergeService/ConciergeService');
       ConciergeService = module.ConciergeService;
+      handoffV2Enabled = module.HANDOFF_V2_ENABLED === true;
     } catch (e) {
       console.warn("[StepExecutor] Failed to import ConciergeService:", e);
       ConciergeService = null;
@@ -2059,7 +2060,7 @@ export class StepExecutor {
       let signal = null;
 
       try {
-        if (ConciergeService && typeof ConciergeService.parseConciergeOutput === "function") {
+        if (handoffV2Enabled && ConciergeService && typeof ConciergeService.parseConciergeOutput === "function") {
           const parsed = ConciergeService.parseConciergeOutput(rawText);
           if (parsed) {
             cleanedText = parsed.userResponse || cleanedText;

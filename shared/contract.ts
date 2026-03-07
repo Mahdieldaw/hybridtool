@@ -80,7 +80,6 @@ export interface Claim {
   | 'contested'
   | 'speculative';
   role: 'anchor' | 'branch' | 'challenger' | 'supplement';
-  challenges: string | null;
   quote?: string;
   support_count?: number;
   sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
@@ -98,7 +97,6 @@ export interface MapperClaim {
   label: string;
   text: string;
   supporters: number[];
-  challenges?: string | null;
 }
 
 export type MapperEdge =
@@ -231,7 +229,6 @@ export interface ProblemStructure extends ShapeClassification {
   peaks?: Array<{ id: string; label: string; supportRatio: number }>;
   peakRelationship?: "conflicting" | "trading-off" | "supporting" | "independent" | "none";
   peakPairRelations?: PeakPairRelationship[];
-  transferQuestion?: string;
   data?: ShapeData;
   signalStrength?: number;
   floorAssumptions?: string[];
@@ -254,7 +251,6 @@ export interface ConflictClaim {
   supportRatio: number;
   role: ClaimRole;
   isHighSupport: boolean;
-  challenges: string | null;
 }
 
 export interface ConflictInfo {
@@ -271,8 +267,6 @@ export interface ConflictInfo {
   dynamics: 'symmetric' | 'asymmetric';
   isBothHighSupport: boolean;
   isHighVsLow: boolean;
-  involvesChallenger: boolean;
-  involvesAnchor: boolean;
   involvesKeystone: boolean;
   stakes: {
     choosingA: string;
@@ -348,14 +342,6 @@ export interface FloorClaim {
   contestedBy: string[];
 }
 
-export interface ChallengerInfo {
-  id: string;
-  label: string;
-  text: string;
-  supportCount: number;
-  challenges: string | null;
-  targetsClaim: string | null;
-}
 
 export interface ChainStep {
   id: string;
@@ -394,23 +380,8 @@ export interface SettledShapeData {
   pattern: 'settled';
   floor: FloorClaim[];
   floorStrength: 'strong' | 'moderate' | 'weak';
-  challengers: ChallengerInfo[];
-  blindSpots: string[];
   confidence: number;
-  strongestOutlier: {
-    claim: {
-      id: string;
-      label: string;
-      text: string;
-      supportCount: number;
-      supportRatio: number;
-    };
-    reason: 'leverage_inversion' | 'explicit_challenger' | 'minority_voice';
-    structuralRole: string;
-    whatItQuestions: string;
-  } | null;
   floorAssumptions: string[];
-  transferQuestion: string;
 }
 
 export interface LinearShapeData {
@@ -435,7 +406,6 @@ export interface LinearShapeData {
     fragilityRatio: number;
     mostVulnerableStep: { step: ChainStep; cascadeSize: number } | null;
   };
-  transferQuestion: string;
 }
 
 export interface KeystoneShapeData {
@@ -455,7 +425,6 @@ export interface KeystoneShapeData {
     relationship: 'prerequisite' | 'supports';
   }>;
   cascadeSize: number;
-  challengers: ChallengerInfo[];
   decoupledClaims: Array<{
     id: string;
     label: string;
@@ -468,7 +437,6 @@ export interface KeystoneShapeData {
     transitivelyAffected: number;
     survives: number;
   };
-  transferQuestion: string;
 }
 
 export interface ContestedShapeData {
@@ -513,12 +481,10 @@ export interface DimensionalShapeData {
     dimensionB: string;
     relationship: 'independent' | 'overlapping' | 'conflicting';
   }>;
-  gaps: string[];
   governingConditions: string[];
   dominantDimension: DimensionCluster | null;
   hiddenDimension: DimensionCluster | null;
   dominantBlindSpots: string[];
-  transferQuestion: string;
 }
 
 export interface ExploratoryShapeData {
@@ -546,7 +512,6 @@ export interface ExploratoryShapeData {
     distanceReason: string;
   } | null;
   sparsityReasons: string[];
-  transferQuestion: string;
 }
 
 export interface ContextualShapeData {
@@ -639,7 +604,7 @@ export interface DissentPatternData {
     label: string;
     text: string;
     supportRatio: number;
-    insightType: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
+    insightType: 'leverage_inversion' | 'unique_perspective' | 'edge_case';
     targets?: string[];
     insightScore: number;
   }>;
@@ -649,7 +614,7 @@ export interface DissentPatternData {
     text: string;
     supportRatio: number;
     whyItMatters: string;
-    insightType?: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
+    insightType?: 'leverage_inversion' | 'unique_perspective' | 'edge_case';
   } | null;
   suppressedDimensions: string[];
 }
@@ -704,7 +669,6 @@ export interface EnrichedClaim extends Claim {
   leverage: number;
   leverageFactors: {
     supportWeight: number;
-    roleWeight: number;
     connectivityWeight: number;
     positionWeight: number;
   };
@@ -723,7 +687,6 @@ export interface EnrichedClaim extends Claim {
   isOutlier: boolean;
   isContested: boolean;
   isConditional: boolean;
-  isChallenger: boolean;
   isIsolated: boolean;
   chainDepth: number;
 }
@@ -739,7 +702,6 @@ export interface LinkedClaim {
   label: string;
   text: string;
   supporters: number[];
-  challenges: string | null;
   support_count: number;
   // Placeholder types for artifact compatibility (SA engine sets real values)
   type: Claim['type'];
@@ -1039,7 +1001,6 @@ export interface MapperOutput {
   edges: Edge[];
   conditionals?: ConditionalPruner[];
   narrative?: string;
-  ghosts?: string[] | null;
 }
 
 export interface ParsedMapperOutput extends MapperOutput {
@@ -1756,7 +1717,6 @@ export interface CognitiveArtifact {
     edges: Edge[];
     conditionals: ConditionalPruner[];
     narrative?: string;
-    ghosts?: string[];
   };
   traversal: {
     forcingPoints: ForcingPoint[];
@@ -1914,8 +1874,6 @@ export interface ExtendRequest {
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string;
-  /** When true, batch providers run automatically even after turn 1 */
-  batchAutoRunEnabled?: boolean;
 }
 
 /**
@@ -2378,11 +2336,6 @@ export interface StructuralAnalysis {
     tradeoffs: TradeoffPair[];
     convergencePoints: ConvergencePoint[];
     isolatedClaims: string[];
-  };
-  ghostAnalysis?: {
-    count: number;
-    mayExtendChallenger: boolean;
-    challengerIds: string[];
   };
   graph?: GraphAnalysis;
   ratios?: CoreRatios;

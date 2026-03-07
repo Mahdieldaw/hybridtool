@@ -661,7 +661,6 @@ export function parseSemanticMapperOutput(rawResponse: string): SemanticMapperPa
             label,
             text,
             supporters,
-            challenges: c.challenges || null,
             stance: 'NEUTRAL',
             gates: { conditionals: [] },
             sourceStatementIds: []
@@ -684,29 +683,11 @@ export function parseSemanticMapperOutput(rawResponse: string): SemanticMapperPa
         }
 
         let type: Edge['type'] = 'supports';
-        if (/^(conflicts?|challenges?)$/.test(rawType)) type = 'conflicts';
+        if (/^(conflicts?)$/.test(rawType)) type = 'conflicts';
         else if (rawType.includes('trade')) type = 'tradeoff';
         else if (rawType.includes('prerequisite')) type = 'prerequisite';
 
         edges.push({ from, to, type });
-    }
-
-    const hasConflictEdge = (a: string, b: string) =>
-        edges.some(e => e.type === 'conflicts' && ((e.from === a && e.to === b) || (e.from === b && e.to === a)));
-
-    for (const c of claims) {
-        const rawChallenges = (c as any).challenges;
-        if (!rawChallenges) continue;
-
-        const targets = Array.isArray(rawChallenges) ? rawChallenges : [rawChallenges];
-        for (const target of targets) {
-            const to = String(target).trim();
-            if (to && to !== c.id && claimIds.has(to)) {
-                if (!hasConflictEdge(c.id, to)) {
-                    edges.push({ from: c.id, to, type: 'conflicts' });
-                }
-            }
-        }
     }
 
     if (errors.length > 0) {
@@ -729,7 +710,7 @@ export function createEmptyMapperArtifact(): MapperArtifact {
     return {
         claims: [],
         edges: [],
-        ghosts: null,
+
         query: "",
         turn: 0,
         timestamp: new Date().toISOString(),

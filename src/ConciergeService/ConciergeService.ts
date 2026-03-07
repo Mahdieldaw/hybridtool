@@ -3,6 +3,14 @@
 // The Voice of Singularity
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Feature flag: Handoff V2 (multi-turn state, COMMIT detection, turn-specific prompts).
+ * When false, every concierge turn uses the plain buildConciergePrompt — no handoff
+ * parsing, no turn 2/3+ prompt variants, no commit/fresh-spawn logic.
+ * Set to true to re-enable the full handoff protocol.
+ */
+export const HANDOFF_V2_ENABLED = false;
+
 import {
     // Handoff V2
     ConciergeDelta,

@@ -59,7 +59,7 @@ export async function triageStatements(
   thresholds: CarrierThresholds = DEFAULT_THRESHOLDS
 ): Promise<TriageResult> {
   const start = nowMs();
-  const { statements, paragraphs, claims, traversalState } = input;
+  const { statements, claims, traversalState } = input;
   const validStatementIds = new Set(statements.map(s => s.id));
 
   const survivingClaims: EnrichedClaim[] = [];
@@ -99,14 +99,6 @@ export async function triageStatements(
     }
   }
 
-  // Build statement → paragraph lookup for paragraph-first triangulation
-  const statementToParagraphId = new Map<string, string>();
-  for (const para of paragraphs) {
-    for (const sid of para.statementIds) {
-      statementToParagraphId.set(sid, para.id);
-    }
-  }
-
   // Build centroid per pruned claim from its source statement embeddings
   const claimEmbeddings = new Map<string, Float32Array>();
   for (const claim of prunedClaims) {
@@ -131,8 +123,6 @@ export async function triageStatements(
   }
 
   // Phase 2 + 3: paragraph-first triangulation then carrier detection
-  const paragraphEmbeddings = input.paragraphEmbeddings;
-
   // Use blast surface vernal/exclusivity data or fallback to static cutoffs
   // No longer computing dynamicRelevanceMin via findElbow
   const dynamicRelevanceMin = 0.55;
@@ -150,57 +140,22 @@ export async function triageStatements(
 
     // If blastSurface tells us which statements are vulnerable, use those instead of elbow cuts
     const blastScore = blastScoreByClaimId.get(prunedClaim.id);
-    let candidateStatementIds: Set<string> | undefined;
+    const layerBByStatementId = new Map<string, any>();
+    const layerBCarrierIdsBySourceId = new Map<string, string[]>();
+    if (blastScore?.layerB?.statements && Array.isArray(blastScore.layerB.statements)) {
+      for (const bState of blastScore.layerB.statements) {
+        const sid = String(bState?.statementId || '').trim();
+        if (!sid) continue;
+        layerBByStatementId.set(sid, bState);
 
-    if (blastScore) {
-      candidateStatementIds = new Set<string>();
-      // Use exclusivity and vernal vulnerability data to seed initial candidates
-      if (blastScore.vernal?.vulnerableStatementIds) {
-        for (const vid of blastScore.vernal.vulnerableStatementIds) {
-          candidateStatementIds.add(vid);
+        const carriers: string[] = [];
+        const carrierEntries = Array.isArray(bState?.carriers) ? bState.carriers : [];
+        for (const c of carrierEntries) {
+          if (!c?.hasTwin) continue;
+          const bestId = String(c?.bestCandidateId || '').trim();
+          if (bestId) carriers.push(bestId);
         }
-      }
-      if (blastScore.layerB?.statements) {
-        for (const bState of blastScore.layerB.statements) {
-          // If it's an orphan or exclusive to this claim
-          if (bState.orphan || bState.carrierCount === 0) {
-            candidateStatementIds.add(bState.statementId);
-          }
-        }
-      }
-
-      // If we didn't find any solid candidates from blast surface, 
-      // fallback to top paragraph statements
-      if (candidateStatementIds.size === 0 && paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
-        const paraScores = paragraphs
-          .map(para => {
-            const paraEmb = paragraphEmbeddings.get(para.id);
-            return paraEmb ? { para, sim: cosineSimilarity(paraEmb, claimCentroid) } : null;
-          })
-          .filter((x): x is { para: typeof paragraphs[0]; sim: number } => x !== null)
-          .sort((a, b) => b.sim - a.sim);
-
-        const paraCutoff = Math.min(3, paraScores.length);
-        for (const { para } of paraScores.slice(0, paraCutoff)) {
-          for (const sid of para.statementIds) candidateStatementIds.add(sid);
-        }
-      }
-    } else if (paragraphEmbeddings && paragraphEmbeddings.size > 0 && claimCentroid) {
-      // Fallback pre-filter candidate statements
-      const paraScores = paragraphs
-        .map(para => {
-          const paraEmb = paragraphEmbeddings.get(para.id);
-          if (!paraEmb) return null;
-          return { para, sim: cosineSimilarity(paraEmb, claimCentroid) };
-        })
-        .filter((x): x is { para: typeof paragraphs[0]; sim: number } => x !== null)
-        .sort((a, b) => b.sim - a.sim);
-
-      const paraCutoff = Math.min(3, paraScores.length);
-
-      candidateStatementIds = new Set<string>();
-      for (const { para } of paraScores.slice(0, paraCutoff)) {
-        for (const sid of para.statementIds) candidateStatementIds.add(sid);
+        if (carriers.length > 0) layerBCarrierIdsBySourceId.set(sid, carriers);
       }
     }
 
@@ -233,6 +188,54 @@ export async function triageStatements(
         continue;
       }
 
+      const layerBState = layerBByStatementId.get(sourceStatementId);
+      if (layerBState) {
+        const carrierCount = typeof layerBState.carrierCount === 'number' ? layerBState.carrierCount : 0;
+        const orphan = !!layerBState.orphan || carrierCount === 0;
+
+        if (orphan) {
+          statementFates.set(sourceStatementId, {
+            statementId: sourceStatementId,
+            action: 'SKELETONIZE',
+            reason: `Orphan statement for pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)})`,
+            triggerClaimId: prunedClaim.id,
+            isSoleCarrier: true,
+          });
+        } else {
+          const carriersSkeletonized: string[] = [];
+          const carrierIds = layerBCarrierIdsBySourceId.get(sourceStatementId) ?? [];
+
+          for (const carrierId of carrierIds) {
+            if (!validStatementIds.has(carrierId)) continue;
+            if (protectedStatementIds.has(carrierId)) continue;
+            if (statementFates.has(carrierId)) continue;
+
+            const carrierEmbedding = statementEmbeddings.get(carrierId);
+            const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
+            if (carrierRelevance < dynamicRelevanceMin) continue;
+
+            statementFates.set(carrierId, {
+              statementId: carrierId,
+              action: 'SKELETONIZE',
+              reason: `Carrier twin for pruned ${prunedClaim.id} (relevance: ${carrierRelevance.toFixed(2)})`,
+              triggerClaimId: prunedClaim.id,
+              isSoleCarrier: false,
+            });
+            carriersSkeletonized.push(carrierId);
+          }
+
+          statementFates.set(sourceStatementId, {
+            statementId: sourceStatementId,
+            action: 'REMOVE',
+            reason: `Has ${carrierCount} carrier twin(s) for pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)})`,
+            triggerClaimId: prunedClaim.id,
+            carriersSkeletonized: carriersSkeletonized.length > 0 ? carriersSkeletonized : undefined,
+            isSoleCarrier: false,
+          });
+        }
+        continue;
+      }
+
       const carrierResult = detectCarriers({
         prunedClaim,
         sourceStatementId,
@@ -241,17 +244,18 @@ export async function triageStatements(
         statementEmbeddings,
         claimEmbeddings,
         thresholds,
-        candidateStatementIds,
       });
 
       if (carrierResult.carriers.length > 0) {
         const carriersSkeletonized: string[] = [];
+        let validCarrierCount = 0;
 
         for (const carrier of carrierResult.carriers) {
-          if (!statementFates.has(carrier.statementId)) {
-            const carrierEmbedding = statementEmbeddings.get(carrier.statementId);
-            const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
+          const carrierEmbedding = statementEmbeddings.get(carrier.statementId);
+          const carrierRelevance = carrierEmbedding ? cosineSimilarity(carrierEmbedding, claimCentroid) : 0;
+          if (carrierRelevance >= dynamicRelevanceMin) validCarrierCount++;
 
+          if (!statementFates.has(carrier.statementId)) {
             if (carrierRelevance < dynamicRelevanceMin) {
               statementFates.set(carrier.statementId, {
                 statementId: carrier.statementId,
@@ -274,19 +278,13 @@ export async function triageStatements(
           }
         }
 
-        // REMOVE only when content is demonstrably redundant: 2+ independent carriers exist.
-        // The relevance gate (step 2) already confirms this statement is about the pruned claim.
-        // Carrier count is the only additional signal needed.
-        const totalCarriers = carrierResult.carriers.length;
-        const canRemove = totalCarriers >= 2;
-
         statementFates.set(sourceStatementId, {
           statementId: sourceStatementId,
-          action: canRemove ? 'REMOVE' : 'SKELETONIZE',
+          action: validCarrierCount > 0 ? 'REMOVE' : 'SKELETONIZE',
           reason: `Pruned ${prunedClaim.id} (relevance: ${relevance.toFixed(2)}), ${carrierResult.carriers.length} carrier(s) found`,
           triggerClaimId: prunedClaim.id,
           carriersSkeletonized: carriersSkeletonized.length > 0 ? carriersSkeletonized : undefined,
-          isSoleCarrier: totalCarriers === 0,
+          isSoleCarrier: carrierResult.carriers.length === 0,
         });
       } else {
         statementFates.set(sourceStatementId, {

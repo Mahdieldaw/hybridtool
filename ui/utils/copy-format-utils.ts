@@ -92,14 +92,6 @@ export function formatClaimsAsText(claims: Claim[], edges: Edge[]): string {
         lines.push(claim.text);
 
         // Relationships (inline, no hierarchy language)
-        const challenges = claim.challenges
-            ? claims.find(c => c.id === claim.challenges)?.label
-            : null;
-
-        if (challenges) {
-            lines.push(`↳ *Challenges: ${challenges}*`);
-        }
-
         const conflictsWith = edges
             .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
             .map(e => {

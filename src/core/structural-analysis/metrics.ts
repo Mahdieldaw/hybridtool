@@ -115,18 +115,16 @@ export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
 };
 
 // AUDIT: computeClaimRatios — HEURISTIC
-// The leverage score combines four weights into a single number per claim.
+// The leverage score combines three weights into a single number per claim.
 // These weights are heuristic (design intuition), not calibrated against outcomes:
 //   supportWeight  = supportRatio * 2         — HEURISTIC: doubles support's contribution
-//   roleWeight     = { challenger:4, anchor:2, branch:1, supplement:0.5 } — HEURISTIC:
-//     challenger is weighted highest because it structurally constrains the peak;
-//     values are round-number intuitions, not derived from data.
 //   connectivityWeight = prereqOut*2 + prereqIn + conflictEdges*1.5 + degree*0.25 — HEURISTIC:
 //     prerequisite-out is weighted heaviest (you gate others); conflict edges more
 //     than degree edges (conflict is structural not incidental). All multipliers invented.
 //   positionWeight = isChainRoot ? 2 : 0     — HEURISTIC: chain roots get a flat bonus
 //     on the assumption that the first link in a dependency chain is disproportionately
 //     important. The value 2 is not calibrated.
+//   REMOVED: roleWeight (L2 — derived from semantic mapper edges, not structural)
 //
 // keystoneScore = outDegree * supporters.length — HEURISTIC:
 //   Treats outgoing-connection count and supporter count as symmetric contributors to
@@ -145,21 +143,13 @@ export const computeClaimRatios = (
     modelCount: number
 ): Omit<EnrichedClaim,
     'isHighSupport' | 'isLeverageInversion' | 'isKeystone' | 'isEvidenceGap' | 'isOutlier' |
-    'isContested' | 'isConditional' | 'isChallenger' | 'isIsolated' | 'chainDepth'
+    'isContested' | 'isConditional' | 'isIsolated' | 'chainDepth'
 > => {
     const safeModelCount = Math.max(modelCount, 1);
     const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
 
     const supportRatio = supporters.length / safeModelCount;
     const supportWeight = supportRatio * 2;
-
-    const roleWeights: Record<string, number> = {
-        challenger: 4,
-        anchor: 2,
-        branch: 1,
-        supplement: 0.5,
-    };
-    const roleWeight = roleWeights[claim.role] ?? 1;
 
     const outgoing = edges.filter((e) => e.from === claim.id);
     const incoming = edges.filter((e) => e.to === claim.id);
@@ -178,7 +168,7 @@ export const computeClaimRatios = (
     const hasOutgoingPrereq = outgoing.some((e) => e.type === "prerequisite");
     const positionWeight = !hasIncomingPrereq && hasOutgoingPrereq ? 2 : 0;
 
-    const leverage = supportWeight + roleWeight + connectivityWeight + positionWeight;
+    const leverage = supportWeight + connectivityWeight + positionWeight;
     const keystoneScore = outDegree * supporters.length;
 
     const supporterCounts = supporters.reduce((acc: Record<string, number>, s: number) => {
@@ -200,7 +190,6 @@ export const computeClaimRatios = (
         leverage,
         leverageFactors: {
             supportWeight,
-            roleWeight,
             connectivityWeight,
             positionWeight,
         },
@@ -295,11 +284,6 @@ export const assignPercentileFlags = (
             e.type === "prerequisite" && e.to === claim.id
         );
 
-        const isChallenger = !isHighSupport && edges.some(e =>
-            e.type === "conflicts" &&
-            ((e.from === claim.id && consensusIds.has(e.to)) || (e.to === claim.id && consensusIds.has(e.from)))
-        );
-
         const isIsolated = !connectedIds.has(claim.id);
         const chainDepth = chainDepthById.get(claim.id) ?? unreachableChainDepth;
 
@@ -313,7 +297,6 @@ export const assignPercentileFlags = (
             isOutlier,
             isContested: hasConflict,
             isConditional: hasIncomingPrereq,
-            isChallenger,
             isIsolated,
             chainDepth,
         };

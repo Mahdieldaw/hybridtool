@@ -56,11 +56,14 @@ export class WorkflowCompiler {
         break;
 
       case "extend":
-        // Check for gated singularity direct routing
-        const isGated = !compileRequest.batchAutoRunEnabled && compileRequest.singularity;
+        // Singularity-only: user selected only the singularity provider via council orbs
+        const isSingularityOnly = compileRequest.singularity
+          && Array.isArray(compileRequest.providers)
+          && compileRequest.providers.length === 1
+          && compileRequest.providers[0] === compileRequest.singularity;
 
-        if (isGated) {
-          console.log("[Compiler] Gated extend: Generating direct singularity step");
+        if (isSingularityOnly) {
+          console.log("[Compiler] Singularity-only extend: direct routing");
           const singularityStep = {
             stepId: `singularity-direct-${Date.now()}`,
             type: "singularity",
@@ -214,22 +217,9 @@ export class WorkflowCompiler {
   }
 
   _applyBatchGating(request, resolvedContext) {
-    if (!request || typeof request !== "object") return request;
-    // Gating strictly applies ONLY to extend requests
-    if (resolvedContext?.type !== "extend") return request;
-    if (request.batchAutoRunEnabled) return request;
-
-    // If auto-run is disabled, enforce single provider gating
-    // Prioritize singularity provider if specified; fallback to first in providers list
-    const gatedProvider = request.singularity || (Array.isArray(request.providers) ? request.providers[0] : null);
-
-    if (!gatedProvider) return request;
-
-    return {
-      ...request,
-      providers: [gatedProvider],
-      includeMapping: false // Disable mapping for gated turns
-    };
+    // No-op: gating is now fully controlled by provider selection in the UI.
+    // The providers array already reflects the user's council orb choices.
+    return request;
   }
 
   // ============================================================================

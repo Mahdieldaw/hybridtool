@@ -4,7 +4,6 @@ import {
     GraphAnalysis,
     StructuralAnalysis,
     SettledShapeData,
-    ChallengerInfo,
     FloorClaim,
     ContestedShapeData,
     CentralConflict,
@@ -29,7 +28,7 @@ export interface DissentVoice {
     label: string;
     text: string;
     supportRatio: number;
-    insightType: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
+    insightType: 'leverage_inversion' | 'unique_perspective' | 'edge_case';
     targets?: string[];
     insightScore?: number;
 }
@@ -41,12 +40,6 @@ export const generateWhyItMatters = (
     switch (voice.insightType) {
         case 'leverage_inversion':
             return `Low support but high structural importance—if "${voice.label}" is right, it reshapes the entire answer.`;
-        case 'explicit_challenger': {
-            const targetLabels = voice.targets?.map((t: string) => peaks.find(p => p.id === t)?.label).filter(Boolean);
-            return targetLabels && targetLabels.length > 0
-                ? `Directly challenges "${targetLabels[0]}"—the consensus may be missing something.`
-                : `Explicitly contests the dominant view.`;
-        }
         case 'unique_perspective':
             return `Comes from model(s) that don't support any consensus position—a genuinely different angle.`;
         case 'edge_case':
@@ -91,19 +84,6 @@ export const generateTransferQuestion = (
     }
 };
 
-function inferWhatOutlierQuestions(
-    outlier: EnrichedClaim,
-    floorClaims: EnrichedClaim[]
-): string {
-    if (outlier.challenges) {
-        return outlier.challenges;
-    }
-    if (outlier.role === "challenger") {
-        const mostSupported = [...floorClaims].sort((a, b) => b.supporters.length - a.supporters.length)[0];
-        return mostSupported ? `the validity of "${mostSupported.label}"` : "the floor consensus";
-    }
-    return "assumptions underlying the consensus";
-}
 
 // AUDIT: Shape Data Builders — LIVE (structure), PARTIALLY DECORATIVE (detail fields)
 //
@@ -123,8 +103,8 @@ function inferWhatOutlierQuestions(
 //     LIVE: floor[] (may be read by DecisionMapGraph for node highlighting — unconfirmed)
 //     HEURISTIC: floorStrength ("strong"/"moderate"/"weak" thresholds: 0.6 and 0.4 are
 //       round-number heuristics, not calibrated)
-//     DECORATIVE (likely): strongestOutlier, challengers[], transferQuestion —
-//       rich fields with no confirmed UI renderer as of this audit
+//     REMOVED: challengers[], strongestOutlier, transferQuestion, inferWhatOutlierQuestions
+//       (L2/L3 interpretive logic — role labels, semantic edges, canned prose)
 //
 //   buildForkedData → ContestedShapeData
 //     LIVE: centralConflict (collapsingQuestion hoisted to shape.centralConflict)
@@ -148,7 +128,7 @@ function inferWhatOutlierQuestions(
 //   buildParallelData → DimensionalShapeData
 //     DECORATIVE (likely): dimensions[], interactions[], dominantDimension,
 //       hiddenDimension, governingConditions — rich structure with no confirmed
-//       UI renderer. Ghost strings flow in as gaps[].
+//       UI renderer.
 //     NOTE — FALLBACK: if graph.componentCount < 2, reclassifies as convergent.
 //       Same epistemic issue as forked fallback: classification says 'parallel'
 //       but data says 'not enough components'. Masks the mismatch.
@@ -156,14 +136,13 @@ function inferWhatOutlierQuestions(
 //   buildSparseData → ExploratoryShapeData
 //     LIVE: signalStrength (stored, may be rendered by future sparse detail view)
 //     HEURISTIC: sparsityReasons thresholds (componentCount > claims*0.5,
-//       avgSupport < 0.3, ghosts > claims*0.3) are round-number heuristics
+//       avgSupport < 0.3) are round-number heuristics
 //     DECORATIVE (likely): looseClusters[], outerBoundary, clarifyingQuestions[]
 //       — no confirmed UI renderer for these fields
 //
 export const buildConvergentData = (
     claims: EnrichedClaim[],
     edges: Edge[],
-    ghosts: string[],
     modelCount: number
 ): SettledShapeData => {
     const floorClaims = claims.filter(c => c.isHighSupport);
@@ -188,75 +167,6 @@ export const buildConvergentData = (
         : 0;
     const floorStrength: "strong" | "moderate" | "weak" =
         avgSupport > 0.6 ? "strong" : avgSupport > 0.4 ? "moderate" : "weak";
-    const challengers = claims.filter(c =>
-        // c.role === "challenger" is the explicit structural role assigned during extraction.
-        // c.isChallenger is a secondary flag that might be true if the claim is identified as a challenge 
-        // even if its primary role was different (e.g. a supplementary claim that also challenges).
-        c.role === "challenger" || c.isChallenger
-    );
-    const challengerInfos: ChallengerInfo[] = challengers.map(c => {
-        const target = c.challenges ? claims.find(t => t.id === c.challenges) : null;
-        return {
-            id: c.id,
-            label: c.label,
-            text: c.text,
-            supportCount: c.supporters.length,
-            challenges: target ? target.text : null,
-            targetsClaim: c.challenges
-        };
-    });
-    const outsideClaims = claims.filter(c => !floorIds.has(c.id));
-    let strongestOutlier: SettledShapeData["strongestOutlier"] = null;
-    if (outsideClaims.length > 0) {
-        const leverageInversion = claims.find(c => c.isLeverageInversion);
-        if (leverageInversion) {
-            strongestOutlier = {
-                claim: {
-                    id: leverageInversion.id,
-                    label: leverageInversion.label,
-                    text: leverageInversion.text,
-                    supportCount: leverageInversion.supporters.length,
-                    supportRatio: leverageInversion.supportRatio
-                },
-                reason: "leverage_inversion",
-                structuralRole: "Leverage inversion claim with high structural importance and low support",
-                whatItQuestions: inferWhatOutlierQuestions(leverageInversion, floorClaims)
-            };
-        }
-        if (!strongestOutlier && challengerInfos.length > 0) {
-            const topChallenger = [...challengerInfos].sort((a, b) => b.supportCount - a.supportCount)[0];
-            const challengerClaim = claims.find(c => c.id === topChallenger.id);
-            if (challengerClaim) {
-                strongestOutlier = {
-                    claim: {
-                        id: challengerClaim.id,
-                        label: challengerClaim.label,
-                        text: challengerClaim.text,
-                        supportCount: challengerClaim.supporters.length,
-                        supportRatio: challengerClaim.supportRatio
-                    },
-                    reason: "explicit_challenger",
-                    structuralRole: "Direct challenger to the floor",
-                    whatItQuestions: topChallenger.challenges || "the consensus position"
-                };
-            }
-        }
-        if (!strongestOutlier) {
-            const topOutside = [...outsideClaims].sort((a, b) => b.supporters.length - a.supporters.length)[0];
-            strongestOutlier = {
-                claim: {
-                    id: topOutside.id,
-                    label: topOutside.label,
-                    text: topOutside.text,
-                    supportCount: topOutside.supporters.length,
-                    supportRatio: topOutside.supportRatio
-                },
-                reason: "minority_voice",
-                structuralRole: "Strongest claim outside consensus",
-                whatItQuestions: inferWhatOutlierQuestions(topOutside, floorClaims)
-            };
-        }
-    }
     const floorAssumptions: string[] = [];
     const floorSupporters = new Set(floorClaims.flatMap(c => c.supporters));
     if (floorSupporters.size < modelCount * 0.5) {
@@ -270,19 +180,12 @@ export const buildConvergentData = (
     if (contestedFloor.length > 0) {
         floorAssumptions.push(`${contestedFloor.length} floor claim(s) are under active challenge`);
     }
-    const transferQuestion = strongestOutlier
-        ? `For the consensus to hold, ${strongestOutlier.whatItQuestions} must be wrong. Is it?`
-        : "For the consensus to hold, what assumption must be true? Is it true in your situation?";
     return {
         pattern: "settled",
         floor,
         floorStrength,
-        challengers: challengerInfos,
-        blindSpots: ghosts,
         confidence: avgSupport,
-        strongestOutlier,
         floorAssumptions,
-        transferQuestion
     };
 };
 
@@ -312,7 +215,6 @@ export const buildForkedData = (
                         supportRatio: target.supportRatio,
                         role: target.role,
                         isHighSupport: target.isHighSupport,
-                        challenges: target.challenges
                     },
                     supportingClaims: [],
                     supportRationale: target.text
@@ -326,7 +228,6 @@ export const buildForkedData = (
                         supportRatio: c.supportRatio,
                         role: c.role,
                         isHighSupport: c.isHighSupport,
-                        challenges: c.challenges
                     })),
                     commonTheme: topCluster.theme,
                     supportingClaims: []
@@ -493,7 +394,6 @@ export const buildParallelData = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
-    ghosts: string[]
 ): DimensionalShapeData => {
     const dimensions: DimensionCluster[] = graph.components
         .filter((comp: string[]) => comp.length >= 2)
@@ -569,26 +469,20 @@ export const buildParallelData = (
     const governingConditions = claims
         .filter(c => c.type === "conditional")
         .map(c => c.text);
-    const transferQuestion = dimensions.length > 1
-        ? `Which dimension is most relevant: "${dominantDimension?.theme}" or "${hiddenDimension?.theme}"?`
-        : "Are there perspectives not represented in these dimensions?";
     return {
         pattern: "dimensional",
         dimensions,
         interactions,
-        gaps: ghosts,
         governingConditions,
         dominantDimension,
         hiddenDimension,
         dominantBlindSpots,
-        transferQuestion
     };
 };
 
 export const buildSparseData = (
     claims: EnrichedClaim[],
     graph: GraphAnalysis,
-    ghosts: string[],
     signalStrength: number
 ): ExploratoryShapeData => {
     const sortedBySupport = [...claims].sort((a, b) => b.supporters.length - a.supporters.length);
@@ -659,16 +553,10 @@ export const buildSparseData = (
     if (avgSupport < 0.3) {
         sparsityReasons.push("Low support concentration (models diverge)");
     }
-    if (ghosts.length > claims.length * 0.3) {
-        sparsityReasons.push("Many gaps identified (unexplored territory)");
-    }
     if (claims.every(c => c.inDegree + c.outDegree < 2)) {
         sparsityReasons.push("No claims strongly connected (flat structure)");
     }
     const clarifyingQuestions: string[] = [];
-    if (ghosts.length > 0) {
-        clarifyingQuestions.push(`What about: ${ghosts[0]}?`);
-    }
     if (isolatedClaims.length > 0) {
         clarifyingQuestions.push(
             `How does "${isolatedClaims[0].label}" relate to your situation?`
@@ -697,7 +585,6 @@ export const buildSparseData = (
             }
             : null,
         sparsityReasons,
-        transferQuestion: "What specific question would help collapse this ambiguity?"
     };
 };
 
@@ -723,22 +610,6 @@ export const buildKeystonePatternData = (
             };
         });
     const cascade = patterns.cascadeRisks.find((r: CascadeRisk) => r.sourceId === keystoneId);
-    const challengers = claims
-        .filter(c => c.role === "challenger")
-        .filter(c => {
-            return edges.some(e =>
-                e.type === "conflicts" &&
-                ((e.from === c.id && e.to === keystoneId) || (e.to === c.id && e.from === keystoneId))
-            );
-        })
-        .map(c => ({
-            id: c.id,
-            label: c.label,
-            text: c.text,
-            supportCount: c.supporters.length,
-            challenges: c.challenges,
-            targetsClaim: keystoneId || null
-        }));
     return {
         pattern: "keystone",
         keystone: {
@@ -752,16 +623,12 @@ export const buildKeystonePatternData = (
         },
         dependencies,
         cascadeSize: cascade?.dependentIds.length || dependencies.length,
-        challengers,
         decoupledClaims: [],
         cascadeConsequences: {
             directlyAffected: dependencies.length,
             transitivelyAffected: cascade?.dependentIds.length || dependencies.length,
             survives: 0
         },
-        transferQuestion: keystoneClaim.supporters.length <= 1
-            ? `The keystone has only ${keystoneClaim.supporters.length} supporter(s). Is "${keystoneClaim.label}" actually true in your situation?`
-            : `Everything flows from "${keystoneClaim.label}". Have you validated this foundation?`
     };
 };
 
@@ -813,9 +680,6 @@ export const buildChainPatternData = (
             ? [...weakLinks].sort((a, b) => b.cascadeSize - a.cascadeSize)[0]
             : null
     };
-    const transferQuestion = weakLinks.length > 0
-        ? `Step "${weakLinks[0].step.label}" is a weak link. Is it actually required?`
-        : "Where are you in this sequence? Have you validated the early steps?";
     return {
         pattern: "linear",
         chain,
@@ -825,6 +689,5 @@ export const buildChainPatternData = (
         terminalClaim,
         shortcuts: [],
         chainFragility,
-        transferQuestion
     };
 };

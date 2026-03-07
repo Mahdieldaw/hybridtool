@@ -49,7 +49,7 @@ function minifyMappingArtifactForPersistence(artifact) {
       edges: Array.isArray(semantic.edges) ? semantic.edges : [],
       conditionals: Array.isArray(semantic.conditionals) ? semantic.conditionals : [],
       narrative: semantic.narrative,
-      ...(Array.isArray(semantic.ghosts) ? { ghosts: semantic.ghosts } : {}),
+
     },
     traversal: {
       forcingPoints: Array.isArray(traversal.forcingPoints) ? traversal.forcingPoints : [],
@@ -369,8 +369,7 @@ export class WorkflowEngine {
     if (stepType === 'mapping') {
       baseOptions.contextManager = this.contextManager;
     }
-    // Note: refiner/antagonist options setup kept generic or handled in CognitivePipelineHandler if needed,
-    // but here we are strictly Foundation phase.
+
 
     return baseOptions;
   }
