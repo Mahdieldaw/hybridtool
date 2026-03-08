@@ -873,14 +873,12 @@ export const DecisionMapSheet = React.memo(() => {
     // Always load geometry+shadow since instrument layout needs them regardless of selected layer
     const hasGeometry = Array.isArray(mappingArtifact?.geometry?.substrate?.nodes) && mappingArtifact.geometry.substrate.nodes.length > 0;
     const hasShadow = !!mappingArtifact?.shadow && (Array.isArray(mappingArtifact.shadow.statements) ? mappingArtifact.shadow.statements.length > 0 : typeof mappingArtifact.shadow.statements === "object");
-    const hasParagraphSimilarity = !!mappingArtifact?.paragraphSimilarityField;
     const hasStatementAllocation = !!mappingArtifact?.statementAllocation;
-    const hasContinuousField = !!mappingArtifact?.continuousField;
     const bs = (mappingArtifact as any)?.blastSurface;
     const scores = Array.isArray(bs?.scores) ? bs.scores : [];
     const hasBlastSurface = !!bs && scores.length > 0;
     const hasBlastVernal = hasBlastSurface && scores.some((s: any) => typeof s?.vernal === "object" && s.vernal != null);
-    if (hasGeometry && hasShadow && hasParagraphSimilarity && hasStatementAllocation && hasContinuousField && hasBlastVernal) return;
+    if (hasGeometry && hasShadow && hasStatementAllocation && hasBlastVernal) return;
 
     const key = `${aiTurnId}::${pid}`;
     if (viewArtifactRequestRef.current === key) return;

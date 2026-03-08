@@ -906,7 +906,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             || !geoRecord?.paragraphEmbeddings
             || (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0)
             || !geoRecord?.meta?.semanticDensityScores
-            || !geoRecord?.meta?.densityRegressionModel;
+            || !geoRecord?.meta?.densityRegressionModel
+            || geoRecord.meta?.embeddingVersion !== 2;
           if (needsRegeneration) {
             // Force re-generation if missing, empty, or lacking density scores
             const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
@@ -948,6 +949,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 paragraphIndex: packedParagraphs.index,
                 ...(densityObj ? { semanticDensityScores: densityObj } : {}),
                 ...(stmtResult.densityRegressionModel ? { densityRegressionModel: stmtResult.densityRegressionModel } : {}),
+                embeddingVersion: 2,
                 timestamp: Date.now(),
               },
             });
@@ -1095,6 +1097,22 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             queryText,
           });
 
+          let questionSelectionInstrumentation = null;
+          try {
+            const { computeQuestionSelectionInstrumentation } =
+              await import('./core/blast-radius/questionSelection');
+            questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
+              blastSurfaceResult: derived?.blastSurfaceResult ?? null,
+              edges: Array.isArray(derived?.semanticEdges) ? derived.semanticEdges : [],
+              enrichedClaims,
+              queryRelevanceScores: derived?.queryRelevance?.statementScores ?? queryRelevance?.statementScores ?? null,
+              modelCount,
+              claimCentroids: claimEmbeddings ?? new Map(),
+            });
+          } catch (_) {
+            questionSelectionInstrumentation = null;
+          }
+
           const shadowDelta = derived.shadowDelta;
 
           // Traversal (no survey mapper in regenerate — no LLM)
@@ -1119,6 +1137,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
           });
           mapperArtifact.preSemantic = preSemantic || null;
+          if (questionSelectionInstrumentation) {
+            mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+          }
 
           // ── G. Build full cognitive artifact ──
           const coords = substrate?.layout2d?.coordinates || {};
@@ -1164,6 +1185,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             preSemantic: preSemantic || null,
             ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
           });
+          if (questionSelectionInstrumentation) {
+            cognitiveArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+          }
 
           // ── G.1 Diagnostic: verify critical fields in cognitive artifact ──
           console.log(`[Regenerate] Artifact diagnostics:`,

@@ -7,8 +7,6 @@ export function dehydrateArtifact(fullArtifact: any): any {
   for (const k of [
     "blastRadiusFilter",
     "completeness",
-    "traversal",
-    "traversalAnalysis",
     "traversalGraph",
     "forcingPoints",
     "pipelineGate",

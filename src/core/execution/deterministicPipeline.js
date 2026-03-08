@@ -56,8 +56,6 @@ export async function computeDerivedFields({
     claimProvenanceOverlap: null,
     cachedStructuralAnalysis: null,
     blastSurfaceResult: null,
-    continuousFieldResult: null,
-    paragraphSimilarityResult: null,
     mixedProvenanceResult: null,
     alignmentResult: null,
     basinInversion: null,
@@ -127,33 +125,7 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Structural analysis failed:', getErrorMessage(err));
   }
 
-  // ── 6. Continuous field ─────────────────────────────────────────────
-  try {
-    const { computeContinuousField } = await import('../../ConciergeService/claimAssembly');
-    result.continuousFieldResult = computeContinuousField(
-      mapperClaimsForProvenance.map(c => ({ id: c.id })),
-      statementEmbeddings || new Map(),
-      claimEmbeddings || new Map(),
-      shadowStatements,
-    );
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Continuous field failed:', getErrorMessage(err));
-  }
-
-  // ── 7. Paragraph similarity field ───────────────────────────────────
-  try {
-    const { computeParagraphSimilarityField } = await import('../../ConciergeService/claimAssembly');
-    result.paragraphSimilarityResult = computeParagraphSimilarityField(
-      mapperClaimsForProvenance.map(c => ({ id: c.id })),
-      paragraphEmbeddings || new Map(),
-      claimEmbeddings || new Map(),
-      shadowParagraphs,
-    );
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Paragraph similarity failed:', getErrorMessage(err));
-  }
-
-  // ── 8. Mixed-method provenance ──────────────────────────────────────
+  // ── 6. Mixed-method provenance ──────────────────────────────────────
   try {
     const { computeMixedMethodProvenance } = await import('../../ConciergeService/claimAssembly');
     const stmtToParaId = new Map();
@@ -205,38 +177,16 @@ export async function computeDerivedFields({
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
       const { computeBlastSurface } = await import('../blast-radius/blastSurface');
-      const stmtToParaId = new Map();
-      for (const para of shadowParagraphs) {
-        for (const sid of (para.statementIds ?? [])) {
-          stmtToParaId.set(sid, para.id);
-        }
-      }
-      const assignedParagraphIds = new Map();
-      for (const c of enrichedClaims) {
-        const claimId = String(c?.id || '').trim();
-        if (!claimId) continue;
-        const paraSet = new Set();
-        for (const sid of (c.sourceStatementIds ?? [])) {
-          const pid = stmtToParaId.get(sid);
-          if (pid) paraSet.add(pid);
-        }
-        assignedParagraphIds.set(claimId, paraSet);
-      }
       result.blastSurfaceResult = computeBlastSurface({
         claims: enrichedClaims.map(c => ({
           id: c.id,
           label: c.label,
           sourceStatementIds: c.sourceStatementIds,
         })),
-        exclusivity: result.claimProvenanceExclusivity,
         mixedProvenance: result.mixedProvenanceResult,
         statementEmbeddings: statementEmbeddings || new Map(),
         queryRelevanceScores: result.queryRelevance?.statementScores ?? null,
         queryEmbedding: queryEmbedding || null,
-        paragraphEmbeddings: paragraphEmbeddings || new Map(),
-        statementToParagraphId: stmtToParaId,
-        claimAssignedParagraphIds: assignedParagraphIds,
-        claimEmbeddings: claimEmbeddings || new Map(),
         totalCorpusStatements: shadowStatements.length,
       });
       console.log(`[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`);
@@ -562,8 +512,6 @@ export function assembleMapperArtifact({
 }) {
   const {
     blastSurfaceResult,
-    continuousFieldResult,
-    paragraphSimilarityResult,
     mixedProvenanceResult,
     alignmentResult,
     basinInversion,
@@ -587,7 +535,6 @@ export function assembleMapperArtifact({
     conditionals: parsedConditionals,
     traversalGraph,
     forcingPoints,
-    traversalAnalysis: null,
     ...(blastSurfaceResult ? { blastSurface: blastSurfaceResult } : {}),
     ...(surveyGates ? { surveyGates, surveyRationale } : { surveyRationale }),
     preSemantic: null,
@@ -599,8 +546,6 @@ export function assembleMapperArtifact({
     },
     ...(claimProvenance ? { claimProvenance } : {}),
     ...(basinInversion ? { basinInversion } : {}),
-    ...(continuousFieldResult ? { continuousField: continuousFieldResult } : {}),
-    ...(paragraphSimilarityResult ? { paragraphSimilarityField: paragraphSimilarityResult } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(alignmentResult ? { alignment: alignmentResult } : {}),
     ...(statementSemanticDensity ? { statementSemanticDensity } : {}),

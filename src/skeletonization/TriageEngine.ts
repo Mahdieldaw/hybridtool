@@ -132,6 +132,8 @@ export async function triageStatements(
     }
   }
 
+  let residualFallbackCount = 0;
+
   for (const prunedClaim of prunedClaims) {
     const sourceStatementIds = Array.isArray(prunedClaim.sourceStatementIds) ? prunedClaim.sourceStatementIds : [];
     const claimCentroid = claimEmbeddings.get(prunedClaim.id);
@@ -352,7 +354,6 @@ export async function triageStatements(
   let untriagedCount = 0;
   let skeletonizedCount = 0;
   let removedCount = 0;
-  let residualFallbackCount = 0;
 
   for (const fate of statementFates.values()) {
     if (fate.action === 'PROTECTED') protectedCount++;

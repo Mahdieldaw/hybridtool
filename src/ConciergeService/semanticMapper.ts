@@ -174,7 +174,6 @@ export function parseSemanticMapperOutput(
         output = {
           claims: Array.isArray(obj.claims) ? obj.claims : [],
           edges: Array.isArray(obj.edges) ? obj.edges : [],
-          conditionals: [],
         } as any;
       }
     }
@@ -187,7 +186,6 @@ export function parseSemanticMapperOutput(
   if (output) {
     const out: any = output;
     if (!Array.isArray(out.edges)) out.edges = [];
-    if (!Array.isArray(out.conditionals)) out.conditionals = [];
   }
 
   return {

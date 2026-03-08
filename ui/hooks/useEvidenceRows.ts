@@ -23,11 +23,6 @@ export interface EvidenceRow {
   tau_S: number | null;
   claimCount: number;
 
-  // Continuous field (claim-relative)
-  z_claim: number | null;
-  z_core: number | null;
-  evidenceScore: number | null;
-
   // Mixed provenance (claim-relative)
   globalSim: number | null;
   zone: 'core' | 'boundary-promoted' | 'removed' | null;
@@ -41,15 +36,6 @@ export interface EvidenceRow {
   bs_simTwin: boolean | null;
   bs_bestSim: number | null;
   bs_t_sim: number | null;
-  bs_bestClaim: number | null;
-  bs_t_dir: number | null;
-  bs_gate: boolean | null;
-  bs_pId: string | null;
-  bs_pTwin: boolean | null;
-  bs_pBest: number | null;
-  bs_pTau: number | null;
-  bs_nearSim: string | null;
-  bs_nearDir: string | null;
 
   // Density
   semanticDensity: number | null;  // statement-level z-scored OLS residual magnitude
@@ -177,12 +163,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       a?.derived?.statementAllocation ??
       a?.derived?.statementAllocationResult ??
       null;
-    const continuousField =
-      a?.continuousField ??
-      a?.continuousFieldResult ??
-      a?.derived?.continuousField ??
-      a?.derived?.continuousFieldResult ??
-      null;
     const mixedProvenance =
       a?.mixedProvenance ??
       a?.mixedProvenanceResult ??
@@ -211,15 +191,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     for (const id of sourceIds) {
       const sid = String(id ?? "").trim();
       if (sid) directTopIds.add(sid);
-    }
-
-    // Continuous field: statementId -> entry { sim_claim, z_claim, z_core, evidenceScore }
-    const continuousFieldByStmt = new Map<string, any>();
-    const cfPerClaim = continuousField?.perClaim ?? {};
-    const cfField: any[] = normalizeArray(cfPerClaim[selectedClaimId]?.field);
-    for (const entry of cfField) {
-      const id = String(entry?.statementId ?? entry?.id ?? entry?.sid ?? "").trim();
-      if (id) continuousFieldByStmt.set(id, entry);
     }
 
     // Competitive: statementId -> { weight, excess, threshold }
@@ -252,8 +223,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     }
 
     const blastAbsorptionByStmt = new Map<string, any>();
-    const blastAbsorptionGate2ByStmt = new Map<string, any>();
-    let blastTauDir: number | null = null;
     const bsScores: any[] = Array.isArray(blastSurface?.scores) ? blastSurface.scores : [];
     const bs = bsScores.find((s: any) => String(s?.claimId ?? "").trim() === selectedClaimId) ?? null;
     const statements: any[] = Array.isArray(bs?.layerB?.statements) ? bs.layerB.statements : [];
@@ -261,18 +230,12 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       const id = String(st?.statementId ?? "").trim();
       if (id) blastAbsorptionByStmt.set(id, st);
     }
-    const gate2Statements: any[] = Array.isArray(bs?.layerBGate2?.statements) ? bs.layerBGate2.statements : [];
-    for (const st of gate2Statements) {
-      const id = String(st?.statementId ?? "").trim();
-      if (id) blastAbsorptionGate2ByStmt.set(id, st);
-    }
-    blastTauDir = typeof bs?.layerBGate2?.tauDir === "number" && Number.isFinite(bs.layerBGate2.tauDir) ? bs.layerBGate2.tauDir : null;
 
     const densityLiftForClaim = typeof claimObj?.densityLift === 'number' && Number.isFinite(claimObj.densityLift)
       ? claimObj.densityLift as number
       : null;
 
-    return { continuousFieldByStmt, competitiveByStmt, mixedByStmt, exclusiveIds, directTopIds, blastAbsorptionByStmt, blastAbsorptionGate2ByStmt, blastTauDir, densityLiftForClaim };
+    return { competitiveByStmt, mixedByStmt, exclusiveIds, directTopIds, blastAbsorptionByStmt, densityLiftForClaim };
   }, [artifact, selectedClaimId]);
 
   return useMemo(() => {
@@ -291,11 +254,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       const claimCount = globalMaps?.claimCountByStmt.get(stmtId) ?? 0;
 
       // Claim-relative fields
-      const cf = claimMaps?.continuousFieldByStmt.get(stmtId) ?? null;
       const comp = claimMaps?.competitiveByStmt.get(stmtId) ?? null;
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
       const abs = claimMaps?.blastAbsorptionByStmt.get(stmtId) ?? null;
-      const abs2 = claimMaps?.blastAbsorptionGate2ByStmt.get(stmtId) ?? null;
       const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
       const isExclusiveFromFate = (fateEntry?.claimIds.length ?? 0) === 1;
       const isExclusive = selectedClaimId
@@ -312,23 +273,30 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         return best > -Infinity ? best : null;
       })();
 
+      const simTwin = (() => {
+        const tauSim = typeof abs?.tauSim === "number" && Number.isFinite(abs.tauSim) ? abs.tauSim : null;
+        if (tauSim === null) return null;
+        const carriers: any[] = Array.isArray(abs?.carriers) ? abs.carriers : [];
+        for (const c of carriers) {
+          const v = typeof c?.bestSim === "number" && Number.isFinite(c.bestSim) ? c.bestSim : -Infinity;
+          if (v > tauSim) return true;
+        }
+        return false;
+      })();
+
       return {
         statementId: stmtId,
         text: String(stmt.text ?? stmt.statement ?? stmt.content ?? ''),
         modelIndex: typeof stmt.modelIndex === 'number' ? stmt.modelIndex : 0,
         paragraphId: String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? ''),
 
-        sim_claim: cf?.sim_claim ?? null,
+        sim_claim: mixed?.globalSim ?? null,
         sim_query,
 
         w_comp: comp?.weight ?? null,
         excess_comp: comp?.excess ?? null,
         tau_S: comp?.threshold ?? null,
         claimCount,
-
-        z_claim: cf?.z_claim ?? null,
-        z_core: cf?.z_core ?? null,
-        evidenceScore: cf?.evidenceScore ?? null,
 
         globalSim: mixed?.globalSim ?? null,
         zone: mixed?.zone ?? null,
@@ -338,18 +306,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         paragraphOrigin: mixed?.paragraphOrigin ?? null,
 
         bs_twin: typeof abs?.orphan === "boolean" ? !abs.orphan : null,
-        bs_simTwin: null,
+        bs_simTwin: simTwin,
         bs_bestSim: bestAbsSim,
         bs_t_sim: typeof abs?.tauSim === "number" && Number.isFinite(abs.tauSim) ? abs.tauSim : null,
-        bs_bestClaim: null,
-        bs_t_dir: typeof abs2?.tauDir === "number" && Number.isFinite(abs2.tauDir) ? abs2.tauDir : (claimMaps?.blastTauDir ?? null),
-        bs_gate: typeof abs2?.orphan === "boolean" ? !abs2.orphan : null,
-        bs_pId: null,
-        bs_pTwin: null,
-        bs_pBest: null,
-        bs_pTau: null,
-        bs_nearSim: null,
-        bs_nearDir: null,
 
         semanticDensity,
         densityLift: claimMaps?.densityLiftForClaim ?? null,
@@ -360,7 +319,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         isExclusive,
 
         inCompetitive: comp != null,
-        inContinuousCore: cf != null && (cf.z_claim ?? -Infinity) > 1.0,
+        inContinuousCore: mixed?.zone === 'core',
         inMixed: mixed != null,
         inDirectTopN: selectedClaimId ? (claimMaps?.directTopIds.has(stmtId) ?? false) : false,
       };

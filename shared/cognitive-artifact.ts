@@ -100,7 +100,6 @@ export function buildCognitiveArtifact(
           cycles: [],
         },
     },
-    traversalAnalysis: mapper?.traversalAnalysis ?? undefined,
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
       query: mapper?.query ?? undefined,
@@ -125,7 +124,7 @@ export function buildCognitiveArtifact(
     // → meta
     'model_count', 'modelCount', 'query', 'turn', 'timestamp',
     // → special / renamed / nested
-    'paragraphClustering', 'shadow', 'substrate', 'traversalAnalysis',
+    'paragraphClustering', 'shadow', 'substrate',
     'id',
   ]);
 

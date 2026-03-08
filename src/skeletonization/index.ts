@@ -98,6 +98,7 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
       removedCount: counts.removedCount,
       processingTimeMs: triageResultPartial.meta.processingTimeMs,
       embeddingTimeMs: triageResultPartial.meta.embeddingTimeMs,
+      residualFallbackCount: triageResultPartial.meta.residualFallbackCount,
     },
   };
 

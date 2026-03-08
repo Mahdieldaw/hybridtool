@@ -63,23 +63,16 @@ function getCategoryColor(colId: string, val: string): string {
 
 // ============================================================================
 // ZONE THRESHOLD PREVIEW
-// Reclassifies zone based on z_claim threshold
 // ============================================================================
 
 function applyThresholdPreview(
-  row: EvidenceRow,
+  _row: EvidenceRow,
   previews: Record<string, ThresholdPreview>
 ): Partial<EvidenceRow> {
   const zonePreview = previews['zone'];
-  if (!zonePreview || row.z_claim == null) return {};
-
-  const threshold = zonePreview.previewThreshold;
-  let zone: EvidenceRow['zone'];
-  if (row.z_claim > threshold) zone = 'core';
-  else if (row.z_claim > threshold * 0.5) zone = 'boundary-promoted';
-  else zone = 'removed';
-
-  return { zone };
+  if (!zonePreview) return {};
+  // Zone is now pre-computed by mixed provenance — no client-side reclassification
+  return {};
 }
 
 // ============================================================================
@@ -97,7 +90,7 @@ function Cell({ col, row, previews, changed }: {
   // Apply threshold preview override
   const previewOverride = previews[col.id];
   let displayVal = baseVal;
-  if (previewOverride && col.id === 'zone' && row.z_claim != null) {
+  if (previewOverride && col.id === 'zone' && false) {
     const overrides = applyThresholdPreview(row, previews);
     if ('zone' in overrides) displayVal = overrides.zone ?? baseVal;
   }
@@ -150,9 +143,6 @@ function colWidth(id: string): number {
     excess_comp: 68,
     tau_S: 64,
     claimCount: 68,
-    z_claim: 68,
-    z_core: 68,
-    evidenceScore: 76,
     globalSim: 76,
     zone: 112,
     coreCoherence: 92,
@@ -163,15 +153,6 @@ function colWidth(id: string): number {
     bs_simTwin: 72,
     bs_bestSim: 72,
     bs_t_sim: 64,
-    bs_bestClaim: 84,
-    bs_t_dir: 64,
-    bs_gate: 56,
-    bs_pId: 80,
-    bs_pTwin: 64,
-    bs_pBest: 72,
-    bs_pTau: 64,
-    bs_nearSim: 220,
-    bs_nearDir: 220,
     semanticDensity: 72,
     densityLift: 80,
     fate: 96,
@@ -346,9 +327,23 @@ export function EvidenceTable({
   // Filter rows by scope
   const scopedRows = useMemo(() => {
     if (scope === 'claim') {
-      const anyClaimSignals = rows.some(r => r.inCompetitive || r.inContinuousCore || r.inMixed || r.inDirectTopN);
+      const anyClaimSignals = rows.some(r =>
+        r.inCompetitive ||
+        r.inContinuousCore ||
+        r.inMixed ||
+        r.inDirectTopN ||
+        r.bs_simTwin != null ||
+        r.bs_twin != null
+      );
       if (!anyClaimSignals) return rows;
-      return rows.filter(r => r.inCompetitive || r.inContinuousCore || r.inMixed || r.inDirectTopN);
+      return rows.filter(r =>
+        r.inCompetitive ||
+        r.inContinuousCore ||
+        r.inMixed ||
+        r.inDirectTopN ||
+        r.bs_simTwin != null ||
+        r.bs_twin != null
+      );
     }
     return rows;
   }, [rows, scope]);
@@ -453,7 +448,7 @@ export function EvidenceTable({
         const baseVal = col.accessor(row);
         const previewOverride = thresholdPreviews[col.id];
         let displayVal = baseVal;
-        if (previewOverride && col.id === 'zone' && row.z_claim != null) {
+        if (previewOverride && col.id === 'zone' && false) {
           const overrides = applyThresholdPreview(row, thresholdPreviews);
           if ('zone' in overrides) displayVal = (overrides as any).zone ?? baseVal;
         }
@@ -648,7 +643,7 @@ function TableRow({
   // Determine if any preview-overridden value differs from original
   const hasChangedCells = useMemo(() => {
     const zonePreview = previews['zone'];
-    if (!zonePreview || row.z_claim == null) return false;
+    if (!zonePreview) return false;
     const overrides = applyThresholdPreview(row, previews);
     return overrides.zone != null && overrides.zone !== row.zone;
   }, [row, previews]);

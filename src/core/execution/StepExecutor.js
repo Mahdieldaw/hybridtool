@@ -1071,6 +1071,7 @@ export class StepExecutor {
                   ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
                   ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
                   ...(densityObj ? { semanticDensityScores: densityObj } : {}),
+                  embeddingVersion: 2,
                   timestamp: Date.now(),
                 },
               }).catch((err) => console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err));
@@ -1259,8 +1260,8 @@ export class StepExecutor {
                   : [];
 
                 const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-                let unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
-                // rawGates and gateQuestionByClaimPair are populated by the Survey Mapper below (after enrichedClaims)
+                // Survey gates are the sole source of conditionals — semantic mapper never produces them.
+                let surveyGateConditionals = [];
                 let rawGates = [];
                 let gateQuestionByClaimPair = new Map();
 
@@ -1356,7 +1357,7 @@ export class StepExecutor {
                     enrichedClaims,
                     mapperClaimsForProvenance,
                     parsedEdges: unifiedEdges,
-                    parsedConditionals: unifiedConditionals,
+                    parsedConditionals: surveyGateConditionals,
                     shadowStatements: shadowResult.statements,
                     shadowParagraphs: paragraphResult.paragraphs,
                     statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
@@ -1458,10 +1459,6 @@ export class StepExecutor {
                         }
                         console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
 
-                        // Rebuild unifiedConditionals from survey gates.
-                        // With the blast radius filter, all gates are conditional —
-                        // the forced_choice/conditional_gate distinction is removed.
-                        unifiedConditionals = [];
                         gateQuestionByClaimPair = new Map();
 
                         for (const gate of rawGates) {
@@ -1471,7 +1468,7 @@ export class StepExecutor {
                             : [];
                           if (affected.length === 0) continue;
 
-                          unifiedConditionals.push({
+                          surveyGateConditionals.push({
                             id: gate.id,
                             question: String(gate.question || '').trim(),
                             affectedClaims: affected,
@@ -1494,7 +1491,7 @@ export class StepExecutor {
                       enrichedClaims,
                       mapperClaimsForProvenance,
                       parsedEdges: unifiedEdges,
-                      parsedConditionals: unifiedConditionals,
+                      parsedConditionals: surveyGateConditionals,
                       shadowStatements: shadowResult.statements,
                       shadowParagraphs: paragraphResult.paragraphs,
                       statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
@@ -1518,7 +1515,7 @@ export class StepExecutor {
                   const { traversalGraph } = buildTraversalData({
                     enrichedClaims,
                     edges: unifiedEdges,
-                    conditionals: unifiedConditionals,
+                    conditionals: surveyGateConditionals,
                     conflictTiering: true,
                   });
                   const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
@@ -1529,7 +1526,7 @@ export class StepExecutor {
                     traversalGraph,
                     forcingPoints,
                     parsedNarrative: String(parseResult.narrative || '').trim(),
-                    parsedConditionals: unifiedConditionals,
+                    parsedConditionals: surveyGateConditionals,
                     queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
                     shadowStatements: shadowResult.statements,

@@ -3,6 +3,7 @@ import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
 import { normalizeCitationSourceOrder } from '../../shared/citation-utils.js';
+import { dehydrateArtifact } from '../../persistence/artifact-hydration';
 
 /** Extract claims array from a CognitiveArtifact or legacy MapperArtifact */
 function extractClaims(artifact) {
@@ -105,10 +106,7 @@ export class CognitivePipelineHandler {
               : undefined;
           } catch (_) { }
 
-          const safeCognitiveArtifact =
-            this.sessionManager && typeof this.sessionManager._safeArtifact === "function"
-              ? this.sessionManager._safeArtifact(mappingArtifact)
-              : mappingArtifact;
+          const safeCognitiveArtifact = dehydrateArtifact(mappingArtifact);
           const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
           if (currentAiTurn) {
             currentAiTurn.pipelineStatus = 'awaiting_traversal';

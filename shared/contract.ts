@@ -835,46 +835,6 @@ export interface ClaimAbsorptionProfile {
   absorptionByTarget: Record<string, number>;
 }
 
-export interface CrossClaimTwinEntryGate2 {
-  targetClaimId: string;
-  hasTwin: boolean;
-  bestSim: number;
-  bestCandidateId: string | null;
-  bestCandidateClaimSim: number | null;
-  bestCandidateCoreAffinity: number | null;
-  bestCandidateCorpusAffinity: number | null;
-  differential: number | null;
-  differentialGate: boolean | null;
-}
-
-export interface StatementAbsorptionGate2 {
-  statementId: string;
-  muS: number;
-  sigmaS: number;
-  tauSim: number;
-  muC: number | null;
-  sigmaC: number | null;
-  tauDir: number | null;
-  claimCentroidCeil: number | null;
-  carriers: CrossClaimTwinEntryGate2[];
-  carrierCount: number;
-  orphan: boolean;
-}
-
-export interface ClaimAbsorptionProfileGate2 {
-  claimId: string;
-  exclusiveCount: number;
-  orphanCount: number;
-  absorbableCount: number;
-  orphanRatio: number;
-  statements: StatementAbsorptionGate2[];
-  absorptionByTarget: Record<string, number>;
-  muC: number | null;
-  sigmaC: number | null;
-  tauDir: number | null;
-  claimCentroidCeil: number | null;
-}
-
 /** Layer C: Evidence mass trio — how much territory does this claim cover? */
 export interface BlastSurfaceLayerC {
   canonicalCount: number;       // total canonical statements from mixed provenance
@@ -918,7 +878,6 @@ export interface BlastSurfaceClaimScore {
   claimId: string;
   claimLabel: string;
   layerB: ClaimAbsorptionProfile;
-  layerBGate2?: ClaimAbsorptionProfileGate2;
   layerC: BlastSurfaceLayerC;
   layerD: BlastSurfaceLayerD;
   vernal?: BlastSurfaceVernalScore;

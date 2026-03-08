@@ -1031,7 +1031,6 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
     id: string; label: string;
     orphanCount: number; exclusiveCount: number;
     carrierRate: string; orphanRatio: number | null;
-    gate2OrphanRatio: number | null;
     canonicalCount: number;
     coreCount: number; cascadeExposure: number | null;
   };
@@ -1039,7 +1038,6 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
   const surfaceRows = useMemo<SurfaceRow[]>(() =>
     scores.map((s: any) => {
       const b = s?.layerB || {};
-      const b2 = s?.layerBGate2 || null;
       const c = s?.layerC || {};
       const d = s?.layerD || {};
       const exclCount = b.exclusiveCount ?? 0;
@@ -1052,7 +1050,6 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
         exclusiveCount: exclCount,
         carrierRate: exclCount > 0 ? `${absorbableCount}/${exclCount}` : "—",
         orphanRatio: typeof b?.orphanRatio === "number" && Number.isFinite(b.orphanRatio) ? b.orphanRatio : null,
-        gate2OrphanRatio: typeof b2?.orphanRatio === "number" && Number.isFinite(b2.orphanRatio) ? b2.orphanRatio : null,
         canonicalCount: c.canonicalCount ?? 0,
         coreCount: c.coreCount ?? 0,
         cascadeExposure: typeof d.cascadeExposure === "number" && Number.isFinite(d.cascadeExposure) ? d.cascadeExposure : null,
@@ -1094,7 +1091,6 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
             { key: "exclusiveCount", header: "Excl", sortValue: (r) => r.exclusiveCount, cell: (r) => <span className="font-mono text-text-muted">{r.exclusiveCount}</span> },
             { key: "carrierRate", header: "Carr", cell: (r) => <span className="font-mono text-text-muted">{r.carrierRate}</span> },
             { key: "orphanRatio", header: "%", sortValue: (r) => r.orphanRatio, cell: (r) => <span className="font-mono text-text-muted">{r.orphanRatio == null ? "—" : `${(r.orphanRatio * 100).toFixed(0)}%`}</span> },
-            { key: "gate2OrphanRatio", header: "%(G2)", sortValue: (r) => r.gate2OrphanRatio, cell: (r) => <span className="font-mono text-text-muted">{r.gate2OrphanRatio == null ? "—" : `${(r.gate2OrphanRatio * 100).toFixed(0)}%`}</span> },
             { key: "canonicalCount", header: "Canon", sortValue: (r) => r.canonicalCount, cell: (r) => <span className="font-mono text-text-muted">{r.canonicalCount}</span> },
             { key: "coreCount", header: "Core", sortValue: (r) => r.coreCount, cell: (r) => <span className="font-mono text-text-muted">{r.coreCount}</span> },
             { key: "cascadeExposure", header: "CascExp", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
@@ -1279,10 +1275,6 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
     bestCorpusAffinity: number | null;
     bestDifferential: number | null;
     differentialGate: boolean | null;
-    gate2CarrierCount: number | null;
-    tauDir: number | null;
-    gate2BestSim: number | null;
-    gate2BestDifferential: number | null;
   };
 
   const rows = useMemo<TwinRow[]>(() => {
@@ -1293,13 +1285,6 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
       if (selectedClaimId && claimId !== selectedClaimId) continue;
       const claimLabel = String(s?.claimLabel ?? claimId);
       const statements: any[] = Array.isArray(s?.layerB?.statements) ? s.layerB.statements : [];
-      const gate2Statements: any[] = Array.isArray(s?.layerBGate2?.statements) ? s.layerBGate2.statements : [];
-      const gate2ById = new Map<string, any>();
-      for (const gs of gate2Statements) {
-        const sid = String(gs?.statementId ?? "").trim();
-        if (sid) gate2ById.set(sid, gs);
-      }
-
       for (const st of statements) {
         const statementId = String(st?.statementId ?? "").trim();
         if (!statementId) continue;
@@ -1324,18 +1309,6 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
           }
         }
 
-        const gate2 = gate2ById.get(statementId) ?? null;
-        const gate2Carriers: any[] = gate2 && Array.isArray(gate2?.carriers) ? gate2.carriers : [];
-        let gate2BestSim = -Infinity;
-        let gate2BestDifferential: number | null = null;
-        for (const gc of gate2Carriers) {
-          const sim = typeof gc?.bestSim === "number" && Number.isFinite(gc.bestSim) ? gc.bestSim : -Infinity;
-          if (sim > gate2BestSim) {
-            gate2BestSim = sim;
-            gate2BestDifferential = typeof gc?.differential === "number" && Number.isFinite(gc.differential) ? gc.differential : null;
-          }
-        }
-
         out.push({
           id: `${claimId}::${statementId}`,
           claimId,
@@ -1352,10 +1325,6 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
           bestCorpusAffinity,
           bestDifferential,
           differentialGate,
-          gate2CarrierCount: gate2 && typeof gate2?.carrierCount === "number" && Number.isFinite(gate2.carrierCount) ? gate2.carrierCount : null,
-          tauDir: typeof s?.layerBGate2?.tauDir === "number" && Number.isFinite(s.layerBGate2.tauDir) ? s.layerBGate2.tauDir : null,
-          gate2BestSim: gate2BestSim > -Infinity ? gate2BestSim : null,
-          gate2BestDifferential,
         });
       }
     }
@@ -1420,10 +1389,6 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
             { key: "bestCandidateId", header: "BestStmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.bestCandidateId ?? "—"}</span> },
             { key: "bestCoreAffinity", header: "A(core)", sortValue: (r) => r.bestCoreAffinity, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestCoreAffinity, 3)}</span> },
             { key: "bestCorpusAffinity", header: "A(corp)", sortValue: (r) => r.bestCorpusAffinity, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestCorpusAffinity, 3)}</span> },
-            { key: "gate2CarrierCount", header: "G2 Carr", sortValue: (r) => r.gate2CarrierCount, cell: (r) => <span className="font-mono text-text-muted">{r.gate2CarrierCount == null ? "—" : fmtInt(r.gate2CarrierCount)}</span> },
-            { key: "gate2BestSim", header: "G2 best", sortValue: (r) => r.gate2BestSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.gate2BestSim, 3)}</span> },
-            { key: "gate2BestDifferential", header: "Δ(G2)", sortValue: (r) => r.gate2BestDifferential, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.gate2BestDifferential, 3)}</span> },
-            { key: "tauDir", header: "τ_dir", sortValue: (r) => r.tauDir, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.tauDir, 3)}</span> },
           ]}
           rows={rows}
           defaultSortKey="orphan"
