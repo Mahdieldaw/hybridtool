@@ -1,7 +1,6 @@
-import { useRef, useMemo, useState, useCallback, useEffect } from "react";
+import { useRef, useMemo, useState, useCallback, useEffect, useLayoutEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
-import type { EvidenceRow } from "../../hooks/useEvidenceRows";
 import type { ColumnDef, ViewConfig } from "./columnRegistry";
 import { CopyButton } from "../CopyButton";
 
@@ -23,7 +22,7 @@ interface GroupedItem {
 
 interface RowItem {
   type: 'row';
-  row: EvidenceRow;
+  row: any;
   originalIndex: number;
 }
 
@@ -66,9 +65,9 @@ function getCategoryColor(colId: string, val: string): string {
 // ============================================================================
 
 function applyThresholdPreview(
-  _row: EvidenceRow,
+  _row: any,
   previews: Record<string, ThresholdPreview>
-): Partial<EvidenceRow> {
+): Record<string, any> {
   const zonePreview = previews['zone'];
   if (!zonePreview) return {};
   // Zone is now pre-computed by mixed provenance — no client-side reclassification
@@ -79,11 +78,12 @@ function applyThresholdPreview(
 // CELL
 // ============================================================================
 
-function Cell({ col, row, previews, changed }: {
+function Cell({ col, row, previews, changed, width }: {
   col: ColumnDef;
-  row: EvidenceRow;
+  row: any;
   previews: Record<string, ThresholdPreview>;
   changed: boolean;
+  width?: number;
 }) {
   const baseVal = col.accessor(row);
 
@@ -109,7 +109,7 @@ function Cell({ col, row, previews, changed }: {
         col.id === 'text' ? "flex-1 min-w-0" : "flex-none",
         isNum && "text-right justify-end"
       )}
-      style={col.id !== 'text' ? { width: colWidth(col.id) } : undefined}
+      style={col.id !== 'text' ? { width: width ?? defaultColWidth(col.id) } : undefined}
     >
       {isCat && displayVal != null ? (
         <span className={clsx("text-[11px] font-mono", getCategoryColor(col.id, String(displayVal)))}>
@@ -132,34 +132,96 @@ function Cell({ col, row, previews, changed }: {
 // COLUMN WIDTH
 // ============================================================================
 
-function colWidth(id: string): number {
-  const widths: Record<string, number> = {
-    statementId: 120,
-    model: 44,
-    paragraphId: 60,
-    sim_claim: 72,
-    sim_query: 72,
-    w_comp: 72,
-    excess_comp: 68,
-    tau_S: 64,
-    claimCount: 68,
-    globalSim: 76,
-    zone: 112,
-    coreCoherence: 92,
-    corpusAffinity: 96,
-    differential: 84,
-    paragraphOrigin: 120,
-    bs_twin: 56,
-    bs_simTwin: 72,
-    bs_bestSim: 72,
-    bs_t_sim: 64,
-    semanticDensity: 72,
-    densityLift: 80,
-    fate: 96,
-    stance: 88,
-    isExclusive: 72,
-  };
-  return widths[id] ?? 80;
+const DEFAULT_COL_WIDTHS: Record<string, number> = {
+  statementId: 120,
+  model: 44,
+  paragraphId: 60,
+  statementCount: 60,
+  dominantStance: 88,
+  contested: 68,
+  top1Sim: 72,
+  avgTopKSim: 72,
+  isolationScore: 72,
+  mutualDegree: 60,
+  origin: 120,
+  claimCentricSim: 72,
+  claimCentricAboveThreshold: 60,
+  sim_claim: 72,
+  sim_query: 72,
+  globalSim: 76,
+  zone: 112,
+  coreCoherence: 92,
+  corpusAffinity: 96,
+  differential: 84,
+  paragraphOrigin: 120,
+  bs_twin: 56,
+  bs_simTwin: 72,
+  bs_bestSim: 72,
+  bs_t_sim: 64,
+  semanticDensity: 72,
+  densityDelta: 76,
+  densityLift: 80,
+  queryDensity: 72,
+  claimDensity: 72,
+  fate: 96,
+  stance: 88,
+  isExclusive: 72,
+};
+
+function defaultColWidth(id: string): number {
+  return DEFAULT_COL_WIDTHS[id] ?? 80;
+}
+
+const MIN_COL_WIDTH = 36;
+
+// ============================================================================
+// COLUMN RESIZE HANDLE
+// ============================================================================
+
+function ColResizeHandle({ colId, onResize }: {
+  colId: string;
+  onResize: (colId: string, delta: number) => void;
+}) {
+  const startXRef = useRef(0);
+  const activeRef = useRef(false);
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    activeRef.current = true;
+    startXRef.current = e.clientX;
+    (e.target as Element).setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!activeRef.current) return;
+    e.preventDefault();
+    const delta = e.clientX - startXRef.current;
+    startXRef.current = e.clientX;
+    onResize(colId, delta);
+  }, [colId, onResize]);
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!activeRef.current) return;
+    activeRef.current = false;
+    (e.target as Element).releasePointerCapture(e.pointerId);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
+  return (
+    <div
+      className="absolute right-0 top-0 bottom-0 w-[5px] cursor-col-resize z-10 group"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onClick={e => e.stopPropagation()}
+    >
+      <div className="absolute right-0 top-0 bottom-0 w-[1px] bg-transparent group-hover:bg-brand-500/60 transition-colors" />
+    </div>
+  );
 }
 
 // ============================================================================
@@ -169,11 +231,11 @@ function colWidth(id: string): number {
 type SortDir = 'asc' | 'desc' | null;
 
 function sortRows(
-  rows: EvidenceRow[],
+  rows: any[],
   sortBy: string | null,
   sortDir: SortDir,
   columns: ColumnDef[]
-): EvidenceRow[] {
+): any[] {
   if (!sortBy || !sortDir) return rows;
   const col = columns.find(c => c.id === sortBy);
   if (!col || !col.sortable) return rows;
@@ -191,19 +253,19 @@ function sortRows(
   });
 }
 
-function applyFilters(rows: EvidenceRow[], viewConfig: ViewConfig, columns: ColumnDef[]): EvidenceRow[] {
+function applyFilters(rows: any[], viewConfig: ViewConfig, columns: ColumnDef[]): any[] {
   const rules = viewConfig.filter;
   if (!rules || rules.length === 0) return rows;
 
   const colById = new Map(columns.map(c => [c.id, c] as const));
 
-  const getVal = (row: EvidenceRow, columnId: string): any => {
+  const getVal = (row: any, columnId: string): any => {
     const col = colById.get(columnId);
     if (col) return col.accessor(row);
     return (row as any)[columnId];
   };
 
-  const matches = (row: EvidenceRow): boolean => {
+  const matches = (row: any): boolean => {
     for (const rule of rules) {
       const v = getVal(row, rule.columnId);
       switch (rule.op) {
@@ -249,7 +311,7 @@ function applyFilters(rows: EvidenceRow[], viewConfig: ViewConfig, columns: Colu
 }
 
 function buildVirtualItems(
-  rows: EvidenceRow[],
+  rows: any[],
   groupBy: string | null,
   columns: ColumnDef[]
 ): VirtualItem[] {
@@ -261,7 +323,7 @@ function buildVirtualItems(
   if (!col) return rows.map((row, i) => ({ type: 'row', row, originalIndex: i }));
 
   // Group rows
-  const groups = new Map<string, EvidenceRow[]>();
+  const groups = new Map<string, any[]>();
   for (const row of rows) {
     const key = String(col.accessor(row) ?? '(none)');
     const arr = groups.get(key) ?? [];
@@ -282,15 +344,17 @@ function buildVirtualItems(
 // ============================================================================
 
 export interface EvidenceTableProps {
-  rows: EvidenceRow[];
+  rows: any[];
   columns: ColumnDef[];
   viewConfig: ViewConfig;
   scope: 'claim' | 'cross-claim' | 'statement';
+  /** Which mode the table is in — affects scope filtering and expanded row detail */
+  mode?: 'statement' | 'paragraph';
   bottomInset?: number;
   onSort?: (columnId: string) => void;
   onGroup?: (columnId: string | null) => void;
   onColumnToggle?: (columnId: string) => void;
-  onRowClick?: (row: EvidenceRow) => void;
+  onRowClick?: (row: any) => void;
 }
 
 // ============================================================================
@@ -302,6 +366,7 @@ export function EvidenceTable({
   columns,
   viewConfig,
   scope,
+  mode = 'statement',
   bottomInset,
   onSort,
   onGroup,
@@ -324,8 +389,37 @@ export function EvidenceTable({
   // Threshold previews (Phase 8)
   const [thresholdPreviews, setThresholdPreviews] = useState<Record<string, ThresholdPreview>>({});
 
+  // Resizable column widths
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+
+  const getColWidth = useCallback((id: string): number => {
+    return columnWidths[id] ?? defaultColWidth(id);
+  }, [columnWidths]);
+
+  const handleColResize = useCallback((colId: string, delta: number) => {
+    setColumnWidths(prev => {
+      const current = prev[colId] ?? defaultColWidth(colId);
+      return { ...prev, [colId]: Math.max(MIN_COL_WIDTH, current + delta) };
+    });
+  }, []);
+
+  const getRowId = useCallback((row: any): string => {
+    return mode === 'paragraph'
+      ? String(row.paragraphId ?? '')
+      : String(row.statementId ?? '');
+  }, [mode]);
+
   // Filter rows by scope
   const scopedRows = useMemo(() => {
+    if (mode === 'paragraph') {
+      // For paragraphs in claim scope, filter to those with mixed provenance origin
+      if (scope === 'claim') {
+        const anyOrigin = rows.some(r => r.origin != null);
+        if (!anyOrigin) return rows;
+        return rows.filter(r => r.origin != null);
+      }
+      return rows;
+    }
     if (scope === 'claim') {
       const anyClaimSignals = rows.some(r =>
         r.inCompetitive ||
@@ -346,7 +440,7 @@ export function EvidenceTable({
       );
     }
     return rows;
-  }, [rows, scope]);
+  }, [rows, scope, mode]);
 
   const filteredRows = useMemo(
     () => applyFilters(scopedRows, viewConfig, columns),
@@ -371,11 +465,17 @@ export function EvidenceTable({
     estimateSize: (i) => {
       const item = virtualItems[i];
       if (item.type === 'group') return 28;
-      if (expandedRows.has(item.row.statementId)) return 96;
+      if (expandedRows.has(getRowId(item.row))) return 200; // generous estimate, dynamic measurement corrects
       return 32;
     },
     overscan: 15,
+    measureElement: (el) => el?.getBoundingClientRect().height ?? 32,
   });
+
+  // Re-measure all rows when expanded set changes
+  useLayoutEffect(() => {
+    rowVirtualizer.measure();
+  }, [expandedRows, rowVirtualizer]);
 
   const handleSort = useCallback((colId: string) => {
     setLocalSortBy(prevCol => {
@@ -485,11 +585,11 @@ export function EvidenceTable({
             <div
               key={col.id}
               className={clsx(
-                "flex flex-col px-2 py-1 gap-0.5 border-r border-white/5 last:border-r-0",
+                "flex flex-col px-2 py-1 gap-0.5 border-r border-white/5 last:border-r-0 relative",
                 col.id === 'text' ? "flex-1 min-w-0" : "flex-none",
                 col.sortable && "cursor-pointer hover:bg-white/5 transition-colors"
               )}
-              style={col.id !== 'text' ? { width: colWidth(col.id) } : undefined}
+              style={col.id !== 'text' ? { width: getColWidth(col.id) } : undefined}
               onClick={() => col.sortable && handleSort(col.id)}
               title={col.description}
             >
@@ -527,7 +627,7 @@ export function EvidenceTable({
                     min={-2}
                     max={3}
                     step={0.1}
-                    value={zonePreview?.previewThreshold ?? 1.0}        
+                    value={zonePreview?.previewThreshold ?? 1.0}
                     className="w-full h-1 accent-amber-400"
                     onChange={e => setZoneThreshold(parseFloat(e.target.value))}
                     title={`Zone threshold: z_claim > ${zonePreview?.previewThreshold?.toFixed(1) ?? '1.0'}`}
@@ -540,6 +640,11 @@ export function EvidenceTable({
                     >✕</button>
                   )}
                 </div>
+              )}
+
+              {/* Resize handle */}
+              {col.id !== 'text' && (
+                <ColResizeHandle colId={col.id} onResize={handleColResize} />
               )}
             </div>
           ))}
@@ -559,13 +664,14 @@ export function EvidenceTable({
             return (
               <div
                 key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={rowVirtualizer.measureElement}
                 style={{
                   position: 'absolute',
                   top: 0,
                   left: 0,
                   right: 0,
                   transform: `translateY(${virtualRow.start}px)`,
-                  height: `${virtualRow.size}px`,
                 }}
               >
                 {item.type === 'group' ? (
@@ -575,9 +681,11 @@ export function EvidenceTable({
                     row={item.row}
                     columns={columns}
                     previews={thresholdPreviews}
-                    expanded={expandedRows.has(item.row.statementId)}
+                    expanded={expandedRows.has(getRowId(item.row))}
+                    mode={mode}
+                    getColWidth={getColWidth}
                     onExpand={() => {
-                      toggleRow(item.row.statementId);
+                      toggleRow(getRowId(item.row));
                       onRowClick?.(item.row);
                     }}
                   />
@@ -632,13 +740,17 @@ function TableRow({
   columns,
   previews,
   expanded,
+  mode = 'statement',
   onExpand,
+  getColWidth,
 }: {
-  row: EvidenceRow;
+  row: any;
   columns: ColumnDef[];
   previews: Record<string, ThresholdPreview>;
   expanded: boolean;
+  mode?: 'statement' | 'paragraph';
   onExpand: () => void;
+  getColWidth: (id: string) => number;
 }) {
   // Determine if any preview-overridden value differs from original
   const hasChangedCells = useMemo(() => {
@@ -657,7 +769,7 @@ function TableRow({
         expanded && "bg-white/5"
       )}
       onClick={onExpand}
-      style={{ minHeight: expanded ? 96 : 32 }}
+      style={{ minHeight: 32 }}
     >
       {columns.map((col) => (
         col.id === 'text' && expanded ? (
@@ -666,10 +778,20 @@ function TableRow({
               {row.text}
             </p>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[9px] text-text-muted font-mono">id:{row.statementId}</span>
-              <span className="text-[9px] text-text-muted font-mono">M{row.modelIndex}</span>
-              {row.paragraphId && (
-                <span className="text-[9px] text-text-muted font-mono">¶{row.paragraphId}</span>
+              {mode === 'paragraph' ? (
+                <>
+                  <span className="text-[9px] text-text-muted font-mono">¶{row.paragraphId}</span>
+                  <span className="text-[9px] text-text-muted font-mono">M{row.modelIndex}</span>
+                  <span className="text-[9px] text-text-muted font-mono">{row.statementCount} stmt{row.statementCount !== 1 ? 's' : ''}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[9px] text-text-muted font-mono">id:{row.statementId}</span>
+                  <span className="text-[9px] text-text-muted font-mono">M{row.modelIndex}</span>
+                  {row.paragraphId && (
+                    <span className="text-[9px] text-text-muted font-mono">¶{row.paragraphId}</span>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -680,6 +802,7 @@ function TableRow({
             row={row}
             previews={previews}
             changed={hasChangedCells && col.id === 'zone'}
+            width={col.id !== 'text' ? getColWidth(col.id) : undefined}
           />
         )
       ))}

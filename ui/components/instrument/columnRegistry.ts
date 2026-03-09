@@ -1,4 +1,4 @@
-import type { EvidenceRow } from "../../hooks/useEvidenceRows";
+import type { ParagraphRow } from "../../hooks/useParagraphRows";
 
 // ============================================================================
 // TYPES
@@ -7,7 +7,7 @@ import type { EvidenceRow } from "../../hooks/useEvidenceRows";
 export interface ColumnDef {
   id: string;
   label: string;
-  accessor: (row: EvidenceRow) => string | number | boolean | null;
+  accessor: (row: any) => string | number | boolean | null;
   type: 'number' | 'text' | 'category' | 'boolean';
   format?: (val: any) => string;
   sortable: boolean;
@@ -15,7 +15,7 @@ export interface ColumnDef {
   description?: string;
   source: 'built-in' | 'computed';
   /** Column category for grouping in ColumnPicker */
-  category: 'identity' | 'geometry' | 'competitive' | 'continuous' | 'mixed' | 'blast' | 'density' | 'metadata';
+  category: 'identity' | 'geometry' | 'continuous' | 'mixed' | 'blast' | 'density' | 'metadata';
 }
 
 export interface FilterRule {
@@ -121,56 +121,6 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     description: 'Cosine similarity between statement and the original query',
     source: 'built-in',
     category: 'geometry',
-  },
-
-  // ── Competitive §1 ─────────────────────────────────────────────────────────
-  {
-    id: 'w_comp',
-    label: 'w_comp',
-    accessor: r => r.w_comp,
-    type: 'number',
-    format: fmtNum(3),
-    sortable: true,
-    groupable: false,
-    description: 'Competitive allocation weight for selected claim',
-    source: 'built-in',
-    category: 'competitive',
-  },
-  {
-    id: 'excess_comp',
-    label: 'excess',
-    accessor: r => r.excess_comp,
-    type: 'number',
-    format: fmtNum(3),
-    sortable: true,
-    groupable: false,
-    description: 'Excess weight above threshold in competitive allocation',
-    source: 'built-in',
-    category: 'competitive',
-  },
-  {
-    id: 'tau_S',
-    label: 'τ_S',
-    accessor: r => r.tau_S,
-    type: 'number',
-    format: fmtNum(3),
-    sortable: true,
-    groupable: false,
-    description: 'Competitive threshold for selected claim',
-    source: 'built-in',
-    category: 'competitive',
-  },
-  {
-    id: 'claimCount',
-    label: '# claims',
-    accessor: r => r.claimCount,
-    type: 'number',
-    format: (v: any) => v == null ? '—' : String(Math.round(v)),
-    sortable: true,
-    groupable: true,
-    description: 'Number of claims this statement is assigned to',
-    source: 'built-in',
-    category: 'competitive',
   },
 
   // ── Mixed provenance ────────────────────────────────────────────────────────
@@ -306,6 +256,18 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     category: 'density',
   },
   {
+    id: 'densityDelta',
+    label: 'Δdensity',
+    accessor: r => r.densityDelta,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Statement density minus claim density. Positive = statement is denser than the claim it feeds. Negative = statement is hollower than the claim.',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
     id: 'densityLift',
     label: 'densityLift',
     accessor: r => r.densityLift,
@@ -314,6 +276,18 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     sortable: true,
     groupable: false,
     description: 'Claim density lift: claim embedding density minus mean density of its assigned source statements. Positive = mapper compressed/elevated meaning, negative = mapper diluted.',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'queryDensity',
+    label: 'q_density',
+    accessor: r => r.queryDensity,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Query embedding density (projected through statement regression model). Single reference value — compare against statement density to gauge relative specificity.',
     source: 'built-in',
     category: 'density',
   },
@@ -370,7 +344,7 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'provenance',
     label: 'Provenance',
-    columns: ['statementId', 'text', 'model', 'sim_claim', 'w_comp', 'zone'],
+    columns: ['statementId', 'text', 'model', 'sim_claim', 'zone'],
     sortBy: 'sim_claim',
     sortDir: 'desc',
     groupBy: 'zone',
@@ -386,8 +360,8 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'allocation',
     label: 'Allocation',
-    columns: ['statementId', 'text', 'model', 'claimCount', 'w_comp', 'isExclusive', 'sim_query'],
-    sortBy: 'w_comp',
+    columns: ['statementId', 'text', 'model', 'isExclusive', 'sim_claim', 'sim_query'],
+    sortBy: 'sim_claim',
     sortDir: 'desc',
     groupBy: null,
   },
@@ -402,7 +376,7 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'density',
     label: 'Density',
-    columns: ['statementId', 'text', 'model', 'semanticDensity', 'densityLift', 'sim_claim', 'zone'],
+    columns: ['statementId', 'text', 'model', 'semanticDensity', 'densityDelta', 'densityLift', 'queryDensity'],
     sortBy: 'semanticDensity',
     sortDir: 'desc',
     groupBy: null,
@@ -420,4 +394,291 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
 
 export const DEFAULT_VIEW_MAP: Map<string, ViewConfig> = new Map(
   DEFAULT_VIEWS.map(v => [v.id, v])
+);
+
+// ============================================================================
+// PARAGRAPH COLUMN DEFINITIONS
+// ============================================================================
+
+export const PARAGRAPH_COLUMNS: ColumnDef[] = [
+  // ── Identity ───────────────────────────────────────────────────────────────
+  {
+    id: 'paragraphId',
+    label: 'ID',
+    accessor: (r: ParagraphRow) => r.paragraphId,
+    type: 'text',
+    sortable: true,
+    groupable: false,
+    description: 'Paragraph ID',
+    source: 'built-in',
+    category: 'identity',
+  },
+  {
+    id: 'text',
+    label: 'Text',
+    accessor: (r: ParagraphRow) => r.text,
+    type: 'text',
+    sortable: false,
+    groupable: false,
+    description: 'Full paragraph text',
+    source: 'built-in',
+    category: 'identity',
+  },
+  {
+    id: 'model',
+    label: 'Model',
+    accessor: (r: ParagraphRow) => r.modelIndex,
+    type: 'number',
+    format: (v: any) => v == null ? '—' : `M${v}`,
+    sortable: true,
+    groupable: true,
+    description: 'Model index that produced this paragraph',
+    source: 'built-in',
+    category: 'identity',
+  },
+  {
+    id: 'statementCount',
+    label: '# stmts',
+    accessor: (r: ParagraphRow) => r.statementCount,
+    type: 'number',
+    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    sortable: true,
+    groupable: false,
+    description: 'Number of statements in this paragraph',
+    source: 'built-in',
+    category: 'identity',
+  },
+
+  // ── Shadow ─────────────────────────────────────────────────────────────────
+  {
+    id: 'dominantStance',
+    label: 'stance',
+    accessor: (r: ParagraphRow) => r.dominantStance,
+    type: 'category',
+    sortable: true,
+    groupable: true,
+    description: 'Dominant epistemic stance of the paragraph',
+    source: 'built-in',
+    category: 'metadata',
+  },
+  {
+    id: 'contested',
+    label: 'contested',
+    accessor: (r: ParagraphRow) => r.contested,
+    type: 'boolean',
+    sortable: true,
+    groupable: true,
+    description: 'Whether paragraph contains conflicting stances',
+    source: 'built-in',
+    category: 'metadata',
+  },
+
+  // ── Geometry ───────────────────────────────────────────────────────────────
+  {
+    id: 'top1Sim',
+    label: 'top1Sim',
+    accessor: (r: ParagraphRow) => r.top1Sim,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Best neighbor similarity',
+    source: 'built-in',
+    category: 'geometry',
+  },
+  {
+    id: 'avgTopKSim',
+    label: 'avgTopK',
+    accessor: (r: ParagraphRow) => r.avgTopKSim,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Average similarity of top-K neighbors',
+    source: 'built-in',
+    category: 'geometry',
+  },
+  {
+    id: 'isolationScore',
+    label: 'isolation',
+    accessor: (r: ParagraphRow) => r.isolationScore,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Isolation score: 1 - top1Sim (higher = more isolated)',
+    source: 'built-in',
+    category: 'geometry',
+  },
+  {
+    id: 'mutualDegree',
+    label: 'mutDeg',
+    accessor: (r: ParagraphRow) => r.mutualDegree,
+    type: 'number',
+    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    sortable: true,
+    groupable: false,
+    description: 'Degree in mutual kNN recognition graph',
+    source: 'built-in',
+    category: 'geometry',
+  },
+
+  // ── Density ────────────────────────────────────────────────────────────────
+  {
+    id: 'semanticDensity',
+    label: 'density',
+    accessor: (r: ParagraphRow) => r.semanticDensity,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Paragraph semantic density: z-scored OLS residual of embedding magnitude vs text length. Positive = more specific than expected, negative = hollow/generic.',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'claimDensity',
+    label: 'c_density',
+    accessor: (r: ParagraphRow) => r.claimDensity,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Selected claim embedding density (reference). Compare against paragraph density to see relative specificity.',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'queryDensity',
+    label: 'q_density',
+    accessor: (r: ParagraphRow) => r.queryDensity,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Query embedding density (reference). Compare against paragraph density to see relative specificity.',
+    source: 'built-in',
+    category: 'density',
+  },
+
+  // ── Mixed provenance (claim-relative) ──────────────────────────────────────
+  {
+    id: 'origin',
+    label: 'origin',
+    accessor: (r: ParagraphRow) => r.origin,
+    type: 'category',
+    sortable: true,
+    groupable: true,
+    description: 'Which method contributed this paragraph: competitive-only, claim-centric-only, or both',
+    source: 'built-in',
+    category: 'mixed',
+  },
+  {
+    id: 'claimCentricSim',
+    label: 'ccSim',
+    accessor: (r: ParagraphRow) => r.claimCentricSim,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Cosine similarity between claim embedding and paragraph embedding',
+    source: 'built-in',
+    category: 'mixed',
+  },
+  {
+    id: 'claimCentricAboveThreshold',
+    label: 'ccGate',
+    accessor: (r: ParagraphRow) => r.claimCentricAboveThreshold,
+    type: 'boolean',
+    sortable: true,
+    groupable: true,
+    description: 'Whether paragraph passed the claim-centric similarity gate (μ+σ)',
+    source: 'built-in',
+    category: 'mixed',
+  },
+
+  // ── Competitive allocation ────────────────────────────────────────────────
+  {
+    id: 'compWeight',
+    label: 'w_comp',
+    accessor: (r: ParagraphRow) => r.compWeight,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Normalized competitive weight: excess / Σ excess',
+    source: 'built-in',
+    category: 'mixed',
+  },
+  {
+    id: 'compExcess',
+    label: 'excess',
+    accessor: (r: ParagraphRow) => r.compExcess,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Raw excess above threshold: sim - τ',
+    source: 'built-in',
+    category: 'mixed',
+  },
+  {
+    id: 'compThreshold',
+    label: 'τ',
+    accessor: (r: ParagraphRow) => r.compThreshold,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Competitive threshold: μ (N=2) or μ+σ (N≥3)',
+    source: 'built-in',
+    category: 'mixed',
+  },
+];
+
+export const PARAGRAPH_COLUMN_MAP: Map<string, ColumnDef> = new Map(
+  PARAGRAPH_COLUMNS.map(c => [c.id, c])
+);
+
+// ============================================================================
+// PARAGRAPH DEFAULT VIEWS
+// ============================================================================
+
+export const PARAGRAPH_VIEWS: ViewConfig[] = [
+  {
+    id: 'para-overview',
+    label: 'Overview',
+    columns: ['paragraphId', 'text', 'model', 'statementCount', 'dominantStance', 'contested'],
+    sortBy: 'paragraphId',
+    sortDir: 'asc',
+    groupBy: 'model',
+  },
+  {
+    id: 'para-geometry',
+    label: 'Geometry',
+    columns: ['paragraphId', 'text', 'model', 'top1Sim', 'avgTopKSim', 'isolationScore', 'mutualDegree'],
+    sortBy: 'isolationScore',
+    sortDir: 'desc',
+    groupBy: null,
+  },
+  {
+    id: 'para-provenance',
+    label: 'Provenance',
+    columns: ['paragraphId', 'text', 'model', 'origin', 'claimCentricSim', 'claimCentricAboveThreshold', 'compWeight', 'compExcess', 'compThreshold'],
+    sortBy: 'claimCentricSim',
+    sortDir: 'desc',
+    groupBy: 'origin',
+  },
+  {
+    id: 'para-density',
+    label: 'Density',
+    columns: ['paragraphId', 'text', 'model', 'semanticDensity', 'claimDensity', 'queryDensity', 'statementCount'],
+    sortBy: 'semanticDensity',
+    sortDir: 'desc',
+    groupBy: null,
+  },
+];
+
+export const PARAGRAPH_VIEW_MAP: Map<string, ViewConfig> = new Map(
+  PARAGRAPH_VIEWS.map(v => [v.id, v])
 );

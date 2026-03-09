@@ -21,7 +21,8 @@
       "Bash(sed 's/.*export function //g')",
       "mcp__ide__getDiagnostics",
       "Bash(xargs grep:*)",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")"
     ]
   }
 }

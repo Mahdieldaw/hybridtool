@@ -50,12 +50,10 @@ export interface BlastSurfaceInput {
 export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResult {
     const startMs = performance.now();
     const {
-        claims, mixedProvenance,
+        claims,
         statementEmbeddings, totalCorpusStatements,
         queryRelevanceScores, queryEmbedding,
     } = input;
-
-    const corpusAffinityByStatement = precomputeCorpusAffinity(statementEmbeddings);
 
     // 1. Build canonical sets and exclusive IDs from the patched claims
     const canonicalSets = new Map<string, Set<string>>();
@@ -83,7 +81,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
     for (const claim of claims) {
         const claimId = claim.id;
         const claimLabel = claim.label ?? claimId;
-        const mpClaim = mixedProvenance.perClaim[claimId];
         const canonicalSet = canonicalSets.get(claimId) ?? new Set<string>();
         const exclusiveIds = canonicalExclusiveIdsByClaim.get(claimId) ?? [];
 
@@ -95,7 +92,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             claims,
             canonicalSets,
             statementEmbeddings,
-            corpusAffinityByStatement,
         });
 
         const vernalVulnerableStatementIds = layerB.statements.filter(s => s.orphan).map(s => s.statementId);
@@ -126,8 +122,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         // ── Layer C: Evidence Mass ────────────────────────────────────────
         const layerC: BlastSurfaceLayerC = {
             canonicalCount: canonicalSet.size,
-            exclusiveCount: exclusiveIds.length,
-            coreCount: mpClaim?.coreCount ?? 0,
         };
 
         // ── Layer D: Cascade Echo ─────────────────────────────────────────
@@ -250,33 +244,6 @@ function median(values: number[]): number {
     return (a + b) / 2;
 }
 
-function precomputeCorpusAffinity(statementEmbeddings: Map<string, Float32Array>): Map<string, number> {
-    const ids = Array.from(statementEmbeddings.keys());
-    const embeddings = ids.map((id) => statementEmbeddings.get(id)).filter(Boolean) as Float32Array[];
-    const n = Math.min(ids.length, embeddings.length);
-
-    const sums = new Array<number>(n).fill(0);
-    const counts = new Array<number>(n).fill(0);
-
-    for (let i = 0; i < n; i++) {
-        const a = embeddings[i];
-        for (let j = i + 1; j < n; j++) {
-            const b = embeddings[j];
-            const sim = cosineSimilarity(a, b);
-            sums[i] += sim;
-            sums[j] += sim;
-            counts[i]++;
-            counts[j]++;
-        }
-    }
-
-    const out = new Map<string, number>();
-    for (let i = 0; i < n; i++) {
-        out.set(ids[i], counts[i] > 0 ? sums[i] / counts[i] : 0);
-    }
-    return out;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // LAYER B — EXCLUSIVE VULNERABILITY
 //
@@ -291,11 +258,9 @@ function computeLayerB(input: {
     claims: Array<{ id: string }>;
     canonicalSets: Map<string, Set<string>>;
     statementEmbeddings: Map<string, Float32Array>;
-    corpusAffinityByStatement: Map<string, number>;
 }): ClaimAbsorptionProfile {
-    const { claimId, exclusiveIds, canonicalSet, claims, canonicalSets, statementEmbeddings, corpusAffinityByStatement } = input;
+    const { claimId, exclusiveIds, canonicalSet, claims, canonicalSets, statementEmbeddings } = input;
 
-    const absorptionByTarget: Record<string, number> = {};
     const statements: ClaimAbsorptionProfile['statements'] = [];
 
     const otherClaimIds = claims.map(c => c.id).filter(id => id !== claimId);
@@ -309,8 +274,15 @@ function computeLayerB(input: {
         }
     }
 
+    // Pre-index exclusive embeddings for the backward pass
+    const exclusiveEmbeddings = new Map<string, Float32Array>();
     for (const sid of exclusiveIds) {
-        const sEmb = statementEmbeddings.get(sid);
+        const emb = statementEmbeddings.get(sid);
+        if (emb) exclusiveEmbeddings.set(sid, emb);
+    }
+
+    for (const sid of exclusiveIds) {
+        const sEmb = exclusiveEmbeddings.get(sid) ?? null;
 
         if (!sEmb) {
             const carriers = otherClaimIds.map(targetClaimId => ({
@@ -318,10 +290,7 @@ function computeLayerB(input: {
                 hasTwin: false,
                 bestSim: -1,
                 bestCandidateId: null,
-                bestCandidateCoreAffinity: null,
-                bestCandidateCorpusAffinity: null,
-                differential: null,
-                differentialGate: null,
+                reciprocal: null,
             }));
             statements.push({
                 statementId: sid,
@@ -335,6 +304,7 @@ function computeLayerB(input: {
             continue;
         }
 
+        // Gate 1 threshold: μ+2σ of cross-claim candidate similarities
         const candidateSims: number[] = [];
         for (const tid of crossClaimCandidateIds) {
             const tEmb = statementEmbeddings.get(tid);
@@ -356,6 +326,8 @@ function computeLayerB(input: {
 
         for (const targetClaimId of otherClaimIds) {
             const targetCanonical = canonicalSets.get(targetClaimId);
+
+            // Forward pass: S looks into D's evidence pool
             let bestSim = -Infinity;
             let bestCandidateId: string | null = null;
 
@@ -372,46 +344,36 @@ function computeLayerB(input: {
             }
 
             const bestSimOut = bestSim > -Infinity ? bestSim : -1;
-            let bestCandidateCoreAffinity: number | null = null;
-            let bestCandidateCorpusAffinity: number | null = null;
-            let differential: number | null = null;
-            let differentialGate: boolean | null = null;
-
+            let reciprocal: boolean | null = null;
             let hasTwin = false;
+
+            // Gate 2: reciprocal best-match
             if (bestCandidateId && bestSimOut > tauSim) {
                 const tEmb = statementEmbeddings.get(bestCandidateId);
                 if (tEmb) {
-                    let coreSum = 0;
-                    let coreCount = 0;
-                    for (const cid of canonicalSet) {
-                        if (cid === sid) continue;
-                        const cEmb = statementEmbeddings.get(cid);
-                        if (!cEmb) continue;
-                        coreSum += cosineSimilarity(tEmb, cEmb);
-                        coreCount++;
+                    // Backward pass: bestCandidate looks back into C's exclusive set
+                    let bestBackSim = -Infinity;
+                    let bestBackId: string | null = null;
+                    for (const [exId, exEmb] of exclusiveEmbeddings) {
+                        const sim = cosineSimilarity(tEmb, exEmb);
+                        if (sim > bestBackSim) {
+                            bestBackSim = sim;
+                            bestBackId = exId;
+                        }
                     }
-                    bestCandidateCoreAffinity = coreCount > 0 ? coreSum / coreCount : 0;
-                    bestCandidateCorpusAffinity = corpusAffinityByStatement.get(bestCandidateId) ?? 0;
-                    differential = bestCandidateCoreAffinity - bestCandidateCorpusAffinity;
-                    differentialGate = differential > 0;
-                    hasTwin = differentialGate;
+                    reciprocal = bestBackId === sid;
+                    hasTwin = reciprocal;
                 }
             }
 
-            if (hasTwin) {
-                carrierCount++;
-                absorptionByTarget[targetClaimId] = (absorptionByTarget[targetClaimId] ?? 0) + 1;
-            }
+            if (hasTwin) carrierCount++;
 
             carriers.push({
                 targetClaimId,
                 hasTwin,
                 bestSim: bestSimOut,
                 bestCandidateId,
-                bestCandidateCoreAffinity,
-                bestCandidateCorpusAffinity,
-                differential,
-                differentialGate,
+                reciprocal,
             });
         }
 
@@ -432,13 +394,11 @@ function computeLayerB(input: {
     const orphanRatio = exclusiveCount > 0 ? orphanCount / exclusiveCount : 0;
 
     return {
-        claimId,
         exclusiveCount,
         orphanCount,
         absorbableCount,
         orphanRatio,
         statements,
-        absorptionByTarget,
     };
 }
 

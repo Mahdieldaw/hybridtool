@@ -1032,7 +1032,7 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
     orphanCount: number; exclusiveCount: number;
     carrierRate: string; orphanRatio: number | null;
     canonicalCount: number;
-    coreCount: number; cascadeExposure: number | null;
+    cascadeExposure: number | null;
   };
 
   const surfaceRows = useMemo<SurfaceRow[]>(() =>
@@ -1051,7 +1051,6 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
         carrierRate: exclCount > 0 ? `${absorbableCount}/${exclCount}` : "—",
         orphanRatio: typeof b?.orphanRatio === "number" && Number.isFinite(b.orphanRatio) ? b.orphanRatio : null,
         canonicalCount: c.canonicalCount ?? 0,
-        coreCount: c.coreCount ?? 0,
         cascadeExposure: typeof d.cascadeExposure === "number" && Number.isFinite(d.cascadeExposure) ? d.cascadeExposure : null,
       };
     }),
@@ -1092,7 +1091,6 @@ function BlastSurfaceInline({ artifact }: { artifact: any }) {
             { key: "carrierRate", header: "Carr", cell: (r) => <span className="font-mono text-text-muted">{r.carrierRate}</span> },
             { key: "orphanRatio", header: "%", sortValue: (r) => r.orphanRatio, cell: (r) => <span className="font-mono text-text-muted">{r.orphanRatio == null ? "—" : `${(r.orphanRatio * 100).toFixed(0)}%`}</span> },
             { key: "canonicalCount", header: "Canon", sortValue: (r) => r.canonicalCount, cell: (r) => <span className="font-mono text-text-muted">{r.canonicalCount}</span> },
-            { key: "coreCount", header: "Core", sortValue: (r) => r.coreCount, cell: (r) => <span className="font-mono text-text-muted">{r.coreCount}</span> },
             { key: "cascadeExposure", header: "CascExp", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
           ]}
           rows={surfaceRows}
@@ -1271,10 +1269,7 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
     bestCarrierClaimId: string | null;
     bestSim: number | null;
     bestCandidateId: string | null;
-    bestCoreAffinity: number | null;
-    bestCorpusAffinity: number | null;
-    bestDifferential: number | null;
-    differentialGate: boolean | null;
+    reciprocal: boolean | null;
   };
 
   const rows = useMemo<TwinRow[]>(() => {
@@ -1292,20 +1287,14 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
         let bestSim = -Infinity;
         let bestCandidateId: string | null = null;
         let bestCarrierClaimId: string | null = null;
-        let bestCoreAffinity: number | null = null;
-        let bestCorpusAffinity: number | null = null;
-        let bestDifferential: number | null = null;
-        let differentialGate: boolean | null = null;
+        let reciprocal: boolean | null = null;
         for (const c of carriers) {
           const sim = typeof c?.bestSim === "number" && Number.isFinite(c.bestSim) ? c.bestSim : -Infinity;
           if (sim > bestSim) {
             bestSim = sim;
             bestCandidateId = typeof c?.bestCandidateId === "string" && c.bestCandidateId.trim() ? String(c.bestCandidateId).trim() : null;
             bestCarrierClaimId = typeof c?.targetClaimId === "string" && c.targetClaimId.trim() ? String(c.targetClaimId).trim() : null;
-            bestCoreAffinity = typeof c?.bestCandidateCoreAffinity === "number" && Number.isFinite(c.bestCandidateCoreAffinity) ? c.bestCandidateCoreAffinity : null;
-            bestCorpusAffinity = typeof c?.bestCandidateCorpusAffinity === "number" && Number.isFinite(c.bestCandidateCorpusAffinity) ? c.bestCandidateCorpusAffinity : null;
-            bestDifferential = typeof c?.differential === "number" && Number.isFinite(c.differential) ? c.differential : null;
-            differentialGate = typeof c?.differentialGate === "boolean" ? c.differentialGate : null;
+            reciprocal = typeof c?.reciprocal === "boolean" ? c.reciprocal : null;
           }
         }
 
@@ -1321,10 +1310,7 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
           bestCarrierClaimId,
           bestSim: bestSim > -Infinity ? bestSim : null,
           bestCandidateId,
-          bestCoreAffinity,
-          bestCorpusAffinity,
-          bestDifferential,
-          differentialGate,
+          reciprocal,
         });
       }
     }
@@ -1384,11 +1370,12 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
             { key: "bestCarrierClaimId", header: "BestClaim", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.bestCarrierClaimId ?? "—"}</span> },
             { key: "bestSim", header: "bestSim", sortValue: (r) => r.bestSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestSim, 3)}</span> },
             { key: "tauSim", header: "τ_sim", sortValue: (r) => r.tauSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.tauSim, 3)}</span> },
-            { key: "bestDifferential", header: "Δ", sortValue: (r) => r.bestDifferential, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestDifferential, 3)}</span> },
-            { key: "differentialGate", header: "ΔG", sortValue: (r) => r.differentialGate == null ? -1 : r.differentialGate ? 1 : 0, cell: (r) => <span className="font-mono text-text-muted">{r.differentialGate == null ? "—" : r.differentialGate ? "✓" : "✕"}</span> },
-            { key: "bestCandidateId", header: "BestStmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.bestCandidateId ?? "—"}</span> },
-            { key: "bestCoreAffinity", header: "A(core)", sortValue: (r) => r.bestCoreAffinity, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestCoreAffinity, 3)}</span> },
-            { key: "bestCorpusAffinity", header: "A(corp)", sortValue: (r) => r.bestCorpusAffinity, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestCorpusAffinity, 3)}</span> },
+            { key: "bestCandidateId", header: "BestFwd", cell: (r) => {
+              const candidateText = r.bestCandidateId ? statementTextById.get(r.bestCandidateId) ?? "" : "";
+              const tip = candidateText ? `${r.bestCandidateId}: ${candidateText}` : r.bestCandidateId ?? "";
+              return <span title={tip} className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block cursor-help">{r.bestCandidateId ?? "—"}</span>;
+            } },
+            { key: "reciprocal", header: "Recip", sortValue: (r) => r.reciprocal == null ? -1 : r.reciprocal ? 1 : 0, cell: (r) => <span className={clsx("font-mono", r.reciprocal === true ? "text-emerald-400" : r.reciprocal === false ? "text-red-400" : "text-text-muted")}>{r.reciprocal == null ? "—" : r.reciprocal ? "✓" : "✕"}</span> },
           ]}
           rows={rows}
           defaultSortKey="orphan"

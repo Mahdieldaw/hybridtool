@@ -11,7 +11,6 @@ import type { EvidenceRow } from "../../hooks/useEvidenceRows";
 const CATEGORY_LABELS: Record<string, string> = {
   identity: 'Identity',
   geometry: 'Geometry',
-  competitive: 'Competitive §1',
   continuous: 'Continuous Field',
   mixed: 'Mixed Provenance',
   blast: 'Blast Surface',
@@ -19,7 +18,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   computed: 'Computed',
 };
 
-const CATEGORY_ORDER = ['identity', 'geometry', 'competitive', 'continuous', 'mixed', 'blast', 'metadata', 'computed'];
+const CATEGORY_ORDER = ['identity', 'geometry', 'continuous', 'mixed', 'blast', 'metadata', 'computed'];
 
 // ============================================================================
 // EXPRESSION INPUT
@@ -127,7 +126,7 @@ function ExpressionInput({
               if (e.key === 'Enter') handleAdd();
               if (e.key === 'Escape') setSuggestions([]);
             }}
-            placeholder="e.g. sim_claim - tau_S"
+            placeholder="e.g. sim_claim - sim_query"
             className={clsx(
               "w-full bg-black/20 border rounded-md px-2 py-1 text-xs font-mono text-text-primary placeholder:text-text-muted focus:outline-none",
               error ? "border-rose-500/50 focus:border-rose-500" : "border-white/10 focus:border-brand-500/50"

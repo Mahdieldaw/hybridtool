@@ -907,20 +907,30 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             || (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0)
             || !geoRecord?.meta?.semanticDensityScores
             || !geoRecord?.meta?.densityRegressionModel
+            || !geoRecord?.meta?.paragraphSemanticDensityScores
+            || geoRecord?.meta?.querySemanticDensity == null
             || geoRecord.meta?.embeddingVersion !== 2;
           if (needsRegeneration) {
             // Force re-generation if missing, empty, or lacking density scores
             const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
             const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
             let queryEmbedding = null;
+            let queryDensityScore = null;
             if (queryText) {
               const cleaned = stripInlineMarkdown(String(queryText)).trim();
               const truncated = structuredTruncate(cleaned, 1740);
               const prefixed = truncated && !truncated.toLowerCase().startsWith('represent this sentence')
                 ? `Represent this sentence for searching relevant passages: ${truncated}` : truncated;
               if (prefixed) {
-                const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG);
+                const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG, { captureRawMagnitudes: true });
                 queryEmbedding = batch.embeddings.get('0') || null;
+                // Project query density through statement regression model
+                const qMag = batch.rawMagnitudes?.get('0') ?? null;
+                const qLen = batch.textLengths?.get('0') ?? null;
+                if (qMag != null && qLen != null && stmtResult.densityRegressionModel) {
+                  const { projectSemanticDensity } = await import('./clustering/semanticDensity');
+                  queryDensityScore = projectSemanticDensity(qMag, qLen, stmtResult.densityRegressionModel);
+                }
               }
             }
 
@@ -933,6 +943,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             const densityMap = stmtResult.semanticDensityScores;
             const densityObj = densityMap && densityMap.size > 0
               ? Object.fromEntries(densityMap)
+              : null;
+            const paraDensityMap = paraResult.semanticDensityScores;
+            const paraDensityObj = paraDensityMap && paraDensityMap.size > 0
+              ? Object.fromEntries(paraDensityMap)
               : null;
 
             await sm.persistEmbeddings(aiTurnId, {
@@ -948,7 +962,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 statementIndex: packedStatements.index,
                 paragraphIndex: packedParagraphs.index,
                 ...(densityObj ? { semanticDensityScores: densityObj } : {}),
+                ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
                 ...(stmtResult.densityRegressionModel ? { densityRegressionModel: stmtResult.densityRegressionModel } : {}),
+                ...(queryDensityScore != null ? { querySemanticDensity: queryDensityScore } : {}),
                 embeddingVersion: 2,
                 timestamp: Date.now(),
               },
@@ -1053,7 +1069,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
             await import('./core/execution/deterministicPipeline');
 
-          const enrichedClaims = await reconstructProvenance(
+          const provenanceResult = await reconstructProvenance(
             mapperClaimsForProvenance,
             shadowStatements,
             shadowParagraphs,
@@ -1063,13 +1079,19 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             statementEmbeddings,
             claimEmbeddings,
           );
+          const enrichedClaims = provenanceResult.claims ?? provenanceResult;
+          const competitiveWeights = provenanceResult.competitiveWeights ?? null;
+          const competitiveExcess = provenanceResult.competitiveExcess ?? null;
+          const competitiveThresholds = provenanceResult.competitiveThresholds ?? null;
 
-          // Compute densityLift: claim density minus mean density of assigned statements
+          // Compute claim density + densityLift
           if (claimDensityScores && geoRecord?.meta?.semanticDensityScores) {
             const stmtDensityObj = geoRecord.meta.semanticDensityScores;
             for (const claim of enrichedClaims) {
               const claimScore = claimDensityScores.get(claim.id);
-              if (claimScore == null || !claim.sourceStatementIds?.length) continue;
+              if (claimScore == null) continue;
+              claim.density = claimScore;
+              if (!claim.sourceStatementIds?.length) continue;
               const assigned = claim.sourceStatementIds
                 .map(sid => stmtDensityObj[sid]).filter(v => v != null);
               if (assigned.length === 0) continue;
@@ -1095,6 +1117,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             existingQueryRelevance: queryRelevance,
             modelCount,
             queryText,
+            competitiveWeights,
+            competitiveExcess,
+            competitiveThresholds,
           });
 
           let questionSelectionInstrumentation = null;
@@ -1135,6 +1160,11 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             modelCount,
             shadowStatements,
             statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
+            paragraphSemanticDensity: geoRecord?.meta?.paragraphSemanticDensityScores ?? undefined,
+            claimSemanticDensity: claimDensityScores?.size > 0
+              ? Object.fromEntries(claimDensityScores)
+              : undefined,
+            querySemanticDensity: geoRecord?.meta?.querySemanticDensity ?? undefined,
           });
           mapperArtifact.preSemantic = preSemantic || null;
           if (questionSelectionInstrumentation) {

@@ -526,6 +526,8 @@ export class StepExecutor {
     let embeddingResult = null;
     let statementEmbeddingResult = null;
     let geometryParagraphEmbeddings = null;
+    let paragraphDensityScores = null;  // Map<paragraphId, number> — hoisted from paragraph embedding IIFE
+    let queryDensityScore = null;       // number — hoisted from query density projection
     let queryEmbedding = null;
     let queryRelevance = null;
     let substrateSummary = null;
@@ -628,7 +630,8 @@ export class StepExecutor {
             );
             embeddingResult = paragraphEmbeddingResult;
             geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
-            const paraDensity = paragraphEmbeddingResult?.semanticDensityScores;
+            paragraphDensityScores = paragraphEmbeddingResult?.semanticDensityScores ?? null;
+            const paraDensity = paragraphDensityScores;
             let paragraphSemanticDensity = null;
             if (paraDensity && paraDensity.size > 0) {
               const entries = Array.from(paraDensity.entries());
@@ -720,6 +723,7 @@ export class StepExecutor {
             queryTextLength,
             statementEmbeddingResult.densityRegressionModel
           );
+          queryDensityScore = score;
           const querySemanticDensity = { score, projectedFrom: 'statement-regression' };
           if (geometryDiagnostics.stages.queryEmbedding) {
             geometryDiagnostics.stages.queryEmbedding.semanticDensity = querySemanticDensity;
@@ -1058,6 +1062,9 @@ export class StepExecutor {
               const densityObj = densityMap && densityMap.size > 0
                 ? Object.fromEntries(densityMap)
                 : null;
+              const paraDensityObj = paragraphDensityScores && paragraphDensityScores.size > 0
+                ? Object.fromEntries(paragraphDensityScores)
+                : null;
               options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
                 ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
                 ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
@@ -1071,6 +1078,9 @@ export class StepExecutor {
                   ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
                   ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
                   ...(densityObj ? { semanticDensityScores: densityObj } : {}),
+                  ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
+                  ...(statementEmbeddingResult?.densityRegressionModel ? { densityRegressionModel: statementEmbeddingResult.densityRegressionModel } : {}),
+                  ...(queryDensityScore != null ? { querySemanticDensity: queryDensityScore } : {}),
                   embeddingVersion: 2,
                   timestamp: Date.now(),
                 },
@@ -1325,7 +1335,7 @@ export class StepExecutor {
                 }
 
                 try {
-                  enrichedClaims = await reconstructProvenance(
+                  const provenanceResult = await reconstructProvenance(
                     mapperClaimsForProvenance,
                     shadowResult.statements,
                     paragraphResult.paragraphs,
@@ -1335,13 +1345,20 @@ export class StepExecutor {
                     statementEmbeddingResult?.embeddings || null,
                     claimEmbeddings,
                   );
+                  enrichedClaims = provenanceResult.claims;
+                  // Store competitive allocation maps for mixed provenance
+                  this._competitiveWeights = provenanceResult.competitiveWeights;
+                  this._competitiveExcess = provenanceResult.competitiveExcess;
+                  this._competitiveThresholds = provenanceResult.competitiveThresholds;
 
-                  // Compute densityLift: claim density minus mean density of assigned statements
+                  // Compute claim density + densityLift
                   if (claimDensityScores && statementEmbeddingResult?.semanticDensityScores) {
                     const stmtDensity = statementEmbeddingResult.semanticDensityScores;
                     for (const claim of enrichedClaims) {
                       const claimScore = claimDensityScores.get(claim.id);
-                      if (claimScore == null || !claim.sourceStatementIds?.length) continue;
+                      if (claimScore == null) continue;
+                      claim.density = claimScore;
+                      if (!claim.sourceStatementIds?.length) continue;
                       const assigned = claim.sourceStatementIds
                         .map(sid => stmtDensity.get(sid)).filter(v => v != null);
                       if (assigned.length === 0) continue;
@@ -1371,6 +1388,9 @@ export class StepExecutor {
                     existingQueryRelevance: queryRelevance,
                     modelCount: citationOrder.length,
                     queryText: payload.originalPrompt,
+                    competitiveWeights: this._competitiveWeights || null,
+                    competitiveExcess: this._competitiveExcess || null,
+                    competitiveThresholds: this._competitiveThresholds || null,
                   });
 
                   let cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
@@ -1505,6 +1525,9 @@ export class StepExecutor {
                       existingQueryRelevance: queryRelevance,
                       modelCount: citationOrder.length,
                       queryText: payload.originalPrompt,
+                      competitiveWeights: this._competitiveWeights || null,
+                      competitiveExcess: this._competitiveExcess || null,
+                      competitiveThresholds: this._competitiveThresholds || null,
                     });
                     cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
                     blastSurfaceResult = derived.blastSurfaceResult;
@@ -1536,6 +1559,13 @@ export class StepExecutor {
                     statementSemanticDensity: statementEmbeddingResult?.semanticDensityScores?.size > 0
                       ? Object.fromEntries(statementEmbeddingResult.semanticDensityScores)
                       : undefined,
+                    paragraphSemanticDensity: paragraphDensityScores?.size > 0
+                      ? Object.fromEntries(paragraphDensityScores)
+                      : undefined,
+                    claimSemanticDensity: claimDensityScores?.size > 0
+                      ? Object.fromEntries(claimDensityScores)
+                      : undefined,
+                    querySemanticDensity: queryDensityScore,
                   });
                   // Add StepExecutor-specific fields
                   mapperArtifact.preSemantic = preSemanticInterpretation || null;

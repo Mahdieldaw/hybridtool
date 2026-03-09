@@ -49,6 +49,11 @@ export async function computeDerivedFields({
   // Config
   modelCount = 1,
   queryText = '',
+
+  // Competitive allocation maps (from reconstructProvenance)
+  competitiveWeights = null,     // Map<paraId, Map<claimId, weight>>
+  competitiveExcess = null,      // Map<paraId, Map<claimId, excess>>
+  competitiveThresholds = null,  // Map<paraId, threshold>
 }) {
   const result = {
     claimProvenance: null,
@@ -151,6 +156,9 @@ export async function computeDerivedFields({
       statementEmbeddings || new Map(),
       claimEmbeddings || new Map(),
       competitivePools,
+      competitiveWeights || undefined,
+      competitiveExcess || undefined,
+      competitiveThresholds || undefined,
     );
     const rr = result.mixedProvenanceResult.recoveryRate ?? 0;
     const er = result.mixedProvenanceResult.expansionRate ?? 0;
@@ -509,6 +517,9 @@ export function assembleMapperArtifact({
   surveyGates = undefined,
   surveyRationale = null,
   statementSemanticDensity = undefined,
+  paragraphSemanticDensity = undefined,
+  claimSemanticDensity = undefined,
+  querySemanticDensity = undefined,
 }) {
   const {
     blastSurfaceResult,
@@ -549,5 +560,8 @@ export function assembleMapperArtifact({
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(alignmentResult ? { alignment: alignmentResult } : {}),
     ...(statementSemanticDensity ? { statementSemanticDensity } : {}),
+    ...(paragraphSemanticDensity ? { paragraphSemanticDensity } : {}),
+    ...(claimSemanticDensity ? { claimSemanticDensity } : {}),
+    ...(querySemanticDensity != null ? { querySemanticDensity } : {}),
   };
 }

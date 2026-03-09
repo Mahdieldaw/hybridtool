@@ -709,6 +709,7 @@ export interface LinkedClaim {
   hasSequenceSignal: boolean;
   hasTensionSignal: boolean;
   provenanceBulk: number;     // Σ paragraph weights for this claim
+  density?: number;            // raw claim embedding density (z-scored OLS residual)
   densityLift?: number;       // claim density - mean(assigned statement density)
 }
 
@@ -724,6 +725,10 @@ export interface MixedParagraphEntry {
   origin: ParagraphOrigin;
   claimCentricSim: number | null;  // null if not in claim-centric pool
   claimCentricAboveThreshold: boolean;
+  // Competitive allocation diagnostics (from reconstructProvenance)
+  compWeight: number | null;       // normalized weight: excess / Σ excess
+  compExcess: number | null;       // raw excess above threshold: sim - τ
+  compThreshold: number | null;    // paragraph threshold: μ (N=2) or μ+σ (N≥3)
 }
 
 export interface MixedStatementEntry {
@@ -809,10 +814,8 @@ export interface CrossClaimTwinEntry {
   hasTwin: boolean;
   bestSim: number;
   bestCandidateId: string | null;
-  bestCandidateCoreAffinity: number | null;
-  bestCandidateCorpusAffinity: number | null;
-  differential: number | null;
-  differentialGate: boolean | null;
+  /** Gate 2: does bestCandidate's best match back into C's exclusives point to this statement? */
+  reciprocal: boolean | null;
 }
 
 export interface StatementAbsorption {
@@ -826,20 +829,16 @@ export interface StatementAbsorption {
 }
 
 export interface ClaimAbsorptionProfile {
-  claimId: string;
   exclusiveCount: number;
   orphanCount: number;
   absorbableCount: number;
   orphanRatio: number;
   statements: StatementAbsorption[];
-  absorptionByTarget: Record<string, number>;
 }
 
-/** Layer C: Evidence mass trio — how much territory does this claim cover? */
+/** Layer C: Evidence mass — how much territory does this claim cover? */
 export interface BlastSurfaceLayerC {
   canonicalCount: number;       // total canonical statements from mixed provenance
-  exclusiveCount: number;       // exclusive statements within mixed provenance canonical set
-  coreCount: number;            // dense core from mixed provenance (globalSim >= globalMu)
 }
 
 export interface BlastSurfaceCascadeDetail {

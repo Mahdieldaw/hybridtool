@@ -17,12 +17,6 @@ export interface EvidenceRow {
   // Query geometry (global)
   sim_query: number | null;
 
-  // Competitive §1 (claim-relative)
-  w_comp: number | null;
-  excess_comp: number | null;
-  tau_S: number | null;
-  claimCount: number;
-
   // Mixed provenance (claim-relative)
   globalSim: number | null;
   zone: 'core' | 'boundary-promoted' | 'removed' | null;
@@ -39,7 +33,9 @@ export interface EvidenceRow {
 
   // Density
   semanticDensity: number | null;  // statement-level z-scored OLS residual magnitude
+  densityDelta: number | null;     // statement density minus claim density (positive = statement denser than claim)
   densityLift: number | null;      // claim's densityLift (constant for all rows under this claim)
+  queryDensity: number | null;     // query embedding density (single scalar, same for all rows — reference)
 
   // Metadata
   fate: 'primary' | 'supporting' | 'unaddressed' | 'orphan' | 'noise' | null;
@@ -108,12 +104,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
   const globalMaps = useMemo(() => {
     if (!artifact) return null;
     const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
-    const statementAllocation =
-      a?.statementAllocation ??
-      a?.statementAllocationResult ??
-      a?.derived?.statementAllocation ??
-      a?.derived?.statementAllocationResult ??
-      null;
     const completeness =
       a?.completeness ??
       a?.derived?.completeness ??
@@ -135,13 +125,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       if (fate) fateByStmt.set(String(stmtId), { fate, claimIds: Array.isArray(claimIds) ? claimIds : [] });
     }
 
-    // Assignment counts: statementId -> count
-    const claimCountByStmt = new Map<string, number>();
-    const assignmentCounts = statementAllocation?.assignmentCounts;
-    for (const [stmtId, count] of normalizeEntries(assignmentCounts)) {
-      if (typeof count === "number") claimCountByStmt.set(String(stmtId), count);
-    }
-
     const semanticDensityByStmt = new Map<string, number>();
     const rawDensity = a?.statementSemanticDensity;
     if (rawDensity && typeof rawDensity === 'object') {
@@ -150,19 +133,28 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       }
     }
 
-    return { queryScoreByStmt, fateByStmt, claimCountByStmt, semanticDensityByStmt };
+    // Query density (single scalar projected through statement regression model)
+    const rawQueryDensity = a?.querySemanticDensity;
+    const queryDensity: number | null = typeof rawQueryDensity === 'number' && Number.isFinite(rawQueryDensity)
+      ? rawQueryDensity
+      : null;
+
+    // Claim density map: claimId -> density score
+    const claimDensityMap = new Map<string, number>();
+    const rawClaimDensity = a?.claimSemanticDensity;
+    if (rawClaimDensity && typeof rawClaimDensity === 'object') {
+      for (const [k, v] of Object.entries(rawClaimDensity)) {
+        if (typeof v === 'number' && Number.isFinite(v)) claimDensityMap.set(String(k), v);
+      }
+    }
+
+    return { queryScoreByStmt, fateByStmt, semanticDensityByStmt, queryDensity, claimDensityMap };
   }, [artifact]);
 
   // Claim-relative maps — rebuild when selectedClaimId changes
   const claimMaps = useMemo(() => {
     if (!artifact || !selectedClaimId) return null;
     const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
-    const statementAllocation =
-      a?.statementAllocation ??
-      a?.statementAllocationResult ??
-      a?.derived?.statementAllocation ??
-      a?.derived?.statementAllocationResult ??
-      null;
     const mixedProvenance =
       a?.mixedProvenance ??
       a?.mixedProvenanceResult ??
@@ -191,15 +183,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     for (const id of sourceIds) {
       const sid = String(id ?? "").trim();
       if (sid) directTopIds.add(sid);
-    }
-
-    // Competitive: statementId -> { weight, excess, threshold }
-    const competitiveByStmt = new Map<string, any>();
-    const saPerClaim = statementAllocation?.perClaim ?? {};
-    const compRows: any[] = normalizeArray(saPerClaim[selectedClaimId]?.directStatementProvenance);
-    for (const row of compRows) {
-      const id = String(row?.statementId ?? row?.id ?? row?.sid ?? "").trim();
-      if (id) competitiveByStmt.set(id, row);
     }
 
     // Mixed provenance: statementId -> entry
@@ -231,11 +214,15 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       if (id) blastAbsorptionByStmt.set(id, st);
     }
 
+    const claimDensityRaw = typeof claimObj?.density === 'number' && Number.isFinite(claimObj.density)
+      ? claimObj.density as number
+      : null;
+
     const densityLiftForClaim = typeof claimObj?.densityLift === 'number' && Number.isFinite(claimObj.densityLift)
       ? claimObj.densityLift as number
       : null;
 
-    return { competitiveByStmt, mixedByStmt, exclusiveIds, directTopIds, blastAbsorptionByStmt, densityLiftForClaim };
+    return { mixedByStmt, exclusiveIds, directTopIds, blastAbsorptionByStmt, claimDensityRaw, densityLiftForClaim };
   }, [artifact, selectedClaimId]);
 
   return useMemo(() => {
@@ -251,10 +238,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       const semanticDensity = globalMaps?.semanticDensityByStmt.get(stmtId) ?? null;
       const fateEntry = globalMaps?.fateByStmt.get(stmtId) ?? null;
       const fate = (fateEntry?.fate as EvidenceRow['fate']) ?? null;
-      const claimCount = globalMaps?.claimCountByStmt.get(stmtId) ?? 0;
 
       // Claim-relative fields
-      const comp = claimMaps?.competitiveByStmt.get(stmtId) ?? null;
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
       const abs = claimMaps?.blastAbsorptionByStmt.get(stmtId) ?? null;
       const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
@@ -293,11 +278,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         sim_claim: mixed?.globalSim ?? null,
         sim_query,
 
-        w_comp: comp?.weight ?? null,
-        excess_comp: comp?.excess ?? null,
-        tau_S: comp?.threshold ?? null,
-        claimCount,
-
         globalSim: mixed?.globalSim ?? null,
         zone: mixed?.zone ?? null,
         coreCoherence: mixed?.coreCoherence ?? null,
@@ -311,14 +291,20 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         bs_t_sim: typeof abs?.tauSim === "number" && Number.isFinite(abs.tauSim) ? abs.tauSim : null,
 
         semanticDensity,
+        densityDelta: (() => {
+          if (semanticDensity == null || !selectedClaimId) return null;
+          const cd = globalMaps?.claimDensityMap.get(selectedClaimId) ?? claimMaps?.claimDensityRaw ?? null;
+          return cd != null ? semanticDensity - cd : null;
+        })(),
         densityLift: claimMaps?.densityLiftForClaim ?? null,
+        queryDensity: globalMaps?.queryDensity ?? null,
 
         fate,
         stance: typeof stmt.stance === 'string' ? stmt.stance : null,
         confidence: typeof stmt.confidence === 'number' ? stmt.confidence : 0,
         isExclusive,
 
-        inCompetitive: comp != null,
+        inCompetitive: mixed?.paragraphOrigin === 'competitive-only' || mixed?.paragraphOrigin === 'both',
         inContinuousCore: mixed?.zone === 'core',
         inMixed: mixed != null,
         inDirectTopN: selectedClaimId ? (claimMaps?.directTopIds.has(stmtId) ?? false) : false,

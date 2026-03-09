@@ -28,7 +28,8 @@ import { ToggleBar } from "./instrument/ToggleBar";
 import { ClaimDetailDrawer } from "./instrument/ClaimDetailDrawer";
 import { NarrativePanel } from "./instrument/NarrativePanel";
 import { useEvidenceRows } from "../hooks/useEvidenceRows";
-import { BUILT_IN_COLUMNS, DEFAULT_VIEWS, DEFAULT_VIEW_MAP } from "./instrument/columnRegistry";
+import { useParagraphRows } from "../hooks/useParagraphRows";
+import { BUILT_IN_COLUMNS, DEFAULT_VIEWS, DEFAULT_VIEW_MAP, PARAGRAPH_COLUMNS, PARAGRAPH_VIEWS, PARAGRAPH_VIEW_MAP } from "./instrument/columnRegistry";
 import type { ColumnDef, ViewConfig } from "./instrument/columnRegistry";
 import { EvidenceTable } from "./instrument/EvidenceTable";
 import { ContextStrip } from "./instrument/ContextStrip";
@@ -736,26 +737,95 @@ export const DecisionMapSheet = React.memo(() => {
     () => DEFAULT_VIEW_MAP.get('provenance')?.columns ?? DEFAULT_VIEWS[0].columns
   );
   const [isGraphCollapsed, setIsGraphCollapsed] = useState(false);
+  const [isRightCollapsed, setIsRightCollapsed] = useState(false); // drag-to-edge collapse of right panel
+  const [splitRatio, setSplitRatio] = useState(40); // percentage for graph pane
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
   const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState(false);
+  const [tableMode, setTableMode] = useState<'statement' | 'paragraph'>('statement');
 
-  // Reset column visibility when view changes
+  // Reset view when switching table mode
   useEffect(() => {
-    const view = DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0];
-    setVisibleColumnIds(view.columns);
-  }, [selectedView]);
+    const views = tableMode === 'paragraph' ? PARAGRAPH_VIEWS : DEFAULT_VIEWS;
+    const viewMap = tableMode === 'paragraph' ? PARAGRAPH_VIEW_MAP : DEFAULT_VIEW_MAP;
+    if (!viewMap.has(selectedView)) {
+      instrumentActions.setSelectedView(views[0].id);
+    }
+  }, [tableMode]);
+
+  // Reset column visibility when view or table mode changes
+  useEffect(() => {
+    if (tableMode === 'paragraph') {
+      const view = PARAGRAPH_VIEW_MAP.get(selectedView) ?? PARAGRAPH_VIEWS[0];
+      setVisibleColumnIds(view.columns);
+    } else {
+      const view = DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0];
+      setVisibleColumnIds(view.columns);
+    }
+  }, [selectedView, tableMode]);
 
   useEffect(() => {
     if (openState) {
       setIsGraphCollapsed(false);
       setIsTableCollapsed(false);
+      setIsRightCollapsed(false);
       setIsClaimPanelCollapsed(false);
     }
   }, [openState?.turnId]);
 
+  // ── Split divider drag handlers ──
+  const handleSplitPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingSplit(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    (e.target as Element).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleSplitPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingSplit || !splitContainerRef.current) return;
+    e.preventDefault();
+    const rect = splitContainerRef.current.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    // Allow dragging into collapse zones but clamp the actual ratio
+    setSplitRatio(Math.max(5, Math.min(95, pct)));
+  }, [isDraggingSplit]);
+
+  const handleSplitPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingSplit) return;
+    e.preventDefault();
+    setIsDraggingSplit(false);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    (e.target as Element).releasePointerCapture(e.pointerId);
+
+    // Snap-to-edge collapse: if released in edge zone (<10% or >90%), collapse that side
+    if (splitContainerRef.current) {
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      if (pct < 10) {
+        setIsGraphCollapsed(true);
+        setSplitRatio(40); // reset for when it's re-expanded
+        return;
+      }
+      // If dragged far right, collapse the right panel
+      if (pct > 90) {
+        setIsRightCollapsed(true);
+        setSplitRatio(40);
+        return;
+      }
+      // Clamp to 30-70 range for normal stops
+      setSplitRatio(Math.max(20, Math.min(80, pct)));
+    }
+  }, [isDraggingSplit]);
+
   const allColumns = useMemo(
-    () => [...BUILT_IN_COLUMNS, ...extraColumns],
-    [extraColumns]
+    () => tableMode === 'paragraph'
+      ? [...PARAGRAPH_COLUMNS]
+      : [...BUILT_IN_COLUMNS, ...extraColumns],
+    [extraColumns, tableMode]
   );
 
   const activeColumns = useMemo(
@@ -766,8 +836,10 @@ export const DecisionMapSheet = React.memo(() => {
   );
 
   const activeViewConfig = useMemo(
-    (): ViewConfig => DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0],
-    [selectedView]
+    (): ViewConfig => tableMode === 'paragraph'
+      ? (PARAGRAPH_VIEW_MAP.get(selectedView) ?? PARAGRAPH_VIEWS[0])
+      : (DEFAULT_VIEW_MAP.get(selectedView) ?? DEFAULT_VIEWS[0]),
+    [selectedView, tableMode]
   );
 
   useEffect(() => {
@@ -863,6 +935,9 @@ export const DecisionMapSheet = React.memo(() => {
   // ── Evidence rows (hook) ───────────────────────────────────────
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const evidenceRows = useEvidenceRows(mappingArtifact, instrumentSelectedClaimId);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const paragraphRows = useParagraphRows(mappingArtifact, instrumentSelectedClaimId);
+  const activeRows = tableMode === 'paragraph' ? paragraphRows : evidenceRows;
 
   const viewArtifactRequestRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1414,15 +1489,28 @@ export const DecisionMapSheet = React.memo(() => {
               </div>
             </div>
 
-            {/* ── Instrument: Two-zone layout (v3) ───────────────── */}
-            <div className="flex-1 flex overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
+            {/* ── Instrument: Two-zone resizable layout ───────────────── */}
+            <div
+              ref={splitContainerRef}
+              className="flex-1 overflow-hidden relative z-10"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: isGraphCollapsed
+                  ? '8px 0px 1fr'
+                  : isRightCollapsed
+                    ? `1fr 6px 8px`
+                    : `${splitRatio}fr 6px ${100 - splitRatio}fr`,
+                transition: isDraggingSplit ? 'none' : 'grid-template-columns 150ms ease-out',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
 
-              {/* Zone 2: ParagraphSpaceView as primary canvas (~40%) */}
+              {/* Zone 1: ParagraphSpaceView (resizable left pane) */}
               {isGraphCollapsed ? (
-                <div className="w-8 border-r border-white/10 flex flex-col items-center justify-center flex-none bg-black/10">
+                <div className="h-full border-r border-white/10 flex flex-col items-center justify-center bg-black/10" style={{ gridColumn: '1' }}>
                   <button
                     type="button"
-                    className="text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors rounded-md px-2 py-1 text-xs"
+                    className="text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors rounded-md px-0.5 py-1 text-xs"
                     onClick={() => setIsGraphCollapsed(false)}
                     title="Expand graph"
                   >
@@ -1430,7 +1518,7 @@ export const DecisionMapSheet = React.memo(() => {
                   </button>
                 </div>
               ) : (
-                <div className="w-[40%] min-w-[320px] border-r border-white/10 flex flex-col overflow-hidden flex-none">
+                <div className="h-full min-w-0 overflow-hidden flex flex-col" style={{ gridColumn: '1' }}>
                   <div className="flex items-stretch flex-none">
                     <div className="flex-1 min-w-0">
                       <ToggleBar
@@ -1472,8 +1560,33 @@ export const DecisionMapSheet = React.memo(() => {
                 </div>
               )}
 
-              {/* Zone 3: Right panel with Instrument/Narrative toggle (~60%) */}
-              <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              {/* Resizable divider (grid column 2) */}
+              <div
+                className={clsx(
+                  "h-full transition-colors cursor-col-resize relative select-none touch-none",
+                  isDraggingSplit ? "bg-brand-500/60" : "bg-white/10 hover:bg-brand-500/40"
+                )}
+                style={{ gridColumn: '2' }}
+                onPointerDown={handleSplitPointerDown}
+                onPointerMove={handleSplitPointerMove}
+                onPointerUp={handleSplitPointerUp}
+              />
+
+              {/* Zone 2: Right panel with Instrument/Narrative toggle */}
+              {isRightCollapsed && !isGraphCollapsed ? (
+                <div className="h-full border-l border-white/10 flex flex-col items-center justify-center bg-black/10" style={{ gridColumn: '3' }}>
+                  <button
+                    type="button"
+                    className="text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors rounded-md px-0.5 py-1 text-xs"
+                    onClick={() => setIsRightCollapsed(false)}
+                    title="Expand panel"
+                    style={{ writingMode: 'vertical-rl' }}
+                  >
+                    ◀ Panel
+                  </button>
+                </div>
+              ) : (
+              <div className="h-full min-w-0 overflow-hidden flex flex-col" style={{ gridColumn: '3' }}>
                 {/* Mode toggle */}
                 <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2 flex-none">
                   <button
@@ -1525,13 +1638,32 @@ export const DecisionMapSheet = React.memo(() => {
                           ))}
                         </select>
 
+                        {/* Statement / Paragraph toggle */}
+                        <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
+                          {(['statement', 'paragraph'] as const).map(m => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setTableMode(m)}
+                              className={clsx(
+                                "px-2 py-1 text-[10px] transition-colors",
+                                tableMode === m
+                                  ? "bg-brand-500/20 text-brand-300"
+                                  : "text-text-muted hover:text-text-secondary"
+                              )}
+                            >
+                              {m === 'statement' ? 'Stmt' : 'Para'}
+                            </button>
+                          ))}
+                        </div>
+
                         {/* View switcher */}
                         <select
                           className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-brand-500/50 cursor-pointer"
                           value={selectedView}
                           onChange={e => instrumentActions.setSelectedView(e.target.value)}
                         >
-                          {DEFAULT_VIEWS.map(v => (
+                          {(tableMode === 'paragraph' ? PARAGRAPH_VIEWS : DEFAULT_VIEWS).map(v => (
                             <option key={v.id} value={v.id}>{v.label}</option>
                           ))}
                         </select>
@@ -1605,13 +1737,18 @@ export const DecisionMapSheet = React.memo(() => {
                       ) : (
                         <div className="flex-1 min-h-0 overflow-hidden relative">
                           <EvidenceTable
-                            rows={evidenceRows}
+                            rows={activeRows}
                             columns={activeColumns}
                             viewConfig={activeViewConfig}
                             scope={scope}
+                            mode={tableMode}
                             bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 260) : 0}
                             onRowClick={(row) => {
-                              if (row.statementId) {
+                              if (tableMode === 'paragraph') {
+                                if (row.paragraphId) {
+                                  instrumentActions.setSelectedEntity({ type: 'statement', id: row.paragraphId });
+                                }
+                              } else if (row.statementId) {
                                 instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
                               }
                             }}
@@ -1690,6 +1827,7 @@ export const DecisionMapSheet = React.memo(() => {
                   )}
                 </div>
               </div>
+              )}
 
             </div>
 

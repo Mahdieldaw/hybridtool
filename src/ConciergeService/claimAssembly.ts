@@ -44,7 +44,12 @@ export async function reconstructProvenance(
     totalModelCount: number,
     statementEmbeddings: Map<string, Float32Array> | null = null,
     precomputedClaimEmbeddings: Map<string, Float32Array> | null = null,
-): Promise<LinkedClaim[]> {
+): Promise<{
+    claims: LinkedClaim[];
+    competitiveWeights: Map<string, Map<string, number>>;
+    competitiveExcess: Map<string, Map<string, number>>;
+    competitiveThresholds: Map<string, number>;
+}> {
     const statementsById = new Map(statements.map(s => [s.id, s]));
 
     // reference unused optional parameter to avoid TS 'noUnusedLocals' errors
@@ -291,7 +296,26 @@ export async function reconstructProvenance(
     const stmtSummary = results.map(r => `${r.id}:pool=${claimPools.get(r.id)?.length ?? '?'},stmts=${r.sourceStatementIds.length}`).join(', ');
     console.log(`[Provenance] Final statement counts: ${stmtSummary}`);
 
-    return results;
+    // Build per-paragraph threshold map (paraId → threshold value)
+    const thresholdByParagraph = new Map<string, number>();
+    for (const [paraId, sims] of simMatrix) {
+        const values = Array.from(sims.values());
+        if (values.length === 0) continue;
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        if (claims.length === 2) {
+            thresholdByParagraph.set(paraId, mean);
+        } else {
+            const variance = values.reduce((s, g) => s + (g - mean) ** 2, 0) / values.length;
+            thresholdByParagraph.set(paraId, mean + Math.sqrt(variance));
+        }
+    }
+
+    return {
+        claims: results,
+        competitiveWeights: normalizedWeights,
+        competitiveExcess: rawExcess,
+        competitiveThresholds: thresholdByParagraph,
+    };
 }
 
 
@@ -505,6 +529,9 @@ export function computeMixedMethodProvenance(
     statementEmbeddings: Map<string, Float32Array>,
     claimEmbeddings: Map<string, Float32Array>,
     competitivePools: Map<string, Set<string>>,
+    competitiveWeights?: Map<string, Map<string, number>>,   // paraId → claimId → normalized weight
+    competitiveExcess?: Map<string, Map<string, number>>,    // paraId → claimId → raw excess
+    competitiveThresholds?: Map<string, number>,             // paraId → threshold
 ): MixedProvenanceResult {
     // Build lookup maps
     const stmtById = new Map<string, { id: string; modelIndex?: number }>();
@@ -591,6 +618,9 @@ export function computeMixedMethodProvenance(
                 origin,
                 claimCentricSim: ccSimByPara.get(paraId) ?? null,
                 claimCentricAboveThreshold: ccPool.has(paraId),
+                compWeight: competitiveWeights?.get(paraId)?.get(claim.id) ?? null,
+                compExcess: competitiveExcess?.get(paraId)?.get(claim.id) ?? null,
+                compThreshold: competitiveThresholds?.get(paraId) ?? null,
             });
         }
 
