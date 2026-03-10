@@ -1,5 +1,5 @@
 import React from "react";
-import { getProviderColor, getProviderConfig } from "../../utils/provider-helpers";
+import { getProviderAbbreviation, getProviderColor, getProviderConfig } from "../../utils/provider-helpers";
 
 interface SupporterOrbsProps {
   supporters: (string | number)[];
@@ -19,12 +19,6 @@ function getProviderFromSupporter(s: string | number, citationSourceOrder?: Reco
   return null;
 }
 
-function getInitials(name: string) {
-  const words = name.split(/\s+/);
-  if (words.length === 1) return name.slice(0, 2).toUpperCase();
-  return words.slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-}
-
 export const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourceOrder, size = "large" }) => {
   const orbSize = size === "large" ? 40 : 28;
   const fontSize = size === "large" ? 11 : 9;
@@ -34,8 +28,8 @@ export const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citati
       {supporters.map((s, idx) => {
         const provider = getProviderFromSupporter(s, citationSourceOrder);
         const color = getProviderColor(provider?.id || "default");
-        const name = provider?.name || `Model ${s}`;
-        const initials = getInitials(name);
+        const name = provider?.name || (s != null ? `Model ${s}` : "Model");
+        const abbrev = provider?.id ? getProviderAbbreviation(provider.id) : (s != null ? `M${s}` : "M");
 
         return (
           <div
@@ -51,7 +45,7 @@ export const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citati
             }}
             title={name}
           >
-            {initials}
+            {abbrev}
           </div>
         );
       })}

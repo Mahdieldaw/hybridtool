@@ -110,7 +110,6 @@ export interface ParseResult {
 }
 /**
  * Wrapper around the shared parser that provides specific SemanticMapperOutput typing.
- * Always initializes conditionals as empty array for downstream compatibility.
  */
 export function parseSemanticMapperOutput(
   rawResponse: string,

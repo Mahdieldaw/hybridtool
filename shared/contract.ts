@@ -170,7 +170,7 @@ export interface UnifiedMapperOutput {
   }>;
   determinants?: Determinant[];
   edges: Edge[];
-  conditionals: ConditionalPruner[];
+  conditionals?: ConditionalPruner[];
   gates?: MapperGate[];
 }
 
@@ -738,10 +738,7 @@ export interface MixedStatementEntry {
   fromSupporterModel: boolean;    // statement.modelIndex ∈ claim.supporters
   paragraphOrigin: ParagraphOrigin;
   paragraphId: string;
-  zone: 'core' | 'boundary-promoted' | 'removed';  // fate after differential filter
-  coreCoherence: number | null;   // mean cos(statement, retainedCore) — boundary zone only
-  corpusAffinity: number | null;  // mean cos(statement, ALL corpus statements) — boundary only
-  differential: number | null;    // coreCoherence - corpusAffinity — boundary only
+  zone: 'core' | 'removed';
 }
 
 export interface MixedProvenanceClaimResult {
@@ -756,9 +753,6 @@ export interface MixedProvenanceClaimResult {
   statements: MixedStatementEntry[];
   // Global floor threshold used for statement filter
   globalMu: number;
-  globalSigma: number;
-  // Boundary zone coherence stats
-  boundaryCoherenceMu: number | null;  // mean coreCoherence across boundary statements
   // Counts
   keptCount: number;
   removedCount: number;
@@ -766,12 +760,9 @@ export interface MixedProvenanceClaimResult {
   bothCount: number;
   competitiveOnlyCount: number;
   claimCentricOnlyCount: number;
-  // Fate breakdown after differential filter
+  // Fate breakdown after μ_global filter
   coreCount: number;
-  boundaryPromotedCount: number;
-  boundaryRemovedCount: number;
-  floorRemovedCount: number;          // below μ - σ
-  // Canonical survived statement IDs (core + boundary-promoted, after supporter filter)
+  // Canonical survived statement IDs (core, after supporter filter)
   canonicalStatementIds: string[];
 }
 
@@ -942,6 +933,31 @@ export interface QuestionSelectionInstrumentation {
   };
 }
 
+export interface ClaimRoutingResult {
+  conflictClusters: Array<{
+    claimIds: string[];
+    edges: Array<{ from: string; to: string; centroidSimilarity: number }>;
+  }>;
+  isolateCandidates: Array<{
+    claimId: string;
+    claimLabel: string;
+    claimText: string;
+    orphanRatio: number;
+    vernalComposite: number;
+    queryDistance: number | null;
+    supporters: number[];
+  }>;
+  passthrough: string[];
+  skipSurvey: boolean;
+  diagnostics: {
+    orphanThreshold: number | null;
+    orphanDistribution: number[];
+    convergenceRatio: number;
+    totalClaims: number;
+    queryDistanceThreshold: number | null;
+  };
+}
+
 export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
@@ -990,6 +1006,7 @@ export interface MapperArtifact extends MapperOutput {
   blastSurface?: BlastSurfaceResult | null;
 
   questionSelectionInstrumentation?: QuestionSelectionInstrumentation | null;
+  claimRouting?: ClaimRoutingResult | null;
 
   // Survey Mapper output (runs after blast radius filter; null when skipped or found no gates)
   surveyGates?: SurveyGate[];

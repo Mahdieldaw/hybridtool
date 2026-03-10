@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { getProviderAbbreviation, resolveProviderIdFromCitationOrder } from "../utils/provider-helpers";
 
 // ============================================================================
 // TYPES
@@ -9,6 +10,8 @@ export interface EvidenceRow {
   statementId: string;
   text: string;
   modelIndex: number;
+  providerId: string | null;
+  providerAbbrev: string | null;
   paragraphId: string;
 
   // Direct geometry (claim-relative)
@@ -19,10 +22,7 @@ export interface EvidenceRow {
 
   // Mixed provenance (claim-relative)
   globalSim: number | null;
-  zone: 'core' | 'boundary-promoted' | 'removed' | null;
-  coreCoherence: number | null;
-  corpusAffinity: number | null;
-  differential: number | null;
+  zone: 'core' | 'removed' | null;
   paragraphOrigin: 'competitive-only' | 'claim-centric-only' | 'both' | null;
 
   // Blast surface (statement-level, exclusive twin diagnostics; claim-relative)
@@ -30,6 +30,10 @@ export interface EvidenceRow {
   bs_simTwin: boolean | null;
   bs_bestSim: number | null;
   bs_t_sim: number | null;
+
+  // Routing (claim-level; constant for all rows under selected claim)
+  routeCategory: 'conflict' | 'isolate' | 'passthrough' | null;
+  queryDistance: number | null;
 
   // Density
   semanticDensity: number | null;  // statement-level z-scored OLS residual magnitude
@@ -104,6 +108,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
   const globalMaps = useMemo(() => {
     if (!artifact) return null;
     const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const citationSourceOrder =
+      a?.citationSourceOrder ??
+      a?.meta?.citationSourceOrder ??
+      null;
     const completeness =
       a?.completeness ??
       a?.derived?.completeness ??
@@ -148,7 +156,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       }
     }
 
-    return { queryScoreByStmt, fateByStmt, semanticDensityByStmt, queryDensity, claimDensityMap };
+    return { queryScoreByStmt, fateByStmt, semanticDensityByStmt, queryDensity, claimDensityMap, citationSourceOrder };
   }, [artifact]);
 
   // Claim-relative maps — rebuild when selectedClaimId changes
@@ -230,8 +238,38 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
     const statements: any[] = normalizeShadowStatements(a?.shadow?.statements);
 
+    const routing = a?.claimRouting ?? null;
+    const routeCategory: EvidenceRow['routeCategory'] = (() => {
+      if (!selectedClaimId || !routing) return null;
+      const inConflict = Array.isArray(routing?.conflictClusters)
+        ? routing.conflictClusters.some((c: any) => Array.isArray(c?.claimIds) && c.claimIds.map(String).includes(selectedClaimId))
+        : false;
+      if (inConflict) return 'conflict';
+      const isolate = Array.isArray(routing?.isolateCandidates)
+        ? routing.isolateCandidates.some((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+        : false;
+      if (isolate) return 'isolate';
+      const passthrough = Array.isArray(routing?.passthrough)
+        ? routing.passthrough.map(String).includes(selectedClaimId)
+        : false;
+      if (passthrough) return 'passthrough';
+      return null;
+    })();
+
+    const queryDistance: number | null = (() => {
+      if (!selectedClaimId || !routing) return null;
+      const isolate = Array.isArray(routing?.isolateCandidates)
+        ? routing.isolateCandidates.find((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+        : null;
+      const q = isolate?.queryDistance;
+      return typeof q === 'number' && Number.isFinite(q) ? q : null;
+    })();
+
     return statements.map((stmt): EvidenceRow => {
       const stmtId = normalizeStatementId(stmt);
+      const modelIndex = typeof stmt.modelIndex === 'number' ? stmt.modelIndex : 0;
+      const providerId = resolveProviderIdFromCitationOrder(modelIndex, globalMaps?.citationSourceOrder ?? undefined);
+      const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : null;
 
       // Global fields
       const sim_query = globalMaps?.queryScoreByStmt.get(stmtId) ?? null;
@@ -272,7 +310,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       return {
         statementId: stmtId,
         text: String(stmt.text ?? stmt.statement ?? stmt.content ?? ''),
-        modelIndex: typeof stmt.modelIndex === 'number' ? stmt.modelIndex : 0,
+        modelIndex,
+        providerId,
+        providerAbbrev,
         paragraphId: String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? ''),
 
         sim_claim: mixed?.globalSim ?? null,
@@ -280,15 +320,15 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
         globalSim: mixed?.globalSim ?? null,
         zone: mixed?.zone ?? null,
-        coreCoherence: mixed?.coreCoherence ?? null,
-        corpusAffinity: mixed?.corpusAffinity ?? null,
-        differential: mixed?.differential ?? null,
         paragraphOrigin: mixed?.paragraphOrigin ?? null,
 
         bs_twin: typeof abs?.orphan === "boolean" ? !abs.orphan : null,
         bs_simTwin: simTwin,
         bs_bestSim: bestAbsSim,
         bs_t_sim: typeof abs?.tauSim === "number" && Number.isFinite(abs.tauSim) ? abs.tauSim : null,
+
+        routeCategory,
+        queryDistance,
 
         semanticDensity,
         densityDelta: (() => {

@@ -1346,10 +1346,10 @@ export class StepExecutor {
                     claimEmbeddings,
                   );
                   enrichedClaims = provenanceResult.claims;
-                  // Store competitive allocation maps for mixed provenance
-                  this._competitiveWeights = provenanceResult.competitiveWeights;
-                  this._competitiveExcess = provenanceResult.competitiveExcess;
-                  this._competitiveThresholds = provenanceResult.competitiveThresholds;
+                  // Competitive allocation maps — kept local to avoid cross-request leakage
+                  const competitiveWeights = provenanceResult.competitiveWeights;
+                  const competitiveExcess = provenanceResult.competitiveExcess;
+                  const competitiveThresholds = provenanceResult.competitiveThresholds;
 
                   // Compute claim density + densityLift
                   if (claimDensityScores && statementEmbeddingResult?.semanticDensityScores) {
@@ -1388,9 +1388,9 @@ export class StepExecutor {
                     existingQueryRelevance: queryRelevance,
                     modelCount: citationOrder.length,
                     queryText: payload.originalPrompt,
-                    competitiveWeights: this._competitiveWeights || null,
-                    competitiveExcess: this._competitiveExcess || null,
-                    competitiveThresholds: this._competitiveThresholds || null,
+                    competitiveWeights: competitiveWeights || null,
+                    competitiveExcess: competitiveExcess || null,
+                    competitiveThresholds: competitiveThresholds || null,
                   });
 
                   let cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
@@ -1408,10 +1408,32 @@ export class StepExecutor {
                       queryRelevanceScores: queryRelevance?.statementScores ?? null,
                       modelCount: citationOrder.length,
                       claimCentroids: claimEmbeddings ?? new Map(),
+                      queryEmbedding: queryEmbedding ?? null,
                     });
                   } catch (err) {
                     console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
                     questionSelectionInstrumentation = null;
+                  }
+
+                  let claimRouting = null;
+                  try {
+                    const { computeClaimRouting } =
+                      await import('../blast-radius/questionSelection');
+                    claimRouting = computeClaimRouting({
+                      blastSurfaceResult: blastSurfaceResult ?? null,
+                      edges: unifiedEdges,
+                      enrichedClaims,
+                      queryRelevanceScores: queryRelevance?.statementScores ?? null,
+                      modelCount: citationOrder.length,
+                      claimCentroids: claimEmbeddings ?? new Map(),
+                      queryEmbedding: queryEmbedding ?? null,
+                    });
+                    console.log(
+                      `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.isolateCandidates.length} isolate(s), skip=${claimRouting.skipSurvey}`
+                    );
+                  } catch (err) {
+                    console.warn('[ClaimRouting] Failed, falling back to old survey prompt:', getErrorMessage(err));
+                    claimRouting = null;
                   }
 
                   let surveyRationale = null;
@@ -1431,7 +1453,11 @@ export class StepExecutor {
 
                   if (shouldRunSurvey) {
                     try {
-                      const { buildSurveyMapperPrompt, parseSurveyMapperOutput: parseSurveyOutput } =
+                      const {
+                        buildSurveyMapperPrompt,
+                        buildRoutedSurveyPrompt,
+                        parseSurveyMapperOutput: parseSurveyOutput,
+                      } =
                         await import('../../ConciergeService/surveyMapper');
 
                       const claimsForSurvey = enrichedClaims.map((c) => ({
@@ -1441,62 +1467,82 @@ export class StepExecutor {
                         supporters: Array.isArray(c?.supporters) ? c.supporters : [],
                       }));
 
-                      const surveyPrompt = buildSurveyMapperPrompt(
-                        payload.originalPrompt,
-                        claimsForSurvey,
-                        unifiedEdges,
-                        indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
-                      );
-
-                      const surveyResult = await new Promise((resolve) => {
-                        let surveyText = '';
-                        this.orchestrator.executeParallelFanout(
-                          surveyPrompt,
-                          [payload.mappingProvider],
-                          {
-                            sessionId: context.sessionId,
-                            useThinking: false,
-                            providerContexts: semanticContinuationMeta
-                              ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
-                              : mappingProviderContexts,
-                            onPartial: () => { },
-                            onAllComplete: (results) => {
-                              const r = results?.get?.(payload.mappingProvider);
-                              surveyText = r?.text || '';
-                              resolve({ text: surveyText });
-                            },
-                            onError: () => resolve({ text: '' }),
-                          }
-                        );
-                      });
-
-                      if (surveyResult?.text) {
-                        const parsed = parseSurveyOutput(surveyResult.text);
-                        rawGates = parsed.gates;
-                        surveyRationale = parsed.rationale;
-                        if (parsed.errors.length > 0) {
-                          console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
-                        }
-                        console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
-
-                        gateQuestionByClaimPair = new Map();
-
-                        for (const gate of rawGates) {
-                          if (!gate || !gate.id) continue;
-                          const affected = Array.isArray(gate.affectedClaims)
-                            ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
-                            : [];
-                          if (affected.length === 0) continue;
-
-                          surveyGateConditionals.push({
-                            id: gate.id,
-                            question: String(gate.question || '').trim(),
-                            affectedClaims: affected,
-                            construct: null,
-                            hinge: null,
-                            classification: 'conditional_gate',
+                      let surveyPrompt = null;
+                      if (claimRouting) {
+                        if (!claimRouting.skipSurvey) {
+                          surveyPrompt = buildRoutedSurveyPrompt({
+                            userQuery: payload.originalPrompt,
+                            routing: claimRouting,
+                            allClaims: claimsForSurvey,
+                            batchTexts: indexedSourceData.map((s) => ({
+                              modelIndex: s.modelIndex,
+                              content: s.text,
+                            })),
+                            edges: unifiedEdges,
                           });
+                        }
+                      } else {
+                        surveyPrompt = buildSurveyMapperPrompt(
+                          payload.originalPrompt,
+                          claimsForSurvey,
+                          unifiedEdges,
+                          indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
+                        );
+                      }
 
+                      if (!surveyPrompt) {
+                        console.log('[SurveyMapper] Skipped: routing determined no survey needed');
+                      } else {
+                        const surveyResult = await new Promise((resolve) => {
+                          let surveyText = '';
+                          this.orchestrator.executeParallelFanout(
+                            surveyPrompt,
+                            [payload.mappingProvider],
+                            {
+                              sessionId: context.sessionId,
+                              useThinking: false,
+                              providerContexts: semanticContinuationMeta
+                                ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
+                                : mappingProviderContexts,
+                              onPartial: () => { },
+                              onAllComplete: (results) => {
+                                const r = results?.get?.(payload.mappingProvider);
+                                surveyText = r?.text || '';
+                                resolve({ text: surveyText });
+                              },
+                              onError: () => resolve({ text: '' }),
+                            }
+                          );
+                        });
+
+                        if (surveyResult?.text) {
+                          const parsed = parseSurveyOutput(surveyResult.text);
+                          rawGates = parsed.gates;
+                          surveyRationale = parsed.rationale;
+                          if (parsed.errors.length > 0) {
+                            console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
+                          }
+                          console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
+
+                          gateQuestionByClaimPair = new Map();
+
+                          for (const gate of rawGates) {
+                            if (!gate || !gate.id) continue;
+                            const affected = Array.isArray(gate.affectedClaims)
+                              ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
+                              : [];
+                            if (affected.length === 0) continue;
+
+                            surveyGateConditionals.push({
+                              id: gate.id,
+                              question: String(gate.question || '').trim(),
+                              affectedClaims: affected,
+                              construct: null,
+                              hinge: null,
+                              classification: 'conditional_gate',
+                            });
+
+                          }
                         }
                       }
                     } catch (err) {
@@ -1574,6 +1620,9 @@ export class StepExecutor {
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
                   if (questionSelectionInstrumentation) {
                     mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+                  }
+                  if (claimRouting) {
+                    mapperArtifact.claimRouting = claimRouting;
                   }
 
                   let diagnosticsResult = null;
@@ -1675,6 +1724,10 @@ export class StepExecutor {
             citationOrder.forEach((pid, idx) => {
               citationSourceOrder[idx + 1] = pid;
             });
+
+            if (mapperArtifact && typeof mapperArtifact === 'object') {
+              mapperArtifact.citationSourceOrder = citationSourceOrder;
+            }
 
             const providerThreadMeta = (() => {
               try {

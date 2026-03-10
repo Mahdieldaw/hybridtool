@@ -378,7 +378,7 @@ export class ConnectionHandler {
    * and posts SURVEY_TEST_RESULT back to the port. Nothing is persisted.
    */
   async _handleSurveyTest(message) {
-    const { turnId, claims, edges, batchTexts, userQuery, provider } = message.payload || {};
+    const { turnId, claims, edges, batchTexts, userQuery, provider, claimRouting } = message.payload || {};
     if (!turnId || !provider) {
       this.port.postMessage({ type: 'SURVEY_TEST_RESULT', turnId, error: 'Missing turnId or provider' });
       return;
@@ -386,14 +386,26 @@ export class ConnectionHandler {
 
     try {
       await this._ensureBackendReady();
-      const { buildSurveyMapperPrompt, parseSurveyMapperOutput } = await import('../ConciergeService/surveyMapper');
+      const { buildSurveyMapperPrompt, buildRoutedSurveyPrompt, parseSurveyMapperOutput } = await import('../ConciergeService/surveyMapper');
 
-      const prompt = buildSurveyMapperPrompt(
-        userQuery || '',
-        Array.isArray(claims) ? claims : [],
-        Array.isArray(edges) ? edges : [],
-        Array.isArray(batchTexts) ? batchTexts : []
-      );
+      let prompt;
+      if (claimRouting && !claimRouting.skipSurvey) {
+        prompt = buildRoutedSurveyPrompt({
+          userQuery: userQuery || '',
+          routing: claimRouting,
+          allClaims: Array.isArray(claims) ? claims : [],
+          batchTexts: Array.isArray(batchTexts) ? batchTexts : [],
+          edges: Array.isArray(edges) ? edges : [],
+        });
+      }
+      if (!prompt) {
+        prompt = buildSurveyMapperPrompt(
+          userQuery || '',
+          Array.isArray(claims) ? claims : [],
+          Array.isArray(edges) ? edges : [],
+          Array.isArray(batchTexts) ? batchTexts : []
+        );
+      }
 
       let resultText = '';
       await new Promise((resolve, reject) => {
@@ -405,7 +417,8 @@ export class ConnectionHandler {
             useThinking: false,
             onPartial: () => {},
             onAllComplete: (results) => {
-              resultText = results?.[provider]?.text || '';
+              const r = results?.get?.(provider) ?? results?.[provider];
+              resultText = r?.text || '';
               resolve();
             },
             onError: (err) => reject(err),

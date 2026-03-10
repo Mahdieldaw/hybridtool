@@ -40,7 +40,7 @@ describe('ConciergeService', () => {
         const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
         expect(Array.isArray(result.output?.edges) ? result.output?.edges.length : null).toBe(0);
-        expect(Array.isArray(result.output?.conditionals) ? result.output?.conditionals.length : null).toBe(0);
+        expect(Array.isArray((result.output as any)?.conditionals) ? (result.output as any)?.conditionals.length : 0).toBe(0);
     });
 
     it('should treat trailing text after <map> as narrative when no narrative tag exists', () => {
@@ -206,7 +206,7 @@ describe('ConciergeService', () => {
 
         const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
-        expect(result.output?.conditionals?.length).toBe(0);
+        expect(Array.isArray((result.output as any)?.conditionals) ? (result.output as any)?.conditionals.length : 0).toBe(0);
         expect((result.output as any)?.determinants).toBeUndefined();
     });
 

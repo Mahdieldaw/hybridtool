@@ -15,6 +15,47 @@ export interface QuestionSelectionInput {
   queryRelevanceScores: Map<string, QueryRelevanceStatementScore> | null;
   modelCount: number;
   claimCentroids: Map<string, Float32Array>;
+  queryEmbedding?: Float32Array | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// STRUCTURAL ROUTING — classifies claims by geometry for targeted prompts
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface ConflictCluster {
+  /** Claim IDs in this cluster connected by validated conflict edges */
+  claimIds: string[];
+  /** The validated conflict edges within this cluster */
+  edges: Array<{ from: string; to: string; centroidSimilarity: number }>;
+}
+
+export interface IsolateCandidate {
+  claimId: string;
+  claimLabel: string;
+  claimText: string;
+  orphanRatio: number;
+  vernalComposite: number;
+  queryDistance: number | null;
+  supporters: number[];
+}
+
+export interface ClaimRouting {
+  /** Claims in validated conflict — need fork articulation prompt */
+  conflictClusters: ConflictCluster[];
+  /** Sole-source claims with meaningful orphaned evidence — need misleadingness test */
+  isolateCandidates: IsolateCandidate[];
+  /** Claims that pass through without survey questions */
+  passthrough: string[];
+  /** If true, skip the survey mapper entirely (high convergence, no structural tension) */
+  skipSurvey: boolean;
+  /** Diagnostic: why the routing made the decisions it did */
+  diagnostics: {
+    orphanThreshold: number | null;
+    orphanDistribution: number[];
+    convergenceRatio: number;
+    totalClaims: number;
+    queryDistanceThreshold: number | null;
+  };
 }
 
 function mean(nums: number[]): number {
@@ -295,6 +336,227 @@ export function computeQuestionSelectionInstrumentation(
     },
     meta: {
       processingTimeMs: performance.now() - startMs,
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// STRUCTURAL ROUTING
+//
+// Classifies claims into three categories based on geometry:
+//   1. Conflict clusters — validated tension edges → fork articulation prompt
+//   2. Isolate candidates — sole-source + meaningful orphans → misleadingness test
+//   3. Passthrough — consensus or structurally redundant → no survey question
+//
+// The routing replaces the composite-weight policy (0.30/0.25/...) and hard
+// cap of 3. The number of questions is derived from the topology: one per
+// conflict cluster + zero-or-one per isolate that fails the misleadingness
+// test. No magic numbers; the count is measured, not imposed.
+// ─────────────────────────────────────────────────────────────────────────
+
+export function computeClaimRouting(
+  input: QuestionSelectionInput
+): ClaimRouting {
+  const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
+  const edges = Array.isArray(input.edges) ? input.edges : [];
+  const claimIds = claims.map((c) => String(c.id));
+
+  // ── 1. Validated conflict clusters ──────────────────────────────────
+  const muInterClaim = computeMuInterClaim(claimIds, input.claimCentroids);
+
+  const validatedConflictEdges: Array<{ from: string; to: string; centroidSimilarity: number }> = [];
+  for (const e of edges) {
+    if (e?.type !== 'conflicts') continue;
+    const aId = String(e.from);
+    const bId = String(e.to);
+    const a = input.claimCentroids.get(aId) ?? null;
+    const b = input.claimCentroids.get(bId) ?? null;
+    if (!a || !b) continue;
+    const sim = cosineSimilarity(a, b);
+    if (!Number.isFinite(sim)) continue;
+    // Validated = centroid similarity below inter-claim mean (genuinely different positions)
+    if (sim < muInterClaim) {
+      validatedConflictEdges.push({ from: aId, to: bId, centroidSimilarity: sim });
+    }
+  }
+
+  // Build connected components from validated conflict edges
+  const conflictClusters: ConflictCluster[] = [];
+  if (validatedConflictEdges.length > 0) {
+    const adj = new Map<string, Set<string>>();
+    for (const e of validatedConflictEdges) {
+      if (!adj.has(e.from)) adj.set(e.from, new Set());
+      if (!adj.has(e.to)) adj.set(e.to, new Set());
+      adj.get(e.from)!.add(e.to);
+      adj.get(e.to)!.add(e.from);
+    }
+    const visited = new Set<string>();
+    for (const node of adj.keys()) {
+      if (visited.has(node)) continue;
+      const component: string[] = [];
+      const stack = [node];
+      visited.add(node);
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        component.push(cur);
+        for (const n of adj.get(cur) || []) {
+          if (visited.has(n)) continue;
+          visited.add(n);
+          stack.push(n);
+        }
+      }
+      const clusterEdges = validatedConflictEdges.filter(
+        (e) => component.includes(e.from) && component.includes(e.to)
+      );
+      conflictClusters.push({ claimIds: component, edges: clusterEdges });
+    }
+  }
+
+  const claimsInConflict = new Set<string>();
+  for (const cluster of conflictClusters) {
+    for (const id of cluster.claimIds) claimsInConflict.add(id);
+  }
+
+  // ── 2. Orphan-based isolate detection ──────────────────────────────
+  // Collect orphan ratios from blast surface
+  const bsScores = input.blastSurfaceResult?.scores ?? [];
+  const blastByClaimId = new Map<string, any>();
+  for (const s of bsScores) {
+    if (!s?.claimId) continue;
+    blastByClaimId.set(String(s.claimId), s);
+  }
+
+  const orphanRatios: number[] = [];
+  const orphanByClaimId = new Map<string, number>();
+  for (const c of claims) {
+    const id = String(c.id);
+    const score = blastByClaimId.get(id);
+    const orphanRatio = typeof score?.layerB?.orphanRatio === 'number' && Number.isFinite(score.layerB.orphanRatio)
+      ? score.layerB.orphanRatio
+      : 0;
+    orphanByClaimId.set(id, orphanRatio);
+    orphanRatios.push(orphanRatio);
+  }
+
+  // Distribution-relative orphan threshold: find the natural gap
+  // Sort orphan ratios; if there's a gap between 0-orphan claims and
+  // positive-orphan claims, that gap IS the threshold.
+  const sortedOrphans = [...orphanRatios].sort((a, b) => a - b);
+  let orphanThreshold: number | null = null;
+
+  // Find the largest gap in the distribution
+  if (sortedOrphans.length >= 2) {
+    let maxGap = 0;
+    let gapIdx = -1;
+    for (let i = 0; i < sortedOrphans.length - 1; i++) {
+      const gap = sortedOrphans[i + 1] - sortedOrphans[i];
+      if (gap > maxGap) {
+        maxGap = gap;
+        gapIdx = i;
+      }
+    }
+    // Only use the gap as threshold if it's meaningful (> 5% absolute)
+    // and the threshold point is above zero
+    if (maxGap > 0.05 && gapIdx >= 0) {
+      orphanThreshold = (sortedOrphans[gapIdx] + sortedOrphans[gapIdx + 1]) / 2;
+    }
+  }
+
+  // Fallback: if no natural gap, use μ+σ of the orphan distribution
+  if (orphanThreshold === null) {
+    const mu = mean(orphanRatios);
+    const sig = sigma(orphanRatios, mu);
+    // Only set threshold if there's actual variance and some orphans exist
+    if (sig > 0.01 && mu > 0) {
+      orphanThreshold = mu + sig;
+    }
+  }
+
+  const queryDistanceByClaimId = new Map<string, number>();
+  if (input.queryEmbedding) {
+    for (const c of claims) {
+      const id = String(c.id);
+      const centroid = input.claimCentroids.get(id);
+      if (centroid && input.queryEmbedding) {
+        const sim = cosineSimilarity(centroid, input.queryEmbedding);
+        queryDistanceByClaimId.set(id, Number.isFinite(sim) ? sim : 0);
+      }
+    }
+  }
+
+  let queryDistanceThreshold: number | null = null;
+  if (queryDistanceByClaimId.size > 0) {
+    const qVals = Array.from(queryDistanceByClaimId.values());
+    const muQ = mean(qVals);
+    const sigQ = sigma(qVals, muQ);
+    if (sigQ > 0.01) {
+      queryDistanceThreshold = muQ - sigQ;
+    }
+  }
+
+  // Isolate candidates: sole-source + orphanRatio above threshold + not in conflict
+  const isolateCandidates: IsolateCandidate[] = [];
+  for (const c of claims) {
+    const id = String(c.id);
+    if (claimsInConflict.has(id)) continue;
+    const isSoleSource = Array.isArray(c.supporters) && c.supporters.length === 1;
+    if (!isSoleSource) continue;
+    const orphanRatio = orphanByClaimId.get(id) ?? 0;
+    if (orphanThreshold !== null && orphanRatio >= orphanThreshold) {
+      const qDist = queryDistanceByClaimId.get(id);
+      const isQueryDistant =
+        queryDistanceThreshold !== null && qDist !== undefined
+          ? qDist < queryDistanceThreshold
+          : true;
+      if (!isQueryDistant) continue;
+
+      const score = blastByClaimId.get(id);
+      const vernalComposite = typeof score?.vernal?.compositeScore === 'number'
+        ? score.vernal.compositeScore : 0;
+      isolateCandidates.push({
+        claimId: id,
+        claimLabel: String(c.label ?? id),
+        claimText: String((c as any).text ?? ''),
+        orphanRatio,
+        vernalComposite,
+        queryDistance: qDist ?? null,
+        supporters: Array.isArray(c.supporters) ? c.supporters : [],
+      });
+    }
+  }
+
+  // ── 3. Convergence skip ────────────────────────────────────────────
+  // If convergence ratio is high AND no conflicts AND no meaningful isolates,
+  // skip survey entirely
+  const supportRatios = claims.map((c) =>
+    typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0
+  );
+  const highConsensusCount = supportRatios.filter((r) => r > 0.5).length;
+  const convergenceRatio = claims.length > 0 ? highConsensusCount / claims.length : 0;
+
+  const skipSurvey =
+    conflictClusters.length === 0 &&
+    isolateCandidates.length === 0 &&
+    convergenceRatio > 0.7;
+
+  // ── 4. Passthrough = everything not routed ─────────────────────────
+  const routedIds = new Set<string>([
+    ...claimsInConflict,
+    ...isolateCandidates.map((ic) => ic.claimId),
+  ]);
+  const passthrough = claimIds.filter((id) => !routedIds.has(id));
+
+  return {
+    conflictClusters,
+    isolateCandidates,
+    passthrough,
+    skipSurvey,
+    diagnostics: {
+      orphanThreshold,
+      orphanDistribution: orphanRatios,
+      convergenceRatio,
+      totalClaims: claims.length,
+      queryDistanceThreshold,
     },
   };
 }

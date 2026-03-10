@@ -26,6 +26,7 @@ export function ToggleBar({ state, actions, hasBasinData }: ToggleBarProps) {
         <Toggle label="Mapper Edges" checked={state.showMapperEdges} onChange={actions.toggleMapperEdges} />
         <Toggle label="Hulls" checked={state.showRegionHulls} onChange={actions.toggleRegionHulls} />
         <Toggle label="Basins" checked={state.showBasinRects} onChange={actions.toggleBasinRects} disabled={!hasBasinData} />
+        <Toggle label="Model Colors" checked={state.colorParagraphsByModel} onChange={actions.toggleColorParagraphsByModel} />
       </div>
     </div>
   );

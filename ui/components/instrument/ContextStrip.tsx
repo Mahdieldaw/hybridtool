@@ -165,6 +165,7 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
     const basin = artifact?.geometry?.basinInversion;
     const substrate = artifact?.geometry?.substrate;
     const queryScores = artifact?.geometry?.query?.relevance?.statementScores;
+    const routing = artifact?.claimRouting ?? null;
 
     const D: number | null = basin?.discriminationRange ?? null;
     const T_v: number | null = basin?.T_v ?? null;
@@ -265,6 +266,18 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
         rangeMax: 1,
       } : undefined,
     });
+
+    if (routing) {
+      const forks = Array.isArray(routing?.conflictClusters) ? routing.conflictClusters.length : 0;
+      const isolates = Array.isArray(routing?.isolateCandidates) ? routing.isolateCandidates.length : 0;
+      const passthrough = Array.isArray(routing?.passthrough) ? routing.passthrough.length : 0;
+      const skipSurvey = !!routing?.skipSurvey;
+      pills.push({
+        label: 'routing',
+        value: `${forks} fork · ${isolates} isolate · ${passthrough} passthrough | skip: ${skipSurvey ? 'yes' : 'no'}`,
+        colorClass: 'border-border-subtle text-text-muted',
+      });
+    }
 
     // Status badge
     pills.push({

@@ -1,6 +1,7 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import type { BasinInversionResult, PipelineRegion, PipelineSubstrateEdge, PipelineSubstrateGraph } from "../../shared/contract";
 import type { ClaimCentroid } from "../hooks/useClaimCentroids";
+import { getProviderAbbreviation, getProviderColor, getProviderName, resolveProviderIdFromCitationOrder } from "../utils/provider-helpers";
 
 type ParagraphData = {
   id: string;
@@ -14,6 +15,7 @@ interface Props {
   regions?: Array<Pick<PipelineRegion, "id" | "kind" | "nodeIds">> | null | undefined;
   basinResult?: BasinInversionResult | null | undefined;
   disabled?: boolean;
+  citationSourceOrder?: Record<string | number, string>;
 
   // Paragraph text data for click-to-inspect
   paragraphs?: ParagraphData[] | null;
@@ -33,6 +35,7 @@ interface Props {
   showRegionHulls?: boolean;
   showBasinRects?: boolean;
   showBasinColors?: boolean;
+  colorParagraphsByModel?: boolean;
 
   // Highlight sub-layers (when claim selected)
   highlightSourceParagraphs?: boolean;
@@ -59,6 +62,61 @@ const MAPPER_EDGE_COLORS: Record<string, string> = {
   dependency: "rgba(96,165,250,0.6)",
 };
 
+function hexToRgba(input: string, alpha: number): string | null {
+  const hex = String(input || "").trim();
+  if (!hex.startsWith("#")) return null;
+  const raw = hex.slice(1);
+  const a = Math.max(0, Math.min(1, alpha));
+  if (raw.length === 6) {
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    if (![r, g, b].every(Number.isFinite)) return null;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  if (raw.length === 8) {
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    if (![r, g, b].every(Number.isFinite)) return null;
+    const baseAlpha = parseInt(raw.slice(6, 8), 16) / 255;
+    return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, baseAlpha * a))})`;
+  }
+  return null;
+}
+
+function normalizeCitationSourceOrderPairs(
+  input: Record<string | number, string> | null | undefined,
+): Array<{ modelIndex: number; providerId: string }> {
+  if (!input || typeof input !== "object") return [];
+  const entries = Object.entries(input as any);
+  if (entries.length === 0) return [];
+
+  const direct: Array<{ modelIndex: number; providerId: string }> = [];
+  let directOk = 0;
+  for (const [k, v] of entries) {
+    const mi = Number(k);
+    const pid = String(v ?? "").trim();
+    if (Number.isFinite(mi) && mi > 0 && pid) {
+      direct.push({ modelIndex: mi, providerId: pid });
+      directOk++;
+    }
+  }
+  if (directOk > 0) {
+    direct.sort((a, b) => a.modelIndex - b.modelIndex);
+    return direct;
+  }
+
+  const inverted: Array<{ modelIndex: number; providerId: string }> = [];
+  for (const [k, v] of entries) {
+    const pid = String(k ?? "").trim();
+    const mi = typeof v === "number" ? v : Number(v);
+    if (pid && Number.isFinite(mi) && mi > 0) inverted.push({ modelIndex: mi, providerId: pid });
+  }
+  inverted.sort((a, b) => a.modelIndex - b.modelIndex);
+  return inverted;
+}
+
 function hull(points: Point[]): Point[] {
   const pts = points
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
@@ -84,6 +142,7 @@ function hull(points: Point[]): Point[] {
 
 export function ParagraphSpaceView({
   graph, mutualEdges, regions, basinResult, disabled,
+  citationSourceOrder,
   paragraphs,
   claimCentroids, mapperEdges,
   selectedClaimId, onClaimClick,
@@ -93,6 +152,7 @@ export function ParagraphSpaceView({
   showRegionHulls = false,
   showBasinRects = false,
   showBasinColors = true,
+  colorParagraphsByModel = false,
   highlightSourceParagraphs = true,
   highlightInternalEdges = true,
   highlightSpannedHulls = true,
@@ -101,6 +161,38 @@ export function ParagraphSpaceView({
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
   const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
   const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
+
+  const modelIndexCounts = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const n of nodes) {
+      const mi = typeof (n as any)?.modelIndex === "number" ? (n as any).modelIndex : null;
+      if (mi == null || !Number.isFinite(mi)) continue;
+      m.set(mi, (m.get(mi) ?? 0) + 1);
+    }
+    return m;
+  }, [nodes]);
+
+  const modelLegend = useMemo(() => {
+    const pairs = normalizeCitationSourceOrderPairs(citationSourceOrder);
+    return pairs.map(({ modelIndex, providerId }) => {
+      const pid = resolveProviderIdFromCitationOrder(modelIndex, citationSourceOrder) ?? providerId;
+      const color = getProviderColor(pid || "default");
+      return {
+        modelIndex,
+        providerId: pid,
+        abbrev: pid ? getProviderAbbreviation(pid) : `M${modelIndex}`,
+        name: pid ? getProviderName(pid) : `Model ${modelIndex}`,
+        color,
+        count: modelIndexCounts.get(modelIndex) ?? 0,
+      };
+    });
+  }, [citationSourceOrder, modelIndexCounts]);
+
+  const legendKey = useMemo(() => modelLegend.map((m) => `${m.modelIndex}:${m.providerId}`).join("|"), [modelLegend]);
+  const [enabledModelIndices, setEnabledModelIndices] = useState<Set<number>>(() => new Set<number>());
+  useEffect(() => {
+    setEnabledModelIndices(new Set(modelLegend.map((m) => m.modelIndex)));
+  }, [legendKey]);
 
   const paragraphDataMap = useMemo(() => {
     const m = new Map<string, ParagraphData>();
@@ -294,6 +386,74 @@ export function ParagraphSpaceView({
           ))}
         </div>
 
+        {colorParagraphsByModel && (
+          <div className="absolute top-4 right-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm shadow-sm z-10 pointer-events-auto min-w-[220px]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[9px] uppercase font-bold text-text-muted tracking-wider">Models</div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEnabledModelIndices(new Set(modelLegend.map((m) => m.modelIndex)));
+                  }}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEnabledModelIndices(new Set());
+                  }}
+                >
+                  None
+                </button>
+              </div>
+            </div>
+            {modelLegend.length === 0 ? (
+              <div className="mt-2 text-[10px] text-text-muted">
+                No model ordering found for this turn.
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1 max-h-56 overflow-y-auto custom-scrollbar">
+                {modelLegend.map((m) => {
+                  const checked = enabledModelIndices.has(m.modelIndex);
+                  const dot = hexToRgba(m.color, 0.85) ?? m.color;
+                  return (
+                    <label
+                      key={`${m.modelIndex}-${m.providerId}`}
+                      className="flex items-center gap-2 text-[11px] text-text-secondary select-none cursor-pointer"
+                      title={m.providerId}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={checked}
+                        onChange={() => {
+                          setEnabledModelIndices((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(m.modelIndex)) next.delete(m.modelIndex);
+                            else next.add(m.modelIndex);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="w-2.5 h-2.5 rounded-full border border-white/20" style={{ backgroundColor: dot }} />
+                      <span className="font-mono text-[10px] text-text-muted">{m.abbrev}</span>
+                      <span className="truncate">{m.name}</span>
+                      <span className="ml-auto font-mono text-[10px] text-text-muted">{m.count}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <svg
           className="w-full h-full bg-black/20"
           viewBox={`0 0 ${W} ${H}`}
@@ -399,22 +559,38 @@ export function ParagraphSpaceView({
             const degree = typeof n.mutualDegree === "number" ? n.mutualDegree : 0;
             const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7));
 
-            const basinId = showBasinColors ? basinResult?.basinByNodeId?.[id] : undefined;
+            const basinId = basinResult?.basinByNodeId?.[id];
             const basinColor =
-              typeof basinId === "number" && Number.isFinite(basinId)
+              showBasinColors && typeof basinId === "number" && Number.isFinite(basinId)
                 ? BASIN_COLORS[((basinId % BASIN_COLORS.length) + BASIN_COLORS.length) % BASIN_COLORS.length]
                 : null;
-            const fill = basinColor ?? "rgba(148,163,184,0.65)";
+            const nodeModelIndex = typeof n.modelIndex === "number" && Number.isFinite(n.modelIndex) ? n.modelIndex : null;
+            const providerId = colorParagraphsByModel
+              ? resolveProviderIdFromCitationOrder(
+                nodeModelIndex,
+                citationSourceOrder,
+              )
+              : null;
+            const providerColor = providerId ? getProviderColor(providerId) : null;
+            const modelFill = providerColor ? (hexToRgba(providerColor, 0.65) ?? providerColor) : null;
+            const fill = (colorParagraphsByModel ? modelFill : basinColor) ?? "rgba(148,163,184,0.65)";
 
             const isSource = hasSelection && highlightSourceParagraphs && selectedClaimSourceIds!.has(id);
             const isHovered = hoveredParagraphId === id;
             const isParaSelected = selectedParagraphId === id;
-            const nodeOpacity = hasSelection && highlightSourceParagraphs ? (isSource ? 1 : 0.20) : 0.85;
+            const modelEnabled =
+              !colorParagraphsByModel ||
+              enabledModelIndices.size === 0 ||
+              nodeModelIndex == null ||
+              enabledModelIndices.has(nodeModelIndex);
+            const baseOpacity = hasSelection && highlightSourceParagraphs ? (isSource ? 1 : 0.20) : 0.85;
+            const nodeOpacity = modelEnabled ? baseOpacity : baseOpacity * 0.08;
             const paraData = paragraphDataMap.get(id);
             const hasText = !!paraData?._fullParagraph;
+            const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : (n.modelIndex != null ? `M${n.modelIndex}` : null);
             const titleText = hasText
               ? `${id} · click to inspect\n${paraData!._fullParagraph!.slice(0, 120)}${paraData!._fullParagraph!.length > 120 ? "…" : ""}`
-              : `${id}${n.modelIndex != null ? ` · model ${n.modelIndex}` : ""}${basinId != null ? ` · basin ${basinId}` : ""}`;
+              : `${id}${providerAbbrev ? ` · ${providerAbbrev}` : ""}${basinId != null ? ` · basin ${basinId}` : ""}`;
 
             return (
               <circle

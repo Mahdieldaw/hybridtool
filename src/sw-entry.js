@@ -1123,8 +1123,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           });
 
           let questionSelectionInstrumentation = null;
+          let claimRouting = null;
           try {
-            const { computeQuestionSelectionInstrumentation } =
+            const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
               await import('./core/blast-radius/questionSelection');
             questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
               blastSurfaceResult: derived?.blastSurfaceResult ?? null,
@@ -1133,9 +1134,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               queryRelevanceScores: derived?.queryRelevance?.statementScores ?? queryRelevance?.statementScores ?? null,
               modelCount,
               claimCentroids: claimEmbeddings ?? new Map(),
+              queryEmbedding: queryEmbedding ?? null,
+            });
+            claimRouting = computeClaimRouting({
+              blastSurfaceResult: derived?.blastSurfaceResult ?? null,
+              edges: Array.isArray(parsedEdges) ? parsedEdges : [],
+              enrichedClaims,
+              queryRelevanceScores: derived?.queryRelevance?.statementScores ?? queryRelevance?.statementScores ?? null,
+              modelCount,
+              claimCentroids: claimEmbeddings ?? new Map(),
+              queryEmbedding: queryEmbedding ?? null,
             });
           } catch (_) {
             questionSelectionInstrumentation = null;
+            claimRouting = null;
           }
 
           const shadowDelta = derived.shadowDelta;
@@ -1169,6 +1181,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           mapperArtifact.preSemantic = preSemantic || null;
           if (questionSelectionInstrumentation) {
             mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+          }
+          if (claimRouting) {
+            mapperArtifact.claimRouting = claimRouting;
           }
 
           // ── G. Build full cognitive artifact ──
@@ -1217,6 +1232,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           });
           if (questionSelectionInstrumentation) {
             cognitiveArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
+          }
+          if (claimRouting) {
+            cognitiveArtifact.claimRouting = claimRouting;
           }
 
           // ── G.1 Diagnostic: verify critical fields in cognitive artifact ──
@@ -1273,6 +1291,170 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           sendResponse({ success: true, data: { artifactPatched, artifact: artifactForUi, claimCount: enrichedClaims.length, edgeCount: mapperArtifact.edges?.length || 0 } });
         })().catch(e => { console.error('[Regenerate] Failed:', e); sendResponse({ success: false, error: getErrorMessage(e) }); });
+        return true;
+
+      case "GET_CHEWED_SUBSTRATE_FOR_TURN":
+        (async () => {
+          const {
+            aiTurnId,
+            providerId,
+            shadowStatements: shadowStatementsFromUi,
+            shadowParagraphs: shadowParagraphsFromUi,
+            claims: claimsFromUi,
+            blastSurface: blastSurfaceFromUi,
+            citationSourceOrder: citationSourceOrderFromUi,
+            sourceData: sourceDataFromUi,
+            forcingPoints: forcingPointsFromUi,
+          } = message.payload || {};
+          const key = String(aiTurnId || "").trim();
+          if (!key) {
+            sendResponse({ success: true, data: { ok: false, reason: "missing_aiTurnId" } });
+            return;
+          }
+
+          const turnRaw = await sm.adapter.get("turns", key);
+          if (!turnRaw) {
+            sendResponse({ success: true, data: { ok: false, reason: "turn_not_found" } });
+            return;
+          }
+
+          const { buildChewedSubstrate } = await import('./skeletonization');
+          const { projectParagraphs } = await import('./shadow');
+          const { unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
+          const { deserializeTraversalState, serializeTraversalState } = await import('./utils/cognitive/traversalSerialization');
+
+          const normalizeProvId = (pid) => String(pid || "").trim().toLowerCase();
+
+          const responsesForTurn = await sm.adapter.getResponsesByTurnId(key);
+
+          const mappingProvider = providerId ? normalizeProvId(providerId) : null;
+          const mappingResp = (responsesForTurn || [])
+            .filter((r) => r && r.responseType === "mapping")
+            .filter((r) => (mappingProvider ? normalizeProvId(r.providerId) === mappingProvider : true))
+            .slice()
+            .reverse()
+            .find((r) => r && r.artifact && typeof r.artifact === "object") || null;
+
+          let mappingArtifact = mappingResp?.artifact || turnRaw?.mapping?.artifact || null;
+          if (typeof mappingArtifact === "string") {
+            try {
+              const parsed = JSON.parse(mappingArtifact);
+              mappingArtifact = parsed && typeof parsed === "object" ? parsed : null;
+            } catch {
+              mappingArtifact = null;
+            }
+          }
+
+          if (!mappingArtifact || typeof mappingArtifact !== "object") {
+            sendResponse({ success: true, data: { ok: false, reason: "mapping_artifact_unavailable" } });
+            return;
+          }
+
+          const shadowStatements = Array.isArray(shadowStatementsFromUi)
+            ? shadowStatementsFromUi
+            : Array.isArray(mappingArtifact?.shadow?.statements)
+              ? mappingArtifact.shadow.statements
+              : [];
+          let shadowParagraphs = Array.isArray(shadowParagraphsFromUi)
+            ? shadowParagraphsFromUi
+            : Array.isArray(mappingArtifact?.shadow?.paragraphs)
+              ? mappingArtifact.shadow.paragraphs
+              : [];
+
+          if (shadowStatements.length === 0) {
+            sendResponse({ success: true, data: { ok: false, reason: "shadow_statements_missing" } });
+            return;
+          }
+          if (shadowParagraphs.length === 0) {
+            shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
+          }
+
+          const claims = Array.isArray(claimsFromUi)
+            ? claimsFromUi
+            : Array.isArray(mappingArtifact?.claims)
+              ? mappingArtifact.claims
+              : Array.isArray(mappingArtifact?.semantic?.claims)
+                ? mappingArtifact.semantic.claims
+                : [];
+
+          const citationOrderArr = Array.isArray(citationSourceOrderFromUi)
+            ? citationSourceOrderFromUi
+            : Array.isArray(mappingArtifact?.citationSourceOrder)
+              ? mappingArtifact.citationSourceOrder
+              : Array.isArray(mappingArtifact?.meta?.citationSourceOrder)
+                ? mappingArtifact.meta.citationSourceOrder
+                : Array.isArray(turnRaw?.batch?.citationSourceOrder)
+                  ? turnRaw.batch.citationSourceOrder
+                  : [];
+          const citationOrderNorm = citationOrderArr.map(normalizeProvId);
+
+          const sourceData = (() => {
+            if (Array.isArray(sourceDataFromUi) && sourceDataFromUi.length > 0) {
+              return sourceDataFromUi
+                .map((s) => ({
+                  providerId: normalizeProvId(s?.providerId),
+                  modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : 0,
+                  text: String(s?.text || ""),
+                }))
+                .filter((s) => s.providerId && s.text.trim().length > 0);
+            }
+            const batchTextByProvider = new Map();
+            for (const r of responsesForTurn || []) {
+              if (!r || r.responseType !== "batch") continue;
+              const pid = normalizeProvId(r.providerId);
+              if (!pid) continue;
+              if (batchTextByProvider.has(pid)) continue;
+              const t = String(r.text || "");
+              if (!t.trim()) continue;
+              batchTextByProvider.set(pid, t);
+            }
+
+            return Array.from(batchTextByProvider.entries()).map(([pid, text], idx) => {
+              const inOrder = citationOrderNorm.indexOf(pid);
+              const modelIndex = inOrder >= 0 ? inOrder : idx;
+              return { providerId: pid, modelIndex, text };
+            });
+          })();
+
+          const traversalStateRaw = turnRaw?.singularity?.traversalState ?? null;
+          const traversalState = deserializeTraversalState(traversalStateRaw);
+          if (!traversalState) {
+            sendResponse({ success: true, data: { ok: false, reason: "traversal_state_missing" } });
+            return;
+          }
+
+          let statementEmbeddings = null;
+          try {
+            const geoRecord = await sm.loadEmbeddings(key);
+            const meta = geoRecord?.meta || null;
+            if (geoRecord?.statementEmbeddings && meta?.statementIndex && meta?.dimensions) {
+              statementEmbeddings = unpackEmbeddingMap(geoRecord.statementEmbeddings, meta.statementIndex, meta.dimensions);
+            }
+          } catch (_) { }
+
+          const chewedSubstrate = await buildChewedSubstrate({
+            statements: shadowStatements,
+            paragraphs: shadowParagraphs,
+            claims,
+            traversalState,
+            sourceData,
+            ...(statementEmbeddings ? { statementEmbeddings } : {}),
+            blastSurface: blastSurfaceFromUi ?? mappingArtifact?.blastSurface ?? null,
+          });
+
+          sendResponse({
+            success: true,
+            data: {
+              ok: true,
+              aiTurnId: key,
+              providerId: mappingProvider,
+              traversalState: serializeTraversalState(traversalState),
+              forcingPoints: forcingPointsFromUi ?? mappingArtifact?.traversal?.forcingPoints ?? null,
+              sourceData,
+              chewedSubstrate,
+            },
+          });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 
 

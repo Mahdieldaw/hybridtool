@@ -42,7 +42,6 @@ function fmt(v: any, col: ColumnDef): string {
 
 const ZONE_COLORS: Record<string, string> = {
   'core': 'text-emerald-400',
-  'boundary-promoted': 'text-amber-400',
   'removed': 'text-rose-400',
 };
 
@@ -78,24 +77,15 @@ function applyThresholdPreview(
 // CELL
 // ============================================================================
 
-function Cell({ col, row, previews, changed, width }: {
+function Cell({ col, row, changed, width }: {
   col: ColumnDef;
   row: any;
-  previews: Record<string, ThresholdPreview>;
   changed: boolean;
   width?: number;
 }) {
   const baseVal = col.accessor(row);
 
-  // Apply threshold preview override
-  const previewOverride = previews[col.id];
-  let displayVal = baseVal;
-  if (previewOverride && col.id === 'zone' && false) {
-    const overrides = applyThresholdPreview(row, previews);
-    if ('zone' in overrides) displayVal = overrides.zone ?? baseVal;
-  }
-
-  const formatted = fmt(displayVal, col);
+  const formatted = fmt(baseVal, col);
 
   const isCat = col.type === 'category';
   const isBool = col.type === 'boolean';
@@ -111,13 +101,13 @@ function Cell({ col, row, previews, changed, width }: {
       )}
       style={col.id !== 'text' ? { width: width ?? defaultColWidth(col.id) } : undefined}
     >
-      {isCat && displayVal != null ? (
-        <span className={clsx("text-[11px] font-mono", getCategoryColor(col.id, String(displayVal)))}>
+      {isCat && baseVal != null ? (
+        <span className={clsx("text-[11px] font-mono", getCategoryColor(col.id, String(baseVal)))}>
           {formatted}
         </span>
       ) : isBool ? (
-        <span className={clsx("text-[11px]", displayVal === true ? "text-emerald-400" : "text-text-muted")}>
-          {displayVal == null ? "—" : displayVal ? "✓" : "✕"}
+        <span className={clsx("text-[11px]", baseVal === true ? "text-emerald-400" : "text-text-muted")}>
+          {baseVal == null ? "—" : baseVal ? "✓" : "✕"}
         </span>
       ) : isNum ? (
         <span className="text-[11px] font-mono text-text-secondary">{formatted}</span>
@@ -150,9 +140,6 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   sim_query: 72,
   globalSim: 76,
   zone: 112,
-  coreCoherence: 92,
-  corpusAffinity: 96,
-  differential: 84,
   paragraphOrigin: 120,
   bs_twin: 56,
   bs_simTwin: 72,
@@ -546,13 +533,7 @@ export function EvidenceTable({
       const row = item.row;
       const line = columns.map((col) => {
         const baseVal = col.accessor(row);
-        const previewOverride = thresholdPreviews[col.id];
-        let displayVal = baseVal;
-        if (previewOverride && col.id === 'zone' && false) {
-          const overrides = applyThresholdPreview(row, thresholdPreviews);
-          if ('zone' in overrides) displayVal = (overrides as any).zone ?? baseVal;
-        }
-        return fmt(displayVal, col).replace(/\r?\n/g, " ").trim();
+        return fmt(baseVal, col).replace(/\r?\n/g, " ").trim();
       }).join("\t");
       lines.push(line);
     }
@@ -570,7 +551,7 @@ export function EvidenceTable({
       lines.push(...legendLines);
     }
     return lines.join("\n");
-  }, [columns, virtualItems, thresholdPreviews]);
+  }, [columns, virtualItems]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -712,7 +693,6 @@ export function EvidenceTable({
 function GroupHeader({ groupKey, count }: { groupKey: string; count: number }) {
   const colorMap: Record<string, string> = {
     'core': 'text-emerald-400',
-    'boundary-promoted': 'text-amber-400',
     'removed': 'text-rose-400',
     'primary': 'text-emerald-400',
     'supporting': 'text-blue-400',
@@ -781,13 +761,13 @@ function TableRow({
               {mode === 'paragraph' ? (
                 <>
                   <span className="text-[9px] text-text-muted font-mono">¶{row.paragraphId}</span>
-                  <span className="text-[9px] text-text-muted font-mono">M{row.modelIndex}</span>
+                  <span className="text-[9px] text-text-muted font-mono">{row.providerAbbrev ?? `M${row.modelIndex}`}</span>
                   <span className="text-[9px] text-text-muted font-mono">{row.statementCount} stmt{row.statementCount !== 1 ? 's' : ''}</span>
                 </>
               ) : (
                 <>
                   <span className="text-[9px] text-text-muted font-mono">id:{row.statementId}</span>
-                  <span className="text-[9px] text-text-muted font-mono">M{row.modelIndex}</span>
+                  <span className="text-[9px] text-text-muted font-mono">{row.providerAbbrev ?? `M${row.modelIndex}`}</span>
                   {row.paragraphId && (
                     <span className="text-[9px] text-text-muted font-mono">¶{row.paragraphId}</span>
                   )}
@@ -800,7 +780,6 @@ function TableRow({
             key={col.id}
             col={col}
             row={row}
-            previews={previews}
             changed={hasChangedCells && col.id === 'zone'}
             width={col.id !== 'text' ? getColWidth(col.id) : undefined}
           />

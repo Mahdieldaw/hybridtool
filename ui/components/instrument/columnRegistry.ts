@@ -1,4 +1,5 @@
 import type { ParagraphRow } from "../../hooks/useParagraphRows";
+import { getProviderAbbreviation } from "../../utils/provider-helpers";
 
 // ============================================================================
 // TYPES
@@ -76,9 +77,13 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'model',
     label: 'Model',
-    accessor: r => r.modelIndex,
-    type: 'number',
-    format: (v: any) => v == null ? '—' : `M${v}`,
+    accessor: r => r.providerId ?? r.modelIndex,
+    type: 'category',
+    format: (v: any) => {
+      if (v == null) return '—';
+      if (typeof v === 'number' && Number.isFinite(v)) return `M${v}`;
+      return getProviderAbbreviation(String(v));
+    },
     sortable: true,
     groupable: true,
     description: 'Model index that produced this statement',
@@ -143,43 +148,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     type: 'category',
     sortable: true,
     groupable: true,
-    description: 'Mixed-provenance zone: core, boundary-promoted, or removed',
-    source: 'built-in',
-    category: 'mixed',
-  },
-  {
-    id: 'coreCoherence',
-    label: 'coreCoherence',
-    accessor: r => r.coreCoherence,
-    type: 'number',
-    format: fmtNum(3),
-    sortable: true,
-    groupable: false,
-    description: 'Coherence with the core cluster',
-    source: 'built-in',
-    category: 'mixed',
-  },
-  {
-    id: 'corpusAffinity',
-    label: 'corpusAffinity',
-    accessor: r => r.corpusAffinity,
-    type: 'number',
-    format: fmtNum(3),
-    sortable: true,
-    groupable: false,
-    description: 'Affinity to the full corpus',
-    source: 'built-in',
-    category: 'mixed',
-  },
-  {
-    id: 'differential',
-    label: 'differential',
-    accessor: r => r.differential,
-    type: 'number',
-    format: fmtNum(3),
-    sortable: true,
-    groupable: false,
-    description: 'Differential score: coreCoherence - corpusAffinity',
+    description: 'Mixed-provenance zone: core or removed',
     source: 'built-in',
     category: 'mixed',
   },
@@ -238,6 +207,29 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     sortable: true,
     groupable: false,
     description: 'Similarity gate threshold (tensionThreshold)',
+    source: 'built-in',
+    category: 'blast',
+  },
+  {
+    id: 'routeCategory',
+    label: 'route',
+    accessor: r => r.routeCategory,
+    type: 'category',
+    sortable: true,
+    groupable: true,
+    description: 'Structural routing category: conflict (fork), isolate (misleadingness test), or passthrough (no gate)',
+    source: 'built-in',
+    category: 'blast',
+  },
+  {
+    id: 'queryDistance',
+    label: 'q_dist',
+    accessor: r => r.queryDistance,
+    type: 'number',
+    format: fmtNum(3),
+    sortable: true,
+    groupable: false,
+    description: 'Cosine similarity between claim centroid and query embedding. Lower = claim introduces concepts far from what user asked about.',
     source: 'built-in',
     category: 'blast',
   },
@@ -350,11 +342,11 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
     groupBy: 'zone',
   },
   {
-    id: 'differential',
-    label: 'Differential',
-    columns: ['statementId', 'text', 'model', 'globalSim', 'zone', 'coreCoherence', 'corpusAffinity', 'differential'],
-    sortBy: 'differential',
-    sortDir: 'asc',
+    id: 'global-floor',
+    label: 'Global Floor',
+    columns: ['statementId', 'text', 'model', 'globalSim', 'zone', 'paragraphOrigin'],
+    sortBy: 'globalSim',
+    sortDir: 'desc',
     groupBy: 'zone',
   },
   {
@@ -389,6 +381,14 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
     sortDir: 'desc',
     groupBy: null,
     filter: [{ columnId: 'bs_simTwin', op: 'not-null' }],
+  },
+  {
+    id: 'routing',
+    label: 'Routing',
+    columns: ['statementId', 'text', 'model', 'routeCategory', 'queryDistance', 'bs_twin'],
+    sortBy: 'queryDistance',
+    sortDir: 'asc',
+    groupBy: 'routeCategory',
   },
 ];
 
@@ -427,9 +427,13 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
   {
     id: 'model',
     label: 'Model',
-    accessor: (r: ParagraphRow) => r.modelIndex,
-    type: 'number',
-    format: (v: any) => v == null ? '—' : `M${v}`,
+    accessor: (r: ParagraphRow) => r.providerId ?? r.modelIndex,
+    type: 'category',
+    format: (v: any) => {
+      if (v == null) return '—';
+      if (typeof v === 'number' && Number.isFinite(v)) return `M${v}`;
+      return getProviderAbbreviation(String(v));
+    },
     sortable: true,
     groupable: true,
     description: 'Model index that produced this paragraph',

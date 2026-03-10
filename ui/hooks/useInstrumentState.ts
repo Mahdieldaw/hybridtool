@@ -28,6 +28,7 @@ export interface InstrumentState {
   showMapperEdges: boolean;
   showRegionHulls: boolean;
   showBasinRects: boolean;
+  colorParagraphsByModel: boolean;
   highlightSourceParagraphs: boolean;
   highlightInternalEdges: boolean;
   highlightSpannedHulls: boolean;
@@ -45,6 +46,7 @@ export interface InstrumentActions {
   toggleMapperEdges: () => void;
   toggleRegionHulls: () => void;
   toggleBasinRects: () => void;
+  toggleColorParagraphsByModel: () => void;
   toggleHighlightSourceParagraphs: () => void;
   toggleHighlightInternalEdges: () => void;
   toggleHighlightSpannedHulls: () => void;
@@ -63,6 +65,7 @@ const DEFAULTS: InstrumentState = {
   showMapperEdges: false,
   showRegionHulls: false,
   showBasinRects: false,
+  colorParagraphsByModel: true,
   highlightSourceParagraphs: true,
   highlightInternalEdges: true,
   highlightSpannedHulls: true,
@@ -80,6 +83,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
   const [showMapperEdges, setShowMapperEdges] = useState(DEFAULTS.showMapperEdges);
   const [showRegionHulls, setShowRegionHulls] = useState(DEFAULTS.showRegionHulls);
   const [showBasinRects, setShowBasinRects] = useState(DEFAULTS.showBasinRects);
+  const [colorParagraphsByModel, setColorParagraphsByModel] = useState(DEFAULTS.colorParagraphsByModel);
   const [highlightSourceParagraphs, setHighlightSourceParagraphs] = useState(DEFAULTS.highlightSourceParagraphs);
   const [highlightInternalEdges, setHighlightInternalEdges] = useState(DEFAULTS.highlightInternalEdges);
   const [highlightSpannedHulls, setHighlightSpannedHulls] = useState(DEFAULTS.highlightSpannedHulls);
@@ -109,6 +113,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     setShowMapperEdges(DEFAULTS.showMapperEdges);
     setShowRegionHulls(DEFAULTS.showRegionHulls);
     setShowBasinRects(DEFAULTS.showBasinRects);
+    setColorParagraphsByModel(DEFAULTS.colorParagraphsByModel);
     setHighlightSourceParagraphs(DEFAULTS.highlightSourceParagraphs);
     setHighlightInternalEdges(DEFAULTS.highlightInternalEdges);
     setHighlightSpannedHulls(DEFAULTS.highlightSpannedHulls);
@@ -126,6 +131,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     showMapperEdges,
     showRegionHulls,
     showBasinRects,
+    colorParagraphsByModel,
     highlightSourceParagraphs,
     highlightInternalEdges,
     highlightSpannedHulls,
@@ -133,6 +139,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     rightPanelMode, selectedView, selectedClaimId, selectedEntity,
     expandedRefSections, scope,
     showMutualEdges, showClaimDiamonds, showMapperEdges, showRegionHulls, showBasinRects,
+    colorParagraphsByModel,
     highlightSourceParagraphs, highlightInternalEdges, highlightSpannedHulls,
   ]);
 
@@ -148,6 +155,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     toggleMapperEdges: () => setShowMapperEdges(v => !v),
     toggleRegionHulls: () => setShowRegionHulls(v => !v),
     toggleBasinRects: () => setShowBasinRects(v => !v),
+    toggleColorParagraphsByModel: () => setColorParagraphsByModel(v => !v),
     toggleHighlightSourceParagraphs: () => setHighlightSourceParagraphs(v => !v),
     toggleHighlightInternalEdges: () => setHighlightInternalEdges(v => !v),
     toggleHighlightSpannedHulls: () => setHighlightSpannedHulls(v => !v),

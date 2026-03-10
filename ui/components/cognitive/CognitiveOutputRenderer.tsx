@@ -88,6 +88,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 batchTexts,
                 userQuery: typeof userTurn?.text === 'string' ? userTurn.text : '',
                 provider,
+                claimRouting: (mappingArtifact as any)?.claimRouting ?? null,
             },
         }).catch(() => {
             setSurveyTest((prev: any) => prev ? { ...prev, loading: false, result: { gates: [], rationale: null, errors: ['Failed to send message'], rawText: '' } } : prev);

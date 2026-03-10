@@ -348,26 +348,19 @@ export function ClaimDetailDrawer({
                 <div className="text-text-primary text-right font-medium">{mixedClaim.canonicalStatementIds?.length ?? "—"}</div>
                 <div className="text-text-muted">Core (above μ)</div>
                 <div className="text-emerald-400 text-right">{mixedClaim.coreCount ?? "—"}</div>
-                <div className="text-text-muted">Boundary promoted</div>
-                <div className="text-cyan-400 text-right">{mixedClaim.boundaryPromotedCount ?? 0}</div>
-                <div className="text-text-muted">Boundary removed</div>
-                <div className="text-rose-400 text-right">{mixedClaim.boundaryRemovedCount ?? 0}</div>
-                <div className="text-text-muted">Floor removed (below μ-σ)</div>
-                <div className="text-rose-400/60 text-right">{mixedClaim.floorRemovedCount ?? 0}</div>
-                <div className="text-text-muted">μ_global / σ_global</div>
-                <div className="text-text-primary text-right font-mono text-[10px]">{fmt(mixedClaim.globalMu)} / {fmt(mixedClaim.globalSigma)}</div>
+                <div className="text-text-muted">Removed (below μ)</div>
+                <div className="text-rose-400 text-right">{mixedClaim.removedCount ?? 0}</div>
+                <div className="text-text-muted">μ_global</div>
+                <div className="text-text-primary text-right font-mono text-[10px]">{fmt(mixedClaim.globalMu)}</div>
               </div>
               {/* Fate bar */}
-              {(mixedClaim.coreCount > 0 || mixedClaim.boundaryPromotedCount > 0) && (
+              {(mixedClaim.coreCount > 0 || (mixedClaim.removedCount ?? 0) > 0) && (
                 <div className="flex h-2 rounded-full overflow-hidden gap-px">
                   {mixedClaim.coreCount > 0 && (
                     <div className="bg-emerald-500/70" style={{ flex: mixedClaim.coreCount }} title={`Core: ${mixedClaim.coreCount}`} />
                   )}
-                  {mixedClaim.boundaryPromotedCount > 0 && (
-                    <div className="bg-cyan-500/70" style={{ flex: mixedClaim.boundaryPromotedCount }} title={`Boundary promoted: ${mixedClaim.boundaryPromotedCount}`} />
-                  )}
-                  {(mixedClaim.boundaryRemovedCount ?? 0) + (mixedClaim.floorRemovedCount ?? 0) > 0 && (
-                    <div className="bg-rose-500/30" style={{ flex: (mixedClaim.boundaryRemovedCount ?? 0) + (mixedClaim.floorRemovedCount ?? 0) }} title={`Removed: ${(mixedClaim.boundaryRemovedCount ?? 0) + (mixedClaim.floorRemovedCount ?? 0)}`} />
+                  {(mixedClaim.removedCount ?? 0) > 0 && (
+                    <div className="bg-rose-500/30" style={{ flex: mixedClaim.removedCount ?? 0 }} title={`Removed: ${mixedClaim.removedCount ?? 0}`} />
                   )}
                 </div>
               )}
@@ -376,7 +369,7 @@ export function ClaimDetailDrawer({
                 <div className="space-y-0.5 mt-1">
                   <div className="text-[9px] text-text-muted mb-1">Survived statements:</div>
                   {(mixedClaim.statements ?? [])
-                    .filter((s: any) => (s.zone === 'core' || s.zone === 'boundary-promoted') && s.fromSupporterModel)
+                    .filter((s: any) => s.zone === 'core' && s.fromSupporterModel)
                     .sort((a: any, b: any) => b.globalSim - a.globalSim)
                     .slice(0, showAllCanonical ? (mixedClaim.statements?.length ?? 9999) : 12)
                     .map((s: any) => {
@@ -384,12 +377,9 @@ export function ClaimDetailDrawer({
                       const truncText = text.length > 90 ? text.slice(0, 90) + "\u2026" : text;
                       return (
                         <div key={s.statementId} className="flex items-start gap-1.5 text-[9px] py-0.5 border-b border-white/5">
-                          <span className={`flex-none font-mono ${s.zone === 'boundary-promoted' ? 'text-cyan-400' : 'text-emerald-400'}`}>
+                          <span className="flex-none font-mono text-emerald-400">
                             {s.globalSim?.toFixed(3)}
                           </span>
-                          {s.zone === 'boundary-promoted' && (
-                            <span className="flex-none text-cyan-500 font-medium" title={`Δ=${s.differential?.toFixed(3)}`}>bp</span>
-                          )}
                           <span className="text-text-secondary" title={text}>{truncText}</span>
                         </div>
                       );

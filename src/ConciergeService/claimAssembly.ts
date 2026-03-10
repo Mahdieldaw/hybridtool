@@ -546,13 +546,6 @@ export function computeMixedMethodProvenance(
         }
     }
 
-    // Collect all corpus embeddings once for corpusAffinity computation
-    const allCorpusEmbeddings: Float32Array[] = [];
-    for (const s of statements) {
-        const emb = statementEmbeddings.get(s.id);
-        if (emb) allCorpusEmbeddings.push(emb);
-    }
-
     // Aggregate for diagnostics
     let totalKept = 0;
     let totalInCompetitive = 0;
@@ -637,12 +630,6 @@ export function computeMixedMethodProvenance(
         const globalMu = allGlobalSims.length > 0
             ? allGlobalSims.reduce((a, b) => a + b, 0) / allGlobalSims.length
             : 0;
-        const globalVariance = allGlobalSims.length > 0
-            ? allGlobalSims.reduce((s, v) => s + (v - globalMu) ** 2, 0) / allGlobalSims.length
-            : 0;
-        const globalSigma = Math.sqrt(globalVariance);
-        const boundaryFloor = globalMu - globalSigma;
-
         // Collect all statements from merged paragraph pool
         const candidateStatements: MixedStatementEntry[] = [];
         const stmtIdsSeen = new Set<string>();
@@ -668,13 +655,6 @@ export function computeMixedMethodProvenance(
                     ? claim.supporters.includes(stmtObj.modelIndex ?? -1)
                     : true;
 
-                // Classify into zones
-                // Initial zone: core vs boundary-candidate vs floor-removed
-                const initialZone: 'core' | 'boundary' | 'floor-removed' =
-                    globalSim >= globalMu ? 'core'
-                        : globalSim >= boundaryFloor ? 'boundary'
-                            : 'floor-removed';
-
                 candidateStatements.push({
                     statementId: sid,
                     globalSim,
@@ -682,92 +662,19 @@ export function computeMixedMethodProvenance(
                     fromSupporterModel,
                     paragraphOrigin: pEntry.origin,
                     paragraphId: pEntry.paragraphId,
-                    zone: initialZone === 'floor-removed' ? 'removed' : initialZone as any,
-                    coreCoherence: null,
-                    corpusAffinity: null,
-                    differential: null,
+                    zone: kept ? 'core' : 'removed',
                 });
             }
         }
 
-        // ── Step 4: Differential filter on boundary zone ────────────────
         const coreStmts = candidateStatements.filter(s => s.zone === 'core');
-        const coreEmbeddings: Float32Array[] = [];
-        for (const s of coreStmts) {
-            const emb = statementEmbeddings.get(s.statementId);
-            if (emb) coreEmbeddings.push(emb);
-        }
 
-        const boundaryStmts = candidateStatements.filter(s => (s.zone as string) === 'boundary');
-        const coherenceValues: number[] = [];
-        let boundaryPromotedCount = 0;
-        let boundaryRemovedCount = 0;
-
-        if (coreEmbeddings.length > 0 && allCorpusEmbeddings.length > 0) {
-            for (const bs of boundaryStmts) {
-                const bEmb = statementEmbeddings.get(bs.statementId);
-                if (!bEmb) {
-                    // No embedding — can't evaluate, remove
-                    bs.zone = 'removed';
-                    boundaryRemovedCount++;
-                    continue;
-                }
-
-                // coreAffinity: mean cos to retained core
-                let coreSum = 0;
-                for (const cEmb of coreEmbeddings) {
-                    coreSum += cosineSimilarity(bEmb, cEmb);
-                }
-                bs.coreCoherence = coreSum / coreEmbeddings.length;
-
-                // corpusAffinity: mean cos to ALL corpus statements
-                let corpusSum = 0;
-                for (const aEmb of allCorpusEmbeddings) {
-                    corpusSum += cosineSimilarity(bEmb, aEmb);
-                }
-                bs.corpusAffinity = corpusSum / allCorpusEmbeddings.length;
-
-                // differential: specificity of alignment
-                bs.differential = bs.coreCoherence - bs.corpusAffinity;
-
-                // Sign-of-zero split: differential <= 0 → specifically aligned → promote
-                if (bs.differential <= 0) {
-                    bs.zone = 'boundary-promoted';
-                    bs.kept = true;
-                    boundaryPromotedCount++;
-                } else {
-                    bs.zone = 'removed';
-                    boundaryRemovedCount++;
-                }
-
-                coherenceValues.push(bs.coreCoherence);
-            }
-        } else {
-            // No core or no corpus → can't run differential, all boundary → removed
-            for (const bs of boundaryStmts) {
-                bs.zone = 'removed';
-                boundaryRemovedCount++;
-            }
-        }
-
-        const boundaryCoherenceMu = coherenceValues.length > 0
-            ? coherenceValues.reduce((a, b) => a + b, 0) / coherenceValues.length
-            : null;
-
-        const floorRemovedCount = candidateStatements.filter(
-            s => s.zone === 'removed' && s.globalSim < boundaryFloor
-        ).length;
-
-        // Canonical survived set: core + boundary-promoted, after supporter filter
         const canonicalStatements = candidateStatements.filter(
-            s => (s.zone === 'core' || s.zone === 'boundary-promoted') && s.fromSupporterModel
+            s => s.zone === 'core'
         );
         const canonicalStatementIds = canonicalStatements.map(s => s.statementId);
 
-        // Apply supporter constraint for kept tally
-        const keptStatements = candidateStatements.filter(
-            s => (s.zone === 'core' || s.zone === 'boundary-promoted') && s.fromSupporterModel
-        );
+        const keptStatements = canonicalStatements;
         const removedCount = candidateStatements.length - keptStatements.length;
 
         totalMergedStmts += candidateStatements.length;
@@ -793,8 +700,6 @@ export function computeMixedMethodProvenance(
             mergedParagraphs,
             statements: candidateStatements,
             globalMu,
-            globalSigma,
-            boundaryCoherenceMu,
             keptCount: keptStatements.length,
             removedCount,
             totalCount: candidateStatements.length,
@@ -802,9 +707,6 @@ export function computeMixedMethodProvenance(
             competitiveOnlyCount: compOnlyCount,
             claimCentricOnlyCount: ccOnlyCount,
             coreCount: coreStmts.length,
-            boundaryPromotedCount,
-            boundaryRemovedCount,
-            floorRemovedCount,
             canonicalStatementIds,
         };
     }

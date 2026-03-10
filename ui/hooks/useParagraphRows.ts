@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { getProviderAbbreviation, resolveProviderIdFromCitationOrder } from "../utils/provider-helpers";
 
 // ============================================================================
 // TYPES
@@ -9,6 +10,8 @@ export interface ParagraphRow {
   paragraphId: string;
   text: string;
   modelIndex: number;
+  providerId: string | null;
+  providerAbbrev: string | null;
   statementCount: number;
 
   // Shadow
@@ -43,6 +46,12 @@ export interface ParagraphRow {
 // ============================================================================
 
 export function useParagraphRows(artifact: any, selectedClaimId: string | null): ParagraphRow[] {
+  const citationSourceOrder = useMemo(() => {
+    if (!artifact) return null;
+    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    return a?.citationSourceOrder ?? a?.meta?.citationSourceOrder ?? null;
+  }, [artifact]);
+
   // Build geometry node map once per artifact
   const nodeMap = useMemo(() => {
     if (!artifact) return null;
@@ -157,10 +166,16 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
       const fin = (v: any): number | null =>
         typeof v === 'number' && Number.isFinite(v) ? v : null;
 
+      const modelIndex = typeof para.modelIndex === 'number' ? para.modelIndex : 0;
+      const providerId = resolveProviderIdFromCitationOrder(modelIndex, citationSourceOrder ?? undefined);
+      const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : null;
+
       return {
         paragraphId: paraId,
         text: fullText,
-        modelIndex: typeof para.modelIndex === 'number' ? para.modelIndex : 0,
+        modelIndex,
+        providerId,
+        providerAbbrev,
         statementCount: stmtIds.length,
 
         dominantStance: typeof para.dominantStance === 'string' ? para.dominantStance : null,
@@ -187,5 +202,5 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         compThreshold: fin(mixed?.compThreshold),
       };
     });
-  }, [artifact, nodeMap, mixedParaMap, densityMaps, selectedClaimId]);
+  }, [artifact, nodeMap, mixedParaMap, densityMaps, selectedClaimId, citationSourceOrder]);
 }

@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
+import { getProviderAbbreviation, resolveProviderIdFromCitationOrder } from "../../utils/provider-helpers";
+export { PruningDecisionsCard } from "./PruningDecisionsCard";
 
 // ============================================================================
 // TYPES
@@ -29,6 +31,13 @@ function fmtPct(v: number | null | undefined, digits = 1): string {
 function fmtInt(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "—";
   return Math.round(v as number).toLocaleString();
+}
+
+function fmtModel(artifact: any, modelIndex: number | null | undefined): string {
+  if (modelIndex == null || !Number.isFinite(modelIndex)) return "—";
+  const order = artifact?.citationSourceOrder ?? artifact?.meta?.citationSourceOrder ?? undefined;
+  const pid = resolveProviderIdFromCitationOrder(modelIndex, order);
+  return pid ? getProviderAbbreviation(pid) : `#${modelIndex}`;
 }
 function computeStats(values: number[]) {
   if (values.length === 0) return null;
@@ -925,7 +934,7 @@ export function QueryRelevanceCard({ artifact, selectedEntity: _selectedEntity }
             {modelRows.map((r) => (
               <HorizontalBar
                 key={r.modelIndex}
-                label={`#${r.modelIndex}`}
+                label={fmtModel(artifact, r.modelIndex)}
                 value={r.mean}
                 max={Math.max(0.01, ...modelRows.map((m) => m.mean))}
                 color="rgba(52,211,153,0.7)"
@@ -934,7 +943,7 @@ export function QueryRelevanceCard({ artifact, selectedEntity: _selectedEntity }
           </div>
           <SortableTable
             columns={[
-              { key: "modelIndex", header: "Model", cell: (r) => <span className="font-mono text-text-muted">#{r.modelIndex}</span> },
+              { key: "modelIndex", header: "Model", cell: (r) => <span className="font-mono text-text-muted">{fmtModel(artifact, r.modelIndex)}</span> },
               { key: "mean", header: "Mean Raw Cosine", sortValue: (r) => r.mean, cell: (r) => <span className="font-mono">{fmt(r.mean, 4)}</span> },
               { key: "count", header: "Stmts", sortValue: (r) => r.count, cell: (r) => <span className="font-mono text-text-muted">{r.count}</span> },
             ]}
@@ -951,7 +960,7 @@ export function QueryRelevanceCard({ artifact, selectedEntity: _selectedEntity }
             columns={[
               { key: "id", header: "Statement", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[120px] inline-block">{r.id}</span> },
               { key: "simRaw", header: "Raw Cosine", sortValue: (r) => r.simRaw, cell: (r) => <span className={clsx("font-mono", (r.simRaw ?? 0) < 0.30 && "text-rose-400")}>{fmt(r.simRaw, 4)}</span> },
-              { key: "modelIndex", header: "Model", sortValue: (r) => r.modelIndex, cell: (r) => <span className="font-mono text-text-muted">{r.modelIndex != null ? `#${r.modelIndex}` : "—"}</span> },
+              { key: "modelIndex", header: "Model", sortValue: (r) => r.modelIndex, cell: (r) => <span className="font-mono text-text-muted">{fmtModel(artifact, r.modelIndex)}</span> },
             ]}
             rows={entries}
             defaultSortKey="simRaw"
@@ -968,15 +977,153 @@ export function QueryRelevanceCard({ artifact, selectedEntity: _selectedEntity }
 // BLAST RADIUS CARD
 // ============================================================================
 
+function RoutingCard({ artifact, selectedClaim }: { artifact: any; selectedClaim: string | null }) {
+  const routing = artifact?.claimRouting ?? null;
+  const claimId = selectedClaim;
+  if (!routing || !claimId) return null;
+
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims)) {
+      const id = String(c?.id ?? "").trim();
+      if (!id) continue;
+      m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [artifact]);
+
+  const inConflict = useMemo(() => {
+    return safeArr<any>(routing?.conflictClusters).find((c: any) =>
+      Array.isArray(c?.claimIds) ? c.claimIds.map(String).includes(claimId) : false
+    ) ?? null;
+  }, [routing, claimId]);
+
+  const isolate = useMemo(() => {
+    return safeArr<any>(routing?.isolateCandidates).find((c: any) => String(c?.claimId ?? "") === claimId) ?? null;
+  }, [routing, claimId]);
+
+  const isPassthrough = useMemo(() => {
+    return Array.isArray(routing?.passthrough) && routing.passthrough.map(String).includes(claimId);
+  }, [routing, claimId]);
+
+  const category = inConflict ? 'conflict' : isolate ? 'isolate' : isPassthrough ? 'passthrough' : 'unknown';
+  const badge = category === 'conflict'
+    ? { text: 'Conflict', cls: 'border-amber-500/40 text-amber-400 bg-amber-500/10' }
+    : category === 'isolate'
+      ? { text: 'Isolate', cls: 'border-fuchsia-500/40 text-fuchsia-300 bg-fuchsia-500/10' }
+      : category === 'passthrough'
+        ? { text: 'Passthrough', cls: 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' }
+        : { text: 'Unknown', cls: 'border-border-subtle text-text-muted' };
+
+  const diagnostics = routing?.diagnostics ?? null;
+  const claimObj = useMemo(() => {
+    return safeArr<any>(artifact?.semantic?.claims).find((c: any) => String(c?.id ?? "") === claimId) ?? null;
+  }, [artifact, claimId]);
+
+  const supportRatio = typeof claimObj?.supportRatio === "number" && Number.isFinite(claimObj.supportRatio) ? claimObj.supportRatio : null;
+
+  const gateForClaim = useMemo(() => {
+    return safeArr<any>(artifact?.surveyGates).find((g: any) =>
+      Array.isArray(g?.affectedClaims) ? g.affectedClaims.map(String).includes(claimId) : false
+    ) ?? null;
+  }, [artifact, claimId]);
+
+  return (
+    <CardSection title="Routing (Selected Claim)">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={clsx("text-[9px] px-1.5 py-0.5 rounded border font-semibold tracking-wider uppercase", badge.cls)}>
+          {badge.text}
+        </span>
+        <span className="text-[10px] text-text-muted truncate">
+          {claimLabelById.get(claimId) ?? claimId} <span className="font-mono text-text-muted">({claimId})</span>
+        </span>
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <StatRow label="Orphan Thr" value={fmt(diagnostics?.orphanThreshold, 3)} />
+        <StatRow label="QDist Thr" value={fmt(diagnostics?.queryDistanceThreshold, 3)} />
+        <StatRow label="Convergence" value={fmt(diagnostics?.convergenceRatio, 3)} />
+        <StatRow label="Skip Survey" value={routing?.skipSurvey ? "yes" : "no"} color={routing?.skipSurvey ? "text-emerald-400" : "text-text-muted"} />
+      </div>
+
+      {category === 'conflict' && (
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <StatRow label="Cluster Claims" value={fmtInt(safeArr(inConflict?.claimIds).length)} />
+            <StatRow label="Cluster Edges" value={fmtInt(safeArr(inConflict?.edges).length)} />
+          </div>
+          <div className="text-[10px] text-text-muted">
+            Others: {safeArr(inConflict?.claimIds).map(String).filter((id) => id !== claimId).map((id) => claimLabelById.get(id) ?? id).join(", ") || "—"}
+          </div>
+          <SortableTable
+            columns={[
+              { key: "from", header: "From", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{r.from}</span> },
+              { key: "to", header: "To", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{r.to}</span> },
+              { key: "centroidSimilarity", header: "Sim", sortValue: (r: any) => r.centroidSimilarity, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.centroidSimilarity, 3)}</span> },
+              { key: "touches", header: "Touches", sortValue: (r: any) => r.touches ? 1 : 0, cell: (r: any) => <span className={clsx("text-[10px] font-mono", r.touches ? "text-amber-400" : "text-text-muted")}>{r.touches ? "yes" : "no"}</span> },
+            ]}
+            rows={safeArr<any>(inConflict?.edges).map((e: any, idx: number) => ({
+              id: `${String(e?.from ?? "")}_${String(e?.to ?? "")}_${idx}`,
+              from: String(e?.from ?? ""),
+              to: String(e?.to ?? ""),
+              centroidSimilarity: typeof e?.centroidSimilarity === "number" ? e.centroidSimilarity : null,
+              touches: String(e?.from ?? "") === claimId || String(e?.to ?? "") === claimId,
+            }))}
+            defaultSortKey="touches"
+            defaultSortDir="desc"
+            maxRows={12}
+          />
+        </div>
+      )}
+
+      {category === 'isolate' && (
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <StatRow label="Orphan Ratio" value={typeof isolate?.orphanRatio === "number" ? fmtPct(isolate.orphanRatio, 0) : "—"} />
+            <StatRow label="Vernal" value={fmt(isolate?.vernalComposite, 3)} />
+            <StatRow label="QSim" value={fmt(isolate?.queryDistance, 3)} />
+            <StatRow label="Supporters" value={fmtInt(safeArr(isolate?.supporters).length)} />
+            <StatRow label="Misleadingness" value={gateForClaim ? "vulnerable" : "stands"} color={gateForClaim ? "text-amber-400" : "text-emerald-400"} />
+            <StatRow label="Gate" value={gateForClaim ? String(gateForClaim.id ?? "gate") : "—"} />
+          </div>
+          {gateForClaim && (
+            <div className="text-[10px] text-text-muted truncate" title={String(gateForClaim.question ?? "")}>
+              {String(gateForClaim.question ?? "")}
+            </div>
+          )}
+        </div>
+      )}
+
+      {category === 'passthrough' && (
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <StatRow label="Support Ratio" value={fmt(supportRatio, 3)} />
+            <StatRow label="High Consensus" value={supportRatio != null ? (supportRatio > 0.5 ? "yes" : "no") : "—"} color={supportRatio != null && supportRatio > 0.5 ? "text-emerald-400" : "text-text-muted"} />
+          </div>
+          <div className="text-[10px] text-text-muted">
+            Not in validated conflict cluster. Not an isolate candidate under orphan+query-distance gates.
+          </div>
+        </div>
+      )}
+    </CardSection>
+  );
+}
+
 export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; selectedEntity: SelectedEntity }) {
   const br = artifact?.blastRadiusFilter ?? null;
   const axes: any[] = useMemo(() => (Array.isArray(br?.axes) ? br.axes : []), [br]);
   const surveyGates: any[] = useMemo(() => safeArr(artifact?.surveyGates), [artifact]);
+  const claimRouting = artifact?.claimRouting ?? null;
+  const routingClusters: any[] = useMemo(() => safeArr(claimRouting?.conflictClusters), [claimRouting]);
+  const routingIsolates: any[] = useMemo(() => safeArr(claimRouting?.isolateCandidates), [claimRouting]);
+  const routingPassthrough: any[] = useMemo(() => safeArr(claimRouting?.passthrough), [claimRouting]);
+  const routingDiagnostics = claimRouting?.diagnostics ?? null;
 
   const hasAny =
     (artifact?.blastSurface && Array.isArray(artifact?.blastSurface?.scores) && artifact.blastSurface.scores.length > 0) ||
     surveyGates.length > 0 ||
-    axes.length > 0;
+    axes.length > 0 ||
+    claimRouting != null;
 
   if (!hasAny) {
     return <div className="text-xs text-text-muted italic py-4">Blast diagnostics not available in artifact.</div>;
@@ -987,6 +1134,71 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
       <BlastSurfaceInline artifact={artifact} />
       <BlastVernalInline artifact={artifact} />
       <BlastTwinsInline artifact={artifact} selectedEntity={selectedEntity} />
+      <RoutingCard artifact={artifact} selectedClaim={selectedEntity?.type === "claim" ? selectedEntity.id : null} />
+      {claimRouting && (
+        <CardSection title="Claim Routing">
+          <div className="grid grid-cols-4 gap-x-4 gap-y-1">
+            <StatRow label="Conflict Clusters" value={fmtInt(routingClusters.length)} />
+            <StatRow label="Isolates" value={fmtInt(routingIsolates.length)} />
+            <StatRow label="Passthrough" value={fmtInt(routingPassthrough.length)} />
+            <StatRow label="Skip Survey" value={claimRouting?.skipSurvey ? "yes" : "no"} color={claimRouting?.skipSurvey ? "text-emerald-400" : "text-text-muted"} />
+            <StatRow label="Orphan Thr" value={fmt(routingDiagnostics?.orphanThreshold, 3)} />
+            <StatRow label="QDist Thr" value={fmt(routingDiagnostics?.queryDistanceThreshold, 3)} />
+            <StatRow label="Convergence" value={fmt(routingDiagnostics?.convergenceRatio, 3)} />
+            <StatRow label="Total Claims" value={fmtInt(routingDiagnostics?.totalClaims)} />
+          </div>
+
+          {routingClusters.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[10px] text-text-muted mb-1">Conflict Clusters</div>
+              <SortableTable
+                columns={[
+                  { key: "cluster", header: "Cluster", sortValue: (r) => r.cluster, cell: (r) => <span className="font-mono text-text-muted">{r.cluster}</span> },
+                  { key: "claimCount", header: "Claims", sortValue: (r) => r.claimCount, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(r.claimCount)}</span> },
+                  { key: "edgeCount", header: "Edges", sortValue: (r) => r.edgeCount, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(r.edgeCount)}</span> },
+                  { key: "claims", header: "Claim IDs", cell: (r) => <span className="font-mono text-[9px] text-text-muted truncate max-w-[240px] inline-block" title={r.claims}>{r.claims}</span> },
+                ]}
+                rows={routingClusters.map((c: any, idx: number) => ({
+                  cluster: idx + 1,
+                  claimCount: safeArr(c?.claimIds).length,
+                  edgeCount: safeArr(c?.edges).length,
+                  claims: safeArr(c?.claimIds).map(String).join(", "),
+                }))}
+                defaultSortKey="claimCount"
+                defaultSortDir="desc"
+                maxRows={8}
+              />
+            </div>
+          )}
+
+          {routingIsolates.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[10px] text-text-muted mb-1">Isolate Candidates</div>
+              <SortableTable
+                columns={[
+                  { key: "claimId", header: "Claim", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{String(r?.claimId ?? "")}</span> },
+                  { key: "label", header: "Label", cell: (r) => <span className="text-[10px] text-text-secondary truncate max-w-[220px] inline-block" title={r.label}>{r.label}</span> },
+                  { key: "orphanRatio", header: "Orphan", sortValue: (r) => r.orphanRatio, cell: (r) => <span className="font-mono text-text-muted">{fmtPct(r.orphanRatio, 0)}</span> },
+                  { key: "queryDistance", header: "QSim", sortValue: (r) => r.queryDistance, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryDistance, 3)}</span> },
+                  { key: "vernalComposite", header: "Vernal", sortValue: (r) => r.vernalComposite, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.vernalComposite, 3)}</span> },
+                  { key: "supporters", header: "Supp", sortValue: (r) => r.supporters, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(r.supporters)}</span> },
+                ]}
+                rows={routingIsolates.map((c: any) => ({
+                  claimId: String(c?.claimId ?? ""),
+                  label: String(c?.claimLabel ?? c?.claimId ?? ""),
+                  orphanRatio: typeof c?.orphanRatio === "number" ? c.orphanRatio : null,
+                  queryDistance: typeof c?.queryDistance === "number" ? c.queryDistance : null,
+                  vernalComposite: typeof c?.vernalComposite === "number" ? c.vernalComposite : null,
+                  supporters: safeArr(c?.supporters).length,
+                }))}
+                defaultSortKey="orphanRatio"
+                defaultSortDir="desc"
+                maxRows={12}
+              />
+            </div>
+          )}
+        </CardSection>
+      )}
       {surveyGates.length > 0 && (
         <CardSection title={`Survey Gates (${surveyGates.length})`}>
           <SortableTable
@@ -1760,6 +1972,7 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
   const substrateSummary = artifact?.chewedSubstrateSummary ?? null;
   const fatesObj: Record<string, any> = artifact?.completeness?.statementFates ?? {};
   const qsi = artifact?.questionSelectionInstrumentation ?? null;
+  const claimRouting = artifact?.claimRouting ?? null;
   const surveyGates = useMemo(() => safeArr<any>(artifact?.surveyGates), [artifact]);
   const fateRows = useMemo(() => Object.values(fatesObj).map((f: any) => ({
     id: String(f.statementId ?? ""),
@@ -2039,7 +2252,11 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                   maxRows={6}
                 />
               ) : (
-                <div className="text-xs text-text-muted italic py-1">No survey gates generated.</div>
+                <div className="text-xs text-text-muted italic py-1">
+                  {claimRouting?.skipSurvey
+                    ? `Survey skipped by routing (fork=${fmtInt(safeArr(claimRouting?.conflictClusters).length)}, isolate=${fmtInt(safeArr(claimRouting?.isolateCandidates).length)})`
+                    : "No survey gates generated."}
+                </div>
               )}
             </div>
           </CardSection>
@@ -2099,7 +2316,7 @@ export function ModelOrderingCard({ artifact }: { artifact: any }) {
               {[...rows].sort((a: any, b: any) => (b.irreplaceability ?? 0) - (a.irreplaceability ?? 0)).map((r: any) => (
                 <HorizontalBar
                   key={r.modelIndex}
-                  label={`#${r.modelIndex}`}
+                  label={fmtModel(artifact, r.modelIndex)}
                   value={r.irreplaceability ?? 0}
                   max={maxIrrep}
                   color="rgba(167,139,250,0.7)"
@@ -2110,7 +2327,7 @@ export function ModelOrderingCard({ artifact }: { artifact: any }) {
         })()}
         <SortableTable
           columns={[
-            { key: "modelIndex", header: "Model", sortValue: (r: any) => r.modelIndex, cell: (r: any) => <span className="font-mono text-text-muted">#{r.modelIndex}</span> },
+            { key: "modelIndex", header: "Model", sortValue: (r: any) => r.modelIndex, cell: (r: any) => <span className="font-mono text-text-muted">{fmtModel(artifact, r.modelIndex)}</span> },
             { key: "irreplaceability", header: "Irrep", sortValue: (r: any) => r.irreplaceability, cell: (r: any) => <span className="font-mono">{fmt(r.irreplaceability, 3)}</span> },
             { key: "queryRelevanceBoost", header: "QBoost", sortValue: (r: any) => r.queryRelevanceBoost, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.queryRelevanceBoost, 3)}</span> },
             { key: "soloCarrierRegions", header: "SoloReg", sortValue: (r: any) => r.soloCarrierRegions, cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.soloCarrierRegions)}</span> },
@@ -2615,8 +2832,7 @@ export function MixedProvenanceCard({ artifact }: { artifact: any }) {
                   {/* Statements */}
                   <CardSection title="Statements">
                     <div className="text-[9px] text-text-muted mb-1.5">
-                      μ_global = {fmt(cd.globalMu)} · σ_global = {fmt(cd.globalSigma ?? 0)}
-                      {cd.boundaryCoherenceMu != null && <> · boundary μ_coherence = {fmt(cd.boundaryCoherenceMu)}</>}
+                      μ_global = {fmt(cd.globalMu)}
                     </div>
                     <SortableTable
                       columns={[
@@ -2625,46 +2841,18 @@ export function MixedProvenanceCard({ artifact }: { artifact: any }) {
                           cell: (row: any) => {
                             const zoneColors: Record<string, string> = {
                               core: 'text-emerald-400',
-                              'boundary-promoted': 'text-cyan-400',
                               removed: 'text-rose-400',
                             };
-                            const abbr: Record<string, string> = { core: 'core', 'boundary-promoted': 'b-prom', removed: 'rem' };
+                            const abbr: Record<string, string> = { core: 'core', removed: 'rem' };
                             const z = row.zone ?? (row.kept ? 'core' : 'removed');
                             return <span className={clsx("text-[9px] font-medium", zoneColors[z] ?? '')}>{abbr[z] ?? z}</span>;
                           },
-                          sortValue: (row: any) => row.zone === 'core' ? 2 : row.zone === 'boundary-promoted' ? 1 : 0,
+                          sortValue: (row: any) => row.zone === 'core' ? 1 : 0,
                         },
                         {
                           key: 'globalSim', header: 'Sim',
                           cell: (row: any) => <span className="font-mono text-[9px]">{fmt(row.globalSim)}</span>,
                           sortValue: (row: any) => row.globalSim,
-                        },
-                        {
-                          key: 'coreCoherence', header: 'CoreAff',
-                          cell: (row: any) => (
-                            <span className="font-mono text-[9px]">
-                              {row.coreCoherence != null ? fmt(row.coreCoherence, 3) : '—'}
-                            </span>
-                          ),
-                          sortValue: (row: any) => row.coreCoherence ?? -1,
-                        },
-                        {
-                          key: 'corpusAffinity', header: 'CorpAff',
-                          cell: (row: any) => (
-                            <span className="font-mono text-[9px]">
-                              {row.corpusAffinity != null ? fmt(row.corpusAffinity, 3) : '—'}
-                            </span>
-                          ),
-                          sortValue: (row: any) => row.corpusAffinity ?? -1,
-                        },
-                        {
-                          key: 'differential', header: 'Δ',
-                          cell: (row: any) => (
-                            <span className={clsx("font-mono text-[9px]", row.differential != null && row.differential > 0 ? 'text-emerald-400' : row.differential != null && row.differential <= 0 ? 'text-rose-400' : '')}>
-                              {row.differential != null ? (row.differential >= 0 ? '+' : '') + fmt(row.differential, 3) : '—'}
-                            </span>
-                          ),
-                          sortValue: (row: any) => row.differential ?? -999,
                         },
                         {
                           key: 'paragraphOrigin', header: 'Pool',

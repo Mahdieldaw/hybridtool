@@ -4,6 +4,7 @@ import {
 } from "../providers/providerRegistry";
 import { PROVIDER_COLORS } from "../constants";
 import type { ProviderConfig } from "../providers/providerRegistry";
+import { normalizeProviderId } from "./provider-id-mapper";
 
 /**
  * Get the full configuration object for a provider.
@@ -58,4 +59,26 @@ export function getProviderLogo(providerId: string): string | undefined {
  */
 export function isProviderValid(providerId: string): boolean {
   return !!getProviderConfig(providerId);
+}
+
+export function getProviderAbbreviation(providerId: string): string {
+  const pid = normalizeProviderId(String(providerId || ""));
+  if (pid === "chatgpt") return "CH";
+  if (pid === "qwen") return "QW";
+  if (pid === "claude") return "CL";
+  if (pid === "gemini") return "GE";
+  if (pid === "gemini-pro") return "GE2.5";
+  if (pid === "gemini-exp") return "GE3";
+  if (pid === "grok") return "GR";
+  return (getProviderName(pid) || pid || "M").slice(0, 4).toUpperCase();
+}
+
+export function resolveProviderIdFromCitationOrder(
+  modelIndex: number | null | undefined,
+  citationSourceOrder?: Record<string | number, string>,
+): string | null {
+  if (!citationSourceOrder || modelIndex == null || !Number.isFinite(modelIndex)) return null;
+  const raw = citationSourceOrder[modelIndex];
+  const pid = raw ? normalizeProviderId(String(raw)) : "";
+  return pid ? pid : null;
 }

@@ -18,6 +18,7 @@ import {
   BasinInversionCard,
   BlastRadiusCard,
   CarrierDetectionCard,
+  PruningDecisionsCard,
   ModelOrderingCard,
   AlignmentCard,
 } from "./instrument/LayerCards";
@@ -823,7 +824,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const allColumns = useMemo(
     () => tableMode === 'paragraph'
-      ? [...PARAGRAPH_COLUMNS]
+      ? [...PARAGRAPH_COLUMNS, ...extraColumns]
       : [...BUILT_IN_COLUMNS, ...extraColumns],
     [extraColumns, tableMode]
   );
@@ -932,11 +933,33 @@ export const DecisionMapSheet = React.memo(() => {
     return (parsed || picked) && typeof (parsed || picked) === "object" ? (parsed || picked) : null;
   }, [aiTurnSafe, activeMappingPid]);
 
+  const citationSourceOrder = useMemo(() => {
+    const fromArtifact =
+      (mappingArtifact as any)?.citationSourceOrder ??
+      (mappingArtifact as any)?.meta?.citationSourceOrder ??
+      null;
+    if (fromArtifact) return fromArtifact;
+
+    const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : null;
+    if (!pid || !aiTurnSafe?.mappingResponses) return null;
+    const entry = (aiTurnSafe.mappingResponses as any)[pid];
+    const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+    const last = arr.length > 0 ? arr[arr.length - 1] : null;
+    return last?.meta?.citationSourceOrder ?? null;
+  }, [mappingArtifact, aiTurnSafe, activeMappingPid]);
+
+  const mappingArtifactWithCitations = useMemo(() => {
+    if (!mappingArtifact || !citationSourceOrder) return mappingArtifact;
+    const existing = (mappingArtifact as any)?.citationSourceOrder ?? (mappingArtifact as any)?.meta?.citationSourceOrder ?? null;
+    if (existing) return mappingArtifact;
+    return { ...(mappingArtifact as any), citationSourceOrder };
+  }, [mappingArtifact, citationSourceOrder]);
+
   // ── Evidence rows (hook) ───────────────────────────────────────
   // eslint-disable-next-line react-hooks/rules-of-hooks
-  const evidenceRows = useEvidenceRows(mappingArtifact, instrumentSelectedClaimId);
+  const evidenceRows = useEvidenceRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
   // eslint-disable-next-line react-hooks/rules-of-hooks
-  const paragraphRows = useParagraphRows(mappingArtifact, instrumentSelectedClaimId);
+  const paragraphRows = useParagraphRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
   const activeRows = tableMode === 'paragraph' ? paragraphRows : evidenceRows;
 
   const viewArtifactRequestRef = useRef<string | null>(null);
@@ -1169,11 +1192,6 @@ export const DecisionMapSheet = React.memo(() => {
     return typeof fromArtifact === 'string' ? fromArtifact : String(fromArtifact || '');
   }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
 
-  const optionsText = useMemo(() => {
-    return (parsedMapping as any)?.options ?? null;
-  }, [parsedMapping]);
-
-
   // v3: Claim centroids for ParagraphSpaceView diamonds
   // IMPORTANT: use artifact claims (enriched by reconstructProvenance, which adds sourceStatementIds).
   // semanticClaims may resolve to raw LLM output (parsedSemanticFromText) which lacks sourceStatementIds,
@@ -1196,56 +1214,6 @@ export const DecisionMapSheet = React.memo(() => {
   useEffect(() => {
     if (selectedClaimObj) setIsClaimPanelCollapsed(false);
   }, [selectedClaimObj]);
-
-  const stringifyForDebug = useMemo(() => {
-    return (value: any) => {
-      const seen = new WeakSet();
-      return JSON.stringify(
-        value,
-        (_key, v) => {
-          if (v instanceof Map) return Object.fromEntries(v);
-          if (v instanceof Set) return Array.from(v);
-          if (typeof v === 'bigint') return String(v);
-          if (typeof v === 'object' && v !== null) {
-            if (seen.has(v)) return '[Circular]';
-            seen.add(v);
-          }
-          return v;
-        },
-        2
-      );
-    };
-  }, []);
-
-  const shadowStatements = useMemo(() => {
-    return safeArr((mappingArtifact as any)?.shadow?.statements);
-  }, [mappingArtifact]);
-
-  const shadowParagraphs = useMemo(() => {
-    const paras = safeArr((mappingArtifact as any)?.shadow?.paragraphs);
-    if (mappingArtifact) {
-      const bs = (mappingArtifact as any)?.blastSurface;
-      const bsScores = Array.isArray(bs?.scores) ? bs.scores : [];
-      const hasVernal = bsScores.length > 0 && bsScores.some((s: any) => s?.vernal && typeof s.vernal === "object");
-      console.log(
-        `[DecisionMapSheet] shadow.paragraphs=${paras.length}, shadow.statements=${safeArr((mappingArtifact as any)?.shadow?.statements).length}, claimProvenance=${!!(mappingArtifact as any)?.claimProvenance}, alignment=${!!(mappingArtifact as any)?.geometry?.alignment}, basinInversion=${(mappingArtifact as any)?.geometry?.basinInversion?.status || 'missing'}, blastSurface=${bsScores.length}, blastVernal=${hasVernal}`
-      );
-    }
-    return paras;
-  }, [mappingArtifact]);
-
-
-
-  const mappingArtifactJson = useMemo(() => {
-    try {
-      return mappingArtifact ? stringifyForDebug(mappingArtifact) : "";
-    } catch {
-      return "";
-    }
-  }, [mappingArtifact, stringifyForDebug]);
-
-
-
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
 
   const sheetMeta = useMemo(() => {
@@ -1263,24 +1231,6 @@ export const DecisionMapSheet = React.memo(() => {
     const claimCount = Array.isArray(semanticClaims) ? semanticClaims.length : 0;
     return { id, idShort, createdAtLabel, mapper, modelCount, claimCount };
   }, [aiTurn, activeMappingPid, semanticClaims]);
-
-  const sheetData = useMemo(() => {
-    return {
-      aiTurn,
-      activeMappingPid,
-      mappingArtifact,
-      mappingArtifactJson,
-      rawMappingText,
-      mappingText,
-      optionsText,
-      graphData,
-      graphTopology,
-      semanticClaims,
-      shadowStatements,
-      shadowParagraphs,
-      preSemanticRegions,
-    };
-  }, [aiTurn, activeMappingPid, mappingArtifact, mappingArtifactJson, rawMappingText, mappingText, optionsText, graphData, graphTopology, semanticClaims, shadowStatements, shadowParagraphs, preSemanticRegions]);
 
   const handleRetryActiveMapper = useCallback(() => {
     if (!aiTurn) return;
@@ -1375,7 +1325,7 @@ export const DecisionMapSheet = React.memo(() => {
                     <div className="p-3 bg-surface-highlight/30">
                       <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">Metrics</div>
                       <div className="-mx-4 -my-1.5">
-                        <ContextStrip artifact={mappingArtifact} className="bg-transparent border-none min-h-0" />
+                        <ContextStrip artifact={mappingArtifactWithCitations} className="bg-transparent border-none min-h-0" />
                       </div>
                     </div>
                   </div>
@@ -1434,50 +1384,8 @@ export const DecisionMapSheet = React.memo(() => {
                     >
                       Copy Map
                     </button>
-                    <button
-                      type="button"
-                      disabled={!sheetData.mappingArtifactJson}
-                      onClick={() => {
-                        const text = sheetData.mappingArtifactJson || "";
-                        navigator.clipboard.writeText(text).then(() => {
-                          setToast({ id: Date.now(), message: "Artifacts Copied!", type: "success" });
-                        });
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
-                    >
-                      Copy Artifacts
-                    </button>
                   </div>
                 </div>
-
-                <div className="w-px h-4 bg-white/10 mx-1"></div>
-
-                <button
-                  type="button"
-                  className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-highlight rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={!sheetData.mappingArtifactJson}
-                  onClick={() => {
-                    let url: string | undefined;
-                    try {
-                      const text = sheetData.mappingArtifactJson || "";
-                      if (!text) throw new Error("No artifact data available");
-                      const blob = new Blob([text], { type: "application/json" });
-                      url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `mapping_artifact_${aiTurn?.id || "turn"}.json`;
-                      a.click();
-                      setToast({ id: Date.now(), message: "Exported successfully", type: "success" });
-                    } catch (err: any) {
-                      setToast({ id: Date.now(), message: `Export failed: ${err?.message || "unknown error"}`, type: "error" });
-                    } finally {
-                      if (url) URL.revokeObjectURL(url);
-                    }
-                  }}
-                  title="Export mapping artifact JSON"
-                >
-                  <span className="text-sm leading-none">⬇</span>
-                </button>
                 <button
                   onClick={() => setOpenState(null)}
                   className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
@@ -1542,6 +1450,7 @@ export const DecisionMapSheet = React.memo(() => {
                       mutualEdges={(mappingArtifact as any)?.geometry?.substrate?.mutualEdges || null}
                       regions={preSemanticRegions}
                       basinResult={(mappingArtifact as any)?.geometry?.basinInversion || null}
+                      citationSourceOrder={citationSourceOrder || undefined}
                       paragraphs={(mappingArtifact as any)?.shadow?.paragraphs || null}
                       claimCentroids={claimCentroids}
                       mapperEdges={semanticEdges}
@@ -1552,6 +1461,7 @@ export const DecisionMapSheet = React.memo(() => {
                       showMapperEdges={instrumentState.showMapperEdges}
                       showRegionHulls={instrumentState.showRegionHulls}
                       showBasinRects={instrumentState.showBasinRects}
+                      colorParagraphsByModel={instrumentState.colorParagraphsByModel}
                       highlightSourceParagraphs={instrumentState.highlightSourceParagraphs}
                       highlightInternalEdges={instrumentState.highlightInternalEdges}
                       highlightSpannedHulls={instrumentState.highlightSpannedHulls}
@@ -1766,8 +1676,9 @@ export const DecisionMapSheet = React.memo(() => {
                                   collapsed={isClaimPanelCollapsed}
                                   onToggleCollapsed={() => setIsClaimPanelCollapsed(v => !v)}
                                   claim={selectedClaimObj}
-                                  artifact={mappingArtifact}
+                                  artifact={mappingArtifactWithCitations}
                                   narrativeText={mappingText}
+                                  citationSourceOrder={citationSourceOrder || undefined}
                                   onClose={() => instrumentActions.selectClaim(null)}
                                   onClaimNavigate={(id) => instrumentActions.selectClaim(id, semanticClaims.find((c: any) => c.id === id)?.label)}
                                 />
@@ -1785,24 +1696,25 @@ export const DecisionMapSheet = React.memo(() => {
                         )}
                       >
                         {([
-                          { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
-                          { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
-                          { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
-                          { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifact} /> },
-                          { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifact} selectedEntity={selectedEntity} /> },
-                          { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifact} /> },
-                          { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifact} /> },
-                          { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifact} /> },
+                          { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                          { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                          { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                          { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
+                          { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                          { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
                           {
-                            id: 'raw-artifacts', label: 'Raw Artifacts', content: (
-                              <div>
-                                <CopyButton text={mappingArtifactJson || ''} label="Copy raw artifact JSON" variant="icon" disabled={!mappingArtifactJson} />
-                                <pre className="text-[10px] text-text-muted font-mono whitespace-pre-wrap break-all leading-relaxed mt-2">
-                                  {mappingArtifactJson || '(no artifact data)'}
-                                </pre>
-                              </div>
+                            id: 'traversal-pruning',
+                            label: 'Traversal Pruning',
+                            content: (
+                              <PruningDecisionsCard
+                                aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
+                                providerId={activeMappingPid ? String(activeMappingPid) : null}
+                                artifact={mappingArtifact}
+                              />
                             )
                           },
+                          { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
+                          { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
                         ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
                           <RefSection
                             key={id}
@@ -1810,7 +1722,7 @@ export const DecisionMapSheet = React.memo(() => {
                             label={label}
                             expanded={expandedRefSections.includes(id)}
                             onToggle={() => instrumentActions.toggleRefSection(id)}
-                            copyText={id !== 'raw-artifacts' && id !== 'cross-signal'
+                            copyText={id !== 'cross-signal'
                               ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                               : undefined}
                           >
@@ -1823,6 +1735,8 @@ export const DecisionMapSheet = React.memo(() => {
                     <NarrativePanel
                       narrativeText={mappingText}
                       activeMappingPid={activeMappingPid}
+                      artifact={mappingArtifact}
+                      aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
                     />
                   )}
                 </div>
