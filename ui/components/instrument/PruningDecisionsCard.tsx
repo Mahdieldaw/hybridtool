@@ -82,9 +82,9 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
           : null;
       const blastSurface = artifact?.blastSurface ?? null;
       const forcingPoints = artifact?.traversal?.forcingPoints ?? null;
-      const citationSourceOrder = Array.isArray(artifact?.citationSourceOrder)
+      const citationSourceOrder = (Array.isArray(artifact?.citationSourceOrder) || (artifact?.citationSourceOrder && typeof artifact.citationSourceOrder === 'object'))
         ? artifact.citationSourceOrder
-        : Array.isArray(artifact?.meta?.citationSourceOrder)
+        : (Array.isArray(artifact?.meta?.citationSourceOrder) || (artifact?.meta?.citationSourceOrder && typeof artifact.meta.citationSourceOrder === 'object'))
           ? artifact.meta.citationSourceOrder
           : null;
 

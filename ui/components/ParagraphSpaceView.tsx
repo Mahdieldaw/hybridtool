@@ -580,9 +580,8 @@ export function ParagraphSpaceView({
             const isParaSelected = selectedParagraphId === id;
             const modelEnabled =
               !colorParagraphsByModel ||
-              enabledModelIndices.size === 0 ||
               nodeModelIndex == null ||
-              enabledModelIndices.has(nodeModelIndex);
+              (enabledModelIndices.size > 0 && enabledModelIndices.has(nodeModelIndex));
             const baseOpacity = hasSelection && highlightSourceParagraphs ? (isSource ? 1 : 0.20) : 0.85;
             const nodeOpacity = modelEnabled ? baseOpacity : baseOpacity * 0.08;
             const paraData = paragraphDataMap.get(id);

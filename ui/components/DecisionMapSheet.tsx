@@ -1709,7 +1709,7 @@ export const DecisionMapSheet = React.memo(() => {
                               <PruningDecisionsCard
                                 aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
                                 providerId={activeMappingPid ? String(activeMappingPid) : null}
-                                artifact={mappingArtifact}
+                                artifact={mappingArtifactWithCitations}
                               />
                             )
                           },

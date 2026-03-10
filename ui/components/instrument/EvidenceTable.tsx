@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useCallback, useEffect, useLayoutEffect } from "react";
+import { useRef, useMemo, useState, useCallback, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import type { ColumnDef, ViewConfig } from "./columnRegistry";
@@ -452,17 +452,10 @@ export function EvidenceTable({
     estimateSize: (i) => {
       const item = virtualItems[i];
       if (item.type === 'group') return 28;
-      if (expandedRows.has(getRowId(item.row))) return 200; // generous estimate, dynamic measurement corrects
       return 32;
     },
     overscan: 15,
-    measureElement: (el) => el?.getBoundingClientRect().height ?? 32,
   });
-
-  // Re-measure all rows when expanded set changes
-  useLayoutEffect(() => {
-    rowVirtualizer.measure();
-  }, [expandedRows, rowVirtualizer]);
 
   const handleSort = useCallback((colId: string) => {
     setLocalSortBy(prevCol => {

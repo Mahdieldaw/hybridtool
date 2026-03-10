@@ -1,6 +1,6 @@
 import MarkdownDisplay from "../MarkdownDisplay";
 import { getProviderColor, getProviderConfig } from "../../utils/provider-helpers";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { CopyButton } from "../CopyButton";
 
@@ -38,13 +38,11 @@ export function NarrativePanel({ narrativeText, activeMappingPid, artifact, aiTu
     };
   }, []);
 
-  if (!narrativeText) {
-    return (
-      <div className="h-full flex items-center justify-center text-text-muted text-sm">
-        No narrative available for this mapping.
-      </div>
-    );
-  }
+  // Reset cached raw JSON when artifact or turn changes
+  useEffect(() => {
+    setRawJson("");
+    setRawError(null);
+  }, [artifact, aiTurnId]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -59,9 +57,15 @@ export function NarrativePanel({ narrativeText, activeMappingPid, artifact, aiTu
 
       {/* Narrative content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4">
-        <div className="prose prose-sm prose-invert max-w-none">
-          <MarkdownDisplay content={narrativeText} />
-        </div>
+        {narrativeText ? (
+          <div className="prose prose-sm prose-invert max-w-none">
+            <MarkdownDisplay content={narrativeText} />
+          </div>
+        ) : (
+          <div className="text-text-muted text-sm py-4">
+            No narrative available for this mapping.
+          </div>
+        )}
 
         <div className="mt-6 border-t border-white/10 pt-4">
           <button

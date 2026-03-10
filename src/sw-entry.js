@@ -1350,12 +1350,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             return;
           }
 
-          const shadowStatements = Array.isArray(shadowStatementsFromUi)
+          const shadowStatements = Array.isArray(shadowStatementsFromUi) && shadowStatementsFromUi.length > 0
             ? shadowStatementsFromUi
             : Array.isArray(mappingArtifact?.shadow?.statements)
               ? mappingArtifact.shadow.statements
               : [];
-          let shadowParagraphs = Array.isArray(shadowParagraphsFromUi)
+          let shadowParagraphs = Array.isArray(shadowParagraphsFromUi) && shadowParagraphsFromUi.length > 0
             ? shadowParagraphsFromUi
             : Array.isArray(mappingArtifact?.shadow?.paragraphs)
               ? mappingArtifact.shadow.paragraphs
@@ -1369,7 +1369,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
           }
 
-          const claims = Array.isArray(claimsFromUi)
+          const claims = Array.isArray(claimsFromUi) && claimsFromUi.length > 0
             ? claimsFromUi
             : Array.isArray(mappingArtifact?.claims)
               ? mappingArtifact.claims
@@ -1377,15 +1377,25 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 ? mappingArtifact.semantic.claims
                 : [];
 
-          const citationOrderArr = Array.isArray(citationSourceOrderFromUi)
-            ? citationSourceOrderFromUi
-            : Array.isArray(mappingArtifact?.citationSourceOrder)
-              ? mappingArtifact.citationSourceOrder
-              : Array.isArray(mappingArtifact?.meta?.citationSourceOrder)
-                ? mappingArtifact.meta.citationSourceOrder
-                : Array.isArray(turnRaw?.batch?.citationSourceOrder)
-                  ? turnRaw.batch.citationSourceOrder
-                  : [];
+          const coerceCitationOrder = (v) => {
+            if (Array.isArray(v) && v.length > 0) return v;
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+              const entries = Object.entries(v)
+                .map(([k, val]) => [Number(k), String(val || '').trim()])
+                .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
+              if (entries.length > 0) {
+                entries.sort((a, b) => a[0] - b[0]);
+                return entries.map(([, pid]) => pid);
+              }
+            }
+            return null;
+          };
+          const citationOrderArr =
+            coerceCitationOrder(citationSourceOrderFromUi) ??
+            coerceCitationOrder(mappingArtifact?.citationSourceOrder) ??
+            coerceCitationOrder(mappingArtifact?.meta?.citationSourceOrder) ??
+            coerceCitationOrder(turnRaw?.batch?.citationSourceOrder) ??
+            [];
           const citationOrderNorm = citationOrderArr.map(normalizeProvId);
 
           const sourceData = (() => {
@@ -1399,8 +1409,11 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 .filter((s) => s.providerId && s.text.trim().length > 0);
             }
             const batchTextByProvider = new Map();
-            for (const r of responsesForTurn || []) {
-              if (!r || r.responseType !== "batch") continue;
+            // Iterate in reverse so newest response per provider wins
+            const sortedBatch = (responsesForTurn || [])
+              .filter((r) => r && r.responseType === "batch")
+              .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+            for (const r of sortedBatch) {
               const pid = normalizeProvId(r.providerId);
               if (!pid) continue;
               if (batchTextByProvider.has(pid)) continue;
@@ -1411,7 +1424,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
             return Array.from(batchTextByProvider.entries()).map(([pid, text], idx) => {
               const inOrder = citationOrderNorm.indexOf(pid);
-              const modelIndex = inOrder >= 0 ? inOrder : idx;
+              const modelIndex = inOrder >= 0 ? inOrder + 1 : idx + 1;
               return { providerId: pid, modelIndex, text };
             });
           })();

@@ -398,7 +398,7 @@ export class ConnectionHandler {
           edges: Array.isArray(edges) ? edges : [],
         });
       }
-      if (!prompt) {
+      if (!prompt && !(claimRouting && claimRouting.skipSurvey)) {
         prompt = buildSurveyMapperPrompt(
           userQuery || '',
           Array.isArray(claims) ? claims : [],

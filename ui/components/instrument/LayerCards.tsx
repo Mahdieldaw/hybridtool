@@ -1081,7 +1081,7 @@ function RoutingCard({ artifact, selectedClaim }: { artifact: any; selectedClaim
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
             <StatRow label="Orphan Ratio" value={typeof isolate?.orphanRatio === "number" ? fmtPct(isolate.orphanRatio, 0) : "—"} />
             <StatRow label="Vernal" value={fmt(isolate?.vernalComposite, 3)} />
-            <StatRow label="QSim" value={fmt(isolate?.queryDistance, 3)} />
+            <StatRow label="QDist" value={fmt(isolate?.queryDistance, 3)} />
             <StatRow label="Supporters" value={fmtInt(safeArr(isolate?.supporters).length)} />
             <StatRow label="Misleadingness" value={gateForClaim ? "vulnerable" : "stands"} color={gateForClaim ? "text-amber-400" : "text-emerald-400"} />
             <StatRow label="Gate" value={gateForClaim ? String(gateForClaim.id ?? "gate") : "—"} />
@@ -1179,7 +1179,7 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
                   { key: "claimId", header: "Claim", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{String(r?.claimId ?? "")}</span> },
                   { key: "label", header: "Label", cell: (r) => <span className="text-[10px] text-text-secondary truncate max-w-[220px] inline-block" title={r.label}>{r.label}</span> },
                   { key: "orphanRatio", header: "Orphan", sortValue: (r) => r.orphanRatio, cell: (r) => <span className="font-mono text-text-muted">{fmtPct(r.orphanRatio, 0)}</span> },
-                  { key: "queryDistance", header: "QSim", sortValue: (r) => r.queryDistance, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryDistance, 3)}</span> },
+                  { key: "queryDistance", header: "QDist", sortValue: (r) => r.queryDistance, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryDistance, 3)}</span> },
                   { key: "vernalComposite", header: "Vernal", sortValue: (r) => r.vernalComposite, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.vernalComposite, 3)}</span> },
                   { key: "supporters", header: "Supp", sortValue: (r) => r.supporters, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(r.supporters)}</span> },
                 ]}
