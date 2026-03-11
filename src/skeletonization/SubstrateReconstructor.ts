@@ -14,8 +14,7 @@ function nowMs(): number {
 
 export function reconstructSubstrate(
   input: SkeletonizationInput,
-  triageResult: TriageResult,
-  embeddingTimeMs: number = 0
+  triageResult: TriageResult
 ): ChewedSubstrate {
   const start = nowMs();
   const { statements, paragraphs, sourceData, traversalState } = input;
@@ -162,13 +161,11 @@ export function reconstructSubstrate(
       untriagedStatementCount: triageResult.meta.untriagedCount,
       skeletonizedStatementCount: triageResult.meta.skeletonizedCount,
       removedStatementCount: triageResult.meta.removedCount,
-      residualFallbackCount: triageResult.meta.residualFallbackCount,
     },
     pathSteps: traversalState.pathSteps,
     meta: {
-      triageTimeMs: triageResult.meta.processingTimeMs - embeddingTimeMs,
+      triageTimeMs: triageResult.meta.processingTimeMs,
       reconstructionTimeMs,
-      embeddingTimeMs,
       totalTimeMs: triageResult.meta.processingTimeMs + reconstructionTimeMs,
     },
   };

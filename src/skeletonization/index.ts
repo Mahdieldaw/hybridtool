@@ -1,6 +1,5 @@
 export * from './types';
 export { skeletonize } from './Skeletonizer';
-export { detectCarriers } from './CarrierDetector';
 export { triageStatements } from './TriageEngine';
 export { reconstructSubstrate, formatSubstrateForPrompt } from './SubstrateReconstructor';
 
@@ -97,12 +96,10 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
       skeletonizedCount: counts.skeletonizedCount,
       removedCount: counts.removedCount,
       processingTimeMs: triageResultPartial.meta.processingTimeMs,
-      embeddingTimeMs: triageResultPartial.meta.embeddingTimeMs,
-      residualFallbackCount: triageResultPartial.meta.residualFallbackCount,
     },
   };
 
-  return reconstructSubstrate(normalizedInput, triageResult, triageResultPartial.meta.embeddingTimeMs);
+  return reconstructSubstrate(normalizedInput, triageResult);
 }
 
 interface BatchResponse {
@@ -204,9 +201,8 @@ function createPassthroughSubstrate(input: SkeletonizationInput): ChewedSubstrat
       protectedStatementCount: input.statements.length,
       skeletonizedStatementCount: 0,
       removedStatementCount: 0,
-      residualFallbackCount: 0,
     },
     pathSteps: input.traversalState.pathSteps,
-    meta: { triageTimeMs: 0, reconstructionTimeMs: 0, embeddingTimeMs: 0, totalTimeMs: 0 },
+    meta: { triageTimeMs: 0, reconstructionTimeMs: 0, totalTimeMs: 0 },
   };
 }

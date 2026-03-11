@@ -40,10 +40,9 @@ describe("formatSubstrateForPrompt", () => {
         protectedStatementCount: 0,
         skeletonizedStatementCount: 0,
         removedStatementCount: 0,
-        residualFallbackCount: 0,
       },
       pathSteps: ["step1", "step2"],
-      meta: { triageTimeMs: 0, reconstructionTimeMs: 0, embeddingTimeMs: 0, totalTimeMs: 0 },
+      meta: { triageTimeMs: 0, reconstructionTimeMs: 0, totalTimeMs: 0 },
     };
 
     const out = formatSubstrateForPrompt(substrate);

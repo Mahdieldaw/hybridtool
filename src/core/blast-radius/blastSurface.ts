@@ -22,11 +22,13 @@
 
 import type {
     BlastSurfaceClaimScore,
+    BlastSurfaceRiskVector,
     ClaimAbsorptionProfile,
     BlastSurfaceLayerC,
     BlastSurfaceLayerD,
     BlastSurfaceCascadeDetail,
     BlastSurfaceResult,
+    StatementTwinMap,
     MixedProvenanceResult,
 } from '../../../shared/contract';
 import type { QueryRelevanceStatementScore } from '../../geometry/queryRelevance';
@@ -120,8 +122,16 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         vernalDestroyedQueryMeanByClaimId.set(claimId, destroyedQueryMean);
 
         // ── Layer C: Evidence Mass ────────────────────────────────────────
+        // Type classification: type1=non-exclusive, type2=exclusive non-orphan, type3=exclusive orphan
+        const type1Count = canonicalSet.size - exclusiveIds.length;
+        const type2Count = layerB.absorbableCount;
+        const type3Count = layerB.orphanCount;
+
         const layerC: BlastSurfaceLayerC = {
             canonicalCount: canonicalSet.size,
+            nonExclusiveCount: type1Count,
+            exclusiveNonOrphanCount: type2Count,
+            exclusiveOrphanCount: type3Count,
         };
 
         // ── Layer D: Cascade Echo ─────────────────────────────────────────
@@ -132,6 +142,50 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             canonicalSets,
             canonicalExclusivityRatioByClaim,
         );
+
+        // ── Risk Vector ───────────────────────────────────────────────────
+        // Continuous cascade fragility: for each non-exclusive statement,
+        // compute 1/(parentCount - 1). parent=2 → 1.0, parent=3 → 0.5, parent=10 → 0.1
+        const cascadeFragilityDetails: Array<{ statementId: string; parentCount: number; fragility: number }> = [];
+        let cascadeFragilitySum = 0;
+        for (const sid of canonicalSet) {
+            const ownerCount = canonicalOwnerCounts.get(sid) ?? 0;
+            if (ownerCount >= 2) {
+                const fragility = 1 / (ownerCount - 1);
+                cascadeFragilityDetails.push({ statementId: sid, parentCount: ownerCount, fragility });
+                cascadeFragilitySum += fragility;
+            }
+        }
+        const fragValues = cascadeFragilityDetails.map(d => d.fragility);
+        const cascadeFragilityMu = fragValues.length > 0
+            ? fragValues.reduce((a, b) => a + b, 0) / fragValues.length : 0;
+        const cascadeFragilitySigma = fragValues.length > 0
+            ? Math.sqrt(fragValues.reduce((s, v) => s + (v - cascadeFragilityMu) ** 2, 0) / fragValues.length) : 0;
+
+        const deletionStatementIds = layerB.statements.filter(s => !s.orphan).map(s => s.statementId);
+        const degradationStatementIds = layerB.statements.filter(s => s.orphan).map(s => s.statementId);
+
+        const K = canonicalSet.size;
+        const exclusiveTotal = type2Count + type3Count;
+        const isolation = K > 0 ? exclusiveTotal / K : 0;
+        const orphanCharacter = exclusiveTotal > 0 ? type3Count / exclusiveTotal : 0;
+        const type1Frac = K > 0 ? type1Count / K : 0;
+        const type2Frac = K > 0 ? type2Count / K : 0;
+        const type3Frac = K > 0 ? type3Count / K : 0;
+
+        const riskVector: BlastSurfaceRiskVector = {
+            deletionRisk: type2Count,
+            deletionStatementIds,
+            degradationRisk: type3Count,
+            degradationStatementIds,
+            cascadeFragility: cascadeFragilitySum,
+            cascadeFragilityDetails,
+            cascadeFragilityMu,
+            cascadeFragilitySigma,
+            isolation,
+            orphanCharacter,
+            simplex: [type1Frac, type2Frac, type3Frac],
+        };
 
         scores.push({
             claimId,
@@ -148,6 +202,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
                 queryTilt: 0,
                 compositeScore: 0,
             },
+            riskVector,
         });
     }
 
@@ -205,8 +260,15 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         s.vernal.compositeScore = structuralMass + queryTilt;
     }
 
+    const twinMap = computeTwinMap({
+        claims,
+        canonicalSets,
+        statementEmbeddings,
+    });
+
     return {
         scores,
+        twinMap,
         meta: {
             totalCorpusStatements,
             processingTimeMs: performance.now() - startMs,
@@ -217,6 +279,150 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
                 lambda,
                 structuralStep,
             },
+        },
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TWIN MAP — Reciprocal best-match for ALL claim-owned statements
+//
+// Extends Layer B's algorithm from exclusive-only to the full canonical set.
+// Unclassified statements (embeddings with no claim parent) join the candidate
+// pool but are NOT subjects — no twins are computed for them.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function computeTwinMap(input: {
+    claims: Array<{ id: string; sourceStatementIds?: string[] }>;
+    canonicalSets: Map<string, Set<string>>;
+    statementEmbeddings: Map<string, Float32Array>;
+}): StatementTwinMap {
+    const twinStart = performance.now();
+    const { claims, canonicalSets, statementEmbeddings } = input;
+
+    // Build set of ALL claim-owned statement IDs
+    const allClaimOwnedIds = new Set<string>();
+    for (const set of canonicalSets.values()) {
+        for (const sid of set) allClaimOwnedIds.add(sid);
+    }
+
+    // Unclassified = have embeddings but not in any claim's canonical set
+    const unclassifiedIds: string[] = [];
+    for (const sid of statementEmbeddings.keys()) {
+        if (!allClaimOwnedIds.has(sid)) unclassifiedIds.push(sid);
+    }
+
+    const twins: Record<string, { twinStatementId: string; similarity: number } | null> = {};
+    const thresholds: Record<string, number> = {};
+
+    for (const claim of claims) {
+        const claimId = claim.id;
+        const homeSet = canonicalSets.get(claimId) ?? new Set<string>();
+        if (homeSet.size === 0) continue;
+
+        // Pre-index home set embeddings for backward pass
+        const homeEmbeddings = new Map<string, Float32Array>();
+        for (const sid of homeSet) {
+            const emb = statementEmbeddings.get(sid);
+            if (emb) homeEmbeddings.set(sid, emb);
+        }
+
+        // Build cross-claim candidate pool: all canonical in OTHER claims + unclassified
+        // (exclude statements already in this claim's canonical set)
+        const candidateIds: string[] = [];
+        for (const [otherId, otherSet] of canonicalSets.entries()) {
+            if (otherId === claimId) continue;
+            for (const sid of otherSet) {
+                if (!homeSet.has(sid)) candidateIds.push(sid);
+            }
+        }
+        for (const sid of unclassifiedIds) {
+            if (!homeSet.has(sid)) candidateIds.push(sid);
+        }
+
+        for (const sid of homeSet) {
+            const sEmb = statementEmbeddings.get(sid);
+            if (!sEmb) {
+                twins[sid] = null;
+                continue;
+            }
+
+            // Compute similarities to all candidates for threshold
+            const candidateSims: number[] = [];
+            const simByCandidateId = new Map<string, number>();
+            for (const cid of candidateIds) {
+                const cEmb = statementEmbeddings.get(cid);
+                if (!cEmb) continue;
+                const sim = cosineSimilarity(sEmb, cEmb);
+                candidateSims.push(sim);
+                simByCandidateId.set(cid, sim);
+            }
+
+            if (candidateSims.length === 0) {
+                twins[sid] = null;
+                continue;
+            }
+
+            // Gate threshold: τ_S = μ + 2σ
+            const muS = candidateSims.reduce((a, b) => a + b, 0) / candidateSims.length;
+            const varS = candidateSims.reduce((s, v) => s + (v - muS) ** 2, 0) / candidateSims.length;
+            const tauS = clamp01(muS + 2 * Math.sqrt(varS));
+            thresholds[sid] = tauS;
+
+            // Forward pass: find best candidate T
+            let bestSim = -Infinity;
+            let bestCandidateId: string | null = null;
+            for (const [cid, sim] of simByCandidateId.entries()) {
+                if (sim > bestSim) {
+                    bestSim = sim;
+                    bestCandidateId = cid;
+                }
+            }
+
+            if (!bestCandidateId || bestSim <= tauS) {
+                twins[sid] = null;
+                continue;
+            }
+
+            // Backward pass: is S the best match for T within C's full canonical set?
+            const tEmb = statementEmbeddings.get(bestCandidateId);
+            if (!tEmb) {
+                twins[sid] = null;
+                continue;
+            }
+
+            let bestBackSim = -Infinity;
+            let bestBackId: string | null = null;
+            for (const [hid, hEmb] of homeEmbeddings.entries()) {
+                const sim = cosineSimilarity(tEmb, hEmb);
+                if (sim > bestBackSim) {
+                    bestBackSim = sim;
+                    bestBackId = hid;
+                }
+            }
+
+            if (bestBackId === sid) {
+                twins[sid] = { twinStatementId: bestCandidateId, similarity: bestSim };
+            } else {
+                twins[sid] = null;
+            }
+        }
+    }
+
+    const twinValues = Object.values(twins);
+    const statementsWithTwins = twinValues.filter(v => v !== null).length;
+    const thresholdValues = Object.values(thresholds);
+    const meanThreshold = thresholdValues.length > 0
+        ? thresholdValues.reduce((a, b) => a + b, 0) / thresholdValues.length
+        : 0;
+
+    return {
+        twins,
+        thresholds,
+        meta: {
+            totalStatements: twinValues.length,
+            statementsWithTwins,
+            meanThreshold,
+            processingTimeMs: performance.now() - twinStart,
         },
     };
 }

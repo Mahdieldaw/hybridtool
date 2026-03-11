@@ -1134,6 +1134,7 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
       <BlastSurfaceInline artifact={artifact} />
       <BlastVernalInline artifact={artifact} />
       <BlastTwinsInline artifact={artifact} selectedEntity={selectedEntity} />
+      <BlastCascadeInline artifact={artifact} selectedEntity={selectedEntity} />
       <RoutingCard artifact={artifact} selectedClaim={selectedEntity?.type === "claim" ? selectedEntity.id : null} />
       {claimRouting && (
         <CardSection title="Claim Routing">
@@ -1338,11 +1339,17 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     cascadeExposure: number | null;
     destroyedQueryMean: number | null;
     queryTilt: number | null;
+    deletionRisk: number | null;
+    degradationRisk: number | null;
+    cascadeFragility: number | null;
+    isolation: number | null;
+    orphanCharacter: number | null;
   };
 
   const rows = useMemo<VernalRow[]>(() =>
     scores.map((s: any) => {
       const v = s?.vernal || {};
+      const rv = s?.riskVector;
       return {
         id: s?.claimId || "",
         label: s?.claimLabel || "",
@@ -1352,6 +1359,11 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
         cascadeExposure: typeof v.cascadeExposure === "number" && Number.isFinite(v.cascadeExposure) ? v.cascadeExposure : null,
         destroyedQueryMean: typeof v.destroyedQueryMean === "number" && Number.isFinite(v.destroyedQueryMean) ? v.destroyedQueryMean : null,
         queryTilt: typeof v.queryTilt === "number" && Number.isFinite(v.queryTilt) ? v.queryTilt : null,
+        deletionRisk: typeof rv?.deletionRisk === "number" ? rv.deletionRisk : null,
+        degradationRisk: typeof rv?.degradationRisk === "number" ? rv.degradationRisk : null,
+        cascadeFragility: typeof rv?.cascadeFragility === "number" ? rv.cascadeFragility : null,
+        isolation: typeof rv?.isolation === "number" ? rv.isolation : null,
+        orphanCharacter: typeof rv?.orphanCharacter === "number" ? rv.orphanCharacter : null,
       };
     }),
     [scores]
@@ -1418,6 +1430,11 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
             { key: "cascadeExposure", header: "D", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
             { key: "destroyedQueryMean", header: "Q", sortValue: (r) => r.destroyedQueryMean, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.destroyedQueryMean, 3)}</span> },
             { key: "queryTilt", header: "Tilt", sortValue: (r) => r.queryTilt, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryTilt, 3)}</span> },
+            { key: "deletionRisk", header: "Del", sortValue: (r) => r.deletionRisk, cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.deletionRisk ?? "–"}</span> },
+            { key: "degradationRisk", header: "Deg", sortValue: (r) => r.degradationRisk, cell: (r) => <span className="font-mono text-[10px] text-amber-400">{r.degradationRisk ?? "–"}</span> },
+            { key: "cascadeFragility", header: "Frag", sortValue: (r) => r.cascadeFragility, cell: (r) => <span className="font-mono text-[10px] text-blue-400">{r.cascadeFragility !== null ? r.cascadeFragility.toFixed(1) : "–"}</span> },
+            { key: "isolation", header: "Iso", sortValue: (r) => r.isolation, cell: (r) => <span className="font-mono text-[10px]">{r.isolation !== null ? r.isolation.toFixed(2) : "–"}</span> },
+            { key: "orphanCharacter", header: "OC", sortValue: (r) => r.orphanCharacter, cell: (r) => <span className="font-mono text-[10px]">{r.orphanCharacter !== null ? r.orphanCharacter.toFixed(2) : "–"}</span> },
           ]}
           rows={rows}
           defaultSortKey="compositeScore"
@@ -1582,15 +1599,148 @@ function BlastTwinsInline({ artifact, selectedEntity }: { artifact: any; selecte
             { key: "bestCarrierClaimId", header: "BestClaim", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.bestCarrierClaimId ?? "—"}</span> },
             { key: "bestSim", header: "bestSim", sortValue: (r) => r.bestSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.bestSim, 3)}</span> },
             { key: "tauSim", header: "τ_sim", sortValue: (r) => r.tauSim, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.tauSim, 3)}</span> },
-            { key: "bestCandidateId", header: "BestFwd", cell: (r) => {
-              const candidateText = r.bestCandidateId ? statementTextById.get(r.bestCandidateId) ?? "" : "";
-              const tip = candidateText ? `${r.bestCandidateId}: ${candidateText}` : r.bestCandidateId ?? "";
-              return <span title={tip} className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block cursor-help">{r.bestCandidateId ?? "—"}</span>;
-            } },
+            {
+              key: "bestCandidateId", header: "BestFwd", cell: (r) => {
+                const candidateText = r.bestCandidateId ? statementTextById.get(r.bestCandidateId) ?? "" : "";
+                const tip = candidateText ? `${r.bestCandidateId}: ${candidateText}` : r.bestCandidateId ?? "";
+                return <span title={tip} className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block cursor-help">{r.bestCandidateId ?? "—"}</span>;
+              }
+            },
             { key: "reciprocal", header: "Recip", sortValue: (r) => r.reciprocal == null ? -1 : r.reciprocal ? 1 : 0, cell: (r) => <span className={clsx("font-mono", r.reciprocal === true ? "text-emerald-400" : r.reciprocal === false ? "text-red-400" : "text-text-muted")}>{r.reciprocal == null ? "—" : r.reciprocal ? "✓" : "✕"}</span> },
           ]}
           rows={rows}
           defaultSortKey="orphan"
+          defaultSortDir="desc"
+          maxRows={30}
+        />
+      </CardSection>
+    </>
+  );
+}
+
+function BlastCascadeInline({ artifact, selectedEntity }: { artifact: any; selectedEntity: SelectedEntity }) {
+  const bs = artifact?.blastSurface;
+  const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
+  const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
+
+  const statementTextById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+      const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
+      if (!id) continue;
+      const text = String(s?.text ?? "");
+      if (!m.has(id)) m.set(id, text);
+    }
+    return m;
+  }, [artifact]);
+
+  type CascadeRow = {
+    id: string;
+    statementId: string;
+    text: string;
+    cascadeEcho: number;
+    overlappingClaims: string[];
+  };
+
+  const rows = useMemo<CascadeRow[]>(() => {
+    if (!selectedClaimId || scores.length === 0) return [];
+
+    // Map of claimId -> { v, n }
+    const claimData = new Map<string, { v: number; n: number }>();
+    for (const s of scores) {
+      claimData.set(String(s.claimId), {
+        v: s?.vernal?.vulnerableCount ?? 0,
+        n: s?.layerC?.canonicalCount ?? 0
+      });
+    }
+
+    const selectedScore = scores.find(s => String(s.claimId) === selectedClaimId);
+    if (!selectedScore) return [];
+
+    const canonIds = safeArr<string>(selectedScore.layerC?.canonicalIds);
+    const finalIds = canonIds.length > 0 ? canonIds : (() => {
+      const c = artifact?.semantic?.claims?.find((c: any) => String(c.id) === selectedClaimId);
+      return Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
+    })();
+
+    const out: CascadeRow[] = [];
+    for (const sid of finalIds) {
+      const strId = String(sid);
+      let echo = 0;
+      const overlaps: string[] = [];
+
+      for (const other of scores) {
+        const otherId = String(other.claimId);
+        if (otherId === selectedClaimId) continue;
+
+        const otherCanon = safeArr<string>(other.layerC?.canonicalIds);
+        const inOther = otherCanon.length > 0
+          ? otherCanon.includes(strId)
+          : artifact?.semantic?.claims?.find((c: any) => String(c.id) === otherId)?.sourceStatementIds?.includes(strId);
+
+        if (inOther) {
+          overlaps.push(otherId);
+          const data = claimData.get(otherId);
+          if (data && data.n > 0) {
+            echo += data.v / data.n;
+          }
+        }
+      }
+
+      if (overlaps.length > 0) {
+        out.push({
+          id: `${selectedClaimId}::${strId}`,
+          statementId: strId,
+          text: statementTextById.get(strId) ?? "",
+          cascadeEcho: echo,
+          overlappingClaims: overlaps
+        });
+      }
+    }
+    return out;
+  }, [scores, selectedClaimId, statementTextById, artifact]);
+
+  if (!bs || scores.length === 0 || !selectedClaimId) return null;
+  if (rows.length === 0) return null;
+
+  return (
+    <>
+      <div className="border-t border-white/10 my-3" />
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+        <span className="text-xs font-semibold text-text-secondary">Cascade Overlaps — Layer D Details</span>
+      </div>
+
+      <CardSection title={`Overlapping Statements — ${rows.length}`}>
+        <SortableTable
+          columns={[
+            { key: "statementId", header: "Stmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[110px] inline-block">{r.statementId}</span> },
+            {
+              key: "text",
+              header: "Text",
+              cell: (r) => (
+                <span title={r.text} className="text-[10px] text-text-secondary truncate max-w-[280px] inline-block">
+                  {r.text || "(missing text)"}
+                </span>
+              )
+            },
+            { key: "cascadeEcho", header: "Echo", sortValue: (r) => r.cascadeEcho, cell: (r) => <span className="font-mono text-emerald-400">{fmt(r.cascadeEcho, 3)}</span> },
+            {
+              key: "overlaps",
+              header: "Overlaps",
+              cell: (r) => (
+                <div className="flex flex-wrap gap-1 max-w-[200px]">
+                  {r.overlappingClaims.map(cid => (
+                    <span key={cid} className="text-[9px] bg-white/5 text-text-muted px-1 rounded truncate max-w-[60px]" title={cid}>
+                      {cid}
+                    </span>
+                  ))}
+                </div>
+              )
+            },
+          ]}
+          rows={rows}
+          defaultSortKey="cascadeEcho"
           defaultSortDir="desc"
           maxRows={30}
         />
@@ -2053,22 +2203,30 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
       </CardSection>
 
       {substrateSummary != null && (
-        <CardSection title="Triage Engine">
+        <CardSection title="Triage Engine (Twin Map)">
           <div className="grid grid-cols-2 gap-x-4">
-            <StatRow label="Protected" value={fmtInt(substrateSummary.protectedStatementCount ?? 0)} />
-            <StatRow label="Skeletonized" value={fmtInt(substrateSummary.skeletonizedStatementCount ?? 0)} />
-            <StatRow label="Removed" value={fmtInt(substrateSummary.removedStatementCount ?? 0)} />
-            <StatRow
-              label="Residual Fallback"
-              value={fmtInt(substrateSummary.residualFallbackCount ?? 0)}
-              color={(substrateSummary.residualFallbackCount ?? 0) > 0 ? "text-amber-400" : "text-text-muted"}
-            />
+            <StatRow label="Protected" value={fmtInt(substrateSummary.protectedStatementCount ?? 0)} color="text-emerald-400" />
+            <StatRow label="Untriaged" value={fmtInt(substrateSummary.untriagedStatementCount ?? 0)} color="text-text-muted" />
+            <StatRow label="Skeletonized" value={fmtInt(substrateSummary.skeletonizedStatementCount ?? 0)} color={(substrateSummary.skeletonizedStatementCount ?? 0) > 0 ? "text-amber-400" : "text-text-muted"} />
+            <StatRow label="Removed" value={fmtInt(substrateSummary.removedStatementCount ?? 0)} color={(substrateSummary.removedStatementCount ?? 0) > 0 ? "text-rose-400" : "text-text-muted"} />
           </div>
-          {(substrateSummary.residualFallbackCount ?? 0) > 0 && (
-            <div className="text-[9px] text-amber-400/70 mt-1">
-              {substrateSummary.residualFallbackCount} non-exclusive statement(s) with all owning claims pruned — no blast surface coverage, fell to detectCarriers fallback
-            </div>
-          )}
+          <div className="text-[9px] text-text-muted mt-1">
+            PROTECTED = surviving parent claim · UNTRIAGED = no parent claim · REMOVED = stranded + twin survives · SKELETONIZED = stranded, no surviving twin
+          </div>
+          {/* Twin map stats from blast surface */}
+          {(() => {
+            const tm = artifact?.blastSurface?.twinMap?.meta;
+            if (!tm) return null;
+            const coverage = tm.totalStatements > 0 ? tm.statementsWithTwins / tm.totalStatements : 0;
+            return (
+              <div className="mt-2 grid grid-cols-2 gap-x-4">
+                <StatRow label="Twin map total" value={fmtInt(tm.totalStatements)} />
+                <StatRow label="With twin" value={fmtInt(tm.statementsWithTwins)} color={coverage > 0.3 ? "text-emerald-400" : "text-text-muted"} />
+                <StatRow label="Twin coverage" value={fmtPct(coverage)} color={coverage > 0.3 ? "text-emerald-400" : "text-text-muted"} />
+                <StatRow label="Mean τ" value={fmt(tm.meanThreshold, 3)} />
+              </div>
+            );
+          })()}
         </CardSection>
       )}
 

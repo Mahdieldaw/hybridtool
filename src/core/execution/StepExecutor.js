@@ -1457,6 +1457,7 @@ export class StepExecutor {
                         buildSurveyMapperPrompt,
                         buildRoutedSurveyPrompt,
                         parseSurveyMapperOutput: parseSurveyOutput,
+                        validateAssessmentCoverage,
                       } =
                         await import('../../ConciergeService/surveyMapper');
 
@@ -1519,10 +1520,18 @@ export class StepExecutor {
                           const parsed = parseSurveyOutput(surveyResult.text);
                           rawGates = parsed.gates;
                           surveyRationale = parsed.rationale;
+
+                          // Coverage check: did the model assess every claim it was asked about?
+                          const expectedIds = claimsForSurvey.map((c) => c.id);
+                          const coverage = validateAssessmentCoverage(expectedIds, parsed.assessments);
+                          if (coverage.errors.length > 0) {
+                            parsed.errors.push(...coverage.errors);
+                          }
+
                           if (parsed.errors.length > 0) {
                             console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
                           }
-                          console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced`);
+                          console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced, ${parsed.assessments.length}/${expectedIds.length} claims assessed`);
 
                           gateQuestionByClaimPair = new Map();
 

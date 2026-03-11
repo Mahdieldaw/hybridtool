@@ -44,7 +44,7 @@ The default is survival. Removal requires the user's explicit decision, scoped b
 
 ## Part II: Stored Primitives
 
-The pipeline stores three categories of data. Everything else is derived at view-time from these primitives. If you change a derivation function, reload, and navigate to any historical turn, the new function's output appears without recompute.
+The pipeline stores four categories of data. Everything else is derived at view-time from these primitives. If you change a derivation function, reload, and navigate to any historical turn, the new function's output appears without recompute.
 
 ### Primitive 1: Batch Text Responses
 
@@ -81,7 +81,21 @@ Historical turns populate all diagnostic panels without recompute.
 |Invalidated|Mapper model change or explicit mapper recompute|
 |Downstream|Claim centroids (L2 bridge), provenance, structural analysis, traversal, synthesis|
 
-**The contract**: These three primitives are sufficient to derive the complete geometry and provenance layers. Nothing else needs persistence. The recompute surface is:
+### Primitive 4: Claim Embeddings (Claim Centroids)
+
+|Property|Value|
+|---|---|
+|What|Float32Array per claim (claim centroid) plus claim-index metadata (`claimIndex`, dimensions)|
+|Keyed by|`(turn_id, mapper_provider_id)`|
+|Stored where|IndexedDB `claim_embeddings` store|
+|Invalidated|Mapper model change or explicit claim re-generation|
+|Downstream|Provenance reconstruction (centroid → paragraph/statement similarity), inter-claim diagnostics, carrier detection, skeletonization, blast surface|
+
+**Status**: Implemented. Persisted during mapping via `SessionManager.persistClaimEmbeddings` into IndexedDB `claim_embeddings` (packed Float32Array rows and metadata). Claim centroids form the documented L2 bridge: they are generated once by `generateClaimEmbeddings` and consumed by provenance reconstruction and downstream L1 computations.
+
+Note: User traversal selections (which claim/region a user picks during traversal/skeletonization) are not persisted as a canonical primitive — they are derivable at view-time from the frozen primitives (batch text, embeddings, mapper output, claim embeddings) and session/UI state. The implementation reconstructs traversal choices from these frozen primitives when loading historical turns; therefore traversal choice is not listed as a stored primitive.
+
+**The contract**: These four primitives are sufficient to derive the complete geometry and provenance layers. Nothing else needs persistence. The recompute surface is:
 
 |Recompute target|What it does|When needed|
 |---|---|---|

@@ -38,11 +38,21 @@ export function NarrativePanel({ narrativeText, activeMappingPid, artifact, aiTu
     };
   }, []);
 
-  // Reset cached raw JSON when artifact or turn changes
+  // Reset cached raw JSON when artifact or turn changes; rebuild if panel is open
   useEffect(() => {
-    setRawJson("");
-    setRawError(null);
-  }, [artifact, aiTurnId]);
+    if (rawOpen && artifact) {
+      try {
+        setRawError(null);
+        setRawJson(stringifyForDebug(artifact));
+      } catch (e: any) {
+        setRawError(String(e?.message || e));
+        setRawJson("");
+      }
+    } else {
+      setRawJson("");
+      setRawError(null);
+    }
+  }, [artifact, aiTurnId, rawOpen, stringifyForDebug]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">

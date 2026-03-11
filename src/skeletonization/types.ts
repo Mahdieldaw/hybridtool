@@ -8,23 +8,6 @@ export interface StatementFate {
   action: StatementAction;
   reason: string;
   triggerClaimId?: string;
-  carriersSkeletonized?: string[];
-  isSoleCarrier?: boolean;
-}
-
-export interface ConfirmedCarrier {
-  statementId: string;
-  claimSimilarity: number;
-  sourceSimilarity: number;
-  prunedClaimId: string;
-  sourceStatementId: string;
-}
-
-export interface CarrierDetectionResult {
-  prunedClaimId: string;
-  sourceStatementId: string;
-  carriers: ConfirmedCarrier[];
-  action: 'REMOVE' | 'SKELETONIZE';
 }
 
 export interface TriageResult {
@@ -37,8 +20,6 @@ export interface TriageResult {
     skeletonizedCount: number;
     removedCount: number;
     processingTimeMs: number;
-    embeddingTimeMs: number;
-    residualFallbackCount: number; // non-exclusive statements all of whose owning claims were pruned — no layerB data, fell to detectCarriers
   };
 }
 
@@ -80,13 +61,11 @@ export interface ChewedSubstrate {
     untriagedStatementCount?: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
-    residualFallbackCount: number;
   };
   pathSteps: string[];
   meta: {
     triageTimeMs: number;
     reconstructionTimeMs: number;
-    embeddingTimeMs: number;
     totalTimeMs: number;
   };
 }
@@ -110,4 +89,3 @@ export interface SkeletonizationInput {
   paragraphEmbeddings?: Map<string, Float32Array>;
   blastSurface?: any | null;
 }
-

@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
-import type { BasinInversionResult, PipelineRegion, PipelineSubstrateEdge, PipelineSubstrateGraph } from "../../shared/contract";
+import type { BasinInversionResult, BlastSurfaceResult, PipelineRegion, PipelineSubstrateEdge, PipelineSubstrateGraph } from "../../shared/contract";
 import type { ClaimCentroid } from "../hooks/useClaimCentroids";
 import { getProviderAbbreviation, getProviderColor, getProviderName, resolveProviderIdFromCitationOrder } from "../utils/provider-helpers";
 
@@ -41,6 +41,10 @@ interface Props {
   highlightSourceParagraphs?: boolean;
   highlightInternalEdges?: boolean;
   highlightSpannedHulls?: boolean;
+
+  // Blast surface risk overlay
+  blastSurface?: BlastSurfaceResult | null;
+  showRiskGlyphs?: boolean;
 }
 
 type Point = { x: number; y: number };
@@ -61,6 +65,61 @@ const MAPPER_EDGE_COLORS: Record<string, string> = {
   prerequisite: "rgba(96,165,250,0.6)",
   dependency: "rgba(96,165,250,0.6)",
 };
+
+// Risk vector colors for blast surface overlay
+const RISK_COLORS = {
+  deletion: "#ef4444",    // Type 2: exclusive non-orphan (will be REMOVED)
+  degradation: "#f59e0b", // Type 3: exclusive orphan (will be SKELETONIZED)
+  shared: "#3b82f6",      // Type 1: non-exclusive (PROTECTED, future fragility)
+};
+
+type RiskVector = {
+  claimId: string;
+  type1: number; // shared/non-exclusive count
+  type2: number; // exclusive non-orphan count (absorbable)
+  type3: number; // exclusive orphan count
+  total: number; // canonicalCount
+  isolation: number;      // (type2 + type3) / total
+  orphanCharacter: number; // type3 / (type2 + type3), or 0 if no exclusives
+  cascadeFragility?: number;
+  cascadeFragilityMu?: number;
+  cascadeFragilitySigma?: number;
+};
+
+/** SVG arc path for a donut segment. Angles in radians, 0 = top (12 o'clock). */
+function donutArc(cx: number, cy: number, r: number, width: number, startAngle: number, endAngle: number): string {
+  if (endAngle - startAngle >= Math.PI * 2 - 0.001) {
+    // Full circle — use two half-arcs to avoid SVG zero-length arc issue
+    const outer = r, inner = r - width;
+    return [
+      `M ${cx} ${cy - outer}`,
+      `A ${outer} ${outer} 0 1 1 ${cx} ${cy + outer}`,
+      `A ${outer} ${outer} 0 1 1 ${cx} ${cy - outer}`,
+      `Z`,
+      `M ${cx} ${cy - inner}`,
+      `A ${inner} ${inner} 0 1 0 ${cx} ${cy + inner}`,
+      `A ${inner} ${inner} 0 1 0 ${cx} ${cy - inner}`,
+      `Z`,
+    ].join(" ");
+  }
+  const outer = r, inner = r - width;
+  const cos = Math.cos, sin = Math.sin;
+  // Convert from "0=top clockwise" to SVG's "0=right counterclockwise"
+  const toSvg = (a: number) => a - Math.PI / 2;
+  const a1 = toSvg(startAngle), a2 = toSvg(endAngle);
+  const large = endAngle - startAngle > Math.PI ? 1 : 0;
+  const ox1 = cx + outer * cos(a1), oy1 = cy + outer * sin(a1);
+  const ox2 = cx + outer * cos(a2), oy2 = cy + outer * sin(a2);
+  const ix2 = cx + inner * cos(a2), iy2 = cy + inner * sin(a2);
+  const ix1 = cx + inner * cos(a1), iy1 = cy + inner * sin(a1);
+  return [
+    `M ${ox1} ${oy1}`,
+    `A ${outer} ${outer} 0 ${large} 1 ${ox2} ${oy2}`,
+    `L ${ix2} ${iy2}`,
+    `A ${inner} ${inner} 0 ${large} 0 ${ix1} ${iy1}`,
+    `Z`,
+  ].join(" ");
+}
 
 function hexToRgba(input: string, alpha: number): string | null {
   const hex = String(input || "").trim();
@@ -156,6 +215,8 @@ export function ParagraphSpaceView({
   highlightSourceParagraphs = true,
   highlightInternalEdges = true,
   highlightSpannedHulls = true,
+  blastSurface,
+  showRiskGlyphs = false,
 }: Props) {
   const nodes = graph?.nodes ?? [];
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
@@ -255,6 +316,50 @@ export function ParagraphSpaceView({
     const found = claimCentroids.find(c => c.claimId === selectedClaimId);
     return found ? new Set(found.sourceParagraphIds) : null;
   }, [selectedClaimId, claimCentroids]);
+
+  // Compute risk vectors from blast surface data
+  const riskVectorMap = useMemo(() => {
+    const m = new Map<string, RiskVector>();
+    if (!blastSurface?.scores) return m;
+    for (const s of blastSurface.scores) {
+      const id = String(s.claimId ?? "");
+      if (!id) continue;
+      // Prefer pipeline-computed riskVector; fall back to local derivation for cached data
+      const rv = (s as any).riskVector;
+      if (rv) {
+        m.set(id, {
+          claimId: id,
+          type1: (s as any).layerC?.nonExclusiveCount ?? 0,
+          type2: rv.deletionRisk,
+          type3: rv.degradationRisk,
+          total: (s as any).layerC?.canonicalCount ?? 0,
+          isolation: rv.isolation,
+          orphanCharacter: rv.orphanCharacter,
+          cascadeFragility: rv.cascadeFragility,
+          cascadeFragilityMu: rv.cascadeFragilityMu,
+          cascadeFragilitySigma: rv.cascadeFragilitySigma,
+        });
+      } else {
+        // Fallback: derive locally from layerB/layerC (backward compat with cached data)
+        const canonicalCount = s.layerC?.canonicalCount ?? 0;
+        const exclusiveCount = s.layerB?.exclusiveCount ?? 0;
+        const orphanCount = s.layerB?.orphanCount ?? 0;
+        const absorbableCount = s.layerB?.absorbableCount ?? Math.max(0, exclusiveCount - orphanCount);
+        const type1 = Math.max(0, canonicalCount - exclusiveCount);
+        const type2 = absorbableCount;
+        const type3 = orphanCount;
+        const total = type1 + type2 + type3;
+        const exclTotal = type2 + type3;
+        m.set(id, {
+          claimId: id,
+          type1, type2, type3, total,
+          isolation: total > 0 ? exclTotal / total : 0,
+          orphanCharacter: exclTotal > 0 ? type3 / exclTotal : 0,
+        });
+      }
+    }
+    return m;
+  }, [blastSurface]);
 
   // Region hulls
   const regionHulls = useMemo(() => {
@@ -385,6 +490,23 @@ export function ParagraphSpaceView({
             </div>
           ))}
         </div>
+
+        {/* Risk Vector Legend */}
+        {showRiskGlyphs && riskVectorMap.size > 0 && (
+          <div className="absolute bottom-4 left-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm pointer-events-none shadow-sm z-10 flex flex-col gap-1.5">
+            <div className="text-[9px] uppercase font-bold text-text-muted mb-0.5 tracking-wider">Pruning Risk</div>
+            {[
+              { label: "Deletion (excl. twinned)", color: RISK_COLORS.deletion, key: "D" },
+              { label: "Degradation (orphans)", color: RISK_COLORS.degradation, key: "S" },
+              { label: "Protected (shared)", color: RISK_COLORS.shared, key: "P" },
+            ].map((item) => (
+              <div key={item.key} className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: item.color, opacity: 0.85 }} />
+                <span className="text-[10px] font-medium text-text-secondary">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {colorParagraphsByModel && (
           <div className="absolute top-4 right-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm shadow-sm z-10 pointer-events-auto min-w-[220px]">
@@ -581,6 +703,7 @@ export function ParagraphSpaceView({
             const modelEnabled =
               !colorParagraphsByModel ||
               nodeModelIndex == null ||
+              modelLegend.length === 0 ||
               (enabledModelIndices.size > 0 && enabledModelIndices.has(nodeModelIndex));
             const baseOpacity = hasSelection && highlightSourceParagraphs ? (isSource ? 1 : 0.20) : 0.85;
             const nodeOpacity = modelEnabled ? baseOpacity : baseOpacity * 0.08;
@@ -611,7 +734,7 @@ export function ParagraphSpaceView({
             );
           })}
 
-          {/* Claim diamonds */}
+          {/* Claim diamonds / risk donut glyphs */}
           {showClaimDiamonds && scaledCentroids.map((c) => {
             const cx = c.sx, cy = c.sy;
             const isHov = hoveredClaimId === c.claimId;
@@ -619,6 +742,8 @@ export function ParagraphSpaceView({
             const bulk = c.provenanceBulk ?? 1;
             const size = Math.max(9, Math.min(18, 9 + bulk * 1.0));
             const label = c.label.length > 50 ? `${c.label.slice(0, 50)}\u2026` : c.label;
+            const rv = showRiskGlyphs ? riskVectorMap.get(c.claimId) : null;
+
             return (
               <g
                 key={c.claimId}
@@ -627,16 +752,64 @@ export function ParagraphSpaceView({
                 onClick={(e) => { e.stopPropagation(); onClaimClick?.(isSel ? null : c.claimId); }}
                 style={{ cursor: "pointer" }}
               >
-                <polygon
-                  points={`${cx},${cy - size} ${cx + size * 0.78},${cy} ${cx},${cy + size} ${cx - size * 0.78},${cy}`}
-                  fill={isSel ? "rgba(251,191,36,1)" : isHov ? "rgba(251,191,36,0.95)" : "rgba(245,158,11,0.75)"}
-                  stroke={isSel ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.6)"}
-                  strokeWidth={isSel ? 2.5 : isHov ? 2 : 1}
-                />
+                {rv && rv.total > 0 ? (() => {
+                  // Risk donut glyph — three segments proportional to type1/type2/type3
+                  const r = Math.max(11, Math.min(22, 11 + (rv.total) * 0.5));
+                  const w = Math.max(3.5, r * 0.35);
+                  const segments = [
+                    { count: rv.type2, color: RISK_COLORS.deletion },
+                    { count: rv.type3, color: RISK_COLORS.degradation },
+                    { count: rv.type1, color: RISK_COLORS.shared },
+                  ].filter(s => s.count > 0);
+                  const total = rv.total;
+                  let angle = 0;
+                  const selStroke = isSel ? 2.5 : isHov ? 1.5 : 0;
+                  return (
+                    <>
+                      {/* Selection/hover ring */}
+                      {(isSel || isHov) && (
+                        <circle cx={cx} cy={cy} r={r + 2} fill="none"
+                          stroke={isSel ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.4)"}
+                          strokeWidth={selStroke} />
+                      )}
+                      {/* Donut segments */}
+                      {segments.map((seg, i) => {
+                        const sweep = (seg.count / total) * Math.PI * 2;
+                        const startA = angle;
+                        angle += sweep;
+                        return (
+                          <path
+                            key={i}
+                            d={donutArc(cx, cy, r, w, startA, startA + sweep)}
+                            fill={seg.color}
+                            opacity={isSel ? 1 : isHov ? 0.95 : 0.8}
+                          />
+                        );
+                      })}
+                      {/* Center dot for visual anchor */}
+                      <circle cx={cx} cy={cy} r={2} fill="rgba(255,255,255,0.6)" />
+                    </>
+                  );
+                })() : (
+                  /* Fallback: original diamond */
+                  <polygon
+                    points={`${cx},${cy - size} ${cx + size * 0.78},${cy} ${cx},${cy + size} ${cx - size * 0.78},${cy}`}
+                    fill={isSel ? "rgba(251,191,36,1)" : isHov ? "rgba(251,191,36,0.95)" : "rgba(245,158,11,0.75)"}
+                    stroke={isSel ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.6)"}
+                    strokeWidth={isSel ? 2.5 : isHov ? 2 : 1}
+                  />
+                )}
                 {(isHov || isSel) && (
-                  <text x={cx} y={cy - size - 4} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={600}>
-                    {label}
-                  </text>
+                  <>
+                    <text x={cx} y={cy - (rv ? Math.max(11, Math.min(22, 11 + (rv?.total ?? 0) * 0.5)) : size) - 4} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={600}>
+                      {label}
+                    </text>
+                    {rv && (
+                      <text x={cx} y={cy + (rv ? Math.max(11, Math.min(22, 11 + rv.total * 0.5)) : size) + 12} textAnchor="middle" fill="rgba(255,255,255,0.6)" fontSize={9}>
+                        {`D:${rv.type2} S:${rv.type3} P:${rv.type1}${rv.cascadeFragility != null ? ` F:${rv.cascadeFragility.toFixed(1)}` : ''}`}
+                      </text>
+                    )}
+                  </>
                 )}
               </g>
             );

@@ -1,32 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // SURVEY MAPPER - ROUTED PROMPT BUILDER + PARSER
 // ═══════════════════════════════════════════════════════════════════════════
-//
-// Architecture: The geometry pipeline classifies claims into structural
-// categories BEFORE the mapper sees them. The mapper receives targeted
-// tasks, not an open-ended landscape to evaluate.
-//
-// Three prompt variants, matched to structural category:
-//
-//   FORK ARTICULATION  — for validated conflict clusters
-//     Task: translate a geometrically-confirmed tension into a natural-
-//     language question that distinguishes the branches for this user.
-//     The geometry already identified the fork; the mapper articulates it.
-//
-//   MISLEADINGNESS TEST — for sole-source claims with orphaned evidence
-//     Task: determine if the claim presents a path that silently doesn't
-//     exist for some users. The "golden thread" signature: irreplaceable
-//     evidence from a single model. Worth protecting, but must check
-//     for unsurfaced preconditions.
-//
-//   SKIP — consensus claims and structurally redundant sole-source claims
-//     pass through without touching the mapper. Silence is architectural,
-//     not prompt-engineered.
-//
-// The old monolithic prompt ("assess every claim") is preserved as
-// buildSurveyMapperPrompt for backward compatibility. New callers
-// should use buildRoutedSurveyPrompt.
-// ═══════════════════════════════════════════════════════════════════════════
 
 import { extractJsonFromContent } from '../../shared/parsing-utils';
 import type { SurveyGate } from '../../shared/contract';
@@ -81,7 +55,7 @@ function formatBatchTexts(responses: RawModelResponse[]): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// PROMPT BUILDER
+// LEGACY PROMPT BUILDER
 // ─────────────────────────────────────────────────────────────────────────
 
 export function buildSurveyMapperPrompt(
@@ -143,21 +117,13 @@ Every claim gets an assessment. Only claims with verdict "vulnerable" produce a 
 
 // ─────────────────────────────────────────────────────────────────────
 // ROUTED PROMPT BUILDER
-//
-// The geometry pipeline has already classified claims. This builder
-// constructs targeted prompts for each structural category. The mapper
-// does articulation and last-mile semantic judgment on pre-structured
-// input — it does not perform discovery or prioritization.
 // ─────────────────────────────────────────────────────────────────────
 
 export interface RoutedSurveyPromptInput {
   userQuery: string;
   routing: ClaimRouting;
-  /** Full claim set for context — the mapper sees all claims but is only
-   *  asked to evaluate the routed subset */
   allClaims: ClaimSummary[];
   batchTexts: RawModelResponse[];
-  /** Mapper edges from semantic mapper (for context in fork articulation) */
   edges: EdgeSummary[];
 }
 
@@ -178,7 +144,6 @@ function buildForkSection(
     })
     .join('\n\n');
 
-  // Include relevant edges between these claims for context
   const claimIdSet = new Set(cluster.claimIds);
   const relevantEdges = edges.filter(
     (e) => claimIdSet.has(e.from) && claimIdSet.has(e.to)
@@ -187,40 +152,43 @@ function buildForkSection(
     .map((e) => `  ${e.from} ─[${e.type}]─> ${e.to}`)
     .join('\n');
 
-  return `<conflict_cluster>
-The geometry confirms these claims occupy genuinely different positions in the evidence space. They represent a fork — the user's situation determines which branch applies.
+  return `<fork cluster_id="conflict_${cluster.claimIds.join('_')}">
+These claims are geometrically distant—they occupy different positions in the evidence space. Geometric distance is not physical incompatibility. Your task is to determine whether it is.
 
-Claims:
+<claims>
 ${claimLines}
-${edgeLines ? `\nRelationships:\n${edgeLines}` : ''}
+</claims>
+${edgeLines ? `<forces>\n${edgeLines}\n</forces>` : ''}
 
-Task: What single observable fact about the user's real-world situation determines which branch of this conflict applies to them? Frame it as a yes/no question that a non-expert can answer from direct observation. Do not ask whether the user prefers one approach — ask about the condition that makes one branch applicable and the other inapplicable.
-</conflict_cluster>`;
+**The Convergence Test:**
+Attempt to construct the single user who executes every claim in this cluster simultaneously. Describe their specific circumstances in one sentence.
+
+If the construction holds—if no property of the user's reality needs to be two mutually exclusive things at once—then this fork is preferential. Mark all claims as "stands" and stop. Proving safe passage is a successful execution of your role.
+
+If the construction collapses, the exact point of collapse is your gate axis. The physical property that cannot satisfy all paths simultaneously is the observable fact your gate question must measure. 
+
+Think of how asking, "Do the items you are comparing say the same things in different words?" acts as a perfect wedge. Answering 'Yes' instantly destroys the viability of simple text-matching and mechanically forces the use of semantic embeddings. You must translate the point of collapse in this fork into a similarly stark, load-bearing question about the user's observable reality.
+</fork>`;
 }
 
-function buildIsolateSection(
-  isolate: IsolateCandidate
-): string {
-  return `<isolate_test claim_id="${isolate.claimId}">
-This claim comes from a single model and carries evidence that no other claim covers (${(isolate.orphanRatio * 100).toFixed(0)}% orphaned statements). It may be the golden thread — the one insight the other models missed. But it needs one check.
+function buildIsolateSection(isolate: IsolateCandidate): string {
+  return `<isolate claim_id="${isolate.claimId}">
+This claim carries evidence no other model produced (${(isolate.orphanRatio * 100).toFixed(0)}% orphaned statements). It is either the golden thread the other models missed, or a path that silently requires a reality the user may not possess.
 
-Claim: [${isolate.claimId}] ${isolate.claimLabel}
+<claim>
+[${isolate.claimId}] ${isolate.claimLabel}
 ${isolate.claimText}
+</claim>
 
-Task: If the user accepted this claim at face value and acted on it, could they waste significant effort, violate a constraint, or break something — because the claim silently requires a condition they might not meet?
+**The Constructive Failure Test:**
+Attempt to complete these two sentences truthfully, based strictly on what the claim demands:
+1. "This path would fail the user who [describe the specific wasted effort or dead end], because it silently requires that they [state the strict, unmentioned condition]."
+2. "The user can verify safety by answering: '[Yes/No question about an observable fact]?'"
 
-Complete exactly two sentences:
-1. "This claim would mislead the user if they [describe the wasted action] because it silently requires that they [state condition]."
-2. "The user can verify this with: '[yes/no question]?'"
-
-If sentence 1 cannot be written truthfully from what the claim actually says, the claim is not fragile — it is safe. Write: "This claim does not present a false affordance. Verdict: stands."
-</isolate_test>`;
+If sentence 1 cannot be completed truthfully—because the claim functions securely regardless of the user's specific circumstances—mark it "stands" and stop. Do not force a failure mode that does not exist. Proving a claim is universally stable is your primary directive here.
+</isolate>`;
 }
 
-/**
- * Build a routed survey prompt based on structural classification.
- * Returns null if the routing says to skip the survey entirely.
- */
 export function buildRoutedSurveyPrompt(
   input: RoutedSurveyPromptInput
 ): string | null {
@@ -235,65 +203,74 @@ export function buildRoutedSurveyPrompt(
 
   const sourcesBlock = formatBatchTexts(batchTexts);
 
-  // Build the context preamble (always present)
-  const preamble = `The models below answered a question. The geometry pipeline has already analyzed the claim landscape and identified specific structural features that need your judgment.
+  const sections: string[] = [];
+
+  // THE PREAMBLE
+  sections.push(`You are the actuator.
+
+The models answered. The geometry mapped. You determine whether the fractures in the map reach the user's ground.
+
+Multiple independent minds have surveyed this problem. Their raw output was projected into a geometric space, revealing the underlying structure of their logic. The consensus has been cleared away. What remains before you are the structural faults: forks where paths cleanly split, and isolated positions built by single models.
+
+The validity and quality of these claims is established terrain. Your task is narrower: determine which claims require a specific user reality to function, and for those that do, produce the question that measures it.
 
 <original_query>${userQuery}</original_query>
 
-<source_responses>
+<evidence_substrate>
 ${sourcesBlock}
-</source_responses>`;
+</evidence_substrate>`);
 
-  // Build fork articulation sections
-  const forkSections = routing.conflictClusters.map((cluster) =>
-    buildForkSection(cluster, allClaims, edges)
-  );
-
-  // Build misleadingness test sections
-  const isolateSections = routing.isolateCandidates.map((isolate) =>
-    buildIsolateSection(isolate)
-  );
-
-  // Assemble the prompt
-  const sections: string[] = [preamble];
-
-  if (forkSections.length > 0) {
+  if (hasForks) {
+    const forkSections = routing.conflictClusters.map((cluster) =>
+      buildForkSection(cluster, allClaims, edges)
+    );
     sections.push(
-      `\n## Fork Articulation\n\nThe following claim clusters are in geometrically validated conflict. For each cluster, identify the distinguishing condition.\n\n${forkSections.join('\n\n')}`
+      `\n## TENSION RESOLUTION (FORKS)\n\n${forkSections.join('\n\n')}`
     );
   }
 
-  if (isolateSections.length > 0) {
+  if (hasIsolates) {
+    const isolateSections = routing.isolateCandidates.map((isolate) =>
+      buildIsolateSection(isolate)
+    );
     sections.push(
-      `\n## Misleadingness Test\n\nThe following claims carry irreplaceable evidence from a single model. For each, determine whether the claim presents a path that silently doesn't exist for some users.\n\n${isolateSections.join('\n\n')}`
+      `\n## ANOMALY VERIFICATION (ISOLATES)\n\n${isolateSections.join('\n\n')}`
     );
   }
 
-  // Output format
-  sections.push(`\nOutput JSON:
+  // THE OUTPUT CONTRACT
+  sections.push(`\n## OUTPUT
+
+Produce valid JSON. Every claim above must receive an assessment. Your reasoning field is your ledger: use it to rigorously defend why a claim passed the clearance test and requires no gate, or to document exactly why clearance failed, necessitating a gate. 
+
+Only claims with a "vulnerable" verdict produce a gate.
 
 \`\`\`json
 {
   "assessments": [
     {
       "claimId": "claim_X",
-      "assumes": "What the claim silently requires about the user's world, or 'Nothing specific' if safe.",
+      "assumes": "The specific real-world condition this claim requires, or 'Universal' if none.",
       "verdict": "stands | vulnerable",
-      "reasoning": "Why it stands or what breaks if the assumption is false."
+      "reasoning": "For stands: the constructed user who safely follows all fork claims, or why the isolate's failure sentence cannot be completed. For vulnerable: the exact point of collapse or the completed sentence pair."
     }
   ],
   "gates": [
     {
       "id": "gate_1",
-      "question": "Do you [observable real-world condition]?",
-      "reasoning": "If no, this claim cannot be acted on because [explanation].",
-      "affectedClaims": ["claim_X"]
+      "question": "Do you [observable fact about the user's reality]?",
+      "prunesOn": "yes | no",
+      "reasoning": "If the user answers [yes/no], [these claims] collapse because [the constructed user becomes impossible / the silent prerequisite is absent].",
+      "affectedClaims": ["claim_X", claim_Y"]
     }
   ]
 }
 \`\`\`
 
-Every routed claim gets an assessment. Only claims with verdict "vulnerable" produce a gate. For conflict clusters, the gate question should distinguish the branches. For isolates, the gate question should test the silent precondition. If an isolate passes the misleadingness test, verdict is "stands" and there is no gate.`);
+**Output Rules:**
+- **Observable Facts:** Questions must measure physical reality ("Do you have...", "Is your system...", "Are you legally required to..."). Never interrogate preference ("Do you want...", "Do you prefer...").
+- **Mechanical Destruction:** The \`prunesOn\` answer must make the affected claims mechanically impossible to execute, not merely suboptimal.
+- **The Right to Pass:** If every claim in a fork stands, produce no gate for that fork. If an isolate stands, produce no gate for it. Documenting the absence of a gate is a valid, expected, and highly valued outcome.`);
 
   return sections.join('\n');
 }
@@ -304,7 +281,7 @@ Every routed claim gets an assessment. Only claims with verdict "vulnerable" pro
 
 export interface ClaimAssessment {
   claimId: string;
-  assumes: string;
+  assumes?: string;
   verdict: 'stands' | 'vulnerable';
   reasoning: string;
 }
@@ -346,6 +323,11 @@ function validateGate(gate: unknown, errors: string[]): boolean {
     errors.push(`Gate ${g.id}: affectedClaims must be a non-empty array`);
     return false;
   }
+  if (g.prunesOn !== 'yes' && g.prunesOn !== 'no') {
+    errors.push(`Gate ${g.id}: prunesOn is '${String(g.prunesOn ?? 'missing')}' — must be 'yes' or 'no'. Defaulting to 'no'.`);
+    // Non-fatal: record the error but allow the gate through with default.
+    // The parser will still coerce to 'no', but now the error log shows it happened.
+  }
   return true;
 }
 
@@ -359,13 +341,9 @@ function validateAssessment(assessment: unknown, errors: string[]): boolean {
     errors.push('Assessment missing claimId');
     return false;
   }
-  if (!a.assumes || typeof a.assumes !== 'string' || !a.assumes.trim()) {
-    errors.push(`Assessment ${a.claimId}: assumes is empty`);
-    return false;
-  }
   if (a.verdict !== 'stands' && a.verdict !== 'vulnerable') {
-    // Tolerate missing/wrong verdict — default to 'stands'
-    return true;
+    errors.push(`Assessment ${a.claimId}: verdict '${String(a.verdict)}' is not 'stands' or 'vulnerable' — dropping`);
+    return false;
   }
   return true;
 }
@@ -374,7 +352,6 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
   const errors: string[] = [];
   const text = String(rawText || '');
 
-  // Find JSON block — look for fenced block first, then bare object
   let jsonContent: string | null = null;
   let jsonStart = 0;
   let jsonEnd = text.length;
@@ -385,7 +362,6 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
     jsonStart = text.indexOf(fenceMatch[0]);
     jsonEnd = jsonStart + fenceMatch[0].length;
   } else {
-    // Fall back to bare object extraction
     const firstBrace = text.indexOf('{');
     const lastBrace = text.lastIndexOf('}');
     if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -398,7 +374,6 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
   const rationale = extractRationale(text, jsonStart, jsonEnd);
 
   if (!jsonContent) {
-    // No JSON at all — if there's rationale text, treat as valid zero-gate result
     if (rationale && rationale.length > 0) {
       return { gates: [], assessments: [], rationale, errors };
     }
@@ -414,7 +389,6 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
 
   const obj = parsed as Record<string, unknown>;
 
-  // Parse assessments
   const assessments: ClaimAssessment[] = [];
   if (Array.isArray(obj.assessments)) {
     for (const raw of obj.assessments) {
@@ -422,7 +396,7 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
         const a = raw as Record<string, unknown>;
         assessments.push({
           claimId: String(a.claimId).trim(),
-          assumes: String(a.assumes || '').trim(),
+          ...(a.assumes != null ? { assumes: String(a.assumes).trim() } : {}),
           verdict: a.verdict === 'vulnerable' ? 'vulnerable' : 'stands',
           reasoning: String(a.reasoning || '').trim(),
         });
@@ -430,7 +404,6 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
     }
   }
 
-  // Parse gates
   const gates: SurveyGate[] = [];
   if (Array.isArray(obj.gates)) {
     for (const raw of obj.gates) {
@@ -439,6 +412,7 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
         gates.push({
           id: String(r.id).trim(),
           question: String(r.question || '').trim(),
+          prunesOn: r.prunesOn === 'yes' ? 'yes' : 'no',
           reasoning: String(r.reasoning || '').trim(),
           affectedClaims: Array.isArray(r.affectedClaims)
             ? r.affectedClaims.map((c: unknown) => String(c).trim()).filter(Boolean)
@@ -448,9 +422,29 @@ export function parseSurveyMapperOutput(rawText: string): SurveyMapperParseResul
       }
     }
   } else if (!Array.isArray(obj.assessments)) {
-    // Neither assessments nor gates array found
     errors.push('Output missing both "assessments" and "gates" arrays');
   }
 
   return { gates, assessments, rationale, errors };
+}
+
+/**
+ * Post-parse coverage check: verifies every expected claim received an assessment.
+ * Returns claim IDs that the model skipped entirely.
+ * Call this at the integration site where expectedClaimIds are known.
+ */
+export function validateAssessmentCoverage(
+  expectedClaimIds: string[],
+  assessments: ClaimAssessment[]
+): { missing: string[]; errors: string[] } {
+  const assessed = new Set(assessments.map((a) => a.claimId));
+  const missing = expectedClaimIds.filter((id) => !assessed.has(id));
+  const errors: string[] = [];
+  if (missing.length > 0) {
+    errors.push(
+      `Survey mapper skipped ${missing.length} claim(s): ${missing.join(', ')}. ` +
+      `These claims have no assessment and will not be gated.`
+    );
+  }
+  return { missing, errors };
 }

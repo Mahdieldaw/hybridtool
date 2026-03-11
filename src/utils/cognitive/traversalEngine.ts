@@ -37,6 +37,7 @@ export interface ForcingPoint {
 
   // Type-specific
   affectedClaims?: string[];           // For conditionals
+  prunesOn?: 'yes' | 'no';            // For conditionals: which answer destroys affected claims
   options?: ConflictOption[];          // For conflicts
   blockedByGateIds?: string[];         // For conflicts (conditional gate IDs)
 
@@ -154,7 +155,8 @@ function normalizeConditionals(input: any): NormalizedConditional[] {
     const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
       ? c.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
       : undefined;
-    merge({ id, question, affectedClaims, sourceStatementIds } satisfies NormalizedConditional);
+    const prunesOn: 'yes' | 'no' | undefined = c?.prunesOn === 'yes' ? 'yes' : c?.prunesOn === 'no' ? 'no' : undefined;
+    merge({ id, question, affectedClaims, sourceStatementIds, ...(prunesOn ? { prunesOn } : {}) } satisfies NormalizedConditional);
   }
 
   for (const gate of gates) {
@@ -168,7 +170,8 @@ function normalizeConditionals(input: any): NormalizedConditional[] {
     const sourceStatementIds = Array.isArray(gate?.sourceStatementIds)
       ? gate.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
       : undefined;
-    merge({ id, question, affectedClaims, sourceStatementIds } satisfies NormalizedConditional);
+    const gatePrunesOn: 'yes' | 'no' | undefined = gate?.prunesOn === 'yes' ? 'yes' : gate?.prunesOn === 'no' ? 'no' : undefined;
+    merge({ id, question, affectedClaims, sourceStatementIds, ...(gatePrunesOn ? { prunesOn: gatePrunesOn } : {}) } satisfies NormalizedConditional);
   }
 
   const conditionals = Array.from(byId.values());
@@ -318,6 +321,7 @@ export function extractForcingPoints(
       ? (affectedSummary ? `Affects: ${affectedSummary}` : `Affects ${affectedClaims.length} claim(s)`)
       : rawQuestion;
 
+    const condPrunesOn = (cond as any)?.prunesOn === 'yes' ? 'yes' as const : (cond as any)?.prunesOn === 'no' ? 'no' as const : undefined;
     forcingPoints.push({
       id,
       type: 'conditional',
@@ -325,6 +329,7 @@ export function extractForcingPoints(
       question,
       condition,
       affectedClaims,
+      ...(condPrunesOn !== undefined ? { prunesOn: condPrunesOn } : {}),
       sourceStatementIds,
     });
   }
@@ -440,8 +445,9 @@ export function resolveConditional(
     userInput,
   });
 
-  // Apply pruning if not satisfied
-  if (!satisfied && forcingPoint.affectedClaims) {
+  // Apply pruning based on prunesOn: 'yes' prunes when satisfied, 'no' (default) prunes when !satisfied
+  const shouldPrune = forcingPoint.prunesOn === 'yes' ? satisfied : !satisfied;
+  if (shouldPrune && forcingPoint.affectedClaims) {
     const prunedIds: string[] = [];
 
     for (const claimId of forcingPoint.affectedClaims) {

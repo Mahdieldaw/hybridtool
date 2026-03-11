@@ -145,6 +145,10 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   bs_simTwin: 72,
   bs_bestSim: 72,
   bs_t_sim: 64,
+  bs_cascadeEcho: 72,
+  tm_twin: 64,
+  tm_sim: 72,
+  tm_twinId: 120,
   semanticDensity: 72,
   densityDelta: 76,
   densityLift: 80,
@@ -414,7 +418,8 @@ export function EvidenceTable({
         r.inMixed ||
         r.inDirectTopN ||
         r.bs_simTwin != null ||
-        r.bs_twin != null
+        r.bs_twin != null ||
+        r.tm_twin != null
       );
       if (!anyClaimSignals) return rows;
       return rows.filter(r =>
@@ -423,7 +428,8 @@ export function EvidenceTable({
         r.inMixed ||
         r.inDirectTopN ||
         r.bs_simTwin != null ||
-        r.bs_twin != null
+        r.bs_twin != null ||
+        r.tm_twin != null
       );
     }
     return rows;
@@ -472,7 +478,7 @@ export function EvidenceTable({
       return prevCol;
     });
     onSort?.(colId);
-  }, [onSort]);  const handleGroup = useCallback((colId: string | null) => {
+  }, [onSort]); const handleGroup = useCallback((colId: string | null) => {
     setLocalGroupBy(colId);
     onGroup?.(colId);
   }, [onGroup]);

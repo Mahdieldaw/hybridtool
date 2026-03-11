@@ -1465,6 +1465,8 @@ export const DecisionMapSheet = React.memo(() => {
                       highlightSourceParagraphs={instrumentState.highlightSourceParagraphs}
                       highlightInternalEdges={instrumentState.highlightInternalEdges}
                       highlightSpannedHulls={instrumentState.highlightSpannedHulls}
+                      blastSurface={(mappingArtifact as any)?.blastSurface || null}
+                      showRiskGlyphs={instrumentState.showRiskGlyphs}
                     />
                   </div>
                 </div>

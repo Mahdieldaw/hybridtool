@@ -10,6 +10,7 @@ import { surveyTestAtom } from "../../state/atoms";
 type SurveyGate = {
   id: string;
   question: string;
+  prunesOn?: 'yes' | 'no';
   reasoning: string;
   affectedClaims: string[];
   blastRadius: number;
@@ -73,7 +74,7 @@ function GateCard({ gate }: { gate: SurveyGate }) {
 
       {gate.affectedClaims.length > 0 && (
         <div>
-          <Label>Affected Claims (pruned on "no")</Label>
+          <Label>Affected Claims (pruned on "{gate.prunesOn ?? 'no'}")</Label>
           <Value>{gate.affectedClaims.join(", ")}</Value>
         </div>
       )}

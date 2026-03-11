@@ -117,6 +117,7 @@ export interface ConditionalPruner {
   id: string;
   question: string;
   affectedClaims: string[];
+  prunesOn?: 'yes' | 'no';
 }
 
 export type Determinant =
@@ -156,6 +157,7 @@ export interface MapperGate {
 export interface SurveyGate {
   id: string;
   question: string;
+  prunesOn: 'yes' | 'no';
   reasoning: string;
   affectedClaims: string[];
   /** Composite blast radius score from the filter, 0-1. */
@@ -830,6 +832,12 @@ export interface ClaimAbsorptionProfile {
 /** Layer C: Evidence mass — how much territory does this claim cover? */
 export interface BlastSurfaceLayerC {
   canonicalCount: number;       // total canonical statements from mixed provenance
+  /** Non-exclusive statements (Type 1) — protected by living parents on single prune */
+  nonExclusiveCount: number;
+  /** Exclusive non-orphan statements (Type 2) — removable on prune */
+  exclusiveNonOrphanCount: number;
+  /** Exclusive orphan statements (Type 3) — skeletonized on prune, never removed */
+  exclusiveOrphanCount: number;
 }
 
 export interface BlastSurfaceCascadeDetail {
@@ -864,6 +872,31 @@ export interface BlastSurfaceVernalMeta {
   structuralStep: number;
 }
 
+/** Risk vector: three orthogonal axes of pruning damage, derived from the canonical fate table. */
+export interface BlastSurfaceRiskVector {
+  /** Type 2 count: exclusive non-orphan statements. These are REMOVED on prune. Highest removal risk. */
+  deletionRisk: number;
+  /** Type 2 statement IDs for drilldown */
+  deletionStatementIds: string[];
+  /** Type 3 count: exclusive orphan statements. These are SKELETONIZED on prune. Irrecoverable but never deleted. */
+  degradationRisk: number;
+  /** Type 3 statement IDs for drilldown */
+  degradationStatementIds: string[];
+  /** Continuous protection-depth: sum of 1/(parentCount-1) over non-exclusive statements. Dimensionally compatible with statement counts. */
+  cascadeFragility: number;
+  /** Per-statement fragility contributions for drilldown */
+  cascadeFragilityDetails: Array<{ statementId: string; parentCount: number; fragility: number }>;
+  /** Distribution stats of per-statement fragility values */
+  cascadeFragilityMu: number;
+  cascadeFragilitySigma: number;
+  /** Derived: (Type2 + Type3) / canonicalCount. 0 = fully shared, 1 = fully isolated. */
+  isolation: number;
+  /** Derived: Type3 / (Type2 + Type3). 0 = all twinned, 1 = all orphaned. NaN-safe: 0 when no exclusives. */
+  orphanCharacter: number;
+  /** Simplex coordinates for visualization: [type1Frac, type2Frac, type3Frac] summing to 1.0 */
+  simplex: [number, number, number];
+}
+
 export interface BlastSurfaceClaimScore {
   claimId: string;
   claimLabel: string;
@@ -871,10 +904,28 @@ export interface BlastSurfaceClaimScore {
   layerC: BlastSurfaceLayerC;
   layerD: BlastSurfaceLayerD;
   vernal?: BlastSurfaceVernalScore;
+  riskVector?: BlastSurfaceRiskVector;
+}
+
+export interface StatementTwinResult {
+  twinStatementId: string;
+  similarity: number;
+}
+
+export interface StatementTwinMap {
+  twins: Record<string, StatementTwinResult | null>;
+  thresholds: Record<string, number>;
+  meta: {
+    totalStatements: number;
+    statementsWithTwins: number;
+    meanThreshold: number;
+    processingTimeMs: number;
+  };
 }
 
 export interface BlastSurfaceResult {
   scores: BlastSurfaceClaimScore[];
+  twinMap?: StatementTwinMap;
   meta: {
     totalCorpusStatements: number;
     processingTimeMs: number;
