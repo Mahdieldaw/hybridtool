@@ -277,6 +277,7 @@ function SortableTable<Row extends Record<string, any>>({
   columns: Array<{
     key: string;
     header: string;
+    title?: string;
     cell: (row: Row) => React.ReactNode;
     sortValue?: (row: Row) => string | number | null;
   }>;
@@ -327,8 +328,11 @@ function SortableTable<Row extends Record<string, any>>({
                 key={col.key}
                 className={clsx(
                   "text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted select-none",
-                  col.sortValue && "cursor-pointer hover:text-text-primary transition-colors"
+                  col.sortValue && "cursor-pointer hover:text-text-primary transition-colors",
+                  !col.sortValue && col.title && "cursor-help",
+                  col.title && "underline decoration-dotted decoration-white/30"
                 )}
+                title={col.title}
                 onClick={() => col.sortValue && handleColClick(col.key)}
               >
                 {col.header}
@@ -1339,6 +1343,8 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     cascadeExposure: number | null;
     destroyedQueryMean: number | null;
     queryTilt: number | null;
+    canonicalCount: number | null;
+    riskTotal: number | null;
     deletionRisk: number | null;
     degradationRisk: number | null;
     cascadeFragility: number | null;
@@ -1350,6 +1356,9 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     scores.map((s: any) => {
       const v = s?.vernal || {};
       const rv = s?.riskVector;
+      const lc = s?.layerC;
+      const del = typeof rv?.deletionRisk === "number" ? rv.deletionRisk : null;
+      const deg = typeof rv?.degradationRisk === "number" ? rv.degradationRisk : null;
       return {
         id: s?.claimId || "",
         label: s?.claimLabel || "",
@@ -1359,8 +1368,10 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
         cascadeExposure: typeof v.cascadeExposure === "number" && Number.isFinite(v.cascadeExposure) ? v.cascadeExposure : null,
         destroyedQueryMean: typeof v.destroyedQueryMean === "number" && Number.isFinite(v.destroyedQueryMean) ? v.destroyedQueryMean : null,
         queryTilt: typeof v.queryTilt === "number" && Number.isFinite(v.queryTilt) ? v.queryTilt : null,
-        deletionRisk: typeof rv?.deletionRisk === "number" ? rv.deletionRisk : null,
-        degradationRisk: typeof rv?.degradationRisk === "number" ? rv.degradationRisk : null,
+        canonicalCount: typeof lc?.canonicalCount === "number" ? lc.canonicalCount : null,
+        riskTotal: del !== null && deg !== null ? del + deg : null,
+        deletionRisk: del,
+        degradationRisk: deg,
         cascadeFragility: typeof rv?.cascadeFragility === "number" ? rv.cascadeFragility : null,
         isolation: typeof rv?.isolation === "number" ? rv.isolation : null,
         orphanCharacter: typeof rv?.orphanCharacter === "number" ? rv.orphanCharacter : null,
@@ -1424,17 +1435,19 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
         <SortableTable
           columns={[
             { key: "label", header: "Claim", cell: (r) => <span className="text-[10px] truncate max-w-[120px] inline-block">{r.label || r.id}</span> },
-            { key: "compositeScore", header: "BR", sortValue: (r) => r.compositeScore, cell: (r) => <span className="font-mono text-text-secondary">{fmt(r.compositeScore, 3)}</span> },
-            { key: "structuralMass", header: "M", sortValue: (r) => r.structuralMass, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.structuralMass, 3)}</span> },
-            { key: "vulnerableCount", header: "V", sortValue: (r) => r.vulnerableCount, cell: (r) => <span className={clsx("font-mono", r.vulnerableCount > 0 ? "text-amber-400" : "text-emerald-400")}>{r.vulnerableCount}</span> },
-            { key: "cascadeExposure", header: "D", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
-            { key: "destroyedQueryMean", header: "Q", sortValue: (r) => r.destroyedQueryMean, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.destroyedQueryMean, 3)}</span> },
-            { key: "queryTilt", header: "Tilt", sortValue: (r) => r.queryTilt, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryTilt, 3)}</span> },
-            { key: "deletionRisk", header: "Del", sortValue: (r) => r.deletionRisk, cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.deletionRisk ?? "–"}</span> },
-            { key: "degradationRisk", header: "Deg", sortValue: (r) => r.degradationRisk, cell: (r) => <span className="font-mono text-[10px] text-amber-400">{r.degradationRisk ?? "–"}</span> },
-            { key: "cascadeFragility", header: "Frag", sortValue: (r) => r.cascadeFragility, cell: (r) => <span className="font-mono text-[10px] text-blue-400">{r.cascadeFragility !== null ? r.cascadeFragility.toFixed(1) : "–"}</span> },
-            { key: "isolation", header: "Iso", sortValue: (r) => r.isolation, cell: (r) => <span className="font-mono text-[10px]">{r.isolation !== null ? r.isolation.toFixed(2) : "–"}</span> },
-            { key: "orphanCharacter", header: "OC", sortValue: (r) => r.orphanCharacter, cell: (r) => <span className="font-mono text-[10px]">{r.orphanCharacter !== null ? r.orphanCharacter.toFixed(2) : "–"}</span> },
+            { key: "compositeScore", header: "BR", title: "Legacy blast-radius composite: structural mass + cascade exposure + query tilt. Drives current question selection.", sortValue: (r) => r.compositeScore, cell: (r) => <span className="font-mono text-text-secondary">{fmt(r.compositeScore, 3)}</span> },
+            { key: "structuralMass", header: "M", title: "Structural mass: exclusive statements weighted by cascade depth (Layer D).", sortValue: (r) => r.structuralMass, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.structuralMass, 3)}</span> },
+            { key: "vulnerableCount", header: "V", title: "Vulnerable count: number of other claims that lose canonical coverage if this claim is pruned.", sortValue: (r) => r.vulnerableCount, cell: (r) => <span className={clsx("font-mono", r.vulnerableCount > 0 ? "text-amber-400" : "text-emerald-400")}>{r.vulnerableCount}</span> },
+            { key: "cascadeExposure", header: "D", title: "Cascade exposure: depth-weighted structural mass (Layer D echo).", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
+            { key: "destroyedQueryMean", header: "Q", title: "Destroyed query mean: avg query similarity of this claim's exclusively-owned statements.", sortValue: (r) => r.destroyedQueryMean, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.destroyedQueryMean, 3)}</span> },
+            { key: "queryTilt", header: "Tilt", title: "Query tilt: D × Q — how much query-relevant evidence is exclusively owned by this claim.", sortValue: (r) => r.queryTilt, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryTilt, 3)}</span> },
+            { key: "canonicalCount", header: "K", title: "Canonical count (K): total statements owned by this claim. Denominator for Del, Deg, Iso.", sortValue: (r) => r.canonicalCount, cell: (r) => <span className="font-mono text-text-muted">{r.canonicalCount ?? "–"}</span> },
+            { key: "riskTotal", header: "RΣ", title: "Risk total (Del + Deg): exclusive statement count — statements that will be removed or skeletonized on prune. Direct risk-vector analog to BR.", sortValue: (r) => r.riskTotal, cell: (r) => <span className={clsx("font-mono text-[10px] font-semibold", r.riskTotal != null && r.riskTotal > 0 ? "text-rose-400" : "text-text-muted")}>{r.riskTotal ?? "–"}</span> },
+            { key: "deletionRisk", header: "Del", title: "Deletion risk (Type 2): exclusive non-orphan statements. These will be fully REMOVED from the corpus on prune — the highest-severity loss.", sortValue: (r) => r.deletionRisk, cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.deletionRisk ?? "–"}</span> },
+            { key: "degradationRisk", header: "Deg", title: "Degradation risk (Type 3): exclusive orphan statements. These will be SKELETONIZED — entities survive but relational framing is stripped.", sortValue: (r) => r.degradationRisk, cell: (r) => <span className="font-mono text-[10px] text-amber-400">{r.degradationRisk ?? "–"}</span> },
+            { key: "cascadeFragility", header: "Frag", title: "Cascade fragility: Σ 1/(parentCount−1) over shared statements. Measures how thin protection becomes on prune. Parent=2 contributes 1.0, parent=10 contributes 0.1.", sortValue: (r) => r.cascadeFragility, cell: (r) => <span className="font-mono text-[10px] text-blue-400">{r.cascadeFragility !== null ? r.cascadeFragility.toFixed(1) : "–"}</span> },
+            { key: "isolation", header: "Iso", title: "Isolation: (Del+Deg) / K — fraction of canonical evidence exclusively owned by this claim. 0 = fully shared (safe), 1 = fully isolated (maximum exposure).", sortValue: (r) => r.isolation, cell: (r) => <span className="font-mono text-[10px]">{r.isolation !== null ? r.isolation.toFixed(2) : "–"}</span> },
+            { key: "orphanCharacter", header: "OC", title: "Orphan character: Deg / (Del+Deg) — within exclusive statements, the fraction that are orphans (no twin anywhere). 0 = all twinned, 1 = all orphaned.", sortValue: (r) => r.orphanCharacter, cell: (r) => <span className="font-mono text-[10px]">{r.orphanCharacter !== null ? r.orphanCharacter.toFixed(2) : "–"}</span> },
           ]}
           rows={rows}
           defaultSortKey="compositeScore"

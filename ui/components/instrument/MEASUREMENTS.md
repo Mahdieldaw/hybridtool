@@ -273,14 +273,16 @@ Important artifact paths used by these computations:
 
 ---
 
-## Carrier Detection (L2)
+## Statement Fates (L2)
+
+> **Note**: The `CarrierDetector.ts` module has been deleted. Triage now runs as pure set operations against the blast surface's pre-computed twin map — no embedding computation at traversal time. The fate categories below remain valid; the "supporting" fate (previously populated by carrier detection) is now populated by twin-map lookup.
 
 Statement fate triage. For each statement, tracks whether it ended up as primary evidence, supporting evidence, or fell through to unaddressed/orphan/noise. Source: `artifact.completeness.statementFates`.
 
 | Fate | Meaning |
 |---|---|
 | **primary** | Statement is directly cited as evidence for at least one claim. |
-| **supporting** | Statement is indirectly associated (e.g. carrier relationship). |
+| **supporting** | Statement is stranded but has a surviving twin in the twin map — the idea carries forward, original text does not. |
 | **unaddressed** | Statement passed relevance gating but wasn't placed. |
 | **orphan** | Statement had no claim relationship at all. |
 | **noise** | Statement was explicitly rejected. |
@@ -307,7 +309,9 @@ Ranks models by their geometric irreplaceability — how much unique evidence ea
 
 ---
 
-## Blast Radius (legacy, optional)
+## Blast Radius (legacy — not a runtime gate)
+
+> **Superseded**: This composite score no longer gates which claims reach the survey mapper. Structural routing (conflict clusters, isolate candidates, passthrough) replaced it. The blast *surface* (`artifact.blastSurface`) is the current damage-assessment layer. If `artifact.blastRadiusFilter` is present in an artifact, treat it as historical diagnostics only.
 
 Historical composite claim importance score that used to gate which claims became survey question candidates. The current pipeline does not use this as a runtime gate; if `artifact.blastRadiusFilter` is present, treat it as legacy diagnostics only.
 
@@ -571,8 +575,8 @@ What the UI shows (Carrier Detection card)
   - Sole-source off-topic (F4): `soleSource`, `queryRelevanceRaw`, `wouldPenalize` where threshold is distribution-derived (`μ - σ` across all claims)
   - Query tilt banding (F2): `damageBand`, `queryTiltReorder` (rank change within band if sorted by query relevance)
 - **Survey Gate & Ceiling (G)**: `gate` + `ceiling` summaries:
-  - `gate.wouldSkip` and `gate.overrideSkip` are informational only (no skipping occurs)
-  - `ceiling.theoreticalCeiling` is informational only; `ceiling.actualClaimsSent` always equals total claim count
+  - `gate.wouldSkip` and `gate.overrideSkip` are informational only — actual routing is handled by structural routing (conflict clusters / isolate candidates / passthrough), not this instrumentation layer
+  - `ceiling.theoreticalCeiling` is informational only; `ceiling.actualClaimsSent` reflects the structurally-routed subset, not all claims
 
 ### Skeletonization
 
@@ -597,19 +601,20 @@ The Diagnostics tab can trigger a regen run:
 
 ## Field-Level Thresholds Quick Reference
 
-| Value | Used in | Meaning |
-|---|---|---|
-| 0.45 | Provenance paragraph anchor | Paragraph-to-claim similarity needed to enter the candidate pool (old system) |
-| 0.55 | Statement refinement / carrier min | Statement-to-claim similarity minimum; also skeletonization elbow fallback |
-| 0.60 | Carrier detection | Source-to-surviving-claim similarity needed to classify as "carried" |
-| 0.72 | Clustering merge default | Default threshold for merging close paragraphs into the same cluster |
-| 0.78 | Soft threshold ceiling | Upper clamp for the dynamically computed soft threshold |
-| 0.85 | Paraphrase detection | Near-paraphrase gate |
-| 0.92 | Merge alert | Claim-to-claim similarity threshold for near-duplicate alert |
-| μ+σ | §1 statement allocation threshold | Per-statement dynamic threshold for cross-claim competition (or just μ when N=2 claims) |
-| T_v | Basin inversion valley | Dynamic threshold from topology; separates "soft" from "strong" similarities |
+> **Note**: Static thresholds below marked ~~struck~~ are from the old paragraph-based pipeline and are no longer active runtime values. The §1 competitive allocator replaced them with distribution-relative thresholds. They remain here for reading older artifacts.
 
-The §1 competitive allocation design goal is to eliminate most of the static values above. After Phase 3, only T_v and a small number of clearly-labeled policy clamps (if any) should remain.
+| Value | Used in | Meaning | Status |
+|---|---|---|---|
+| ~~0.45~~ | ~~Provenance paragraph anchor~~ | ~~Paragraph-to-claim similarity needed to enter the candidate pool (old system)~~ | Legacy — §0 only |
+| ~~0.55~~ | ~~Statement refinement / carrier min~~ | ~~Statement-to-claim similarity minimum; also skeletonization elbow fallback~~ | Legacy |
+| ~~0.60~~ | ~~Carrier detection~~ | ~~Source-to-surviving-claim similarity needed to classify as "carried"~~ | Deleted with CarrierDetector |
+| ~~0.72~~ | ~~Clustering merge default~~ | ~~Default threshold for merging close paragraphs into the same cluster~~ | Legacy |
+| ~~0.78~~ | ~~Soft threshold ceiling~~ | ~~Upper clamp for the dynamically computed soft threshold~~ | Legacy |
+| 0.85 | Paraphrase detection / twin map | Near-paraphrase gate (cosine); paired with Jaccard > 0.5 as secondary gate | Active |
+| 0.92 | Merge alert | Claim-to-claim similarity threshold for near-duplicate alert | Active |
+| μ+σ | §1 statement allocation threshold | Per-statement dynamic threshold for cross-claim competition (or just μ when N=2 claims) | Active — canonical |
+| μ+2σ | Twin map / blast surface Layer B | Per-statement adaptive threshold for twin detection across claim boundaries | Active — canonical |
+| T_v | Basin inversion valley | Dynamic threshold from topology; separates "soft" from "strong" similarities | Active |
 
 ---
 

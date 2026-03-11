@@ -23,6 +23,7 @@ export function ToggleBar({ state, actions, hasBasinData }: ToggleBarProps) {
       <div className="flex items-center gap-3 text-[11px] text-text-muted">
         <Toggle label="Mutual" checked={state.showMutualEdges} onChange={actions.toggleMutualEdges} />
         <Toggle label="Claims" checked={state.showClaimDiamonds} onChange={actions.toggleClaimDiamonds} />
+        <Toggle label="Risk Glyphs" checked={state.showRiskGlyphs} onChange={actions.toggleRiskGlyphs} disabled={!state.showClaimDiamonds} />
         <Toggle label="Mapper Edges" checked={state.showMapperEdges} onChange={actions.toggleMapperEdges} />
         <Toggle label="Hulls" checked={state.showRegionHulls} onChange={actions.toggleRegionHulls} />
         <Toggle label="Basins" checked={state.showBasinRects} onChange={actions.toggleBasinRects} disabled={!hasBasinData} />

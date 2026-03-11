@@ -1199,6 +1199,7 @@ export const DecisionMapSheet = React.memo(() => {
   const claimCentroids = useClaimCentroids(
     (mappingArtifact as any)?.semantic?.claims || null,
     (mappingArtifact as any)?.geometry?.substrate || null,
+    (mappingArtifact as any)?.mixedProvenance || null,
   );
 
   const semanticEdges = useMemo(() =>

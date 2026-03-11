@@ -13,18 +13,35 @@ export interface ClaimCentroid {
   provenanceBulk: number | null;
   role: string;
   type: string;
+  /** Fraction of each paragraph's statements that are canonical for this claim (0..1) */
+  paraCanonicalFractions: Map<string, number>;
 }
 
+/**
+ * Compute claim diamond positions and source paragraph sets.
+ *
+ * When `mixedProvenance` is provided, uses `canonicalStatementIds` for paragraph
+ * resolution and weights each paragraph by the fraction of its statements that
+ * are canonical for the claim (canonicalCount / totalCount). This gives paragraphs
+ * where only a sliver of content survived less positional pull than paragraphs
+ * fully owned by the claim.
+ *
+ * Falls back to equal-weight averaging over `claim.sourceStatementIds` when
+ * mixed provenance is unavailable.
+ */
 export function useClaimCentroids(
   claims: any[] | null | undefined,
   substrate: PipelineSubstrateGraph | null | undefined,
+  mixedProvenance?: any | null,
 ): ClaimCentroid[] {
   return useMemo(() => {
     if (!claims || !substrate?.nodes?.length) return [];
 
-    // Build statementId → paragraphId + position from substrate nodes
+    // Build statementId → paragraphId lookup + paragraph positions
     const stmtToPara = new Map<string, string>();
     const paraPosition = new Map<string, { x: number; y: number }>();
+    // Total statement count per paragraph (for weighting)
+    const paraTotalStmts = new Map<string, number>();
 
     for (const node of substrate.nodes) {
       const pid = String(node?.paragraphId ?? "").trim();
@@ -34,42 +51,66 @@ export function useClaimCentroids(
       if (Number.isFinite(x) && Number.isFinite(y)) {
         paraPosition.set(pid, { x, y });
       }
-      for (const sid of node?.statementIds ?? []) {
+      const sids: string[] = node?.statementIds ?? [];
+      paraTotalStmts.set(pid, sids.length);
+      for (const sid of sids) {
         if (sid) stmtToPara.set(String(sid), pid);
       }
     }
 
+    const perClaim = mixedProvenance?.perClaim;
+
     const out: ClaimCentroid[] = [];
     for (const claim of claims) {
-      const stmtIds: string[] = Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : [];
-      const paraIds = stmtIds
-        .map((sid: string) => stmtToPara.get(String(sid)))
-        .filter((pid): pid is string => !!pid);
-      const unique = Array.from(new Set(paraIds));
+      const claimId = String(claim.id ?? "");
 
-      let sumX = 0, sumY = 0, count = 0;
+      // Prefer canonical statement IDs from mixed provenance when available
+      const mpEntry = perClaim?.[claimId];
+      const canonicalIds: string[] | null =
+        Array.isArray(mpEntry?.canonicalStatementIds) && mpEntry.canonicalStatementIds.length > 0
+          ? mpEntry.canonicalStatementIds
+          : null;
+      const stmtIds: string[] = canonicalIds
+        ?? (Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : []);
+
+      // Resolve statements → paragraphs, counting canonical hits per paragraph
+      const paraCanonicalCount = new Map<string, number>();
+      for (const sid of stmtIds) {
+        const pid = stmtToPara.get(String(sid));
+        if (pid) paraCanonicalCount.set(pid, (paraCanonicalCount.get(pid) ?? 0) + 1);
+      }
+      const unique = Array.from(paraCanonicalCount.keys());
+
+      // Weighted centroid: weight = canonicalCount / totalCount per paragraph
+      const paraCanonicalFractions = new Map<string, number>();
+      let sumX = 0, sumY = 0, totalWeight = 0;
       for (const pid of unique) {
         const pos = paraPosition.get(pid);
         if (!pos) continue;
-        sumX += pos.x;
-        sumY += pos.y;
-        count++;
+        const total = paraTotalStmts.get(pid) ?? 1;
+        const canonical = paraCanonicalCount.get(pid) ?? 0;
+        const w = canonical / Math.max(total, 1);
+        paraCanonicalFractions.set(pid, w);
+        sumX += pos.x * w;
+        sumY += pos.y * w;
+        totalWeight += w;
       }
 
       out.push({
-        claimId: String(claim.id ?? ""),
+        claimId,
         label: String(claim.label ?? claim.id ?? ""),
-        x: count > 0 ? sumX / count : 0,
-        y: count > 0 ? sumY / count : 0,
-        hasPosition: count > 0,
+        x: totalWeight > 0 ? sumX / totalWeight : 0,
+        y: totalWeight > 0 ? sumY / totalWeight : 0,
+        hasPosition: totalWeight > 0,
         sourceParagraphIds: unique,
         sourceStatementIds: stmtIds.map(String),
         supporters: Array.isArray(claim.supporters) ? claim.supporters : [],
         provenanceBulk: typeof claim.provenanceBulk === "number" ? claim.provenanceBulk : null,
         role: String(claim.role ?? ""),
         type: String(claim.type ?? ""),
+        paraCanonicalFractions,
       });
     }
     return out;
-  }, [claims, substrate]);
+  }, [claims, substrate, mixedProvenance]);
 }

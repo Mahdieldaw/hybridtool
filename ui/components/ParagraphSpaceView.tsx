@@ -317,6 +317,31 @@ export function ParagraphSpaceView({
     return found ? new Set(found.sourceParagraphIds) : null;
   }, [selectedClaimId, claimCentroids]);
 
+  // Canonical fractions per paragraph for the selected claim
+  const selectedClaimCanonicalFractions = useMemo(() => {
+    if (!selectedClaimId || !claimCentroids) return null;
+    const found = claimCentroids.find(c => c.claimId === selectedClaimId);
+    return found?.paraCanonicalFractions ?? null;
+  }, [selectedClaimId, claimCentroids]);
+
+  // Clip geometry for source nodes (used for measuring-cylinder partial fill)
+  const sourceNodeClipMap = useMemo(() => {
+    const m = new Map<string, { x: number; y: number; r: number; fraction: number }>();
+    if (!selectedClaimSourceIds || !selectedClaimCanonicalFractions) return m;
+    for (const n of nodes) {
+      const id = String(n?.paragraphId ?? "").trim();
+      if (!id || !selectedClaimSourceIds.has(id)) continue;
+      const x = toX(Number(n.x));
+      const y = toY(Number(n.y));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const degree = typeof n.mutualDegree === "number" ? n.mutualDegree : 0;
+      const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7)) + 1; // +1 for isSource
+      const fraction = Math.max(0, Math.min(1, selectedClaimCanonicalFractions.get(id) ?? 1));
+      m.set(id, { x, y, r, fraction });
+    }
+    return m;
+  }, [selectedClaimSourceIds, selectedClaimCanonicalFractions, nodes, toX, toY]);
+
   // Compute risk vectors from blast surface data
   const riskVectorMap = useMemo(() => {
     const m = new Map<string, RiskVector>();
@@ -582,6 +607,15 @@ export function ParagraphSpaceView({
           preserveAspectRatio="xMidYMid meet"
           onClick={handleSvgClick}
         >
+          {/* ClipPaths for measuring-cylinder partial fill on source nodes */}
+          <defs>
+            {Array.from(sourceNodeClipMap.entries()).map(([id, d]) => (
+              <clipPath key={id} id={`cpara-${id.replace(/[^a-zA-Z0-9-]/g, '_')}`}>
+                <circle cx={d.x} cy={d.y} r={d.r} />
+              </clipPath>
+            ))}
+          </defs>
+
           {/* Background rect for click-to-deselect */}
           <rect x={0} y={0} width={W} height={H} fill="transparent" />
 
@@ -714,16 +748,50 @@ export function ParagraphSpaceView({
               ? `${id} · click to inspect\n${paraData!._fullParagraph!.slice(0, 120)}${paraData!._fullParagraph!.length > 120 ? "…" : ""}`
               : `${id}${providerAbbrev ? ` · ${providerAbbrev}` : ""}${basinId != null ? ` · basin ${basinId}` : ""}`;
 
+            // Measuring-cylinder partial fill for source nodes
+            if (isSource && !isParaSelected) {
+              const cd = sourceNodeClipMap.get(id);
+              const nr = cd?.r ?? (r + 1);
+              const fraction = cd?.fraction ?? 1;
+              const clipId = `cpara-${id.replace(/[^a-zA-Z0-9-]/g, '_')}`;
+              const fillTop = y + nr - fraction * 2 * nr;
+              return (
+                <g
+                  key={id}
+                  opacity={nodeOpacity}
+                  onMouseEnter={() => setHoveredParagraphId(id)}
+                  onMouseLeave={() => setHoveredParagraphId(null)}
+                  onClick={hasText ? (e) => { e.stopPropagation(); setSelectedParagraphId(isParaSelected ? null : id); } : undefined}
+                  style={{ cursor: hasText ? "pointer" : "default" }}
+                >
+                  {/* Empty shell */}
+                  <circle cx={x} cy={y} r={nr} fill="rgba(148,163,184,0.08)" stroke="rgba(255,255,255,0.55)" strokeWidth={1.5} />
+                  {/* Filled portion from bottom, clipped to circle */}
+                  {fraction > 0 && (
+                    <rect
+                      x={x - nr} y={fillTop}
+                      width={2 * nr} height={fraction * 2 * nr}
+                      fill={fill}
+                      clipPath={`url(#${clipId})`}
+                    />
+                  )}
+                  {/* Hover ring */}
+                  {isHovered && <circle cx={x} cy={y} r={nr} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth={1} />}
+                  <title>{titleText}</title>
+                </g>
+              );
+            }
+
             return (
               <circle
                 key={id}
                 cx={x}
                 cy={y}
-                r={isSource ? r + 1 : isParaSelected ? r + 1.5 : r}
+                r={isParaSelected ? r + 1.5 : r}
                 fill={isParaSelected ? "rgba(251,191,36,0.9)" : fill}
                 opacity={nodeOpacity}
-                stroke={isParaSelected ? "rgba(255,255,255,0.9)" : isSource ? "rgba(255,255,255,0.7)" : isHovered ? "rgba(255,255,255,0.4)" : "none"}
-                strokeWidth={isParaSelected ? 2 : isSource ? 2 : 1}
+                stroke={isParaSelected ? "rgba(255,255,255,0.9)" : isHovered ? "rgba(255,255,255,0.4)" : "none"}
+                strokeWidth={isParaSelected ? 2 : 1}
                 onMouseEnter={() => setHoveredParagraphId(id)}
                 onMouseLeave={() => setHoveredParagraphId(null)}
                 onClick={hasText ? (e) => { e.stopPropagation(); setSelectedParagraphId(isParaSelected ? null : id); } : undefined}

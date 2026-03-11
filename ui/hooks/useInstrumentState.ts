@@ -32,6 +32,7 @@ export interface InstrumentState {
   highlightSourceParagraphs: boolean;
   highlightInternalEdges: boolean;
   highlightSpannedHulls: boolean;
+  showRiskGlyphs: boolean;
 }
 
 export interface InstrumentActions {
@@ -50,6 +51,7 @@ export interface InstrumentActions {
   toggleHighlightSourceParagraphs: () => void;
   toggleHighlightInternalEdges: () => void;
   toggleHighlightSpannedHulls: () => void;
+  toggleRiskGlyphs: () => void;
   reset: () => void;
 }
 
@@ -69,6 +71,7 @@ const DEFAULTS: InstrumentState = {
   highlightSourceParagraphs: true,
   highlightInternalEdges: true,
   highlightSpannedHulls: true,
+  showRiskGlyphs: false,
 };
 
 export function useInstrumentState(): [InstrumentState, InstrumentActions] {
@@ -87,6 +90,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
   const [highlightSourceParagraphs, setHighlightSourceParagraphs] = useState(DEFAULTS.highlightSourceParagraphs);
   const [highlightInternalEdges, setHighlightInternalEdges] = useState(DEFAULTS.highlightInternalEdges);
   const [highlightSpannedHulls, setHighlightSpannedHulls] = useState(DEFAULTS.highlightSpannedHulls);
+  const [showRiskGlyphs, setShowRiskGlyphs] = useState(DEFAULTS.showRiskGlyphs);
 
   const selectClaim = useCallback((claimId: string | null, label?: string) => {
     setSelectedClaimId(claimId);
@@ -117,6 +121,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     setHighlightSourceParagraphs(DEFAULTS.highlightSourceParagraphs);
     setHighlightInternalEdges(DEFAULTS.highlightInternalEdges);
     setHighlightSpannedHulls(DEFAULTS.highlightSpannedHulls);
+    setShowRiskGlyphs(DEFAULTS.showRiskGlyphs);
   }, []);
 
   const state = useMemo<InstrumentState>(() => ({
@@ -135,12 +140,14 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     highlightSourceParagraphs,
     highlightInternalEdges,
     highlightSpannedHulls,
+    showRiskGlyphs,
   }), [
     rightPanelMode, selectedView, selectedClaimId, selectedEntity,
     expandedRefSections, scope,
     showMutualEdges, showClaimDiamonds, showMapperEdges, showRegionHulls, showBasinRects,
     colorParagraphsByModel,
     highlightSourceParagraphs, highlightInternalEdges, highlightSpannedHulls,
+    showRiskGlyphs,
   ]);
 
   const actions = useMemo<InstrumentActions>(() => ({
@@ -159,6 +166,7 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     toggleHighlightSourceParagraphs: () => setHighlightSourceParagraphs(v => !v),
     toggleHighlightInternalEdges: () => setHighlightInternalEdges(v => !v),
     toggleHighlightSpannedHulls: () => setHighlightSpannedHulls(v => !v),
+    toggleRiskGlyphs: () => setShowRiskGlyphs(v => !v),
     reset,
   }), [selectClaim, toggleRefSection, reset]);
 
