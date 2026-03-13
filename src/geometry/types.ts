@@ -75,6 +75,8 @@ export interface NodeLocalStats {
 
     // Mutual rank degree (from mutual recognition graph)
     mutualRankDegree?: number;
+    // topographic basin id (from density inversion)
+    basinId?: number;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

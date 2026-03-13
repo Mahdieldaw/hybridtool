@@ -20,6 +20,7 @@ export function computeNodeStats(
     top1Sims: Map<string, number>,
     topKSims: Map<string, number[]>,
     mutualRankGraph?: MutualRankGraph,
+    basinInversionResult?: any, // Topographic data
 ): NodeLocalStats[] {
     const nodes: NodeLocalStats[] = [];
 
@@ -42,15 +43,8 @@ export function computeNodeStats(
         const isolationScore = quantize(1 - t1);
 
         // Mutual neighborhood patch: use mutual recognition (μ+σ) neighbors when available
-        let patch: string[];
         const mrStats = mutualRankGraph?.nodeStats.get(id);
-        if (mrStats) {
-            patch = mrStats.mutualRankNeighborhood; // Already [self + neighbors], sorted
-        } else {
-            // Fallback to mutual kNN neighbors
-            const mutualNeighbors = mutual.adjacency.get(id)?.map(e => e.target) ?? [];
-            patch = [id, ...mutualNeighbors].sort((a, b) => a.localeCompare(b));
-        }
+        const patch = mrStats?.mutualRankNeighborhood ?? [id];
 
         const mutualRankDegree = mrStats?.mutualRankDegree;
 
@@ -71,6 +65,7 @@ export function computeNodeStats(
             isolationScore,
             mutualNeighborhoodPatch: patch,
             mutualRankDegree,
+            basinId: basinInversionResult?.basinByNodeId?.[id] ?? undefined,
         });
     }
 

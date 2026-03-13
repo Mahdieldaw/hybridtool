@@ -65,7 +65,7 @@ const DEFAULTS: InstrumentState = {
   showMutualEdges: true,
   showClaimDiamonds: true,
   showMapperEdges: false,
-  showRegionHulls: false,
+  showRegionHulls: true,
   showBasinRects: false,
   colorParagraphsByModel: true,
   highlightSourceParagraphs: true,

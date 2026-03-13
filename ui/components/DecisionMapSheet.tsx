@@ -21,6 +21,7 @@ import {
   PruningDecisionsCard,
   ModelOrderingCard,
   AlignmentCard,
+  RegionsCard,
 } from "./instrument/LayerCards";
 import { useInstrumentState } from "../hooks/useInstrumentState";
 import type { PipelineLayer } from "../hooks/useInstrumentState";
@@ -744,6 +745,10 @@ export const DecisionMapSheet = React.memo(() => {
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
   const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState(false);
+  const [verticalSplitPct, setVerticalSplitPct] = useState(60);
+  const [isDraggingVerticalSplit, setIsDraggingVerticalSplit] = useState(false);
+  const [isCardsCollapsed, setIsCardsCollapsed] = useState(false);
+  const verticalSplitContainerRef = useRef<HTMLDivElement>(null);
   const [tableMode, setTableMode] = useState<'statement' | 'paragraph'>('statement');
 
   // Reset view when switching table mode
@@ -772,6 +777,8 @@ export const DecisionMapSheet = React.memo(() => {
       setIsTableCollapsed(false);
       setIsRightCollapsed(false);
       setIsClaimPanelCollapsed(false);
+      setIsCardsCollapsed(false);
+      setVerticalSplitPct(60);
     }
   }, [openState?.turnId]);
 
@@ -821,6 +828,43 @@ export const DecisionMapSheet = React.memo(() => {
       setSplitRatio(Math.max(20, Math.min(80, pct)));
     }
   }, [isDraggingSplit]);
+
+  // ── Vertical split (table / cards) drag handlers ──
+  const handleVerticalSplitPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingVerticalSplit(true);
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    (e.target as Element).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleVerticalSplitPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingVerticalSplit || !verticalSplitContainerRef.current) return;
+    e.preventDefault();
+    const rect = verticalSplitContainerRef.current.getBoundingClientRect();
+    const pct = ((e.clientY - rect.top) / rect.height) * 100;
+    setVerticalSplitPct(Math.max(15, Math.min(90, pct)));
+  }, [isDraggingVerticalSplit]);
+
+  const handleVerticalSplitPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingVerticalSplit) return;
+    e.preventDefault();
+    setIsDraggingVerticalSplit(false);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    (e.target as Element).releasePointerCapture(e.pointerId);
+    if (verticalSplitContainerRef.current) {
+      const rect = verticalSplitContainerRef.current.getBoundingClientRect();
+      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      if (pct > 85) {
+        setIsCardsCollapsed(true);
+        setVerticalSplitPct(60);
+        return;
+      }
+      setVerticalSplitPct(Math.max(20, Math.min(80, pct)));
+    }
+  }, [isDraggingVerticalSplit]);
 
   const allColumns = useMemo(
     () => tableMode === 'paragraph'
@@ -958,9 +1002,7 @@ export const DecisionMapSheet = React.memo(() => {
   // ── Evidence rows (hook) ───────────────────────────────────────
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const evidenceRows = useEvidenceRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const paragraphRows = useParagraphRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
-  const activeRows = tableMode === 'paragraph' ? paragraphRows : evidenceRows;
 
   const viewArtifactRequestRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1184,6 +1226,25 @@ export const DecisionMapSheet = React.memo(() => {
     const regionizationObj = regionization as Record<string, unknown>;
     return normalize(regionizationObj.regions);
   }, [mappingArtifact]);
+
+  const nodeToRegionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!preSemanticRegions) return map;
+    for (const r of preSemanticRegions) {
+      for (const nid of (r.nodeIds || [])) {
+        map.set(String(nid), r.id);
+      }
+    }
+    return map;
+  }, [preSemanticRegions]);
+
+  const activeRows = useMemo(() => {
+    const rows = tableMode === 'paragraph' ? paragraphRows : evidenceRows;
+    return rows.map((r: any) => {
+      const pId = String(r.paragraphId || '');
+      return { ...r, regionId: nodeToRegionMap.get(pId) || null };
+    });
+  }, [tableMode, paragraphRows, evidenceRows, nodeToRegionMap]);
 
   const mappingText = useMemo(() => {
     const fromArtifact = (mappingArtifact as any)?.semantic?.narrative ?? (parsedMapping as any)?.narrative ?? '';
@@ -1635,104 +1696,184 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       </div>
 
-                      {/* ── Evidence Table (flex-1) ── */}
+                      {/* ── Vertical-split: Table + Cards ── */}
                       {isTableCollapsed ? (
-                        <div className="flex-none px-3 py-2 text-[11px] text-text-muted border-b border-white/10 flex items-center justify-between">
-                          <span>Table collapsed</span>
-                          <button
-                            type="button"
-                            className="px-2 py-1 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] text-text-muted hover:text-text-primary transition-colors"
-                            onClick={() => setIsTableCollapsed(false)}
-                          >
-                            Expand
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex-1 min-h-0 overflow-hidden relative">
-                          <EvidenceTable
-                            rows={activeRows}
-                            columns={activeColumns}
-                            viewConfig={activeViewConfig}
-                            scope={scope}
-                            mode={tableMode}
-                            bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 260) : 0}
-                            onRowClick={(row) => {
-                              if (tableMode === 'paragraph') {
-                                if (row.paragraphId) {
-                                  instrumentActions.setSelectedEntity({ type: 'statement', id: row.paragraphId });
-                                }
-                              } else if (row.statementId) {
-                                instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
-                              }
-                            }}
-                          />
-                          <AnimatePresence>
-                            {selectedClaimObj && (
-                              <div
-                                className={clsx(
-                                  "absolute left-0 right-0 bottom-0 z-40 shadow-elevated",
-                                  isClaimPanelCollapsed ? "h-14" : "h-[260px]"
-                                )}
+                        <>
+                          <div className="flex-none px-3 py-2 text-[11px] text-text-muted border-b border-white/10 flex items-center justify-between">
+                            <span>Table collapsed</span>
+                            <button
+                              type="button"
+                              className="px-2 py-1 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] text-text-muted hover:text-text-primary transition-colors"
+                              onClick={() => setIsTableCollapsed(false)}
+                            >
+                              Expand
+                            </button>
+                          </div>
+                          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                            {([
+                              { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
+                              {
+                                id: 'traversal-pruning',
+                                label: 'Traversal Pruning',
+                                content: (
+                                  <PruningDecisionsCard
+                                    aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
+                                    providerId={activeMappingPid ? String(activeMappingPid) : null}
+                                    artifact={mappingArtifactWithCitations}
+                                  />
+                                )
+                              },
+                              { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
+                            ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
+                              <RefSection
+                                key={id}
+                                id={id}
+                                label={label}
+                                expanded={expandedRefSections.includes(id)}
+                                onToggle={() => instrumentActions.toggleRefSection(id)}
+                                copyText={id !== 'cross-signal'
+                                  ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
+                                  : undefined}
                               >
-                                <ClaimDetailDrawer
-                                  variant="bottom"
-                                  collapsed={isClaimPanelCollapsed}
-                                  onToggleCollapsed={() => setIsClaimPanelCollapsed(v => !v)}
-                                  claim={selectedClaimObj}
-                                  artifact={mappingArtifactWithCitations}
-                                  narrativeText={mappingText}
-                                  citationSourceOrder={citationSourceOrder || undefined}
-                                  onClose={() => instrumentActions.selectClaim(null)}
-                                  onClaimNavigate={(id) => instrumentActions.selectClaim(id, semanticClaims.find((c: any) => c.id === id)?.label)}
-                                />
-                              </div>
+                                {content}
+                              </RefSection>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <div
+                          ref={verticalSplitContainerRef}
+                          className="flex-1 min-h-0 overflow-hidden"
+                          style={{
+                            display: 'grid',
+                            gridTemplateRows: isCardsCollapsed
+                              ? '1fr 6px 28px'
+                              : `${verticalSplitPct}fr 6px ${100 - verticalSplitPct}fr`,
+                            transition: isDraggingVerticalSplit ? 'none' : 'grid-template-rows 150ms ease-out',
+                          }}
+                        >
+                          {/* Row 1: EvidenceTable */}
+                          <div className="min-h-0 overflow-hidden relative">
+                            <EvidenceTable
+                              rows={activeRows}
+                              columns={activeColumns}
+                              viewConfig={activeViewConfig}
+                              scope={scope}
+                              mode={tableMode}
+                              bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 260) : 0}
+                              onRowClick={(row) => {
+                                if (tableMode === 'paragraph') {
+                                  if (row.paragraphId) {
+                                    instrumentActions.setSelectedEntity({ type: 'statement', id: row.paragraphId });
+                                  }
+                                } else if (row.statementId) {
+                                  instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
+                                }
+                              }}
+                            />
+                            <AnimatePresence>
+                              {selectedClaimObj && (
+                                <div
+                                  className={clsx(
+                                    "absolute left-0 right-0 bottom-0 z-40 shadow-elevated",
+                                    isClaimPanelCollapsed ? "h-14" : "h-[260px]"
+                                  )}
+                                >
+                                  <ClaimDetailDrawer
+                                    variant="bottom"
+                                    collapsed={isClaimPanelCollapsed}
+                                    onToggleCollapsed={() => setIsClaimPanelCollapsed(v => !v)}
+                                    claim={selectedClaimObj}
+                                    artifact={mappingArtifactWithCitations}
+                                    narrativeText={mappingText}
+                                    citationSourceOrder={citationSourceOrder || undefined}
+                                    onClose={() => instrumentActions.selectClaim(null)}
+                                    onClaimNavigate={(id) => instrumentActions.selectClaim(id, semanticClaims.find((c: any) => c.id === id)?.label)}
+                                  />
+                                </div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+
+                          {/* Row 2: Vertical resize handle */}
+                          <div
+                            className={clsx(
+                              "w-full transition-colors cursor-row-resize relative select-none touch-none flex items-center justify-center",
+                              isDraggingVerticalSplit ? "bg-brand-500/60" : "bg-white/10 hover:bg-brand-500/40"
                             )}
-                          </AnimatePresence>
+                            onPointerDown={handleVerticalSplitPointerDown}
+                            onPointerMove={handleVerticalSplitPointerMove}
+                            onPointerUp={handleVerticalSplitPointerUp}
+                          >
+                            <button
+                              type="button"
+                              className="absolute right-2 text-[9px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded transition-colors z-10 bg-black/20"
+                              onClick={(e) => { e.stopPropagation(); setIsCardsCollapsed(v => !v); }}
+                              title={isCardsCollapsed ? "Expand reference shelf" : "Collapse reference shelf"}
+                            >
+                              {isCardsCollapsed ? '▲' : '▼'}
+                            </button>
+                          </div>
+
+                          {/* Row 3: LayerCards or collapsed bar */}
+                          {isCardsCollapsed ? (
+                            <div className="flex items-center justify-between px-3 text-[11px] text-text-muted bg-black/10 border-t border-white/5">
+                              <span>Reference shelf collapsed</span>
+                              <button
+                                type="button"
+                                className="text-text-muted hover:text-text-primary text-[10px] hover:underline"
+                                onClick={() => setIsCardsCollapsed(false)}
+                              >
+                                Expand ▲
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="overflow-y-auto custom-scrollbar min-h-0">
+                              {([
+                                { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
+                                { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
+                                {
+                                  id: 'traversal-pruning',
+                                  label: 'Traversal Pruning',
+                                  content: (
+                                    <PruningDecisionsCard
+                                      aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
+                                      providerId={activeMappingPid ? String(activeMappingPid) : null}
+                                      artifact={mappingArtifactWithCitations}
+                                    />
+                                  )
+                                },
+                                { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
+                                { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
+                              ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
+                                <RefSection
+                                  key={id}
+                                  id={id}
+                                  label={label}
+                                  expanded={expandedRefSections.includes(id)}
+                                  onToggle={() => instrumentActions.toggleRefSection(id)}
+                                  copyText={id !== 'cross-signal'
+                                    ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
+                                    : undefined}
+                                >
+                                  {content}
+                                </RefSection>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
-
-                      {/* ── Reference Shelf (collapsible sections) ── */}
-                      <div
-                        className={clsx(
-                          "border-t border-white/10 overflow-y-auto custom-scrollbar",
-                          isTableCollapsed ? "flex-1 min-h-0" : "flex-none max-h-72"
-                        )}
-                      >
-                        {([
-                          { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                          { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                          { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                          { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
-                          { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                          { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
-                          {
-                            id: 'traversal-pruning',
-                            label: 'Traversal Pruning',
-                            content: (
-                              <PruningDecisionsCard
-                                aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
-                                providerId={activeMappingPid ? String(activeMappingPid) : null}
-                                artifact={mappingArtifactWithCitations}
-                              />
-                            )
-                          },
-                          { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
-                          { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
-                        ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
-                          <RefSection
-                            key={id}
-                            id={id}
-                            label={label}
-                            expanded={expandedRefSections.includes(id)}
-                            onToggle={() => instrumentActions.toggleRefSection(id)}
-                            copyText={id !== 'cross-signal'
-                              ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
-                              : undefined}
-                          >
-                            {content}
-                          </RefSection>
-                        ))}
-                      </div>
                     </>
                   ) : (
                     <NarrativePanel

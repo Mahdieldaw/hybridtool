@@ -33,6 +33,7 @@ import type {
 } from '../../../shared/contract';
 import type { QueryRelevanceStatementScore } from '../../geometry/queryRelevance';
 import { cosineSimilarity } from '../../clustering/distance';
+import nlp from 'compromise';
 
 // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ export interface BlastSurfaceInput {
     queryRelevanceScores?: Map<string, QueryRelevanceStatementScore> | null;
     queryEmbedding?: Float32Array | null;
     totalCorpusStatements: number;
+    /** Statement ID → text. Required for noun-survival degradation cost. */
+    statementTexts?: Map<string, string>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -55,6 +58,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         claims,
         statementEmbeddings, totalCorpusStatements,
         queryRelevanceScores, queryEmbedding,
+        statementTexts,
     } = input;
 
     // 1. Build canonical sets and exclusive IDs from the patched claims
@@ -77,6 +81,15 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         canonicalExclusivityRatioByClaim.set(claimId, set.size > 0 ? exclusiveIds.length / set.size : 0);
     }
 
+    // Build allClaimOwnedIds for certainty classification
+    const allClaimOwnedIds = new Set<string>();
+    for (const set of canonicalSets.values()) {
+        for (const sid of set) allClaimOwnedIds.add(sid);
+    }
+
+    // Compute twin map BEFORE per-claim loop (front-line classification)
+    const twinMap = computeTwinMap({ claims, canonicalSets, statementEmbeddings });
+
     const scores: BlastSurfaceClaimScore[] = [];
     const vernalVulnerableCountByClaimId = new Map<string, number>();
     const vernalDestroyedQueryMeanByClaimId = new Map<string, number>();
@@ -86,7 +99,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         const canonicalSet = canonicalSets.get(claimId) ?? new Set<string>();
         const exclusiveIds = canonicalExclusiveIdsByClaim.get(claimId) ?? [];
 
-        // ── Layer B: Exclusive Vulnerability ──────────────────────────────
+        // ── Layer B: Exclusive Vulnerability (kept for diagnostics) ───────
         const layerB = computeLayerB({
             claimId,
             exclusiveIds,
@@ -96,8 +109,76 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             statementEmbeddings,
         });
 
-        const vernalVulnerableStatementIds = layerB.statements.filter(s => s.orphan).map(s => s.statementId);
-        const vernalVulnerableCount = vernalVulnerableStatementIds.length;
+        // ── Twin-map classification of exclusives ─────────────────────────
+        const deletionIds: string[] = [];
+        const degradationIds: string[] = [];
+        const deletionCertaintyDetails: Array<{
+            statementId: string;
+            twinId: string;
+            twinSimilarity: number;
+            certainty: '2a' | '2b' | '2c';
+            twinHostClaimId: string | null;
+        }> = [];
+        const degradationDetails: Array<{
+            statementId: string;
+            originalWordCount: number;
+            survivingWordCount: number;
+            nounSurvivalRatio: number;
+            cost: number;
+        }> = [];
+        let deletionDamage = 0;
+        let degradationDamage = 0;
+
+        for (const sid of exclusiveIds) {
+            const twin = twinMap.twins[sid];
+            if (twin) {
+                // Type 2: deletion — has a twin outside this claim
+                deletionIds.push(sid);
+                deletionDamage += (1 - twin.similarity);
+
+                // Certainty classification (2a/2b/2c)
+                const twinId = twin.twinStatementId;
+                let certainty: '2a' | '2b' | '2c';
+                let hostClaim: string | null;
+                if (!allClaimOwnedIds.has(twinId)) {
+                    certainty = '2a';
+                    hostClaim = null;
+                } else {
+                    hostClaim = findHostClaim(twinId, canonicalSets);
+                    const twinOwnerCount = canonicalOwnerCounts.get(twinId) ?? 0;
+                    certainty = twinOwnerCount <= 1 ? '2c' : '2b';
+                }
+                deletionCertaintyDetails.push({
+                    statementId: sid,
+                    twinId,
+                    twinSimilarity: twin.similarity,
+                    certainty,
+                    twinHostClaimId: hostClaim,
+                });
+            } else {
+                // Type 3: degradation — no twin found
+                degradationIds.push(sid);
+                const text = statementTexts?.get(sid) ?? '';
+                const nounRatio = computeNounSurvivalRatio(text);
+                const words = text.replace(/[*_#|>]/g, '').trim().split(/\s+/).filter(w => w.length > 0);
+                const originalWordCount = words.length;
+                const survivingWordCount = Math.round(nounRatio * originalWordCount);
+                degradationDamage += (1 - nounRatio);
+                degradationDetails.push({
+                    statementId: sid,
+                    originalWordCount,
+                    survivingWordCount,
+                    nounSurvivalRatio: nounRatio,
+                    cost: 1 - nounRatio,
+                });
+            }
+        }
+
+        const totalDamage = deletionDamage + degradationDamage;
+
+        // Vernal vulnerable = twin-map Type 3 (degradation, no twin)
+        const vernalVulnerableStatementIds = degradationIds;
+        const vernalVulnerableCount = degradationIds.length;
 
         let destroyedQueryMean = 0;
         if (vernalVulnerableCount > 0) {
@@ -121,11 +202,10 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         vernalVulnerableCountByClaimId.set(claimId, vernalVulnerableCount);
         vernalDestroyedQueryMeanByClaimId.set(claimId, destroyedQueryMean);
 
-        // ── Layer C: Evidence Mass ────────────────────────────────────────
-        // Type classification: type1=non-exclusive, type2=exclusive non-orphan, type3=exclusive orphan
+        // ── Layer C: Evidence Mass (counts from twin map) ─────────────────
         const type1Count = canonicalSet.size - exclusiveIds.length;
-        const type2Count = layerB.absorbableCount;
-        const type3Count = layerB.orphanCount;
+        const type2Count = deletionIds.length;
+        const type3Count = degradationIds.length;
 
         const layerC: BlastSurfaceLayerC = {
             canonicalCount: canonicalSet.size,
@@ -144,8 +224,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         );
 
         // ── Risk Vector ───────────────────────────────────────────────────
-        // Continuous cascade fragility: for each non-exclusive statement,
-        // compute 1/(parentCount - 1). parent=2 → 1.0, parent=3 → 0.5, parent=10 → 0.1
         const cascadeFragilityDetails: Array<{ statementId: string; parentCount: number; fragility: number }> = [];
         let cascadeFragilitySum = 0;
         for (const sid of canonicalSet) {
@@ -162,9 +240,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         const cascadeFragilitySigma = fragValues.length > 0
             ? Math.sqrt(fragValues.reduce((s, v) => s + (v - cascadeFragilityMu) ** 2, 0) / fragValues.length) : 0;
 
-        const deletionStatementIds = layerB.statements.filter(s => !s.orphan).map(s => s.statementId);
-        const degradationStatementIds = layerB.statements.filter(s => s.orphan).map(s => s.statementId);
-
         const K = canonicalSet.size;
         const exclusiveTotal = type2Count + type3Count;
         const isolation = K > 0 ? exclusiveTotal / K : 0;
@@ -173,11 +248,19 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         const type2Frac = K > 0 ? type2Count / K : 0;
         const type3Frac = K > 0 ? type3Count / K : 0;
 
+        // Certainty decomposition counts
+        let count2a = 0, count2b = 0, count2c = 0;
+        for (const d of deletionCertaintyDetails) {
+            if (d.certainty === '2a') count2a++;
+            else if (d.certainty === '2b') count2b++;
+            else count2c++;
+        }
+
         const riskVector: BlastSurfaceRiskVector = {
             deletionRisk: type2Count,
-            deletionStatementIds,
+            deletionStatementIds: deletionIds,
             degradationRisk: type3Count,
-            degradationStatementIds,
+            degradationStatementIds: degradationIds,
             cascadeFragility: cascadeFragilitySum,
             cascadeFragilityDetails,
             cascadeFragilityMu,
@@ -185,6 +268,16 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             isolation,
             orphanCharacter,
             simplex: [type1Frac, type2Frac, type3Frac],
+            deletionDamage,
+            degradationDamage,
+            totalDamage,
+            degradationDetails,
+            deletionCertainty: {
+                unconditional: count2a,
+                conditional: count2b,
+                fragile: count2c,
+                details: deletionCertaintyDetails,
+            },
         };
 
         scores.push({
@@ -259,12 +352,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         s.vernal.queryTilt = queryTilt;
         s.vernal.compositeScore = structuralMass + queryTilt;
     }
-
-    const twinMap = computeTwinMap({
-        claims,
-        canonicalSets,
-        statementEmbeddings,
-    });
 
     return {
         scores,
@@ -448,6 +535,35 @@ function median(values: number[]): number {
     const a = sorted[mid - 1] ?? 0;
     const b = sorted[mid] ?? 0;
     return (a + b) / 2;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS — Twin-map reclassification support
+// ═══════════════════════════════════════════════════════════════════════════
+
+function findHostClaim(statementId: string, canonicalSets: Map<string, Set<string>>): string | null {
+    for (const [claimId, set] of canonicalSets) {
+        if (set.has(statementId)) return claimId;
+    }
+    return null;
+}
+
+function computeNounSurvivalRatio(text: string): number {
+    if (!text || typeof text !== 'string') return 0;
+    const trimmed = text.replace(/[*_#|>]/g, '').trim();
+    if (trimmed.length === 0) return 0;
+    const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+    if (words.length === 0) return 0;
+    try {
+        const doc = nlp(trimmed);
+        doc.remove('#Verb'); doc.remove('#Adverb'); doc.remove('#Adjective');
+        doc.remove('#Conjunction'); doc.remove('#Preposition'); doc.remove('#Determiner');
+        doc.remove('#Pronoun'); doc.remove('#Modal'); doc.remove('#Auxiliary');
+        doc.remove('#Copula'); doc.remove('#Negative'); doc.remove('#QuestionWord');
+        const skeleton = doc.text('normal').replace(/\s+/g, ' ').trim();
+        const survivingWords = skeleton.split(/\s+/).filter(w => w.length > 0);
+        return survivingWords.length / words.length;
+    } catch { return 0; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

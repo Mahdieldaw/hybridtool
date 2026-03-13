@@ -895,6 +895,36 @@ export interface BlastSurfaceRiskVector {
   orphanCharacter: number;
   /** Simplex coordinates for visualization: [type1Frac, type2Frac, type3Frac] summing to 1.0 */
   simplex: [number, number, number];
+
+  /** Sum of (1 - twinSimilarity) over Type 2 statements. Higher = lossier twins. */
+  deletionDamage: number;
+  /** Sum of (1 - nounSurvivalRatio) over Type 3 statements. Higher = more context destroyed. */
+  degradationDamage: number;
+  /** deletionDamage + degradationDamage. Ranking value for question priority. */
+  totalDamage: number;
+
+  /** Per-Type-3 noun survival details */
+  degradationDetails?: Array<{
+    statementId: string;
+    originalWordCount: number;
+    survivingWordCount: number;
+    nounSurvivalRatio: number;
+    cost: number;
+  }>;
+
+  /** Certainty decomposition within Type 2 */
+  deletionCertainty?: {
+    unconditional: number;   // 2a: twin is unclassified
+    conditional: number;     // 2b: twin in another claim, multiple parents
+    fragile: number;         // 2c: twin exclusive to its host
+    details: Array<{
+      statementId: string;
+      twinId: string;
+      twinSimilarity: number;
+      certainty: '2a' | '2b' | '2c';
+      twinHostClaimId: string | null;
+    }>;
+  };
 }
 
 export interface BlastSurfaceClaimScore {
@@ -936,9 +966,13 @@ export interface BlastSurfaceResult {
 export interface ValidatedConflict {
   edgeFrom: string;
   edgeTo: string;
-  centroidSimilarity: number;
-  muInterClaim: number;
+  crossPoolProximity: number | null;
+  muPairwise: number | null;
+  exclusiveA: number;
+  exclusiveB: number;
+  mapperLabeledConflict: boolean;
   validated: boolean;
+  failReason: string | null;
 }
 
 export interface QuestionSelectionClaimProfile {
@@ -987,7 +1021,7 @@ export interface QuestionSelectionInstrumentation {
 export interface ClaimRoutingResult {
   conflictClusters: Array<{
     claimIds: string[];
-    edges: Array<{ from: string; to: string; centroidSimilarity: number }>;
+    edges: Array<{ from: string; to: string; jaccard: number; crossPoolProximity: number | null }>;
   }>;
   isolateCandidates: Array<{
     claimId: string;

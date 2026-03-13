@@ -580,6 +580,15 @@ export class StepExecutor {
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
+        /** @type {"none" | "webgpu" | "wasm"} */
+        let embeddingBackend = 'none';
+        try {
+          const status = await getEmbeddingStatus();
+          if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
+            embeddingBackend = status.backend;
+          }
+        } catch (_) { }
+
         const rawQuery =
           (payload && typeof payload.originalPrompt === 'string' && payload.originalPrompt) ||
           (context && typeof context.userMessage === 'string' && context.userMessage) ||
@@ -747,19 +756,26 @@ export class StepExecutor {
           return;
         }
 
-        /** @type {"none" | "webgpu" | "wasm"} */
-        let embeddingBackend = 'none';
+        // ─────────────────────────────────────────────────────────────────────────
+        // 2.7 Basin Inversion (Topographic Analysis)
+        // ─────────────────────────────────────────────────────────────────────────
         try {
-          const status = await getEmbeddingStatus();
-          if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
-            embeddingBackend = status.backend;
-          }
-        } catch (_) { }
+          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+          const dims = DEFAULT_CONFIG?.embeddingDimensions || 384;
+          const paraIds = Array.from(geometryParagraphEmbeddings.keys());
+          const paraVectors = paraIds.map(id => geometryParagraphEmbeddings.get(id));
+          basinInversionResult = computeBasinInversion(paraIds, paraVectors);
+          console.log(`[StepExecutor] Basin inversion complete: ${basinInversionResult.basinCount} basins found at Tv=${basinInversionResult.T_v?.toFixed(3) || 'null'}`);
+        } catch (err) {
+          console.warn(`[StepExecutor] Basin inversion failed:`, getErrorMessage(err));
+        }
 
         substrate = buildGeometricSubstrate(
           paragraphResult.paragraphs,
           geometryParagraphEmbeddings,
-          embeddingBackend
+          embeddingBackend,
+          undefined, // config
+          basinInversionResult // NEW: Pass topography to substrate
         );
         geometryDiagnostics.stages.substrate = {
           status: 'ok',
@@ -767,6 +783,7 @@ export class StepExecutor {
         };
 
         try {
+          const { isDegenerate } = await import('../../geometry');
           substrateDegenerate = isDegenerate(substrate);
           substrateDegenerateReason = substrateDegenerate
             ? (substrate && typeof substrate === 'object' && 'degenerateReason' in substrate
@@ -858,7 +875,8 @@ export class StepExecutor {
               substrate,
               paragraphResult.paragraphs,
               geometryParagraphEmbeddings,
-              perModelQueryRelevance
+              perModelQueryRelevance,
+              basinInversionResult
             );
           } else {
             preSemanticInterpretation = null;
@@ -1398,6 +1416,8 @@ export class StepExecutor {
                   let mapperArtifact_claimProvenance = derived.claimProvenance;
 
                   let questionSelectionInstrumentation = null;
+                  const muPairwise = substrate?.meta?.similarityStats?.mean ?? null;
+
                   try {
                     const { computeQuestionSelectionInstrumentation } =
                       await import('../blast-radius/questionSelection');
@@ -1409,6 +1429,8 @@ export class StepExecutor {
                       modelCount: citationOrder.length,
                       claimCentroids: claimEmbeddings ?? new Map(),
                       queryEmbedding: queryEmbedding ?? null,
+                      statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
+                      muPairwise,
                     });
                   } catch (err) {
                     console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
@@ -1427,6 +1449,8 @@ export class StepExecutor {
                       modelCount: citationOrder.length,
                       claimCentroids: claimEmbeddings ?? new Map(),
                       queryEmbedding: queryEmbedding ?? null,
+                      statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
+                      muPairwise,
                     });
                     console.log(
                       `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.isolateCandidates.length} isolate(s), skip=${claimRouting.skipSurvey}`

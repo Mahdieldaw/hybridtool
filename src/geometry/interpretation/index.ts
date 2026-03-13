@@ -31,6 +31,7 @@ import { buildRegions } from './regions';
 import { profileRegions } from './profiles';
 import { evaluatePipelineGates } from './pipelineGates';
 import { computeModelOrdering } from './modelOrdering';
+import { computeGapRegionalization } from '../../../shared/geometry/gapRegionalization';
 
 function buildDefaultModelOrdering(substrate: GeometricSubstrate, regionCount: number): ModelOrderingResult {
     const startedAt = Date.now();
@@ -61,7 +62,8 @@ export function buildPreSemanticInterpretation(
     substrate: GeometricSubstrate,
     paragraphs: ShadowParagraph[],
     paragraphEmbeddings?: Map<string, Float32Array> | null,
-    queryRelevanceBoost?: Map<number, number>
+    queryRelevanceBoost?: Map<number, number>,
+    basinInversionResult?: any
 ): PreSemanticInterpretation {
     const lens = deriveLens(substrate);
     const pipelineGate = evaluatePipelineGates(substrate);
@@ -73,7 +75,7 @@ export function buildPreSemanticInterpretation(
                 regions: [],
                 meta: {
                     regionCount: 0,
-                    kindCounts: { component: 0, patch: 0 },
+                    kindCounts: { component: 0, patch: 0, basin: 0, gap: 0 },
                     coveredNodes: 0,
                     totalNodes: substrate.nodes.length,
                 },
@@ -83,7 +85,17 @@ export function buildPreSemanticInterpretation(
         };
     }
 
-    const regionization = buildRegions(substrate, paragraphs, lens);
+    let gapResult: any = null;
+    if (paragraphEmbeddings) {
+        const nodes = substrate.nodes
+            .map(n => ({ id: n.paragraphId, embedding: paragraphEmbeddings.get(n.paragraphId)! }))
+            .filter(n => n.embedding != null);
+        if (nodes.length > 0) {
+            gapResult = computeGapRegionalization(nodes);
+        }
+    }
+
+    const regionization = buildRegions(substrate, paragraphs, lens, basinInversionResult, gapResult);
     const regionProfiles = profileRegions(regionization.regions, substrate, paragraphs, paragraphEmbeddings ?? null);
     const modelOrdering =
         pipelineGate.verdict === 'insufficient_structure'

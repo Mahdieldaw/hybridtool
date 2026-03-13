@@ -12,7 +12,7 @@ export interface AdaptiveLens {
 
 export interface Region {
     id: string;
-    kind: 'component' | 'patch';
+    kind: 'component' | 'patch' | 'basin' | 'gap';
     nodeIds: string[];
     statementIds: string[];
     sourceId: string;

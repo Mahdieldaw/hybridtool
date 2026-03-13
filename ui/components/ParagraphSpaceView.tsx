@@ -56,7 +56,11 @@ const REGION_KIND_STYLE: Record<string, { fill: string; stroke: string }> = {
   component: { fill: "rgba(139,92,246,0.06)", stroke: "rgba(139,92,246,0.25)" },
   patch: { fill: "rgba(148,163,184,0.05)", stroke: "rgba(148,163,184,0.20)" },
 };
-const DEFAULT_HULL_STYLE = { fill: "rgba(148,163,184,0.04)", stroke: "rgba(148,163,184,0.18)" };
+type HullStyle = { fill: string; stroke: string };
+const DEFAULT_HULL_STYLE: HullStyle = {
+  fill: "rgba(148,163,184,0.18)",
+  stroke: "rgba(148,163,184,0.45)",
+};
 
 const MAPPER_EDGE_COLORS: Record<string, string> = {
   supports: "rgba(16,185,129,0.6)",
@@ -84,6 +88,9 @@ type RiskVector = {
   cascadeFragility?: number;
   cascadeFragilityMu?: number;
   cascadeFragilitySigma?: number;
+  deletionDamage?: number;
+  degradationDamage?: number;
+  totalDamage?: number;
 };
 
 /** SVG arc path for a donut segment. Angles in radians, 0 = top (12 o'clock). */
@@ -142,6 +149,17 @@ function hexToRgba(input: string, alpha: number): string | null {
     return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, baseAlpha * a))})`;
   }
   return null;
+}
+
+function hsvToHex(h: number, s: number, v: number): string {
+  s /= 100;
+  v /= 100;
+  const k = (n: number) => (n + h / 60) % 6;
+  const f = (n: number) => v - v * s * Math.max(0, Math.min(k(n), 4 - k(n), 1));
+  const r = Math.round(255 * f(5));
+  const g = Math.round(255 * f(3));
+  const b = Math.round(255 * f(1));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 function normalizeCitationSourceOrderPairs(
@@ -222,6 +240,9 @@ export function ParagraphSpaceView({
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
   const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
   const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
+
+  // Region Toggles
+  const [enabledRegionIds, setEnabledRegionIds] = useState<Set<string> | null>(null);
 
   const modelIndexCounts = useMemo(() => {
     const m = new Map<number, number>();
@@ -324,6 +345,33 @@ export function ParagraphSpaceView({
     return found?.paraCanonicalFractions ?? null;
   }, [selectedClaimId, claimCentroids]);
 
+  const nodeToRegionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const list = Array.isArray(regions) ? regions : [];
+    for (const r of list) {
+      if (!r || !Array.isArray(r.nodeIds)) continue;
+      for (const nid of r.nodeIds) {
+        map.set(String(nid), r.id);
+      }
+    }
+    return map;
+  }, [regions]);
+
+  const highlightedRegionIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (selectedParagraphId) {
+      const rid = nodeToRegionMap.get(selectedParagraphId);
+      if (rid) ids.add(rid);
+    }
+    if (selectedClaimSourceIds) {
+      for (const pid of selectedClaimSourceIds) {
+        const rid = nodeToRegionMap.get(pid);
+        if (rid) ids.add(rid);
+      }
+    }
+    return ids;
+  }, [selectedParagraphId, selectedClaimSourceIds, nodeToRegionMap]);
+
   // Clip geometry for source nodes (used for measuring-cylinder partial fill)
   const sourceNodeClipMap = useMemo(() => {
     const m = new Map<string, { x: number; y: number; r: number; fraction: number }>();
@@ -363,6 +411,9 @@ export function ParagraphSpaceView({
           cascadeFragility: rv.cascadeFragility,
           cascadeFragilityMu: rv.cascadeFragilityMu,
           cascadeFragilitySigma: rv.cascadeFragilitySigma,
+          deletionDamage: rv.deletionDamage,
+          degradationDamage: rv.degradationDamage,
+          totalDamage: rv.totalDamage,
         });
       } else {
         // Fallback: derive locally from layerB/layerC (backward compat with cached data)
@@ -386,7 +437,7 @@ export function ParagraphSpaceView({
     return m;
   }, [blastSurface]);
 
-  // Region hulls
+  // Region hulls (including halos for 1-2 node regions)
   const regionHulls = useMemo(() => {
     if (!showRegionHulls) return [];
     const list = Array.isArray(regions) ? regions : [];
@@ -406,13 +457,48 @@ export function ParagraphSpaceView({
           pts.push({ x: toX(x), y: toY(y) });
           if (selectedClaimSourceIds?.has(String(nodeId))) hasSource = true;
         }
-        const poly = hull(pts);
+
+        let poly: Point[] = [];
+        if (pts.length === 1) {
+          // Circle halo approximation
+          const p = pts[0];
+          const d = 5;
+          poly = [
+            { x: p.x - d, y: p.y },
+            { x: p.x, y: p.y - d },
+            { x: p.x + d, y: p.y },
+            { x: p.x, y: p.y + d },
+          ];
+        } else if (pts.length === 2) {
+          // Thick line / Capsule approximation
+          const [p1, p2] = pts;
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const nx = (dy / len) * 4;
+          const ny = (-dx / len) * 4;
+          poly = [
+            { x: p1.x - nx, y: p1.y - ny },
+            { x: p2.x - nx, y: p2.y - ny },
+            { x: p2.x + nx, y: p2.y + ny },
+            { x: p1.x + nx, y: p1.y + ny },
+          ];
+        } else if (pts.length >= 3) {
+          poly = hull(pts);
+        }
+
         if (poly.length < 3) return null;
         const kind = r?.kind ? String(r.kind) : undefined;
-        return { id, kind, points: poly, hasSource };
+        return { id, kind, points: poly, hasSource, nodeIds };
       })
-      .filter(Boolean) as Array<{ id: string; kind?: string; points: Point[]; hasSource: boolean }>;
+      .filter(Boolean) as Array<{ id: string; kind?: string; points: Point[]; hasSource: boolean; nodeIds: string[] }>;
   }, [regions, nodeById, showRegionHulls, toX, toY, selectedClaimSourceIds]);
+
+  // Derived state for region visibility
+  const isRegionEnabled = useCallback((regionId: string) => {
+    if (enabledRegionIds === null) return true; // all visible by default
+    return enabledRegionIds.has(regionId);
+  }, [enabledRegionIds]);
 
   // Basin bounding rects
   const basinRectData = useMemo(() => {
@@ -467,6 +553,22 @@ export function ParagraphSpaceView({
     for (const c of scaledCentroids) m.set(c.claimId, { sx: c.sx, sy: c.sy });
     return m;
   }, [scaledCentroids]);
+
+  // Re-evaluating claim active state: check against nodeToRegionMap using paraCanonicalFractions keys
+  const getClaimVisibility = useCallback((claimId: string) => {
+    if (enabledRegionIds === null) return true;
+    const c = claimCentroids?.find(c => c.claimId === claimId);
+    if (!c?.paraCanonicalFractions) return true;
+    for (const pid of c.paraCanonicalFractions.keys()) {
+      const rid = nodeToRegionMap.get(pid);
+      if (rid && enabledRegionIds.has(rid)) {
+         return true; // Claim has at least one node in an active region
+      }
+    }
+    // If we have nodes but none are in an active region, it's inactive
+    if (c.paraCanonicalFractions.size > 0) return false;
+    return true; // Fallback
+  }, [claimCentroids, enabledRegionIds, nodeToRegionMap]);
 
   const handleSvgClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if ((e.target as SVGElement).tagName === "svg" || (e.target as SVGElement).tagName === "rect") {
@@ -601,6 +703,62 @@ export function ParagraphSpaceView({
           </div>
         )}
 
+        {/* Region Toggles (Horizontal row at bottom) */}
+        {showRegionHulls && regions && regions.length > 0 && (
+          <div className="absolute bottom-4 left-4 right-4 bg-black/50 border border-white/10 rounded-lg p-2.5 backdrop-blur-md shadow-lg z-10 pointer-events-auto">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2 pr-3 border-r border-white/10">
+                <div className="text-[9px] uppercase font-bold text-text-muted tracking-wider">Regions</div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="text-[9px] text-text-muted hover:text-text-primary px-1 rounded border border-white/10 hover:border-white/20 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setEnabledRegionIds(null); }}
+                  >All</button>
+                  <button
+                    type="button"
+                    className="text-[9px] text-text-muted hover:text-text-primary px-1 rounded border border-white/10 hover:border-white/20 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setEnabledRegionIds(new Set()); }}
+                  >None</button>
+                </div>
+              </div>
+              <div className="flex items-center gap-x-4 gap-y-1.5 flex-wrap flex-1 min-w-0">
+                {regions.map((r, i) => {
+                  const checked = isRegionEnabled(r.id);
+                  const color = hsvToHex((i * 137.5) % 360, 60, 80);
+                  const dot = hexToRgba(color, 0.85) ?? color;
+                  return (
+                    <label
+                      key={r.id}
+                      className="flex items-center gap-1.5 text-[10px] text-text-secondary select-none cursor-pointer hover:text-text-primary transition-colors pr-2"
+                      title={r.id}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded-sm w-3 h-3 border-white/20 bg-black/20"
+                        checked={checked}
+                        onChange={() => {
+                          setEnabledRegionIds((prev) => {
+                            const list = Array.isArray(regions) ? regions : [];
+                            const next = new Set(prev === null ? list.map(x => x.id) : prev);
+                            if (next.has(r.id)) next.delete(r.id);
+                            else next.add(r.id);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="w-2 h-2 rounded-full border border-white/20" style={{ backgroundColor: dot }} />
+                      <span className="truncate max-w-[80px] font-medium">{r.id.split('-').slice(0, 2).join('-')}</span>
+                      <span className="font-mono text-[9px] opacity-40">({r.nodeIds?.length || 0})</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         <svg
           className="w-full h-full bg-black/20"
           viewBox={`0 0 ${W} ${H}`}
@@ -638,16 +796,22 @@ export function ParagraphSpaceView({
 
           {/* Region hulls */}
           {regionHulls.map((h) => {
+            if (!isRegionEnabled(h.id)) return null;
             const style = REGION_KIND_STYLE[h.kind || ""] || DEFAULT_HULL_STYLE;
-            const isSpanned = hasSelection && highlightSpannedHulls && h.hasSource;
+            
+            // Highlight region if any of its nodes are selected or hovered, OR if it has a selected claim source
+            const isHighlighted = highlightedRegionIds.has(h.id);
+            const isSpanned = (hasSelection && highlightSpannedHulls && h.hasSource) || isHighlighted;
+            
             return (
               <polygon
                 key={`hull-${h.id}`}
                 points={h.points.map((p) => `${p.x},${p.y}`).join(" ")}
-                fill={style.fill}
-                stroke={isSpanned ? "rgba(251,191,36,0.5)" : style.stroke}
-                strokeWidth={isSpanned ? 2.5 : 1.5}
-                opacity={hasSelection && !isSpanned ? 0.3 : 1}
+                fill={isHighlighted ? "rgba(251,191,36,0.08)" : style.fill}
+                stroke={isHighlighted || isSpanned ? "rgba(251,191,36,0.8)" : style.stroke}
+                strokeWidth={isHighlighted || isSpanned ? 3.5 : 1.5}
+                opacity={hasSelection && !isSpanned && enabledRegionIds === null ? 0.3 : 1}
+                strokeDasharray={isHighlighted ? "none" : (isSpanned ? "4 2" : "none")}
               />
             );
           })}
@@ -734,13 +898,21 @@ export function ParagraphSpaceView({
             const isSource = hasSelection && highlightSourceParagraphs && selectedClaimSourceIds!.has(id);
             const isHovered = hoveredParagraphId === id;
             const isParaSelected = selectedParagraphId === id;
+            
+            const regionId = nodeToRegionMap.get(id);
+            const inActiveRegion = regionId ? isRegionEnabled(regionId) : true;
+            
             const modelEnabled =
               !colorParagraphsByModel ||
               nodeModelIndex == null ||
               modelLegend.length === 0 ||
               (enabledModelIndices.size > 0 && enabledModelIndices.has(nodeModelIndex));
-            const baseOpacity = hasSelection && highlightSourceParagraphs ? (isSource ? 1 : 0.20) : 0.85;
-            const nodeOpacity = modelEnabled ? baseOpacity : baseOpacity * 0.08;
+              
+            const inHighlightedRegion = regionId && highlightedRegionIds.has(regionId);
+            const baseOpacity = hasSelection && highlightSourceParagraphs 
+               ? (isSource ? 1 : inHighlightedRegion ? 0.65 : 0.20) 
+               : 0.85;
+            const nodeOpacity = (modelEnabled && inActiveRegion) ? baseOpacity : baseOpacity * 0.08;
             const paraData = paragraphDataMap.get(id);
             const hasText = !!paraData?._fullParagraph;
             const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : (n.modelIndex != null ? `M${n.modelIndex}` : null);
@@ -807,27 +979,35 @@ export function ParagraphSpaceView({
             const cx = c.sx, cy = c.sy;
             const isHov = hoveredClaimId === c.claimId;
             const isSel = selectedClaimId === c.claimId;
+            const claimVisible = getClaimVisibility(c.claimId);
+            const displayOpacity = claimVisible ? 1 : 0.08;
+            if (!claimVisible && !isSel && !isHov && enabledRegionIds !== null) {
+              return null; // Cull completely if it's inactive and not selected to reduce clutter
+            }
             const bulk = c.provenanceBulk ?? 1;
             const size = Math.max(9, Math.min(18, 9 + bulk * 1.0));
             const label = c.label.length > 50 ? `${c.label.slice(0, 50)}\u2026` : c.label;
             const rv = showRiskGlyphs ? riskVectorMap.get(c.claimId) : null;
 
             return (
-              <g
+                  <g
                 key={c.claimId}
                 onMouseEnter={() => setHoveredClaimId(c.claimId)}
                 onMouseLeave={() => setHoveredClaimId(null)}
                 onClick={(e) => { e.stopPropagation(); onClaimClick?.(isSel ? null : c.claimId); }}
-                style={{ cursor: "pointer" }}
+                style={{ cursor: "pointer", opacity: displayOpacity }}
               >
                 {rv && rv.total > 0 ? (() => {
                   // Risk donut glyph — three segments proportional to type1/type2/type3
                   const r = Math.max(11, Math.min(22, 11 + (rv.total) * 0.5));
                   const w = Math.max(3.5, r * 0.35);
                   const segments = [
-                    { count: rv.type2, color: RISK_COLORS.deletion },
-                    { count: rv.type3, color: RISK_COLORS.degradation },
-                    { count: rv.type1, color: RISK_COLORS.shared },
+                    { count: rv.type2, baseColor: RISK_COLORS.deletion, damageColor: "#991b1b",
+                      fillRatio: rv.type2 > 0 ? Math.min(1, (rv.deletionDamage ?? 0) / rv.type2) : 0 },
+                    { count: rv.type3, baseColor: RISK_COLORS.degradation, damageColor: "#92400e",
+                      fillRatio: rv.type3 > 0 ? Math.min(1, (rv.degradationDamage ?? 0) / rv.type3) : 0 },
+                    { count: rv.type1, baseColor: RISK_COLORS.shared, damageColor: null as string | null,
+                      fillRatio: 0 },
                   ].filter(s => s.count > 0);
                   const total = rv.total;
                   let angle = 0;
@@ -840,18 +1020,27 @@ export function ParagraphSpaceView({
                           stroke={isSel ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.4)"}
                           strokeWidth={selStroke} />
                       )}
-                      {/* Donut segments */}
+                      {/* Donut segments with damage overlays */}
                       {segments.map((seg, i) => {
                         const sweep = (seg.count / total) * Math.PI * 2;
                         const startA = angle;
                         angle += sweep;
+                        const opac = isSel ? 1 : isHov ? 0.95 : 0.8;
                         return (
-                          <path
-                            key={i}
-                            d={donutArc(cx, cy, r, w, startA, startA + sweep)}
-                            fill={seg.color}
-                            opacity={isSel ? 1 : isHov ? 0.95 : 0.8}
-                          />
+                          <g key={i}>
+                            <path
+                              d={donutArc(cx, cy, r, w, startA, startA + sweep)}
+                              fill={seg.baseColor}
+                              opacity={opac}
+                            />
+                            {seg.fillRatio > 0 && seg.damageColor && (
+                              <path
+                                d={donutArc(cx, cy, r, w, startA, startA + sweep * seg.fillRatio)}
+                                fill={seg.damageColor}
+                                opacity={opac}
+                              />
+                            )}
+                          </g>
                         );
                       })}
                       {/* Center dot for visual anchor */}
@@ -873,9 +1062,16 @@ export function ParagraphSpaceView({
                       {label}
                     </text>
                     {rv && (
-                      <text x={cx} y={cy + (rv ? Math.max(11, Math.min(22, 11 + rv.total * 0.5)) : size) + 12} textAnchor="middle" fill="rgba(255,255,255,0.6)" fontSize={9}>
-                        {`D:${rv.type2} S:${rv.type3} P:${rv.type1}${rv.cascadeFragility != null ? ` F:${rv.cascadeFragility.toFixed(1)}` : ''}`}
-                      </text>
+                      <>
+                        <text x={cx} y={cy + (rv ? Math.max(11, Math.min(22, 11 + rv.total * 0.5)) : size) + 12} textAnchor="middle" fill="rgba(255,255,255,0.6)" fontSize={9}>
+                          {`D:${rv.type2} S:${rv.type3} P:${rv.type1}${rv.cascadeFragility != null ? ` F:${rv.cascadeFragility.toFixed(1)}` : ''}`}
+                        </text>
+                        {(rv.totalDamage != null && rv.totalDamage > 0) && (
+                          <text x={cx} y={cy + (rv ? Math.max(11, Math.min(22, 11 + rv.total * 0.5)) : size) + 23} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize={8}>
+                            {`DD:${(rv.deletionDamage ?? 0).toFixed(1)} GD:${(rv.degradationDamage ?? 0).toFixed(1)} TD:${(rv.totalDamage ?? 0).toFixed(1)}`}
+                          </text>
+                        )}
+                      </>
                     )}
                   </>
                 )}

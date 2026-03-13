@@ -834,6 +834,95 @@ export function BasinInversionCard({
 }
 
 // ============================================================================
+// REGIONS CARD
+// ============================================================================
+
+export function RegionsCard({
+  artifact,
+  selectedEntity: _selectedEntity,
+}: {
+  artifact: any;
+  selectedEntity: SelectedEntity;
+}) {
+  const regions = useMemo(() => {
+    const ps = artifact?.geometry?.preSemantic;
+    if (!ps || typeof ps !== 'object') return [];
+    
+    const normalize = (input: unknown) => {
+      if (!Array.isArray(input)) return [];
+      const out: Array<{ id: string; kind: "component" | "patch"; nodeIds: string[] }> = [];
+      for (const r of input) {
+        if (!r || typeof r !== 'object') continue;
+        const rr = r as Record<string, unknown>;
+        const id = typeof rr.id === 'string' ? rr.id : '';
+        if (!id) continue;
+        const kindRaw = typeof rr.kind === 'string' ? rr.kind : '';
+        const kind = kindRaw === 'component' || kindRaw === 'patch' ? kindRaw : 'patch';
+        const nodeIds = Array.isArray(rr.nodeIds) ? rr.nodeIds.map((x) => String(x)).filter(Boolean) : [];
+        out.push({ id, kind, nodeIds });
+      }
+      return out;
+    };
+
+    const direct = normalize(ps.regions);
+    if (direct.length > 0) return direct;
+
+    const regionization = ps.regionization;
+    if (!regionization || typeof regionization !== 'object') return [];
+    return normalize((regionization as any).regions);
+  }, [artifact]);
+
+  const nodes = artifact?.geometry?.substrate?.nodes || [];
+  const totalNodes = nodes.length;
+
+  const regionRows = useMemo(() => {
+    return regions.map(r => ({
+      ...r,
+      size: r.nodeIds.length,
+      ratio: totalNodes > 0 ? r.nodeIds.length / totalNodes : 0,
+    })).sort((a, b) => b.size - a.size);
+  }, [regions, totalNodes]);
+
+  if (regions.length === 0) {
+    return <div className="text-xs text-text-muted italic py-4">No region data available in artifact.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
+      </div>
+
+      <InterpretiveCallout
+        text={`${regions.length} region${regions.length !== 1 ? 's' : ''} detected. Regions represent topologically connected "islands" or dense patches in the similarity surface.`}
+        variant="info"
+      />
+
+      <CardSection title="Summary">
+        <div className="grid grid-cols-2 gap-4">
+          <StatRow label="Total Regions" value={fmtInt(regions.length)} />
+          <StatRow label="Coverage" value={fmtPct(regionRows.reduce((a, b) => a + b.ratio, 0))} />
+        </div>
+      </CardSection>
+
+      <CardSection title="Region Breakdown">
+        <SortableTable
+          columns={[
+            { key: "id", header: "Region", cell: (r) => <span className="font-mono text-[10px]">{r.id}</span> },
+            { key: "kind", header: "Kind", cell: (r) => <span className={clsx("text-[9px] uppercase", r.kind === 'component' ? 'text-blue-400' : 'text-amber-400')}>{r.kind}</span> },
+            { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
+            { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
+          ]}
+          rows={regionRows}
+          defaultSortKey="size"
+          defaultSortDir="desc"
+        />
+      </CardSection>
+    </div>
+  );
+}
+
+// ============================================================================
 // QUERY RELEVANCE CARD
 // ============================================================================
 
@@ -1063,14 +1152,14 @@ function RoutingCard({ artifact, selectedClaim }: { artifact: any; selectedClaim
             columns={[
               { key: "from", header: "From", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{r.from}</span> },
               { key: "to", header: "To", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{r.to}</span> },
-              { key: "centroidSimilarity", header: "Sim", sortValue: (r: any) => r.centroidSimilarity, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.centroidSimilarity, 3)}</span> },
+              { key: "prox", header: "Prox", sortValue: (r: any) => r.prox, cell: (r: any) => <span className="font-mono text-text-muted">{r.prox != null ? fmt(r.prox, 3) : "—"}</span> },
               { key: "touches", header: "Touches", sortValue: (r: any) => r.touches ? 1 : 0, cell: (r: any) => <span className={clsx("text-[10px] font-mono", r.touches ? "text-amber-400" : "text-text-muted")}>{r.touches ? "yes" : "no"}</span> },
             ]}
             rows={safeArr<any>(inConflict?.edges).map((e: any, idx: number) => ({
               id: `${String(e?.from ?? "")}_${String(e?.to ?? "")}_${idx}`,
               from: String(e?.from ?? ""),
               to: String(e?.to ?? ""),
-              centroidSimilarity: typeof e?.centroidSimilarity === "number" ? e.centroidSimilarity : null,
+              prox: typeof e?.crossPoolProximity === "number" ? e.crossPoolProximity : null,
               touches: String(e?.from ?? "") === claimId || String(e?.to ?? "") === claimId,
             }))}
             defaultSortKey="touches"
@@ -1350,6 +1439,12 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     cascadeFragility: number | null;
     isolation: number | null;
     orphanCharacter: number | null;
+    deletionDamage: number | null;
+    degradationDamage: number | null;
+    totalDamage: number | null;
+    unconditional: number | null;
+    conditional: number | null;
+    fragile: number | null;
   };
 
   const rows = useMemo<VernalRow[]>(() =>
@@ -1375,6 +1470,12 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
         cascadeFragility: typeof rv?.cascadeFragility === "number" ? rv.cascadeFragility : null,
         isolation: typeof rv?.isolation === "number" ? rv.isolation : null,
         orphanCharacter: typeof rv?.orphanCharacter === "number" ? rv.orphanCharacter : null,
+        deletionDamage: typeof rv?.deletionDamage === "number" ? rv.deletionDamage : null,
+        degradationDamage: typeof rv?.degradationDamage === "number" ? rv.degradationDamage : null,
+        totalDamage: typeof rv?.totalDamage === "number" ? rv.totalDamage : null,
+        unconditional: typeof rv?.deletionCertainty?.unconditional === "number" ? rv.deletionCertainty.unconditional : null,
+        conditional: typeof rv?.deletionCertainty?.conditional === "number" ? rv.deletionCertainty.conditional : null,
+        fragile: typeof rv?.deletionCertainty?.fragile === "number" ? rv.deletionCertainty.fragile : null,
       };
     }),
     [scores]
@@ -1448,6 +1549,12 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
             { key: "cascadeFragility", header: "Frag", title: "Cascade fragility: Σ 1/(parentCount−1) over shared statements. Measures how thin protection becomes on prune. Parent=2 contributes 1.0, parent=10 contributes 0.1.", sortValue: (r) => r.cascadeFragility, cell: (r) => <span className="font-mono text-[10px] text-blue-400">{r.cascadeFragility !== null ? r.cascadeFragility.toFixed(1) : "–"}</span> },
             { key: "isolation", header: "Iso", title: "Isolation: (Del+Deg) / K — fraction of canonical evidence exclusively owned by this claim. 0 = fully shared (safe), 1 = fully isolated (maximum exposure).", sortValue: (r) => r.isolation, cell: (r) => <span className="font-mono text-[10px]">{r.isolation !== null ? r.isolation.toFixed(2) : "–"}</span> },
             { key: "orphanCharacter", header: "OC", title: "Orphan character: Deg / (Del+Deg) — within exclusive statements, the fraction that are orphans (no twin anywhere). 0 = all twinned, 1 = all orphaned.", sortValue: (r) => r.orphanCharacter, cell: (r) => <span className="font-mono text-[10px]">{r.orphanCharacter !== null ? r.orphanCharacter.toFixed(2) : "–"}</span> },
+            { key: "deletionDamage", header: "DD", title: "Deletion damage: sum of twin gaps (1 - similarity) over Type 2 statements. Higher = lossier twins.", sortValue: (r) => r.deletionDamage, cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.deletionDamage !== null ? r.deletionDamage.toFixed(2) : "–"}</span> },
+            { key: "degradationDamage", header: "GD", title: "Degradation damage: sum of noun loss (1 - nounSurvivalRatio) over Type 3 statements. Higher = more context destroyed.", sortValue: (r) => r.degradationDamage, cell: (r) => <span className="font-mono text-[10px] text-amber-400">{r.degradationDamage !== null ? r.degradationDamage.toFixed(2) : "–"}</span> },
+            { key: "totalDamage", header: "TD", title: "Total damage: DD + GD. Ranking value for question priority.", sortValue: (r) => r.totalDamage, cell: (r) => <span className="font-mono text-[10px] text-white">{r.totalDamage !== null ? r.totalDamage.toFixed(2) : "–"}</span> },
+            { key: "unconditional", header: "2a", title: "Certainty 2a: twin is unclassified (not in any claim). Safest deletion — twin persists regardless.", sortValue: (r) => r.unconditional, cell: (r) => <span className="font-mono text-[10px] text-red-600">{r.unconditional ?? "–"}</span> },
+            { key: "conditional", header: "2b", title: "Certainty 2b: twin in another claim with multiple parents. Medium risk — twin survives unless host also pruned.", sortValue: (r) => r.conditional, cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.conditional ?? "–"}</span> },
+            { key: "fragile", header: "2c", title: "Certainty 2c: twin exclusive to its host claim. Highest risk — if host pruned, twin also lost.", sortValue: (r) => r.fragile, cell: (r) => <span className="font-mono text-[10px] text-red-300">{r.fragile ?? "–"}</span> },
           ]}
           rows={rows}
           defaultSortKey="compositeScore"
@@ -2267,26 +2374,31 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                 id: `${c?.edgeFrom ?? ""}_${c?.edgeTo ?? ""}_${idx}`,
                 from: String(c?.edgeFrom ?? ""),
                 to: String(c?.edgeTo ?? ""),
-                centroidSimilarity: typeof c?.centroidSimilarity === "number" ? c.centroidSimilarity : null,
-                muInterClaim: typeof c?.muInterClaim === "number" ? c.muInterClaim : null,
+                prox: typeof c?.crossPoolProximity === "number" ? c.crossPoolProximity : null,
+                muPw: typeof c?.muPairwise === "number" ? c.muPairwise : null,
+                exA: typeof c?.exclusiveA === "number" ? c.exclusiveA : null,
+                exB: typeof c?.exclusiveB === "number" ? c.exclusiveB : null,
+                mapperConflict: !!c?.mapperLabeledConflict,
                 validated: !!c?.validated,
+                failReason: c?.failReason ?? null,
               }));
               const validatedCount = rows.filter((r: any) => r.validated).length;
-              const muInter = rows.length > 0 ? rows[0].muInterClaim : null;
+              const mapperAgreement = rows.filter((r: any) => r.mapperConflict === r.validated).length;
               return (
                 <div className="space-y-2">
                   <div className="text-[9px] text-text-muted">
-                    {fmtInt(validatedCount)}/{fmtInt(rows.length)} conflict edges validated (centroid sim &lt; μ_inter = {muInter != null ? fmt(muInter, 3) : "—"})
+                    {fmtInt(validatedCount)} validated / {fmtInt(rows.length)} pairs — mapper agrees on {fmtInt(mapperAgreement)}
                   </div>
                   <SortableTable
                     columns={[
-                      { key: "from", header: "From", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.from}</span> },
-                      { key: "to", header: "To", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.to}</span> },
-                      { key: "centroidSimilarity", header: "Centroid Sim", sortValue: (r: any) => r.centroidSimilarity ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.centroidSimilarity != null ? fmt(r.centroidSimilarity, 3) : "—"}</span> },
-                      { key: "muInterClaim", header: "μ_inter", sortValue: (r: any) => r.muInterClaim ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.muInterClaim != null ? fmt(r.muInterClaim, 3) : "—"}</span> },
+                      { key: "from", header: "From", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[50px] inline-block" title={r.from}>{r.from}</span> },
+                      { key: "to", header: "To", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[50px] inline-block" title={r.to}>{r.to}</span> },
+                      { key: "exAB", header: "ExA:B", cell: (r: any) => <span className="font-mono text-text-muted">{r.exA ?? "—"}:{r.exB ?? "—"}</span> },
+                      { key: "prox", header: "Prox", sortValue: (r: any) => r.prox ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted" title={r.muPw != null ? `μ_pw: ${fmt(r.muPw, 3)}` : undefined}>{r.prox != null ? fmt(r.prox, 3) : r.failReason ? <span className="text-[9px] italic truncate max-w-[80px] inline-block" title={r.failReason}>—</span> : "—"}</span> },
+                      { key: "mapper", header: "Map", sortValue: (r: any) => r.mapperConflict ? 1 : 0, cell: (r: any) => <span className={clsx("font-mono text-[10px]", r.mapperConflict ? "text-amber-400" : "text-text-muted")}>{r.mapperConflict ? "C" : "·"}</span> },
                       {
                         key: "validated",
-                        header: "Validated",
+                        header: "Valid",
                         sortValue: (r: any) => (r.validated ? 1 : 0),
                         cell: (r: any) => (
                           <span className={clsx("font-mono text-[10px]", r.validated ? "text-emerald-400" : "text-text-muted")}>
@@ -2296,9 +2408,9 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                       },
                     ]}
                     rows={rows}
-                    defaultSortKey="validated"
+                    defaultSortKey="prox"
                     defaultSortDir="desc"
-                    maxRows={12}
+                    maxRows={20}
                   />
                 </div>
               );

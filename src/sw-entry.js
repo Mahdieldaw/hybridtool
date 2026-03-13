@@ -770,6 +770,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const { buildCognitiveArtifact } = await import('../shared/cognitive-artifact');
           const { buildGeometricSubstrate } = await import('./geometry/substrate');
           const { buildPreSemanticInterpretation, computePerModelQueryRelevance } = await import('./geometry/interpretation');
+          const { computeBasinInversion } = await import('../shared/geometry/basinInversion');
           const { computeQueryRelevance } = await import('./geometry/queryRelevance');
           const { enrichStatementsWithGeometry } = await import('./geometry/enrichment');
           const dims = DEFAULT_CONFIG.embeddingDimensions;
@@ -983,16 +984,22 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               ? new Float32Array(geoRecord.queryEmbedding)
               : null;
 
+          const paraVectors = Array.from(paragraphEmbeddings.values());
+          const paraIds = Array.from(paragraphEmbeddings.keys());
+          const basinInversionResult = geoRecord?.meta?.basinInversion || computeBasinInversion(paraIds, paraVectors);
+
           const substrate = buildGeometricSubstrate(
             shadowParagraphs,
             paragraphEmbeddings,
             geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
+            undefined, // default config
+            basinInversionResult
           );
 
           const queryBoost = queryEmbedding
             ? computePerModelQueryRelevance(queryEmbedding, statementEmbeddings, shadowParagraphs)
             : null;
-          const preSemantic = buildPreSemanticInterpretation(substrate, shadowParagraphs, paragraphEmbeddings, queryBoost);
+          const preSemantic = buildPreSemanticInterpretation(substrate, shadowParagraphs, paragraphEmbeddings, queryBoost, basinInversionResult);
           const regions = preSemantic?.regionization?.regions || [];
 
           try {
@@ -1124,6 +1131,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           let questionSelectionInstrumentation = null;
           let claimRouting = null;
+
+          const muPairwise = substrate?.meta?.similarityStats?.mean ?? null;
+
           try {
             const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
               await import('./core/blast-radius/questionSelection');
@@ -1135,6 +1145,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               modelCount,
               claimCentroids: claimEmbeddings ?? new Map(),
               queryEmbedding: queryEmbedding ?? null,
+              statementEmbeddings: statementEmbeddings ?? null,
+              muPairwise,
             });
             claimRouting = computeClaimRouting({
               blastSurfaceResult: derived?.blastSurfaceResult ?? null,
@@ -1144,6 +1156,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               modelCount,
               claimCentroids: claimEmbeddings ?? new Map(),
               queryEmbedding: queryEmbedding ?? null,
+              statementEmbeddings: statementEmbeddings ?? null,
+              muPairwise,
             });
           } catch (_) {
             questionSelectionInstrumentation = null;

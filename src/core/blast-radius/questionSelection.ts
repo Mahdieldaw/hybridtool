@@ -16,6 +16,10 @@ export interface QuestionSelectionInput {
   modelCount: number;
   claimCentroids: Map<string, Float32Array>;
   queryEmbedding?: Float32Array | null;
+  /** Statement embeddings for cross-pool proximity computation */
+  statementEmbeddings?: Map<string, Float32Array> | null;
+  /** Global pairwise mean similarity (from substrate or basin inversion) */
+  muPairwise?: number | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -26,7 +30,7 @@ export interface ConflictCluster {
   /** Claim IDs in this cluster connected by validated conflict edges */
   claimIds: string[];
   /** The validated conflict edges within this cluster */
-  edges: Array<{ from: string; to: string; centroidSimilarity: number }>;
+  edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
 }
 
 export interface IsolateCandidate {
@@ -75,23 +79,71 @@ function sigma(nums: number[], mu: number): number {
   return Math.sqrt(s / nums.length);
 }
 
-function computeMuInterClaim(claimIds: string[], claimCentroids: Map<string, Float32Array>): number {
-  if (claimIds.length < 2) return 0;
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < claimIds.length; i++) {
-    const a = claimCentroids.get(claimIds[i]) ?? null;
-    if (!a) continue;
-    for (let j = i + 1; j < claimIds.length; j++) {
-      const b = claimCentroids.get(claimIds[j]) ?? null;
-      if (!b) continue;
-      const sim = cosineSimilarity(a, b);
-      if (!Number.isFinite(sim)) continue;
-      sum += sim;
-      count += 1;
-    }
+// ─── Conflict validation helpers ─────────────────────────────────────────
+
+/** Builds canonical and exclusive statement ID sets for all claims. */
+function buildClaimStatementSets(claims: EnrichedClaim[]): {
+  canonicalSets: Map<string, Set<string>>;
+  exclusiveIds: Map<string, string[]>;
+} {
+  const canonicalSets = new Map<string, Set<string>>();
+  const ownerCount = new Map<string, number>();
+  for (const c of claims) {
+    const set = new Set<string>(Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : []);
+    canonicalSets.set(String(c.id), set);
+    for (const sid of set) ownerCount.set(sid, (ownerCount.get(sid) ?? 0) + 1);
   }
-  return count > 0 ? sum / count : 0;
+  const exclusiveIds = new Map<string, string[]>();
+  for (const [claimId, set] of canonicalSets.entries()) {
+    exclusiveIds.set(claimId, Array.from(set).filter(sid => (ownerCount.get(sid) ?? 0) <= 1));
+  }
+  return { canonicalSets, exclusiveIds };
+}
+
+/**
+ * Cross-pool proximity on statement embeddings.
+ * For each exclusive statement in A, find max cosine similarity to any statement in B's
+ * full canonical set. Average → meanAtoB. Mirror for B→A. Return min(meanAtoB, meanBtoA).
+ */
+function computeCrossPoolProximityStatements(
+  exclusiveStmtsA: string[],
+  canonicalB: Set<string>,
+  exclusiveStmtsB: string[],
+  canonicalA: Set<string>,
+  embeddings: Map<string, Float32Array>
+): number | null {
+  const embsExclA = exclusiveStmtsA.map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
+  const embsExclB = exclusiveStmtsB.map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
+  const allEmbsA = Array.from(canonicalA).map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
+  const allEmbsB = Array.from(canonicalB).map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
+
+  if (embsExclA.length === 0 || embsExclB.length === 0 || allEmbsA.length === 0 || allEmbsB.length === 0) return null;
+
+  // A→B: for each exclusive-A statement, max sim to any statement in B's full pool
+  let sumAtoB = 0;
+  for (const ea of embsExclA) {
+    let maxSim = -Infinity;
+    for (const eb of allEmbsB) {
+      const s = cosineSimilarity(ea, eb);
+      if (s > maxSim) maxSim = s;
+    }
+    sumAtoB += maxSim;
+  }
+  const meanAtoB = sumAtoB / embsExclA.length;
+
+  // B→A: for each exclusive-B statement, max sim to any statement in A's full pool
+  let sumBtoA = 0;
+  for (const eb of embsExclB) {
+    let maxSim = -Infinity;
+    for (const ea of allEmbsA) {
+      const s = cosineSimilarity(eb, ea);
+      if (s > maxSim) maxSim = s;
+    }
+    sumBtoA += maxSim;
+  }
+  const meanBtoA = sumBtoA / embsExclB.length;
+
+  return Math.min(meanAtoB, meanBtoA);
 }
 
 function computeQueryRelevanceRaw(
@@ -152,7 +204,6 @@ export function computeQuestionSelectionInstrumentation(
 
   const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
   const edges = Array.isArray(input.edges) ? input.edges : [];
-  const claimIds = claims.map((c) => String(c.id));
 
   const blastScoresByClaimId = new Map<string, any>();
   const bsScores = input.blastSurfaceResult?.scores ?? [];
@@ -161,25 +212,64 @@ export function computeQuestionSelectionInstrumentation(
     blastScoresByClaimId.set(String(s.claimId), s);
   }
 
-  const muInterClaim = computeMuInterClaim(claimIds, input.claimCentroids);
-  const validatedConflicts: ValidatedConflict[] = [];
+  const muPw = input.muPairwise ?? null;
+  const stmtEmbeddings = input.statementEmbeddings ?? null;
+
+  // Build canonical/exclusive sets from enriched claims
+  const { canonicalSets, exclusiveIds } = buildClaimStatementSets(claims);
+
+  // Build mapper conflict edge set for quick lookup
+  const mapperConflictSet = new Set<string>();
   for (const e of edges) {
     if (e?.type !== 'conflicts') continue;
-    const aId = String(e.from);
-    const bId = String(e.to);
-    const a = input.claimCentroids.get(aId) ?? null;
-    const b = input.claimCentroids.get(bId) ?? null;
-    const centroidSimilarity =
-      a && b ? cosineSimilarity(a, b) : 0;
-    const sim = Number.isFinite(centroidSimilarity) ? centroidSimilarity : 0;
-    const validated = a && b ? sim < muInterClaim : false;
-    validatedConflicts.push({
-      edgeFrom: aId,
-      edgeTo: bId,
-      centroidSimilarity: sim,
-      muInterClaim,
-      validated,
-    });
+    const a = String(e.from), b = String(e.to);
+    mapperConflictSet.add(`${a}\0${b}`);
+    mapperConflictSet.add(`${b}\0${a}`);
+  }
+
+  // All-pairs conflict validation
+  const validatedConflicts: ValidatedConflict[] = [];
+  for (let i = 0; i < claims.length; i++) {
+    for (let j = i + 1; j < claims.length; j++) {
+      const aId = String(claims[i].id);
+      const bId = String(claims[j].id);
+      const exclA = exclusiveIds.get(aId) ?? [];
+      const exclB = exclusiveIds.get(bId) ?? [];
+      const mapperLabeledConflict = mapperConflictSet.has(`${aId}\0${bId}`);
+
+      let crossPoolProx: number | null = null;
+      let validated = false;
+      let failReason: string | null = null;
+
+      if (exclA.length < 2 || exclB.length < 2) {
+        failReason = `insufficient exclusive statements (A:${exclA.length}, B:${exclB.length}, need ≥2 each)`;
+      } else if (!stmtEmbeddings) {
+        failReason = 'no statement embeddings available';
+      } else if (muPw === null) {
+        failReason = 'muPairwise not available';
+      } else {
+        const canonA = canonicalSets.get(aId) ?? new Set<string>();
+        const canonB = canonicalSets.get(bId) ?? new Set<string>();
+        crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddings);
+        if (crossPoolProx === null) {
+          failReason = 'embeddings missing for exclusive statements';
+        } else {
+          validated = crossPoolProx > muPw;
+        }
+      }
+
+      validatedConflicts.push({
+        edgeFrom: aId,
+        edgeTo: bId,
+        crossPoolProximity: crossPoolProx,
+        muPairwise: muPw,
+        exclusiveA: exclA.length,
+        exclusiveB: exclB.length,
+        mapperLabeledConflict,
+        validated,
+        failReason: failReason ?? null,
+      });
+    }
   }
 
   const discountStrength = 0.5 * Math.min(input.modelCount / 4, 1);
@@ -358,25 +448,30 @@ export function computeClaimRouting(
   input: QuestionSelectionInput
 ): ClaimRouting {
   const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
-  const edges = Array.isArray(input.edges) ? input.edges : [];
   const claimIds = claims.map((c) => String(c.id));
 
   // ── 1. Validated conflict clusters ──────────────────────────────────
-  const muInterClaim = computeMuInterClaim(claimIds, input.claimCentroids);
+  const muPwR = input.muPairwise ?? null;
+  const stmtEmbeddingsR = input.statementEmbeddings ?? null;
+  const { canonicalSets: canonicalSetsR, exclusiveIds: exclusiveIdsR } = buildClaimStatementSets(claims);
 
-  const validatedConflictEdges: Array<{ from: string; to: string; centroidSimilarity: number }> = [];
-  for (const e of edges) {
-    if (e?.type !== 'conflicts') continue;
-    const aId = String(e.from);
-    const bId = String(e.to);
-    const a = input.claimCentroids.get(aId) ?? null;
-    const b = input.claimCentroids.get(bId) ?? null;
-    if (!a || !b) continue;
-    const sim = cosineSimilarity(a, b);
-    if (!Number.isFinite(sim)) continue;
-    // Validated = centroid similarity below inter-claim mean (genuinely different positions)
-    if (sim < muInterClaim) {
-      validatedConflictEdges.push({ from: aId, to: bId, centroidSimilarity: sim });
+  const validatedConflictEdges: Array<{ from: string; to: string; crossPoolProximity: number | null }> = [];
+  for (let i = 0; i < claims.length; i++) {
+    for (let j = i + 1; j < claims.length; j++) {
+      const aId = String(claims[i].id);
+      const bId = String(claims[j].id);
+      const exclA = exclusiveIdsR.get(aId) ?? [];
+      const exclB = exclusiveIdsR.get(bId) ?? [];
+
+      if (exclA.length < 2 || exclB.length < 2 || !stmtEmbeddingsR || muPwR === null) continue;
+
+      const canonA = canonicalSetsR.get(aId) ?? new Set<string>();
+      const canonB = canonicalSetsR.get(bId) ?? new Set<string>();
+      const crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddingsR);
+
+      if (crossPoolProx !== null && crossPoolProx > muPwR) {
+        validatedConflictEdges.push({ from: aId, to: bId, crossPoolProximity: crossPoolProx });
+      }
     }
   }
 

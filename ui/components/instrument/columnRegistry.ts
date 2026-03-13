@@ -116,6 +116,17 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     category: 'geometry',
   },
   {
+    id: 'regionId',
+    label: 'Region',
+    accessor: r => r.regionId,
+    type: 'category',
+    sortable: true,
+    groupable: true,
+    description: 'Region ID assigned to the source paragraph',
+    source: 'computed',
+    category: 'geometry',
+  },
+  {
     id: 'sim_query',
     label: 'sim_query',
     accessor: r => r.sim_query,
@@ -393,7 +404,7 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'global-floor',
     label: 'Global Floor',
-    columns: ['statementId', 'text', 'model', 'globalSim', 'zone', 'paragraphOrigin'],
+    columns: ['statementId', 'text', 'model', 'globalSim', 'regionId', 'zone', 'paragraphOrigin'],
     sortBy: 'globalSim',
     sortDir: 'desc',
     groupBy: 'zone',
@@ -558,6 +569,17 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     category: 'geometry',
   },
   {
+    id: 'regionId',
+    label: 'Region',
+    accessor: (r: any) => r.regionId,
+    type: 'category',
+    sortable: true,
+    groupable: true,
+    description: 'Region ID assigned to the paragraph',
+    source: 'computed',
+    category: 'geometry',
+  },
+  {
     id: 'avgTopKSim',
     label: 'avgTopK',
     accessor: (r: ParagraphRow) => r.avgTopKSim,
@@ -719,7 +741,7 @@ export const PARAGRAPH_VIEWS: ViewConfig[] = [
   {
     id: 'para-overview',
     label: 'Overview',
-    columns: ['paragraphId', 'text', 'model', 'statementCount', 'dominantStance', 'contested'],
+    columns: ['paragraphId', 'text', 'model', 'statementCount', 'regionId', 'dominantStance', 'contested'],
     sortBy: 'paragraphId',
     sortDir: 'asc',
     groupBy: 'model',

@@ -48,7 +48,8 @@ export function buildGeometricSubstrate(
     paragraphs: ShadowParagraph[],
     embeddings: Map<string, Float32Array> | null,
     embeddingBackend: 'webgpu' | 'wasm' | 'none',
-    config: SubstrateConfig = DEFAULT_SUBSTRATE_CONFIG
+    config: SubstrateConfig = DEFAULT_SUBSTRATE_CONFIG,
+    basinInversionResult?: any // Topographic data
 ): GeometricSubstrate | DegenerateSubstrate {
     const startTime = performance.now();
     const paragraphIds = paragraphs.map(p => p.id);
@@ -155,6 +156,7 @@ export function buildGeometricSubstrate(
         top1Sims,
         topKSims,
         mutualRankGraph,
+        basinInversionResult
     );
 
     const similarityStats = computeSimilarityStats(topKSims);

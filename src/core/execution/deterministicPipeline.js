@@ -185,6 +185,10 @@ export async function computeDerivedFields({
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
       const { computeBlastSurface } = await import('../blast-radius/blastSurface');
+      const statementTextsMap = new Map();
+      for (const stmt of shadowStatements) {
+        statementTextsMap.set(stmt.id, stmt.text ?? '');
+      }
       result.blastSurfaceResult = computeBlastSurface({
         claims: enrichedClaims.map(c => ({
           id: c.id,
@@ -196,6 +200,7 @@ export async function computeDerivedFields({
         queryRelevanceScores: result.queryRelevance?.statementScores ?? null,
         queryEmbedding: queryEmbedding || null,
         totalCorpusStatements: shadowStatements.length,
+        statementTexts: statementTextsMap,
       });
       console.log(`[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`);
     }
@@ -224,7 +229,9 @@ export async function computeDerivedFields({
 
   // ── 11. Basin inversion ─────────────────────────────────────────────
   try {
-    if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
+    if (geoRecord?.meta?.basinInversion) {
+      result.basinInversion = geoRecord.meta.basinInversion;
+    } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
       const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
       const dims = geoRecord.meta.dimensions || 384;
       const paraIds = geoRecord.meta.paragraphIndex;
