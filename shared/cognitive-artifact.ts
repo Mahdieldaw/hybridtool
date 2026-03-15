@@ -30,6 +30,7 @@ export function buildCognitiveArtifact(
       paragraphs: pipeline?.paragraphProjection?.paragraphs ?? [],
       audit: mapper?.shadow?.audit ?? {},
       delta: pipeline?.shadow?.delta ?? null,
+      tableSidecar: pipeline?.shadow?.extraction?.tableSidecar ?? [],
     },
     geometry: {
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',

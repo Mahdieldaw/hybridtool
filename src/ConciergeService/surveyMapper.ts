@@ -4,7 +4,7 @@
 
 import { extractJsonFromContent } from '../../shared/parsing-utils';
 import type { SurveyGate } from '../../shared/contract';
-import type { ClaimRouting, ConflictCluster, IsolateCandidate } from '../core/blast-radius/questionSelection';
+import type { ClaimRouting, ConflictCluster, DamageOutlier } from '../core/blast-radius/questionSelection';
 
 type RawModelResponse = {
   modelIndex: number;
@@ -171,9 +171,9 @@ Think of how asking, "Do the items you are comparing say the same things in diff
 </fork>`;
 }
 
-function buildIsolateSection(isolate: IsolateCandidate): string {
+function buildIsolateSection(isolate: DamageOutlier): string {
   return `<isolate claim_id="${isolate.claimId}">
-This claim carries evidence no other model produced (${(isolate.orphanRatio * 100).toFixed(0)}% orphaned statements). It is either the golden thread the other models missed, or a path that silently requires a reality the user may not possess.
+This claim has outlier structural damage (totalDamage=${isolate.totalDamage.toFixed(3)}, support=${(isolate.supportRatio * 100).toFixed(0)}% of models). It is either a critical path the majority missed, or one that silently requires a reality the user may not possess.
 
 <claim>
 [${isolate.claimId}] ${isolate.claimLabel}
@@ -197,9 +197,9 @@ export function buildRoutedSurveyPrompt(
   if (routing.skipSurvey) return null;
 
   const hasForks = routing.conflictClusters.length > 0;
-  const hasIsolates = routing.isolateCandidates.length > 0;
+  const hasOutliers = routing.damageOutliers.length > 0;
 
-  if (!hasForks && !hasIsolates) return null;
+  if (!hasForks && !hasOutliers) return null;
 
   const sourcesBlock = formatBatchTexts(batchTexts);
 
@@ -229,12 +229,12 @@ ${sourcesBlock}
     );
   }
 
-  if (hasIsolates) {
-    const isolateSections = routing.isolateCandidates.map((isolate) =>
-      buildIsolateSection(isolate)
+  if (hasOutliers) {
+    const outlierSections = routing.damageOutliers.map((outlier) =>
+      buildIsolateSection(outlier)
     );
     sections.push(
-      `\n## ANOMALY VERIFICATION (ISOLATES)\n\n${isolateSections.join('\n\n')}`
+      `\n## ANOMALY VERIFICATION (ISOLATES)\n\n${outlierSections.join('\n\n')}`
     );
   }
 
@@ -261,7 +261,7 @@ Only claims with a "vulnerable" verdict produce a gate.
       "question": "Do you [observable fact about the user's reality]?",
       "prunesOn": "yes | no",
       "reasoning": "If the user answers [yes/no], [these claims] collapse because [the constructed user becomes impossible / the silent prerequisite is absent].",
-      "affectedClaims": ["claim_X", claim_Y"]
+      "affectedClaims": ["claim_X", "claim_Y"]
     }
   ]
 }

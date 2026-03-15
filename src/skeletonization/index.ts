@@ -99,7 +99,46 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
     },
   };
 
-  return reconstructSubstrate(normalizedInput, triageResult);
+  const chewed = reconstructSubstrate(normalizedInput, triageResult);
+
+  // Cell-unit triage + table reconstruction
+  const tca = normalizedInput.tableCellAllocation;
+  const tableSidecar = normalizedInput.tableSidecar;
+  if (tca && Array.isArray(tca.cellUnits) && tca.cellUnits.length > 0 && Array.isArray(tableSidecar) && tableSidecar.length > 0) {
+    try {
+      const { triageCellUnits, reconstructSurvivingTables } = await import('../core/tableCellAllocation');
+
+      // Normalize Maps (may arrive as plain objects from serialization)
+      const cellUnitClaims = tca.cellUnitClaims instanceof Map
+        ? tca.cellUnitClaims
+        : new Map(Object.entries(tca.cellUnitClaims ?? {}));
+
+      const survivingClaimIds = new Set<string>();
+      for (const claim of normalizedInput.claims) {
+        const status = traversalState.claimStatuses.get(claim.id);
+        if (status !== 'pruned') survivingClaimIds.add(claim.id);
+      }
+
+      const allCellUnitIds = tca.cellUnits.map(cu => cu.id);
+      const cellTriage = triageCellUnits(
+        cellUnitClaims,
+        tca.unallocatedCellUnitIds ?? [],
+        survivingClaimIds,
+        allCellUnitIds,
+      );
+
+      chewed.reconstructedTables = reconstructSurvivingTables(
+        tableSidecar,
+        tca.cellUnits,
+        cellTriage.fates,
+      );
+      chewed.summary.tableCellUnits = cellTriage.meta;
+    } catch (err) {
+      console.warn('[Skeletonization] Cell-unit triage failed:', err);
+    }
+  }
+
+  return chewed;
 }
 
 interface BatchResponse {

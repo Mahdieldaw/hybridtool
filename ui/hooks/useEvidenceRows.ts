@@ -299,8 +299,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         ? routing.conflictClusters.some((c: any) => Array.isArray(c?.claimIds) && c.claimIds.map(String).includes(selectedClaimId))
         : false;
       if (inConflict) return 'conflict';
-      const isolate = Array.isArray(routing?.isolateCandidates)
-        ? routing.isolateCandidates.some((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+      const isolate = Array.isArray(routing?.damageOutliers)
+        ? routing.damageOutliers.some((c: any) => String(c?.claimId ?? "") === selectedClaimId)
         : false;
       if (isolate) return 'isolate';
       const passthrough = Array.isArray(routing?.passthrough)
@@ -312,8 +312,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
     const queryDistance: number | null = (() => {
       if (!selectedClaimId || !routing) return null;
-      const isolate = Array.isArray(routing?.isolateCandidates)
-        ? routing.isolateCandidates.find((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+      const isolate = Array.isArray(routing?.damageOutliers)
+        ? routing.damageOutliers.find((c: any) => String(c?.claimId ?? "") === selectedClaimId)
         : null;
       const q = isolate?.queryDistance;
       return typeof q === 'number' && Number.isFinite(q) ? q : null;

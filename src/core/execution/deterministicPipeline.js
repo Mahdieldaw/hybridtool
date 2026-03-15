@@ -54,6 +54,10 @@ export async function computeDerivedFields({
   competitiveWeights = null,     // Map<paraId, Map<claimId, weight>>
   competitiveExcess = null,      // Map<paraId, Map<claimId, excess>>
   competitiveThresholds = null,  // Map<paraId, threshold>
+
+  // Table cell-unit integration
+  tableSidecar = [],             // TableSidecar
+  cellUnitEmbeddings = null,     // Map<string, Float32Array> | null
 }) {
   const result = {
     claimProvenance: null,
@@ -70,6 +74,7 @@ export async function computeDerivedFields({
     queryRelevance: null,
     semanticEdges: [],
     derivedSupportEdges: [],
+    tableCellAllocation: null,
   };
 
   // ── 1. Query relevance ──────────────────────────────────────────────
@@ -181,6 +186,26 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Mixed-method provenance failed:', getErrorMessage(err));
   }
 
+  // ── 8. Table cell-unit allocation ──────────────────────────────────
+  try {
+    if (Array.isArray(tableSidecar) && tableSidecar.length > 0 && cellUnitEmbeddings && cellUnitEmbeddings.size > 0 && claimEmbeddings && claimEmbeddings.size > 0) {
+      const { flattenCellUnits, allocateCellUnitsToClaims } = await import('../tableCellAllocation');
+      const cellUnits = flattenCellUnits(tableSidecar);
+      if (cellUnits.length > 0) {
+        result.tableCellAllocation = allocateCellUnitsToClaims(
+          cellUnits,
+          cellUnitEmbeddings,
+          claimEmbeddings,
+          statementEmbeddings || new Map(),
+          enrichedClaims,
+        );
+        console.log(`[DeterministicPipeline] TableCellAllocation: ${result.tableCellAllocation.meta.allocatedCount}/${result.tableCellAllocation.meta.totalCellUnits} allocated in ${result.tableCellAllocation.meta.processingTimeMs.toFixed(0)}ms`);
+      }
+    }
+  } catch (err) {
+    console.warn('[DeterministicPipeline] Table cell allocation failed:', getErrorMessage(err));
+  }
+
   // ── 9. Blast surface (provenance-derived) ───────────────────────────
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
@@ -201,6 +226,7 @@ export async function computeDerivedFields({
         queryEmbedding: queryEmbedding || null,
         totalCorpusStatements: shadowStatements.length,
         statementTexts: statementTextsMap,
+        tableCellAllocations: result.tableCellAllocation?.tableCellAllocations ?? null,
       });
       console.log(`[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`);
     }
@@ -539,6 +565,7 @@ export function assembleMapperArtifact({
     derivedSupportEdges,
     shadowDelta,
     topUnindexed,
+    tableCellAllocation,
   } = derived;
 
   return {
@@ -566,6 +593,12 @@ export function assembleMapperArtifact({
     ...(basinInversion ? { basinInversion } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(alignmentResult ? { alignment: alignmentResult } : {}),
+    ...(tableCellAllocation ? { tableCellAllocation: {
+      tableCellAllocations: Object.fromEntries(tableCellAllocation.tableCellAllocations),
+      cellUnitClaims: Object.fromEntries(tableCellAllocation.cellUnitClaims),
+      unallocatedCellUnitIds: tableCellAllocation.unallocatedCellUnitIds,
+      meta: tableCellAllocation.meta,
+    } } : {}),
     ...(statementSemanticDensity ? { statementSemanticDensity } : {}),
     ...(paragraphSemanticDensity ? { paragraphSemanticDensity } : {}),
     ...(claimSemanticDensity ? { claimSemanticDensity } : {}),

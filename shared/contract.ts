@@ -838,6 +838,8 @@ export interface BlastSurfaceLayerC {
   exclusiveNonOrphanCount: number;
   /** Exclusive orphan statements (Type 3) — skeletonized on prune, never removed */
   exclusiveOrphanCount: number;
+  /** Table cell-units allocated to this claim (contributes to evidence mass, not twin map) */
+  allocatedCellUnits?: number;
 }
 
 export interface BlastSurfaceCascadeDetail {
@@ -978,7 +980,7 @@ export interface ValidatedConflict {
 export interface QuestionSelectionClaimProfile {
   claimId: string;
   claimLabel: string;
-  vernalComposite: number | null;
+  totalDamage: number | null;
   orphanRatio: number | null;
   supportRatio: number;
   modelCount: number;
@@ -1023,20 +1025,21 @@ export interface ClaimRoutingResult {
     claimIds: string[];
     edges: Array<{ from: string; to: string; jaccard: number; crossPoolProximity: number | null }>;
   }>;
-  isolateCandidates: Array<{
+  damageOutliers: Array<{
     claimId: string;
     claimLabel: string;
     claimText: string;
-    orphanRatio: number;
-    vernalComposite: number;
+    totalDamage: number;
+    supportRatio: number;
     queryDistance: number | null;
     supporters: number[];
+    promptType: 'isolate' | 'conditionality';
   }>;
   passthrough: string[];
   skipSurvey: boolean;
   diagnostics: {
-    orphanThreshold: number | null;
-    orphanDistribution: number[];
+    damageThreshold: number | null;
+    damageDistribution: number[];
     convergenceRatio: number;
     totalClaims: number;
     queryDistanceThreshold: number | null;

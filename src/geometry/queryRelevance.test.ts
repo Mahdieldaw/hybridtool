@@ -8,6 +8,7 @@ function makeStatement(id: string, modelIndex: number): ShadowStatement {
     id,
     modelIndex,
     text: `Statement ${id}`,
+    cleanText: `Statement ${id}`,
     stance: "assertive",
     confidence: 1,
     signals: { sequence: false, tension: false, conditional: false },

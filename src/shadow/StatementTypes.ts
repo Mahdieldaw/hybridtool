@@ -112,10 +112,10 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\brecommend\b/i,
         /\bsuggest\b/i,
         /\badvise\b/i,
-        /\bconsider\b/i,
-        /\buse\b/i,
-        /\bimplement\b/i,
-        /\bapply\b/i,
+        /^use\s+\w/i,
+        /^apply\s+\w/i,
+        /^consider\s+\w/i,
+        /^implement\s+\w/i,
     ],
 
     uncertain: [
@@ -133,20 +133,10 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\bhard\s+to\s+(say|know|tell)\b/i,
         /\bdifficult\s+to\s+know\b/i,
         /\b(it|that)\s+varies\b/i,
-        /\btypically\b/i,
-        /\busually\b/i,
         /\bin\s+some\s+cases\b/i,
     ],
 
     assertive: [
-        /\bis\b/i,
-        /\bare\b/i,
-        /\bwas\b/i,
-        /\bwere\b/i,
-        /\bdoes\b/i,
-        /\bdo\b/i,
-        /\bhas\b/i,
-        /\bhave\b/i,
         /\bworks?\b/i,
         /\bperforms?\b/i,
         /\bprovides?\b/i,
@@ -155,6 +145,8 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\bexists?\b/i,
         /\bcontains?\b/i,
         /\bsupports?\b/i,
+        /\bis\s+(essential|critical|required|necessary)\b/i,
+        /\b(demonstrates|proves|confirms)\s+that\b/i,
     ],
     unclassified: [],
 };
@@ -247,38 +239,46 @@ export function getSignalPatterns(signalType: keyof SignalPatterns): RegExp[] {
 }
 
 /**
- * Classify stance based on pattern matching with priority order
+ * Classify stance using evidence-weighted majority wins.
+ * The stance with the most pattern matches wins; priority breaks ties.
+ * If no patterns match, returns assertive with low confidence (residual fallback).
  */
 export function classifyStance(text: string): { stance: Stance; confidence: number } {
-    let bestStance: Stance = 'unclassified';
-    let maxPriority = 0;
-    let winnerMatches = 0;
+    const matchCounts = new Map<Stance, number>();
     let totalMatches = 0;
 
     for (const stance of STANCE_PRIORITY) {
         const patterns = STANCE_PATTERNS[stance];
         const matches = patterns.filter(p => p.test(text)).length;
-        totalMatches += matches;
-
         if (matches > 0) {
-            const priority = getStancePriority(stance);
-            if (priority > maxPriority) {
-                maxPriority = priority;
-                bestStance = stance;
-                winnerMatches = matches;
-            }
+            matchCounts.set(stance, matches);
+            totalMatches += matches;
         }
     }
 
-    if (winnerMatches === 0) return { stance: 'unclassified', confidence: 0 };
+    // No patterns matched at all: residual assertive fallback.
+    // 0.50 = neutral "no strong stance signal", not "this statement is weak".
+    if (totalMatches === 0) return { stance: 'assertive', confidence: 0.50 };
+
+    // Majority wins: stance with most matches; priority as tiebreaker
+    let bestStance: Stance = 'assertive';
+    let bestCount = 0;
+    let bestPriority = 0;
+
+    for (const [stance, count] of matchCounts) {
+        const priority = getStancePriority(stance);
+        if (count > bestCount || (count === bestCount && priority > bestPriority)) {
+            bestStance = stance;
+            bestCount = count;
+            bestPriority = priority;
+        }
+    }
 
     // Base confidence from winner pattern strength: 1 match = 0.65, 2 = 0.80, 3+ = 0.95
-    const baseConfidence = Math.min(1.0, 0.5 + (winnerMatches * 0.15));
+    const baseConfidence = Math.min(1.0, 0.5 + (bestCount * 0.15));
 
-    // Dominance ratio: penalize cross-stance contamination.
-    // A statement matching 2 cautionary + 6 other stances is less certain than
-    // one matching 2 cautionary + 0 others. Pure winner gets ratio = 1.0.
-    const dominanceRatio = totalMatches > 0 ? winnerMatches / totalMatches : 1;
+    // Dominance ratio: penalize cross-stance contamination
+    const dominanceRatio = bestCount / totalMatches;
     const confidence = baseConfidence * dominanceRatio;
 
     return { stance: bestStance, confidence };

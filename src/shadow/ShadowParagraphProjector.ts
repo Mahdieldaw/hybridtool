@@ -64,7 +64,10 @@ function computeDominantStance(
 
     const contested =
         (stanceSet.has('prescriptive') && stanceSet.has('cautionary')) ||
-        (stanceSet.has('assertive') && stanceSet.has('uncertain'));
+        (stanceSet.has('assertive') && stanceSet.has('uncertain')) ||
+        (stanceSet.has('prerequisite') && stanceSet.has('dependent')) ||
+        (stanceSet.has('cautionary') && stanceSet.has('uncertain')) ||
+        (stanceSet.has('prescriptive') && stanceSet.has('uncertain'));
 
     if (contested) {
         const contestedStances = Array.from(stanceSet).sort(compareStances);

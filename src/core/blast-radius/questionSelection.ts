@@ -18,8 +18,6 @@ export interface QuestionSelectionInput {
   queryEmbedding?: Float32Array | null;
   /** Statement embeddings for cross-pool proximity computation */
   statementEmbeddings?: Map<string, Float32Array> | null;
-  /** Global pairwise mean similarity (from substrate or basin inversion) */
-  muPairwise?: number | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -33,29 +31,30 @@ export interface ConflictCluster {
   edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
 }
 
-export interface IsolateCandidate {
+export interface DamageOutlier {
   claimId: string;
   claimLabel: string;
   claimText: string;
-  orphanRatio: number;
-  vernalComposite: number;
+  totalDamage: number;
+  supportRatio: number;
   queryDistance: number | null;
   supporters: number[];
+  promptType: 'isolate' | 'conditionality';
 }
 
 export interface ClaimRouting {
   /** Claims in validated conflict — need fork articulation prompt */
   conflictClusters: ConflictCluster[];
-  /** Sole-source claims with meaningful orphaned evidence — need misleadingness test */
-  isolateCandidates: IsolateCandidate[];
+  /** Non-consensus claims with outlier structural damage — need misleadingness test */
+  damageOutliers: DamageOutlier[];
   /** Claims that pass through without survey questions */
   passthrough: string[];
   /** If true, skip the survey mapper entirely (high convergence, no structural tension) */
   skipSurvey: boolean;
   /** Diagnostic: why the routing made the decisions it did */
   diagnostics: {
-    orphanThreshold: number | null;
-    orphanDistribution: number[];
+    damageThreshold: number | null;
+    damageDistribution: number[];
     convergenceRatio: number;
     totalClaims: number;
     queryDistanceThreshold: number | null;
@@ -212,11 +211,10 @@ export function computeQuestionSelectionInstrumentation(
     blastScoresByClaimId.set(String(s.claimId), s);
   }
 
-  const muPw = input.muPairwise ?? null;
   const stmtEmbeddings = input.statementEmbeddings ?? null;
 
   // Build canonical/exclusive sets from enriched claims
-  const { canonicalSets, exclusiveIds } = buildClaimStatementSets(claims);
+  const { canonicalSets } = buildClaimStatementSets(claims);
 
   // Build mapper conflict edge set for quick lookup
   const mapperConflictSet = new Set<string>();
@@ -227,49 +225,80 @@ export function computeQuestionSelectionInstrumentation(
     mapperConflictSet.add(`${b}\0${a}`);
   }
 
-  // All-pairs conflict validation
-  const validatedConflicts: ValidatedConflict[] = [];
+  // All-pairs conflict validation — two-pass so the threshold is the mean of the
+  // actual cross-pool proximity values being tested, not the top-K similarity mean.
+
+  // Pass 1: compute proximity for every eligible pair; collect all finite values.
+  type PairResult = {
+    aId: string; bId: string;
+    exclA: string[]; exclB: string[];
+    crossPoolProx: number | null;
+    failReason: string | null;
+    mapperLabeledConflict: boolean;
+  };
+  const pairResults: PairResult[] = [];
+  const proximityValues: number[] = [];
+
   for (let i = 0; i < claims.length; i++) {
     for (let j = i + 1; j < claims.length; j++) {
       const aId = String(claims[i].id);
       const bId = String(claims[j].id);
-      const exclA = exclusiveIds.get(aId) ?? [];
-      const exclB = exclusiveIds.get(bId) ?? [];
+      const canonA = canonicalSets.get(aId) ?? new Set<string>();
+      const canonB = canonicalSets.get(bId) ?? new Set<string>();
+      const exclA = Array.from(canonA).filter(sid => !canonB.has(sid));
+      const exclB = Array.from(canonB).filter(sid => !canonA.has(sid));
       const mapperLabeledConflict = mapperConflictSet.has(`${aId}\0${bId}`);
 
       let crossPoolProx: number | null = null;
-      let validated = false;
       let failReason: string | null = null;
 
       if (exclA.length < 2 || exclB.length < 2) {
         failReason = `insufficient exclusive statements (A:${exclA.length}, B:${exclB.length}, need ≥2 each)`;
       } else if (!stmtEmbeddings) {
         failReason = 'no statement embeddings available';
-      } else if (muPw === null) {
-        failReason = 'muPairwise not available';
       } else {
-        const canonA = canonicalSets.get(aId) ?? new Set<string>();
-        const canonB = canonicalSets.get(bId) ?? new Set<string>();
         crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddings);
         if (crossPoolProx === null) {
           failReason = 'embeddings missing for exclusive statements';
         } else {
-          validated = crossPoolProx > muPw;
+          proximityValues.push(crossPoolProx);
         }
       }
 
-      validatedConflicts.push({
-        edgeFrom: aId,
-        edgeTo: bId,
-        crossPoolProximity: crossPoolProx,
-        muPairwise: muPw,
-        exclusiveA: exclA.length,
-        exclusiveB: exclB.length,
-        mapperLabeledConflict,
-        validated,
-        failReason: failReason ?? null,
-      });
+      pairResults.push({ aId, bId, exclA, exclB, crossPoolProx, failReason, mapperLabeledConflict });
     }
+  }
+
+  // Derive threshold from the distribution of actual proximity values computed above.
+  const muProximity = proximityValues.length > 0
+    ? proximityValues.reduce((a, b) => a + b, 0) / proximityValues.length
+    : null;
+
+  // Pass 2: apply threshold and assemble ValidatedConflict records.
+  const validatedConflicts: ValidatedConflict[] = [];
+  for (const pr of pairResults) {
+    let validated = false;
+    let failReason = pr.failReason;
+
+    if (pr.crossPoolProx !== null) {
+      if (muProximity === null) {
+        failReason = 'muProximity not available';
+      } else {
+        validated = pr.crossPoolProx > muProximity;
+      }
+    }
+
+    validatedConflicts.push({
+      edgeFrom: pr.aId,
+      edgeTo: pr.bId,
+      crossPoolProximity: pr.crossPoolProx,
+      muPairwise: muProximity,
+      exclusiveA: pr.exclA.length,
+      exclusiveB: pr.exclB.length,
+      mapperLabeledConflict: pr.mapperLabeledConflict,
+      validated,
+      failReason: failReason ?? null,
+    });
   }
 
   const discountStrength = 0.5 * Math.min(input.modelCount / 4, 1);
@@ -287,30 +316,29 @@ export function computeQuestionSelectionInstrumentation(
   const sigmaQr = sigma(queryRelValues, muQr);
   const qrThreshold = muQr - sigmaQr;
 
-  const vernalValues: number[] = [];
-  const vernalByClaimId = new Map<string, number | null>();
+  const totalDamageValues: number[] = [];
+  const totalDamageByClaimId = new Map<string, number | null>();
   const orphanRatioByClaimId = new Map<string, number | null>();
   for (const c of claims) {
     const score = blastScoresByClaimId.get(String(c.id)) ?? null;
-    const vernalComposite = typeof score?.vernal?.compositeScore === 'number' && Number.isFinite(score.vernal.compositeScore)
-      ? score.vernal.compositeScore
-      : null;
+    const td = score?.riskVector?.totalDamage;
+    const totalDamage = typeof td === 'number' && Number.isFinite(td) ? td : null;
     const orphanRatio = typeof score?.layerB?.orphanRatio === 'number' && Number.isFinite(score.layerB.orphanRatio)
       ? score.layerB.orphanRatio
       : null;
-    vernalByClaimId.set(String(c.id), vernalComposite);
+    totalDamageByClaimId.set(String(c.id), totalDamage);
     orphanRatioByClaimId.set(String(c.id), orphanRatio);
-    if (vernalComposite !== null) vernalValues.push(vernalComposite);
+    if (totalDamage !== null) totalDamageValues.push(totalDamage);
   }
-  const meanDamage = mean(vernalValues);
-  const sigmaDamage = sigma(vernalValues, meanDamage);
-  const maxDamage = vernalValues.length > 0 ? Math.max(...vernalValues) : 0;
+  const meanDamage = mean(totalDamageValues);
+  const sigmaDamage = sigma(totalDamageValues, meanDamage);
+  const maxDamage = totalDamageValues.length > 0 ? Math.max(...totalDamageValues) : 0;
 
   const damageBandByClaimId = new Map<string, number>();
   if (sigmaDamage > 0) {
     const denom = 0.5 * sigmaDamage;
     for (const c of claims) {
-      const v = vernalByClaimId.get(String(c.id)) ?? null;
+      const v = totalDamageByClaimId.get(String(c.id)) ?? null;
       if (v === null) {
         damageBandByClaimId.set(String(c.id), 0);
         continue;
@@ -333,8 +361,8 @@ export function computeQuestionSelectionInstrumentation(
   }
   for (const [, ids] of claimsByBand.entries()) {
     const byDamage = [...ids].sort((a, b) => {
-      const va = vernalByClaimId.get(a);
-      const vb = vernalByClaimId.get(b);
+      const va = totalDamageByClaimId.get(a);
+      const vb = totalDamageByClaimId.get(b);
       const na = typeof va === 'number' ? va : -Infinity;
       const nb = typeof vb === 'number' ? vb : -Infinity;
       if (nb !== na) return nb - na;
@@ -364,7 +392,7 @@ export function computeQuestionSelectionInstrumentation(
       return {
         claimId: id,
         claimLabel: String(c.label ?? id),
-        vernalComposite: vernalByClaimId.get(id) ?? null,
+        totalDamage: totalDamageByClaimId.get(id) ?? null,
         orphanRatio: orphanRatioByClaimId.get(id) ?? null,
         supportRatio: typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0,
         modelCount: input.modelCount,
@@ -378,8 +406,8 @@ export function computeQuestionSelectionInstrumentation(
       };
     })
     .sort((a, b) => {
-      const va = typeof a.vernalComposite === 'number' ? a.vernalComposite : -Infinity;
-      const vb = typeof b.vernalComposite === 'number' ? b.vernalComposite : -Infinity;
+      const va = typeof a.totalDamage === 'number' ? a.totalDamage : -Infinity;
+      const vb = typeof b.totalDamage === 'number' ? b.totalDamage : -Infinity;
       if (vb !== va) return vb - va;
       return a.claimId.localeCompare(b.claimId);
     });
@@ -398,7 +426,7 @@ export function computeQuestionSelectionInstrumentation(
   if (sigmaDamage > 0) {
     const threshold = meanDamage + sigmaDamage;
     for (const p of claimProfiles) {
-      const v = p.vernalComposite;
+      const v = p.totalDamage;
       if (typeof v === 'number' && Number.isFinite(v) && v > threshold) damageOutlierClaimIds.push(p.claimId);
     }
   }
@@ -451,26 +479,58 @@ export function computeClaimRouting(
   const claimIds = claims.map((c) => String(c.id));
 
   // ── 1. Validated conflict clusters ──────────────────────────────────
-  const muPwR = input.muPairwise ?? null;
   const stmtEmbeddingsR = input.statementEmbeddings ?? null;
-  const { canonicalSets: canonicalSetsR, exclusiveIds: exclusiveIdsR } = buildClaimStatementSets(claims);
+  const { canonicalSets: canonicalSetsR } = buildClaimStatementSets(claims);
 
-  const validatedConflictEdges: Array<{ from: string; to: string; crossPoolProximity: number | null }> = [];
+  // Only validate pairs the mapper labeled as conflicting — the routing
+  // decision affects which questions are asked, so it must stay scoped to
+  // mapper-declared conflicts. All-pairs validation is done separately in
+  // computeQuestionSelectionInstrumentation for UI diagnostics only.
+  const mapperConflictSetR = new Set<string>();
+  for (const e of Array.isArray(input.edges) ? input.edges : []) {
+    if (e?.type !== 'conflicts') continue;
+    const a = String(e.from), b = String(e.to);
+    mapperConflictSetR.add(`${a}\0${b}`);
+    mapperConflictSetR.add(`${b}\0${a}`);
+  }
+
+  // Pass 1: compute proximity for mapper-conflict pairs only, collect values for mean.
+  type RoutingPair = { aId: string; bId: string; crossPoolProx: number | null };
+  const routingPairs: RoutingPair[] = [];
+  const routingProxValues: number[] = [];
+
   for (let i = 0; i < claims.length; i++) {
     for (let j = i + 1; j < claims.length; j++) {
       const aId = String(claims[i].id);
       const bId = String(claims[j].id);
-      const exclA = exclusiveIdsR.get(aId) ?? [];
-      const exclB = exclusiveIdsR.get(bId) ?? [];
 
-      if (exclA.length < 2 || exclB.length < 2 || !stmtEmbeddingsR || muPwR === null) continue;
+      // Skip pairs the mapper didn't label as conflicting
+      if (!mapperConflictSetR.has(`${aId}\0${bId}`)) continue;
 
       const canonA = canonicalSetsR.get(aId) ?? new Set<string>();
       const canonB = canonicalSetsR.get(bId) ?? new Set<string>();
-      const crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddingsR);
+      const exclA = Array.from(canonA).filter(sid => !canonB.has(sid));
+      const exclB = Array.from(canonB).filter(sid => !canonA.has(sid));
 
-      if (crossPoolProx !== null && crossPoolProx > muPwR) {
-        validatedConflictEdges.push({ from: aId, to: bId, crossPoolProximity: crossPoolProx });
+      if (exclA.length < 2 || exclB.length < 2 || !stmtEmbeddingsR) continue;
+
+      const crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddingsR);
+      if (crossPoolProx !== null) routingProxValues.push(crossPoolProx);
+      routingPairs.push({ aId, bId, crossPoolProx });
+    }
+  }
+
+  // Threshold = mean of actual proximity values computed above.
+  const muProximityR = routingProxValues.length > 0
+    ? routingProxValues.reduce((a, b) => a + b, 0) / routingProxValues.length
+    : null;
+
+  // Pass 2: keep edges whose proximity exceeds the mean.
+  const validatedConflictEdges: Array<{ from: string; to: string; crossPoolProximity: number | null }> = [];
+  if (muProximityR !== null) {
+    for (const pr of routingPairs) {
+      if (pr.crossPoolProx !== null && pr.crossPoolProx > muProximityR) {
+        validatedConflictEdges.push({ from: pr.aId, to: pr.bId, crossPoolProximity: pr.crossPoolProx });
       }
     }
   }
@@ -512,8 +572,8 @@ export function computeClaimRouting(
     for (const id of cluster.claimIds) claimsInConflict.add(id);
   }
 
-  // ── 2. Orphan-based isolate detection ──────────────────────────────
-  // Collect orphan ratios from blast surface
+  // ── 2. Damage-outlier detection ────────────────────────────────────
+  // Read totalDamage from blast surface riskVector
   const bsScores = input.blastSurfaceResult?.scores ?? [];
   const blastByClaimId = new Map<string, any>();
   for (const s of bsScores) {
@@ -521,52 +581,22 @@ export function computeClaimRouting(
     blastByClaimId.set(String(s.claimId), s);
   }
 
-  const orphanRatios: number[] = [];
-  const orphanByClaimId = new Map<string, number>();
+  const totalDamageByClaimIdR = new Map<string, number>();
   for (const c of claims) {
     const id = String(c.id);
     const score = blastByClaimId.get(id);
-    const orphanRatio = typeof score?.layerB?.orphanRatio === 'number' && Number.isFinite(score.layerB.orphanRatio)
-      ? score.layerB.orphanRatio
-      : 0;
-    orphanByClaimId.set(id, orphanRatio);
-    orphanRatios.push(orphanRatio);
+    const td = score?.riskVector?.totalDamage;
+    totalDamageByClaimIdR.set(id,
+      typeof td === 'number' && Number.isFinite(td) ? td : 0);
   }
 
-  // Distribution-relative orphan threshold: find the natural gap
-  // Sort orphan ratios; if there's a gap between 0-orphan claims and
-  // positive-orphan claims, that gap IS the threshold.
-  const sortedOrphans = [...orphanRatios].sort((a, b) => a - b);
-  let orphanThreshold: number | null = null;
+  // μ+σ threshold on totalDamage distribution
+  const damageValues = Array.from(totalDamageByClaimIdR.values());
+  const muDamage = mean(damageValues);
+  const sigmaDamage = sigma(damageValues, muDamage);
+  const damageThreshold = sigmaDamage > 0 ? muDamage + sigmaDamage : null;
 
-  // Find the largest gap in the distribution
-  if (sortedOrphans.length >= 2) {
-    let maxGap = 0;
-    let gapIdx = -1;
-    for (let i = 0; i < sortedOrphans.length - 1; i++) {
-      const gap = sortedOrphans[i + 1] - sortedOrphans[i];
-      if (gap > maxGap) {
-        maxGap = gap;
-        gapIdx = i;
-      }
-    }
-    // Only use the gap as threshold if it's meaningful (> 5% absolute)
-    // and the threshold point is above zero
-    if (maxGap > 0.05 && gapIdx >= 0) {
-      orphanThreshold = (sortedOrphans[gapIdx] + sortedOrphans[gapIdx + 1]) / 2;
-    }
-  }
-
-  // Fallback: if no natural gap, use μ+σ of the orphan distribution
-  if (orphanThreshold === null) {
-    const mu = mean(orphanRatios);
-    const sig = sigma(orphanRatios, mu);
-    // Only set threshold if there's actual variance and some orphans exist
-    if (sig > 0.01 && mu > 0) {
-      orphanThreshold = mu + sig;
-    }
-  }
-
+  // Query-distance for prompt-type classification (kept from original)
   const queryDistanceByClaimId = new Map<string, number>();
   if (input.queryEmbedding) {
     for (const c of claims) {
@@ -589,40 +619,48 @@ export function computeClaimRouting(
     }
   }
 
-  // Isolate candidates: sole-source + orphanRatio above threshold + not in conflict
-  const isolateCandidates: IsolateCandidate[] = [];
-  for (const c of claims) {
-    const id = String(c.id);
-    if (claimsInConflict.has(id)) continue;
-    const isSoleSource = Array.isArray(c.supporters) && c.supporters.length === 1;
-    if (!isSoleSource) continue;
-    const orphanRatio = orphanByClaimId.get(id) ?? 0;
-    if (orphanThreshold !== null && orphanRatio >= orphanThreshold) {
-      const qDist = queryDistanceByClaimId.get(id);
-      const isQueryDistant =
-        queryDistanceThreshold !== null && qDist !== undefined
-          ? qDist < queryDistanceThreshold
-          : true;
-      if (!isQueryDistant) continue;
+  // Detect damage outliers: non-consensus (supportRatio < 0.5) + totalDamage above threshold
+  const damageOutliersAll: DamageOutlier[] = [];
+  if (damageThreshold !== null) {
+    for (const c of claims) {
+      const id = String(c.id);
+      if (claimsInConflict.has(id)) continue;
+      const supportRatio = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
+      if (supportRatio >= 0.5) continue;
+      const totalDamage = totalDamageByClaimIdR.get(id) ?? 0;
+      if (totalDamage <= damageThreshold) continue;
 
-      const score = blastByClaimId.get(id);
-      const vernalComposite = typeof score?.vernal?.compositeScore === 'number'
-        ? score.vernal.compositeScore : 0;
-      isolateCandidates.push({
+      const qDist = queryDistanceByClaimId.get(id) ?? null;
+      const isSoleSource = Array.isArray(c.supporters) && c.supporters.length === 1;
+      const isQueryDistant =
+        queryDistanceThreshold !== null && qDist !== null
+          ? qDist < queryDistanceThreshold
+          : false;
+
+      // All outliers use 'isolate' promptType for now (logged for future pattern analysis)
+      const promptType: 'isolate' | 'conditionality' = 'isolate';
+      void isSoleSource; void isQueryDistant; // reserved for future classification
+
+      damageOutliersAll.push({
         claimId: id,
         claimLabel: String(c.label ?? id),
         claimText: String((c as any).text ?? ''),
-        orphanRatio,
-        vernalComposite,
-        queryDistance: qDist ?? null,
+        totalDamage,
+        supportRatio,
+        queryDistance: qDist,
         supporters: Array.isArray(c.supporters) ? c.supporters : [],
+        promptType,
       });
     }
   }
 
+  // Rank by totalDamage desc, apply slot ceiling
+  damageOutliersAll.sort((a, b) => b.totalDamage - a.totalDamage);
+  const ceiling = Math.min(3, conflictClusters.length + damageOutliersAll.length);
+  const slotsForOutliers = Math.max(0, ceiling - conflictClusters.length);
+  const damageOutliers = damageOutliersAll.slice(0, slotsForOutliers);
+
   // ── 3. Convergence skip ────────────────────────────────────────────
-  // If convergence ratio is high AND no conflicts AND no meaningful isolates,
-  // skip survey entirely
   const supportRatios = claims.map((c) =>
     typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0
   );
@@ -631,24 +669,24 @@ export function computeClaimRouting(
 
   const skipSurvey =
     conflictClusters.length === 0 &&
-    isolateCandidates.length === 0 &&
+    damageOutliers.length === 0 &&
     convergenceRatio > 0.7;
 
   // ── 4. Passthrough = everything not routed ─────────────────────────
   const routedIds = new Set<string>([
     ...claimsInConflict,
-    ...isolateCandidates.map((ic) => ic.claimId),
+    ...damageOutliers.map((o) => o.claimId),
   ]);
   const passthrough = claimIds.filter((id) => !routedIds.has(id));
 
   return {
     conflictClusters,
-    isolateCandidates,
+    damageOutliers,
     passthrough,
     skipSurvey,
     diagnostics: {
-      orphanThreshold,
-      orphanDistribution: orphanRatios,
+      damageThreshold,
+      damageDistribution: damageValues,
       convergenceRatio,
       totalClaims: claims.length,
       queryDistanceThreshold,

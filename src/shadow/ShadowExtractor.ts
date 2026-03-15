@@ -16,19 +16,36 @@ import {
     detectSignals,
 } from './StatementTypes';
 import { isExcluded } from './ExclusionRules';
-
-// Performance limits
-const SENTENCE_LIMIT = 2000;
-const CANDIDATE_LIMIT = 2000;
+import { stripInlineMarkdown } from '../clustering/embeddings';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
+export interface TableCellUnit {
+    rowHeader: string;
+    columnHeader: string;
+    value: string;
+    /** Synthesized statement: "rowHeader — columnHeader: value" */
+    text: string;
+}
+
+export interface TableSidecarEntry {
+    modelIndex: number;
+    /** Zero-based paragraph index within the model's content (after table removal) */
+    paragraphOffset: number;
+    headers: string[];
+    rows: string[][];
+    cells: TableCellUnit[];
+}
+
+export type TableSidecar = TableSidecarEntry[];
+
 export interface ShadowStatement {
     id: string;                    // "s_0", "s_1", ...
     modelIndex: number;            // Which model produced this
-    text: string;                  // The extracted sentence/clause
+    text: string;                  // Raw extracted sentence/clause (unchanged)
+    cleanText: string;             // Markdown-stripped version used for classification
 
     stance: Stance;                // What kind of statement
     confidence: number;            // 0.0-1.0 based on pattern strength
@@ -59,6 +76,7 @@ export interface ShadowStatementLocation {
 
 export interface ShadowExtractionResult {
     statements: ShadowStatement[];
+    tableSidecar: TableSidecar;
     meta: {
         totalStatements: number;
         byModel: Record<number, number>;
@@ -74,12 +92,31 @@ export interface ShadowExtractionResult {
         candidatesProcessed: number;
         candidatesExcluded: number;
         sentencesProcessed: number;
+        truncated: boolean;
+        truncatedAtModel: number | null;
     };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEXT PROCESSING HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Strip markdown formatting for internal processing (classification, filtering).
+ * Does NOT modify stored `text` — raw original is preserved there.
+ */
+function cleanTextForProcessing(raw: string): string {
+    let out = raw;
+    // Strip header prefixes
+    out = out.replace(/^#{1,6}\s+/gm, '');
+    // Strip blockquote prefixes
+    out = out.replace(/^>\s?/gm, '');
+    // Strip table pipes → space
+    out = out.replace(/\|/g, ' ');
+    // Strip bold/italic/backticks
+    out = stripInlineMarkdown(out);
+    return out.trim();
+}
 
 /**
  * Split text into sentences with protection for common abbreviations
@@ -90,9 +127,9 @@ function splitIntoSentences(paragraph: string): string[] {
         .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|vs|etc|e\.g|i\.e)\./gi, '$1|||')
         .replace(/\b(\d+)\./g, '$1|||');
 
-    // Split on sentence boundaries
+    // Split on sentence boundaries (including end-of-string)
     const sentences = protectedText
-        .split(/(?<=[.!?])\s+/)
+        .split(/(?<=[.!?])(?:\s+|$)/)
         .map(s => s.replace(/\|\|\|/g, '.'))
         .map(s => s.trim())
         .filter(s => s.length > 0);
@@ -101,29 +138,29 @@ function splitIntoSentences(paragraph: string): string[] {
 }
 
 /**
- * Check if sentence is substantive enough to extract
+ * Check if sentence is substantive enough to extract.
+ * Operates on cleanText (markdown already stripped).
  */
-function isSubstantive(sentence: string): boolean {
-    const trimmed = sentence.trim();
+function isSubstantive(cleanText: string): boolean {
+    const trimmed = cleanText.trim();
     const words = trimmed.split(/\s+/).filter(w => w.length > 0);
 
-    // Length checks
-    if (words.length < 5) return false;
+    // Lower word threshold (operates on clean text, no markdown inflation)
+    if (words.length < 3) return false;
 
+    // Residual markdown structures that survived cleaning
     if (/^#{1,6}\s/.test(trimmed)) return false;
     if (/^\*{2}[^*]+\*{2}$/.test(trimmed)) return false;
     if (/^__[^_]+__$/.test(trimmed)) return false;
-
     if (/^\|.*\|$/.test(trimmed) && trimmed.split('|').length > 2) return false;
     if (/^[\|\s\-:]+$/.test(trimmed)) return false;
-
     if (/^[-*+]\s*$/.test(trimmed)) return false;
     if (/^\d+\.\s*$/.test(trimmed)) return false;
 
-    // Filter meta-commentary
+    // Filter meta-commentary (removed "I would" — valuable in analytical text)
     const metaPatterns = [
         /^(sure|okay|yes|no|well|so|now)[,.]?\s/i,
-        /^(let me|I'll|I will|I can|I would)\b/i,
+        /^(let me|I'll|I will|I can)\b/i,
         /^(here's|here is|this is|that's|that is)\s+(a|an|the|my)\s+(summary|overview|breakdown|list)/i,
         /\b(as I mentioned|as discussed|as noted)\b/i,
         /^(to summarize|in summary|in conclusion)\b/i,
@@ -136,6 +173,123 @@ function isSubstantive(sentence: string): boolean {
     return true;
 }
 
+/**
+ * Extract markdown tables from content.
+ * Tables are removed from content and returned as structured sidecar entries.
+ */
+function extractTables(
+    content: string,
+    modelIndex: number
+): { cleanedContent: string; tables: TableSidecarEntry[] } {
+    const lines = content.split('\n');
+    const tables: TableSidecarEntry[] = [];
+    const outputLines: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const line = lines[i];
+        // Check if this looks like a table row
+        if (/^\|.*\|$/.test(line.trim())) {
+            // Collect contiguous table lines
+            const tableLines: string[] = [];
+            while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) {
+                tableLines.push(lines[i]);
+                i++;
+            }
+
+            // Validate: need at least 2 rows and one separator row
+            const hasSeparator = tableLines.some(l => /^\|[\s\-:|]+\|$/.test(l.trim()));
+            if (tableLines.length >= 2 && hasSeparator) {
+                // Parse table
+                const nonSeparator = tableLines.filter(l => !/^\|[\s\-:|]+\|$/.test(l.trim()));
+                if (nonSeparator.length >= 1) {
+                    const parseRow = (l: string) =>
+                        l.trim().replace(/^\|/, '').replace(/\|$/, '')
+                            .split('|').map(c => c.trim());
+
+                    const headers = parseRow(nonSeparator[0]);
+                    const dataRows = nonSeparator.slice(1).map(parseRow);
+
+                    const cells: TableCellUnit[] = [];
+                    for (const row of dataRows) {
+                        const rowHeader = row[0] ?? '';
+                        for (let c = 1; c < headers.length; c++) {
+                            const colHeader = headers[c] ?? '';
+                            const value = row[c] ?? '';
+                            if (value) {
+                                cells.push({
+                                    rowHeader,
+                                    columnHeader: colHeader,
+                                    value,
+                                    text: `${rowHeader} \u2014 ${colHeader}: ${value}`,
+                                });
+                            }
+                        }
+                    }
+
+                    tables.push({
+                        modelIndex,
+                        paragraphOffset: outputLines.filter(l => l === '').length,
+                        headers,
+                        rows: dataRows,
+                        cells,
+                    });
+                    // Replace table with blank separator so paragraph splitting still works
+                    outputLines.push('');
+                    continue;
+                }
+            }
+
+            // Not a valid table — keep lines
+            outputLines.push(...tableLines);
+        } else {
+            outputLines.push(line);
+            i++;
+        }
+    }
+
+    return { cleanedContent: outputLines.join('\n'), tables };
+}
+
+type ContentBlock =
+    | { type: 'list'; items: string[] }
+    | { type: 'prose'; content: string };
+
+/**
+ * Split content into list blocks and prose blocks.
+ * List items are returned individually (skip sentence splitting).
+ */
+function splitContentBlocks(content: string): ContentBlock[] {
+    const lines = content.split('\n');
+    const blocks: ContentBlock[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        const line = lines[i];
+        if (/^\s*(?:[-*\u2022]\s+|\d+\.\s+)/.test(line)) {
+            // Collect contiguous list lines
+            const items: string[] = [];
+            while (i < lines.length && /^\s*(?:[-*\u2022]\s+|\d+\.\s+)/.test(lines[i])) {
+                const stripped = lines[i].replace(/^\s*(?:[-*\u2022]\s+|\d+\.\s+)/, '').trim();
+                if (stripped.length > 0) items.push(stripped);
+                i++;
+            }
+            if (items.length > 0) blocks.push({ type: 'list', items });
+        } else {
+            // Collect non-list lines into a prose chunk
+            const proseLines: string[] = [];
+            while (i < lines.length && !/^\s*(?:[-*\u2022]\s+|\d+\.\s+)/.test(lines[i])) {
+                proseLines.push(lines[i]);
+                i++;
+            }
+            const prose = proseLines.join('\n').trim();
+            if (prose.length > 0) blocks.push({ type: 'prose', content: prose });
+        }
+    }
+
+    return blocks;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN EXTRACTION FUNCTION
 // ═══════════════════════════════════════════════════════════════════════════
@@ -145,80 +299,146 @@ export function extractShadowStatements(
 ): ShadowExtractionResult {
     const startTime = performance.now();
 
+    /** Safety circuit breaker — prevents runaway extraction from errors or malformed input.
+     *  Normal operation produces 600-1500 statements. This limit should never be reached
+     *  during correct operation. If it fires, something is wrong with the input. */
+    const SENTENCE_LIMIT = 10_000;
+    const CANDIDATE_LIMIT = 10_000;
+
     const statements: ShadowStatement[] = [];
+    const tableSidecar: TableSidecar = [];
     let idCounter = 0;
     let candidatesProcessed = 0;
     let candidatesExcluded = 0;
     let sentencesProcessed = 0;
+    let truncated = false;
+    let truncatedAtModel: number | null = null;
 
     for (const response of responses) {
-        // Split into paragraphs
-        const paragraphs = response.content
-            .split(/\n\n+/)
-            .map(p => p.trim())
-            .filter(p => p.length > 0);
+        // 1. Extract tables first, remove them from content
+        const { cleanedContent, tables } = extractTables(response.content, response.modelIndex);
+        tableSidecar.push(...tables);
 
-        for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
-            const paragraph = paragraphs[pIdx];
-            const sentences = splitIntoSentences(paragraph);
+        // 2. Split into content blocks (list items vs prose paragraphs)
+        const rawBlocks = cleanedContent.split(/\n\n+/).filter(b => b.trim().length > 0);
 
-            for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
-                sentencesProcessed++;
+        let pIdx = 0;
+        let hitLimit = false;
 
-                if (sentencesProcessed > SENTENCE_LIMIT) {
-                    console.warn(
-                        `[ShadowExtractor] Hit sentence limit (${SENTENCE_LIMIT}), ` +
-                        `stopping at model ${response.modelIndex}`
-                    );
-                    break;
+        for (const rawBlock of rawBlocks) {
+            const blocks = splitContentBlocks(rawBlock);
+
+            for (const block of blocks) {
+                if (block.type === 'list') {
+                    // List items → direct statements (skip sentence splitting)
+                    for (let sIdx = 0; sIdx < block.items.length; sIdx++) {
+                        sentencesProcessed++;
+                        if (sentencesProcessed > SENTENCE_LIMIT) {
+                            truncated = true;
+                            truncatedAtModel = response.modelIndex;
+                            hitLimit = true;
+                            break;
+                        }
+
+                        const rawItem = block.items[sIdx];
+                        const cleanText = cleanTextForProcessing(rawItem);
+
+                        if (!isSubstantive(cleanText)) continue;
+
+                        candidatesProcessed++;
+                        const { stance, confidence: rawConfidence } = classifyStance(cleanText);
+                        const exclusion = isExcluded(cleanText, stance);
+                        if (exclusion.excluded) {
+                            candidatesExcluded++;
+                            continue;
+                        }
+                        const confidence = rawConfidence * exclusion.confidenceMultiplier;
+                        const signals = detectSignals(cleanText);
+
+                        statements.push({
+                            id: `s_${idCounter++}`,
+                            modelIndex: response.modelIndex,
+                            text: rawItem,
+                            cleanText,
+                            stance,
+                            confidence,
+                            signals,
+                            location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
+                            fullParagraph: rawItem,
+                        });
+
+                        if (statements.length >= CANDIDATE_LIMIT) {
+                            truncated = true;
+                            truncatedAtModel = response.modelIndex;
+                            hitLimit = true;
+                            break;
+                        }
+                    }
+                } else {
+                    // Prose block → sentence split
+                    const paragraph = block.content;
+                    const sentences = splitIntoSentences(paragraph);
+
+                    for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
+                        sentencesProcessed++;
+                        if (sentencesProcessed > SENTENCE_LIMIT) {
+                            truncated = true;
+                            truncatedAtModel = response.modelIndex;
+                            hitLimit = true;
+                            break;
+                        }
+
+                        const rawSentence = sentences[sIdx];
+                        const cleanText = cleanTextForProcessing(rawSentence);
+
+                        if (!isSubstantive(cleanText)) continue;
+
+                        candidatesProcessed++;
+                        const { stance, confidence: rawConfidence } = classifyStance(cleanText);
+                        const exclusion = isExcluded(cleanText, stance);
+                        if (exclusion.excluded) {
+                            candidatesExcluded++;
+                            continue;
+                        }
+                        const confidence = rawConfidence * exclusion.confidenceMultiplier;
+                        const signals = detectSignals(cleanText);
+
+                        statements.push({
+                            id: `s_${idCounter++}`,
+                            modelIndex: response.modelIndex,
+                            text: rawSentence,
+                            cleanText,
+                            stance,
+                            confidence,
+                            signals,
+                            location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
+                            fullParagraph: paragraph,
+                        });
+
+                        if (statements.length >= CANDIDATE_LIMIT) {
+                            truncated = true;
+                            truncatedAtModel = response.modelIndex;
+                            hitLimit = true;
+                            break;
+                        }
+                    }
                 }
 
-                const sentence = sentences[sIdx];
-
-                // Check substantiveness
-                if (!isSubstantive(sentence)) continue;
-
-                candidatesProcessed++;
-
-                const { stance, confidence } = classifyStance(sentence);
-
-                if (isExcluded(sentence, stance)) {
-                    candidatesExcluded++;
-                    continue;
-                }
-
-                const signals = detectSignals(sentence);
-
-                // Create statement
-                statements.push({
-                    id: `s_${idCounter++}`,
-                    modelIndex: response.modelIndex,
-                    text: sentence,
-                    stance,
-                    confidence,
-                    signals,
-                    location: {
-                        paragraphIndex: pIdx,
-                        sentenceIndex: sIdx,
-                    },
-                    fullParagraph: paragraph,
-                });
-
-                if (statements.length >= CANDIDATE_LIMIT) {
-                    console.warn(
-                        `[ShadowExtractor] Hit candidate limit (${CANDIDATE_LIMIT}), ` +
-                        `stopping extraction`
-                    );
-                    break;
-                }
+                if (hitLimit) break;
+                pIdx++;
             }
 
-            if (statements.length >= CANDIDATE_LIMIT || sentencesProcessed > SENTENCE_LIMIT) {
-                break;
-            }
+            if (hitLimit) break;
         }
 
-        if (statements.length >= CANDIDATE_LIMIT || sentencesProcessed > SENTENCE_LIMIT) {
+        // Complete current model before stopping (do NOT break mid-model here)
+        // The hitLimit flag stops inner loops; outer model loop continues to next model
+        // unless we've already truncated (to avoid wasted work on remaining models)
+        if (truncated) {
+            console.warn(
+                `[ShadowExtractor] Hit limit (sentences=${SENTENCE_LIMIT}, candidates=${CANDIDATE_LIMIT}), ` +
+                `truncated at model ${truncatedAtModel}`
+            );
             break;
         }
     }
@@ -229,11 +449,14 @@ export function extractShadowStatements(
         performance.now() - startTime,
         candidatesProcessed,
         candidatesExcluded,
-        sentencesProcessed
+        sentencesProcessed,
+        truncated,
+        truncatedAtModel
     );
 
     return {
         statements,
+        tableSidecar,
         meta,
     };
 }
@@ -247,7 +470,9 @@ function buildMetadata(
     processingTimeMs: number,
     candidatesProcessed: number,
     candidatesExcluded: number,
-    sentencesProcessed: number
+    sentencesProcessed: number,
+    truncated: boolean,
+    truncatedAtModel: number | null
 ): ShadowExtractionResult['meta'] {
     const byModel: Record<number, number> = {};
     const byStance: Record<Stance, number> = {
@@ -287,6 +512,8 @@ function buildMetadata(
         candidatesProcessed,
         candidatesExcluded,
         sentencesProcessed,
+        truncated,
+        truncatedAtModel,
     };
 }
 

@@ -15,6 +15,11 @@
 
 import { Stance } from './StatementTypes';
 
+export interface ExclusionResult {
+    excluded: boolean;
+    confidenceMultiplier: number;
+}
+
 export interface ExclusionRule {
     id: string;
     appliesTo: Stance[];
@@ -54,7 +59,7 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
     {
         id: 'meta_let_me',
         appliesTo: ALL_STANCES,
-        pattern: /^(let me|let's|i('ll| will| would)|allow me to)\b/i,
+        pattern: /^(let me|let's|i('ll| will)|allow me to)\b/i,
         reason: 'Meta-framing, not claim',
         severity: 'hard'
     },
@@ -183,13 +188,6 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
         severity: 'hard'
     },
     {
-        id: 'prereq_requires_subject',
-        appliesTo: ['prerequisite'],
-        pattern: /\brequires\s+(a|an|the|some|more|less)\s+(lot|bit|degree|amount)\s+of\b/i,
-        reason: 'Quantitative requirement, not dependency',
-        severity: 'soft'
-    },
-    {
         id: 'prereq_hypothetical',
         appliesTo: ['prerequisite'],
         pattern: /\bif\s+you\s+were\s+to\s+.{0,30}\s+(first|before)\b/i,
@@ -240,13 +238,6 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
         severity: 'soft'
     },
     {
-        id: 'assertive_hypothetical_would',
-        appliesTo: ['assertive'],
-        pattern: /\bwould\s+be\b/i,
-        reason: 'Hypothetical, not actual state',
-        severity: 'soft'
-    },
-    {
         id: 'assertive_metaphor',
         appliesTo: ['assertive'],
         pattern: /\b(is\s+like|are\s+like)\s+(a|an)\b/i,
@@ -281,24 +272,28 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
 ];
 
 /**
- * Check if text is excluded for given stance
+ * Check if text is excluded for given stance.
+ * Hard matches → excluded outright.
+ * Soft matches → compound 0.7x confidence multiplier per hit.
  */
-export function isExcluded(text: string, stance: Stance): boolean {
+export function isExcluded(text: string, stance: Stance): ExclusionResult {
     const applicableRules = EXCLUSION_RULES.filter(r =>
         r.appliesTo.includes(stance)
     );
 
+    let confidenceMultiplier = 1.0;
+
     for (const rule of applicableRules) {
         if (rule.pattern.test(text)) {
             if (rule.severity === 'hard') {
-                return true;
+                return { excluded: true, confidenceMultiplier: 0 };
             }
-            // Soft exclusions could reduce confidence in future
-            // For now, we only implement hard exclusions
+            // Soft exclusion: compound confidence penalty
+            confidenceMultiplier *= 0.7;
         }
     }
 
-    return false;
+    return { excluded: false, confidenceMultiplier };
 }
 
 /**

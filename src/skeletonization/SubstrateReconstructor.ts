@@ -200,5 +200,16 @@ export function formatSubstrateForPrompt(substrate: ChewedSubstrate): string {
     parts.push('───────────────────────────────────────────────────────────────');
   }
 
+  if (Array.isArray(substrate.reconstructedTables) && substrate.reconstructedTables.length > 0) {
+    parts.push('');
+    parts.push('### Structured Evidence (Tables)');
+    parts.push('');
+    for (const table of substrate.reconstructedTables) {
+      parts.push(table);
+      parts.push('');
+    }
+    parts.push('───────────────────────────────────────────────────────────────');
+  }
+
   return parts.join('\n');
 }

@@ -22,7 +22,13 @@
       "mcp__ide__getDiagnostics",
       "Bash(xargs grep:*)",
       "Bash(xargs wc:*)",
-      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(grep -n \"pairwise\\\\|muPairwise\" /c/Users/Mahdi/Desktop/hybrid/src/geometry/*.ts 2>/dev/null | head -30)",
+      "Bash(grep -n \"computeSimilarityStats\\\\|interface.*SimilarityStats\" /c/Users/Mahdi/Desktop/hybrid/src/geometry/*.ts | head -20)",
+      "Bash(grep -r \"tc_\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | head -30)",
+      "Bash(grep -r \"\\\\.tableSidecar\\\\|tableSidecar\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | grep -v node_modules)",
+      "Bash(grep -r \"TableSidecar\\\\|TableCellUnit\" /c/Users/Mahdi/Desktop/hybrid --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | grep -v node_modules)",
+      "Bash(grep -n \"gate\\\\|ceiling\\\\|overrideSkip\\\\|theoreticalCeiling\" C:/Users/Mahdi/Desktop/hybrid/src/core/execution/StepExecutor.js | grep -v \"//\" | head -20)"
     ]
   }
 }

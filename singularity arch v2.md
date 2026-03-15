@@ -46,11 +46,15 @@ Before the system builds any structure on this terrain, it asks a prior question
 
 When the terrain has meaningful variation, structure is derived — never imposed.
 
-### Mutual Recognition
+### Regionalization
 
-Most systems cluster by choosing a threshold and drawing boundaries. Singularity does neither. Instead, each paragraph defines what "notably similar" means relative to its own neighborhood: its mean similarity to all other paragraphs (μ) plus one standard deviation (σ). Two paragraphs form a structural bond — a mutual recognition edge — only when *both* consider each other notable by their own standards.
+Most systems cluster by choosing a threshold and drawing boundaries. Singularity does neither. The primary regionalization algorithm — **Dual-Gap Regionalization** — reads structure from the shape of each node's own similarity distribution rather than from any global parameter.
 
-This is parameter-free. No thresholds to tune. No cluster count to specify. In a uniform field, no edges form — the system honestly reports "no mutual recognition structure exists." In a structured field, the structure reveals itself through the data's own statistical properties. Connected components on the mutual recognition graph become **regions** — natural groupings that emerge from the terrain without anyone deciding they should exist.
+For each paragraph, the system sorts its similarity scores to every other paragraph descending and measures the gap distribution across consecutive differences. A top-down scan identifies the first gap that exceeds μ+σ of those gaps — that is the upper boundary; everything above it is the node's *upper zone*. A symmetric bottom-up scan identifies the lower boundary. Two paragraphs form a **reciprocal-upper pair** only when each independently places the other in its own upper zone — both sides must clear a threshold derived from their own gap distribution. Reciprocal-upper pairs are connected by Union-Find into **core regions**. Nodes that fall outside any core region are allocated by vote: the fraction of core members that place the candidate in their upper zone determines assignment; strict winner takes the node; ties and zero-vote nodes become singletons.
+
+This is parameter-free. No cluster count to specify, no global threshold to tune. In a uniform field, no reciprocal-upper edges form — the system honestly reports no structure. In a structured field, the cores self-assemble from the data's own gap geometry.
+
+If gap regionalization produces no multi-node regions, the system falls back: basin inversion (KDE landscape peaks) → mutual recognition components → patch groupings from shared mutual neighborhoods. The fallback chain preserves behavior for degenerate or very small corpora. Mutual recognition edges — where each paragraph considers the other notable by its own μ+σ threshold — remain available as a fallback structural primitive and for independent diagnostics.
 
 ### What the Geometry Measures (and What It Doesn't)
 
@@ -129,7 +133,7 @@ The user collapses it — but only where the geometry identifies a structural re
 
 Before any LLM generates questions, the geometry classifies claims into three categories. This classification is the gate — it determines *whether* a question is asked, not what the question says.
 
-**Conflict clusters.** Claims connected by validated conflict edges. A conflict edge is validated when the centroid similarity between two claims the mapper labeled as conflicting falls below the mean inter-claim similarity — meaning they occupy genuinely different positions in the embedding space, not just surface-level disagreement. Connected components of validated conflict edges form clusters. Each cluster is a fork: the user's situation determines which branch applies.
+**Conflict clusters.** Claims connected by validated conflict edges. The candidate set is the mapper's conflict edges — only pairs the mapper labeled as conflicting are eligible for validation. Each is tested geometrically via **cross-pool proximity**: for every statement exclusive to claim A (not in B's canonical set), find the maximum cosine similarity to any statement in B's full canonical pool, and average to get meanA→B. Repeat in the other direction for meanB→A. The pair's cross-pool proximity is min(meanA→B, meanB→A) — the weaker directional reach, ensuring both sides' unique evidence genuinely intrudes into the other's territory. A mapper-labeled conflict is validated when this proximity exceeds the mean across all mapper-conflict pair proximities. Connected components of validated edges form clusters. Each cluster is a fork: the user's situation determines which branch applies.
 
 **Isolate candidates.** Claims that meet three criteria simultaneously: (1) sole-source — supported by exactly one model; (2) high orphan ratio — a distribution-relative proportion of their exclusive statements have no twins in the corpus; (3) query-distant — the claim's centroid is far from the query embedding (below μ−σ of the claim-query similarity distribution), meaning it introduces concepts the user didn't mention. This is the golden-thread signature: irreplaceable evidence from a single model, bringing in something from left field. Worth protecting, but must check for unsurfaced preconditions.
 

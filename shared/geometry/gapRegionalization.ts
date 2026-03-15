@@ -99,6 +99,11 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
     let upperBoundary: number | null = null;
     let lowerBoundary: number | null = null;
 
+    // Special case: single neighbor — classify it as upper directly
+    if (others.length === 1) {
+      upperBoundary = others[0][1];
+    }
+
     // top-down
     for (let i = 0; i < others.length - 1; i++) {
       if (others[i][1] - others[i+1][1] > threshold) {

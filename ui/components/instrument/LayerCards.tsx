@@ -1092,7 +1092,7 @@ function RoutingCard({ artifact, selectedClaim }: { artifact: any; selectedClaim
   }, [routing, claimId]);
 
   const isolate = useMemo(() => {
-    return safeArr<any>(routing?.isolateCandidates).find((c: any) => String(c?.claimId ?? "") === claimId) ?? null;
+    return safeArr<any>(routing?.damageOutliers).find((c: any) => String(c?.claimId ?? "") === claimId) ?? null;
   }, [routing, claimId]);
 
   const isPassthrough = useMemo(() => {
@@ -1133,7 +1133,7 @@ function RoutingCard({ artifact, selectedClaim }: { artifact: any; selectedClaim
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
-        <StatRow label="Orphan Thr" value={fmt(diagnostics?.orphanThreshold, 3)} />
+        <StatRow label="Damage Thr" value={fmt(diagnostics?.damageThreshold, 3)} />
         <StatRow label="QDist Thr" value={fmt(diagnostics?.queryDistanceThreshold, 3)} />
         <StatRow label="Convergence" value={fmt(diagnostics?.convergenceRatio, 3)} />
         <StatRow label="Skip Survey" value={routing?.skipSurvey ? "yes" : "no"} color={routing?.skipSurvey ? "text-emerald-400" : "text-text-muted"} />
@@ -1172,8 +1172,8 @@ function RoutingCard({ artifact, selectedClaim }: { artifact: any; selectedClaim
       {category === 'isolate' && (
         <div className="mt-3 space-y-2">
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-            <StatRow label="Orphan Ratio" value={typeof isolate?.orphanRatio === "number" ? fmtPct(isolate.orphanRatio, 0) : "—"} />
-            <StatRow label="Vernal" value={fmt(isolate?.vernalComposite, 3)} />
+            <StatRow label="Total Damage" value={fmt(isolate?.totalDamage, 3)} />
+            <StatRow label="Support%" value={typeof isolate?.supportRatio === "number" ? fmtPct(isolate.supportRatio, 0) : "—"} />
             <StatRow label="QDist" value={fmt(isolate?.queryDistance, 3)} />
             <StatRow label="Supporters" value={fmtInt(safeArr(isolate?.supporters).length)} />
             <StatRow label="Misleadingness" value={gateForClaim ? "vulnerable" : "stands"} color={gateForClaim ? "text-amber-400" : "text-emerald-400"} />
@@ -1208,7 +1208,7 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
   const surveyGates: any[] = useMemo(() => safeArr(artifact?.surveyGates), [artifact]);
   const claimRouting = artifact?.claimRouting ?? null;
   const routingClusters: any[] = useMemo(() => safeArr(claimRouting?.conflictClusters), [claimRouting]);
-  const routingIsolates: any[] = useMemo(() => safeArr(claimRouting?.isolateCandidates), [claimRouting]);
+  const routingIsolates: any[] = useMemo(() => safeArr(claimRouting?.damageOutliers), [claimRouting]);
   const routingPassthrough: any[] = useMemo(() => safeArr(claimRouting?.passthrough), [claimRouting]);
   const routingDiagnostics = claimRouting?.diagnostics ?? null;
 
@@ -1233,10 +1233,10 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
         <CardSection title="Claim Routing">
           <div className="grid grid-cols-4 gap-x-4 gap-y-1">
             <StatRow label="Conflict Clusters" value={fmtInt(routingClusters.length)} />
-            <StatRow label="Isolates" value={fmtInt(routingIsolates.length)} />
+            <StatRow label="Outliers" value={fmtInt(routingIsolates.length)} />
             <StatRow label="Passthrough" value={fmtInt(routingPassthrough.length)} />
             <StatRow label="Skip Survey" value={claimRouting?.skipSurvey ? "yes" : "no"} color={claimRouting?.skipSurvey ? "text-emerald-400" : "text-text-muted"} />
-            <StatRow label="Orphan Thr" value={fmt(routingDiagnostics?.orphanThreshold, 3)} />
+            <StatRow label="Damage Thr" value={fmt(routingDiagnostics?.damageThreshold, 3)} />
             <StatRow label="QDist Thr" value={fmt(routingDiagnostics?.queryDistanceThreshold, 3)} />
             <StatRow label="Convergence" value={fmt(routingDiagnostics?.convergenceRatio, 3)} />
             <StatRow label="Total Claims" value={fmtInt(routingDiagnostics?.totalClaims)} />
@@ -1267,25 +1267,25 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
 
           {routingIsolates.length > 0 && (
             <div className="mt-3">
-              <div className="text-[10px] text-text-muted mb-1">Isolate Candidates</div>
+              <div className="text-[10px] text-text-muted mb-1">Damage Outliers</div>
               <SortableTable
                 columns={[
                   { key: "claimId", header: "Claim", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{String(r?.claimId ?? "")}</span> },
                   { key: "label", header: "Label", cell: (r) => <span className="text-[10px] text-text-secondary truncate max-w-[220px] inline-block" title={r.label}>{r.label}</span> },
-                  { key: "orphanRatio", header: "Orphan", sortValue: (r) => r.orphanRatio, cell: (r) => <span className="font-mono text-text-muted">{fmtPct(r.orphanRatio, 0)}</span> },
+                  { key: "totalDamage", header: "Damage", sortValue: (r) => r.totalDamage, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.totalDamage, 3)}</span> },
+                  { key: "supportRatio", header: "Support%", sortValue: (r) => r.supportRatio, cell: (r) => <span className="font-mono text-text-muted">{r.supportRatio != null ? fmtPct(r.supportRatio, 0) : "—"}</span> },
                   { key: "queryDistance", header: "QDist", sortValue: (r) => r.queryDistance, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryDistance, 3)}</span> },
-                  { key: "vernalComposite", header: "Vernal", sortValue: (r) => r.vernalComposite, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.vernalComposite, 3)}</span> },
                   { key: "supporters", header: "Supp", sortValue: (r) => r.supporters, cell: (r) => <span className="font-mono text-text-muted">{fmtInt(r.supporters)}</span> },
                 ]}
                 rows={routingIsolates.map((c: any) => ({
                   claimId: String(c?.claimId ?? ""),
                   label: String(c?.claimLabel ?? c?.claimId ?? ""),
-                  orphanRatio: typeof c?.orphanRatio === "number" ? c.orphanRatio : null,
+                  totalDamage: typeof c?.totalDamage === "number" ? c.totalDamage : null,
+                  supportRatio: typeof c?.supportRatio === "number" ? c.supportRatio : null,
                   queryDistance: typeof c?.queryDistance === "number" ? c.queryDistance : null,
-                  vernalComposite: typeof c?.vernalComposite === "number" ? c.vernalComposite : null,
                   supporters: safeArr(c?.supporters).length,
                 }))}
-                defaultSortKey="orphanRatio"
+                defaultSortKey="totalDamage"
                 defaultSortDir="desc"
                 maxRows={12}
               />
@@ -2423,7 +2423,7 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                 id: String(p?.claimId ?? ""),
                 claimId: String(p?.claimId ?? ""),
                 label: String(p?.claimLabel ?? ""),
-                vernalComposite: typeof p?.vernalComposite === "number" ? p.vernalComposite : null,
+                totalDamage: typeof p?.totalDamage === "number" ? p.totalDamage : null,
                 orphanRatio: typeof p?.orphanRatio === "number" ? p.orphanRatio : null,
                 supportRatio: typeof p?.supportRatio === "number" ? p.supportRatio : null,
                 consensusDiscount: typeof p?.consensusDiscount === "number" ? p.consensusDiscount : null,
@@ -2437,7 +2437,7 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                   columns={[
                     { key: "claimId", header: "Claim", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.claimId}</span> },
                     { key: "label", header: "Label", cell: (r: any) => <span className="text-[10px] truncate max-w-[160px] inline-block" title={r.label}>{r.label}</span> },
-                    { key: "vernalComposite", header: "Vernal BR", sortValue: (r: any) => r.vernalComposite ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.vernalComposite != null ? fmt(r.vernalComposite, 4) : "—"}</span> },
+                    { key: "totalDamage", header: "Total Damage", sortValue: (r: any) => r.totalDamage ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.totalDamage != null ? fmt(r.totalDamage, 4) : "—"}</span> },
                     { key: "orphanRatio", header: "Orphan%", sortValue: (r: any) => r.orphanRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.orphanRatio != null ? `${(r.orphanRatio * 100).toFixed(1)}%` : "—"}</span> },
                     { key: "supportRatio", header: "Support%", sortValue: (r: any) => r.supportRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.supportRatio != null ? `${(r.supportRatio * 100).toFixed(0)}%` : "—"}</span> },
                     {
@@ -2483,7 +2483,7 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                     },
                   ]}
                   rows={rows}
-                  defaultSortKey="vernalComposite"
+                  defaultSortKey="totalDamage"
                   defaultSortDir="desc"
                   maxRows={12}
                 />
@@ -2537,7 +2537,7 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
               ) : (
                 <div className="text-xs text-text-muted italic py-1">
                   {claimRouting?.skipSurvey
-                    ? `Survey skipped by routing (fork=${fmtInt(safeArr(claimRouting?.conflictClusters).length)}, isolate=${fmtInt(safeArr(claimRouting?.isolateCandidates).length)})`
+                    ? `Survey skipped by routing (fork=${fmtInt(safeArr(claimRouting?.conflictClusters).length)}, outlier=${fmtInt(safeArr(claimRouting?.damageOutliers).length)})`
                     : "No survey gates generated."}
                 </div>
               )}

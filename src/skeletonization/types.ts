@@ -53,6 +53,7 @@ export interface ReconstructedParagraph {
 
 export interface ChewedSubstrate {
   outputs: ReconstructedOutput[];
+  reconstructedTables?: string[];
   summary: {
     totalModels: number;
     survivingClaimCount: number;
@@ -61,6 +62,11 @@ export interface ChewedSubstrate {
     untriagedStatementCount?: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
+    tableCellUnits?: {
+      protectedCount: number;
+      removedCount: number;
+      unallocatedCount: number;
+    };
   };
   pathSteps: string[];
   meta: {
@@ -88,4 +94,11 @@ export interface SkeletonizationInput {
   statementEmbeddings?: Map<string, Float32Array>;
   paragraphEmbeddings?: Map<string, Float32Array>;
   blastSurface?: any | null;
+  tableSidecar?: any[];
+  tableCellAllocation?: {
+    cellUnits?: Array<{ id: string; tableIndex: number; rowIndex: number; colIndex: number; modelIndex: number; text: string; rowHeader: string; columnHeader: string; value: string }>;
+    tableCellAllocations?: Map<string, string[]> | Record<string, string[]>;
+    cellUnitClaims?: Map<string, string[]> | Record<string, string[]>;
+    unallocatedCellUnitIds?: string[];
+  } | null;
 }

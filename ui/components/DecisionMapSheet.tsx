@@ -1714,6 +1714,7 @@ export const DecisionMapSheet = React.memo(() => {
                               { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },

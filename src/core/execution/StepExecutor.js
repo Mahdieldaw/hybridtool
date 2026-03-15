@@ -724,6 +724,37 @@ export class StepExecutor {
         await paragraphEmbeddingPromise;
         await statementEmbeddingPromise;
 
+        // ── Cell-unit embeddings (table sidecar) ──────────────────────────
+        let cellUnitEmbeddings = null; // Map<string, Float32Array> | null
+        if (shadowResult.tableSidecar?.length > 0 && generateTextEmbeddings) {
+          try {
+            const { flattenCellUnits } = await import('../tableCellAllocation');
+            const cellUnits = flattenCellUnits(shadowResult.tableSidecar);
+            if (cellUnits.length > 0) {
+              const cellTexts = cellUnits.map(cu => stripInlineMarkdown(cu.text));
+              const cellIds = cellUnits.map(cu => cu.id);
+              const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
+              cellUnitEmbeddings = new Map();
+              for (let ci = 0; ci < cellIds.length; ci++) {
+                const emb = cellBatch.embeddings.get(String(ci));
+                if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
+              }
+              console.log(`[StepExecutor] Embedded ${cellUnitEmbeddings.size} table cell-units`);
+              geometryDiagnostics.stages.cellUnitEmbeddings = {
+                status: 'ok',
+                cellUnits: cellUnits.length,
+                embedded: cellUnitEmbeddings.size,
+              };
+            }
+          } catch (cellEmbErr) {
+            console.warn('[StepExecutor] Cell-unit embedding failed:', getErrorMessage(cellEmbErr));
+            geometryDiagnostics.stages.cellUnitEmbeddings = {
+              status: 'failed',
+              error: getErrorMessage(cellEmbErr),
+            };
+          }
+        }
+
         // Post-await: project query density using statement regression model
         if (queryRawMagnitude != null && queryTextLength != null
             && statementEmbeddingResult?.densityRegressionModel) {
@@ -761,7 +792,6 @@ export class StepExecutor {
         // ─────────────────────────────────────────────────────────────────────────
         try {
           const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
-          const dims = DEFAULT_CONFIG?.embeddingDimensions || 384;
           const paraIds = Array.from(geometryParagraphEmbeddings.keys());
           const paraVectors = paraIds.map(id => geometryParagraphEmbeddings.get(id));
           basinInversionResult = computeBasinInversion(paraIds, paraVectors);
@@ -1409,6 +1439,8 @@ export class StepExecutor {
                     competitiveWeights: competitiveWeights || null,
                     competitiveExcess: competitiveExcess || null,
                     competitiveThresholds: competitiveThresholds || null,
+                    tableSidecar: shadowResult.tableSidecar || [],
+                    cellUnitEmbeddings: cellUnitEmbeddings || null,
                   });
 
                   let cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
@@ -1416,7 +1448,6 @@ export class StepExecutor {
                   let mapperArtifact_claimProvenance = derived.claimProvenance;
 
                   let questionSelectionInstrumentation = null;
-                  const muPairwise = substrate?.meta?.similarityStats?.mean ?? null;
 
                   try {
                     const { computeQuestionSelectionInstrumentation } =
@@ -1430,7 +1461,6 @@ export class StepExecutor {
                       claimCentroids: claimEmbeddings ?? new Map(),
                       queryEmbedding: queryEmbedding ?? null,
                       statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
-                      muPairwise,
                     });
                   } catch (err) {
                     console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
@@ -1450,10 +1480,9 @@ export class StepExecutor {
                       claimCentroids: claimEmbeddings ?? new Map(),
                       queryEmbedding: queryEmbedding ?? null,
                       statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
-                      muPairwise,
                     });
                     console.log(
-                      `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.isolateCandidates.length} isolate(s), skip=${claimRouting.skipSurvey}`
+                      `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.damageOutliers.length} outlier(s), skip=${claimRouting.skipSurvey}`
                     );
                   } catch (err) {
                     console.warn('[ClaimRouting] Failed, falling back to old survey prompt:', getErrorMessage(err));
