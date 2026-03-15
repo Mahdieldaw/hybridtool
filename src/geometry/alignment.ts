@@ -1,13 +1,13 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// CLAIM ↔ GEOMETRY ALIGNMENT
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// CLAIM - GEOMETRY ALIGNMENT
+// ===========================================================================
 //
 // Uses statement-level embeddings + claim vectors to compute:
 //   - Per-region coverage (what fraction of statement vectors are "claimed")
 //   - Split alerts (claim sources span distant regions)
 //   - Merge alerts (two claims have near-identical vectors)
 //   - Unattended region detection (regions with low claim coverage)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 import type { Region, RegionProfile } from './interpretation/types';
 
@@ -20,9 +20,9 @@ function cosineSim(a: Float32Array, b: Float32Array): number {
     return dot;
 }
 
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // TYPES
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 export interface ClaimVector {
     claimId: string;
@@ -72,9 +72,9 @@ export interface AlignmentResult {
     };
 }
 
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // CLAIM VECTOR BUILDER
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 /**
  * Build claim vectors by pooling cited statement embeddings.
@@ -134,9 +134,9 @@ export function buildClaimVectors(
     return results;
 }
 
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // ALIGNMENT COMPUTATION
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 const DEFAULT_COVERAGE_THRESHOLD = 0.50;
 const DEFAULT_SPLIT_THRESHOLD = 0.85;
@@ -158,7 +158,7 @@ export function computeAlignment(
     const splitThreshold = options.splitThreshold ?? DEFAULT_SPLIT_THRESHOLD;
     const mergeThreshold = options.mergeThreshold ?? DEFAULT_MERGE_THRESHOLD;
 
-    // ── REGION COVERAGE ──────────────────────────────────────────────────
+    // -- REGION COVERAGE --------------------------------------------------
     const regionCoverages: RegionCoverage[] = [];
     let totalStatements = 0;
     let totalCovered = 0;
@@ -212,7 +212,7 @@ export function computeAlignment(
         .filter(rc => rc.coverageRatio < 0.25 && rc.totalStatements >= 2)
         .map(rc => rc.regionId);
 
-    // ── SPLIT ALERTS ─────────────────────────────────────────────────────
+    // -- SPLIT ALERTS -----------------------------------------------------
     // A claim's source statements span multiple distant regions
     const splitAlerts: SplitAlert[] = [];
 
@@ -249,7 +249,7 @@ export function computeAlignment(
         }
     }
 
-    // ── MERGE ALERTS ─────────────────────────────────────────────────────
+    // -- MERGE ALERTS -----------------------------------------------------
     // Two claims with near-identical vectors (likely duplicates or subsumptions)
     const mergeAlerts: MergeAlert[] = [];
 
@@ -285,9 +285,9 @@ export function computeAlignment(
     };
 }
 
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // HELPERS
-// ───────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 function computeRegionCentroid(
     region: Region,

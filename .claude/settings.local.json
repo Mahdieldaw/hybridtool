@@ -28,7 +28,9 @@
       "Bash(grep -r \"tc_\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | head -30)",
       "Bash(grep -r \"\\\\.tableSidecar\\\\|tableSidecar\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | grep -v node_modules)",
       "Bash(grep -r \"TableSidecar\\\\|TableCellUnit\" /c/Users/Mahdi/Desktop/hybrid --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | grep -v node_modules)",
-      "Bash(grep -n \"gate\\\\|ceiling\\\\|overrideSkip\\\\|theoreticalCeiling\" C:/Users/Mahdi/Desktop/hybrid/src/core/execution/StepExecutor.js | grep -v \"//\" | head -20)"
+      "Bash(grep -n \"gate\\\\|ceiling\\\\|overrideSkip\\\\|theoreticalCeiling\" C:/Users/Mahdi/Desktop/hybrid/src/core/execution/StepExecutor.js | grep -v \"//\" | head -20)",
+      "Bash(wc -l /c/Users/Mahdi/Desktop/hybrid/src/core/execution/*.js /c/Users/Mahdi/Desktop/hybrid/src/core/blast-radius/*.ts 2>/dev/null | tail -15)",
+      "Bash(grep -r \"hardcoded\\\\|TODO.*provider\\\\|FIXME.*provider\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | head -20)"
     ]
   }
 }

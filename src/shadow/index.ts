@@ -1,6 +1,6 @@
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // SHADOW MAPPER V2 - MODULE INDEX
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 //
 // This module provides mechanical extraction of statements from model responses.
 // No LLM calls - pure pattern matching with provenance tracking.
@@ -11,14 +11,14 @@
 // - Types: ShadowStatement, ShadowExtractionResult, etc.
 //
 // Guardrail: Pattern definitions are frozen on import to prevent runtime modification
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 import { STANCE_PATTERNS, SIGNAL_PATTERNS } from './StatementTypes';
 import { EXCLUSION_RULES } from './ExclusionRules';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // INITIALIZATION - FREEZE PATTERN DEFINITIONS
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 let _initialized = false;
 
@@ -55,9 +55,9 @@ export function initializeShadowMapper(): void {
 // Auto-initialize on import
 initializeShadowMapper();
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // EXPORTS
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 // Types
 export type {
@@ -134,9 +134,9 @@ export {
     extractReferencedIds,
 } from './ShadowDelta';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // LEGACY ALIASES (Migration Support)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 export { extractShadowStatements as executeShadowExtraction } from './ShadowExtractor';
 export { computeShadowDelta as executeShadowDelta } from './ShadowDelta';

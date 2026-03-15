@@ -1,6 +1,6 @@
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================
 // POSITION BRIEF - Spatial Arrangement of Claims for Concierge (V4 - GEOMETRY)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 //
 // Philosophy:
 // - Edges describe the problem (logical relationships)
@@ -9,8 +9,8 @@
 // - Concierge interprets in context of user's question
 //
 // Concierge sees: Side-by-side boxes (tensions), dividers (buckets)
-// Concierge does NOT see: Rankings, percentages, shape names, outlier labels
-// ═══════════════════════════════════════════════════════════════════════════
+// Concierge= does NOT see: Rankings, percentages, shape names, outlier labels
+// ===========================================================================
 
 import type {
     StructuralAnalysis,
@@ -20,9 +20,9 @@ import type {
 
 import type { TraversalGraph, TraversalState } from '../utils/cognitive/traversalEngine';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // UTILITIES
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /**
  * Shuffle an array in-place (Fisher-Yates)
@@ -221,9 +221,9 @@ export function formatTargetedInsights(
         : '';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // MAIN ALGORITHMS
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // NEW function needed in positionBrief.ts
 export function buildPositionBriefFromClaims(
     claims: EnrichedClaim[],

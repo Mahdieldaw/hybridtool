@@ -49,7 +49,7 @@ docs/*
 jest.config.js
 oldaiturnblock.tsx
 oldsynthesisbubble.tsx
-/fonts/
+ui/fonts/
 /scripts/*
 package-lock.json
 coderabbit

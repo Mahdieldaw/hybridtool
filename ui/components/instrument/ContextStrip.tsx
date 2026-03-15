@@ -269,12 +269,12 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
 
     if (routing) {
       const forks = Array.isArray(routing?.conflictClusters) ? routing.conflictClusters.length : 0;
-      const isolates = Array.isArray(routing?.isolateCandidates) ? routing.isolateCandidates.length : 0;
+      const isolates = Array.isArray(routing?.damageOutliers) ? routing.damageOutliers.length : 0;
       const passthrough = Array.isArray(routing?.passthrough) ? routing.passthrough.length : 0;
       const skipSurvey = !!routing?.skipSurvey;
       pills.push({
         label: 'routing',
-        value: `${forks} fork · ${isolates} isolate · ${passthrough} passthrough | skip: ${skipSurvey ? 'yes' : 'no'}`,
+        value: `${forks} fork · ${isolates} outlier · ${passthrough} passthrough | skip: ${skipSurvey ? 'yes' : 'no'}`,
         colorClass: 'border-border-subtle text-text-muted',
       });
     }
