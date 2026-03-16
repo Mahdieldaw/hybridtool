@@ -1481,7 +1481,7 @@ export class StepExecutor {
                       claimCentroids: claimEmbeddings ?? new Map(),
                       queryEmbedding: queryEmbedding ?? null,
                       statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
-                    });
+                    }, questionSelectionInstrumentation?.validatedConflicts);
                     console.log(
                       `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.damageOutliers.length} outlier(s), skip=${claimRouting.skipSurvey}`
                     );

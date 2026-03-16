@@ -76,21 +76,21 @@ export const GeminiModels = {
     name: "Gemini 2.5 Flash",
     description: "Fast and efficient model for everyday tasks",
     maxTokens: 9999,
-    header: '[1,null,null,null,"9ec249fc9ad08861",null,null,0,[4]]',
+    header: '[1,null,null,null,"fbb127bbb056c959",null,null,0,[4],null,null,1]',
   },
   "gemini-pro": {
     id: "gemini-pro",
     name: "Gemini 2.5 Pro",
     description: "Advanced model with enhanced reasoning capabilities",
     maxTokens: 9999,
-    header: '[1,null,null,null,"61530e79959ab139",null,null,0,[4]]',
+    header: '[1,null,null,null,"5bf011840784117a",null,null,0,[4],null,null,1]',
   },
   "gemini-exp": {
     id: "gemini-exp",
     name: "Gemini 3.0",
     description: "Latest experimental capability",
     maxTokens: 9999,
-    header: '[1,null,null,null,"9d8ca3786ebdfbea",null,null,0,[4]]',
+    header: '[1,null,null,null,"9d8ca3786ebdfbea",null,null,0,[4],null,null,1]',
   },
 };
 

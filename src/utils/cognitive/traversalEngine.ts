@@ -335,67 +335,15 @@ export function extractForcingPoints(
   }
 
   // -------------------------------------------------------------------------
-  // TIER 1+: Conflicts (Crucibles)
+  // TIER 1+: Conflicts — only surfaced when the survey mapper produced a
+  // real question for the pair.  Raw mapper conflict edges are structural
+  // metadata, not user-facing questions.  Machine-generated "Choose between"
+  // placeholders are never appropriate.
   // -------------------------------------------------------------------------
 
-  const conflictPairs = new Set<string>();
-
-  for (const edge of normalized.edges || []) {
-    if (edge.type !== 'conflicts') continue;
-
-    const aId = edge.from;
-    const bId = edge.to;
-    const pairKey = pairKeyFor(aId, bId);
-
-    if (conflictPairs.has(pairKey)) continue;
-    conflictPairs.add(pairKey);
-
-    const a = claimMap.get(aId);
-    const b = claimMap.get(bId);
-    if (!a || !b) continue;
-
-    const edgeSourceIds = Array.isArray((edge as any)?.sourceStatementIds)
-      ? (edge as any).sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
-      : [];
-    const sourceStatementIds = Array.from(new Set([
-      ...(a.sourceStatementIds || []),
-      ...(b.sourceStatementIds || []),
-      ...edgeSourceIds,
-    ])).sort();
-
-    const id = `fp_conflict_${pairKey}`;
-    const question = String((edge as any).question || '').trim()
-      || `Choose between: ${a.label} vs ${b.label}`;
-    const blockedByGateIds = Array.from(
-      new Set(
-        (normalized.conflictBlocks.get(pairKey) || [])
-          .map((g) => String(g).trim())
-          .filter(Boolean)
-      )
-    ).sort();
-
-    forcingPoints.push({
-      id,
-      type: 'conflict',
-      tier: 1,  // All conflicts are tier 1+
-      question,
-      condition: `${a.label} vs ${b.label}`,
-      options: [
-        {
-          claimId: a.id,
-          label: a.label,
-          text: a.text,
-        },
-        {
-          claimId: b.id,
-          label: b.label,
-          text: b.text,
-        },
-      ],
-      blockedByGateIds: blockedByGateIds.length > 0 ? blockedByGateIds : undefined,
-      sourceStatementIds,
-    });
-  }
+  // (Conflict forcing points are now created from surveyGates in the caller,
+  // not from raw edges here.  The edges remain in the traversal graph for
+  // structural analysis but do not generate forcing points on their own.)
 
   // Sort: conditionals first (tier 0), then conflicts
   forcingPoints.sort((a, b) => a.tier - b.tier);

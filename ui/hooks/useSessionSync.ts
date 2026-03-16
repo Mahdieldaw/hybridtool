@@ -25,13 +25,15 @@ export function useSessionSync(isInitialized: boolean) {
 
   useEffect(() => {
     if (!isInitialized || !currentSessionId || turnIds.length > 0 || hasSyncedRef.current) return;
-    hasSyncedRef.current = true;
 
     (async () => {
       try {
         const response = await api.getHistorySession(currentSessionId);
         const fullSession = response as any;
-        if (!fullSession?.turns?.length) return;
+        if (!fullSession?.turns?.length) {
+          hasSyncedRef.current = true;
+          return;
+        }
 
         const { ids, map } = parseSessionTurns(fullSession);
         if (ids.length > 0) {
@@ -40,6 +42,7 @@ export function useSessionSync(isInitialized: boolean) {
           setUiPhase("awaiting_action");
           console.log("[SessionSync] Rehydrated", ids.length, "turns for session", currentSessionId);
         }
+        hasSyncedRef.current = true;
       } catch (e) {
         console.warn("[SessionSync] Failed to rehydrate session:", e);
       }

@@ -5,9 +5,6 @@
 
 import { persistenceMonitor } from "../core/PersistenceMonitor";
 import {
-  AUTH_STATUS_CODES as _AUTH_STATUS_CODES,
-  AUTH_ERROR_PATTERNS as _AUTH_ERROR_PATTERNS,
-  RATE_LIMIT_PATTERNS as _RATE_LIMIT_PATTERNS,
   isProviderAuthError as _isProviderAuthError,
   isRateLimitError as _isRateLimitError,
   isNetworkError as _isNetworkError,
@@ -120,9 +117,6 @@ export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
 // Auth error detection patterns — re-exported from error-classification
 // ============================================================
 
-const AUTH_STATUS_CODES = _AUTH_STATUS_CODES;
-const AUTH_ERROR_PATTERNS = _AUTH_ERROR_PATTERNS;
-const RATE_LIMIT_PATTERNS = _RATE_LIMIT_PATTERNS;
 
 export class HTOSError extends Error {
   name: string;
@@ -215,7 +209,9 @@ export function isProviderAuthError(error: unknown): boolean {
   return _isProviderAuthError(error);
 }
 
-export { _isRateLimitError as isRateLimitError, _isNetworkError as isNetworkError };
+const isRateLimitError = _isRateLimitError;
+const isNetworkError = _isNetworkError;
+export { isRateLimitError, isNetworkError };
 
 export function createProviderAuthError(
   providerId: string,

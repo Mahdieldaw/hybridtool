@@ -1158,7 +1158,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               queryEmbedding: queryEmbedding ?? null,
               statementEmbeddings: statementEmbeddings ?? null,
               muPairwise,
-            });
+            }, questionSelectionInstrumentation?.validatedConflicts);
           } catch (_) {
             questionSelectionInstrumentation = null;
             claimRouting = null;

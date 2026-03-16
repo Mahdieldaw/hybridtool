@@ -426,6 +426,7 @@ export function computeQuestionSelectionInstrumentation(
   if (sigmaDamage > 0) {
     const threshold = meanDamage + sigmaDamage;
     for (const p of claimProfiles) {
+      if (p.supportRatio > 0.5) continue;          // consensus claims are not outliers
       const v = p.totalDamage;
       if (typeof v === 'number' && Number.isFinite(v) && v > threshold) damageOutlierClaimIds.push(p.claimId);
     }
@@ -473,64 +474,26 @@ export function computeQuestionSelectionInstrumentation(
 // ─────────────────────────────────────────────────────────────────────────
 
 export function computeClaimRouting(
-  input: QuestionSelectionInput
+  input: QuestionSelectionInput,
+  qsiConflicts?: ValidatedConflict[],
 ): ClaimRouting {
   const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
   const claimIds = claims.map((c) => String(c.id));
 
   // ── 1. Validated conflict clusters ──────────────────────────────────
-  const stmtEmbeddingsR = input.statementEmbeddings ?? null;
-  const { canonicalSets: canonicalSetsR } = buildClaimStatementSets(claims);
-
-  // Only validate pairs the mapper labeled as conflicting — the routing
-  // decision affects which questions are asked, so it must stay scoped to
-  // mapper-declared conflicts. All-pairs validation is done separately in
-  // computeQuestionSelectionInstrumentation for UI diagnostics only.
-  const mapperConflictSetR = new Set<string>();
-  for (const e of Array.isArray(input.edges) ? input.edges : []) {
-    if (e?.type !== 'conflicts') continue;
-    const a = String(e.from), b = String(e.to);
-    mapperConflictSetR.add(`${a}\0${b}`);
-    mapperConflictSetR.add(`${b}\0${a}`);
-  }
-
-  // Pass 1: compute proximity for mapper-conflict pairs only, collect values for mean.
-  type RoutingPair = { aId: string; bId: string; crossPoolProx: number | null };
-  const routingPairs: RoutingPair[] = [];
-  const routingProxValues: number[] = [];
-
-  for (let i = 0; i < claims.length; i++) {
-    for (let j = i + 1; j < claims.length; j++) {
-      const aId = String(claims[i].id);
-      const bId = String(claims[j].id);
-
-      // Skip pairs the mapper didn't label as conflicting
-      if (!mapperConflictSetR.has(`${aId}\0${bId}`)) continue;
-
-      const canonA = canonicalSetsR.get(aId) ?? new Set<string>();
-      const canonB = canonicalSetsR.get(bId) ?? new Set<string>();
-      const exclA = Array.from(canonA).filter(sid => !canonB.has(sid));
-      const exclB = Array.from(canonB).filter(sid => !canonA.has(sid));
-
-      if (exclA.length < 2 || exclB.length < 2 || !stmtEmbeddingsR) continue;
-
-      const crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddingsR);
-      if (crossPoolProx !== null) routingProxValues.push(crossPoolProx);
-      routingPairs.push({ aId, bId, crossPoolProx });
-    }
-  }
-
-  // Threshold = mean of actual proximity values computed above.
-  const muProximityR = routingProxValues.length > 0
-    ? routingProxValues.reduce((a, b) => a + b, 0) / routingProxValues.length
-    : null;
-
-  // Pass 2: keep edges whose proximity exceeds the mean.
+  // Use QSI's all-pairs validated conflicts (thresholded against the full
+  // distribution mean) and filter to mapper-labeled pairs.  This avoids a
+  // duplicate proximity computation and eliminates the self-referential
+  // threshold bug where a single mapper pair could never validate itself.
   const validatedConflictEdges: Array<{ from: string; to: string; crossPoolProximity: number | null }> = [];
-  if (muProximityR !== null) {
-    for (const pr of routingPairs) {
-      if (pr.crossPoolProx !== null && pr.crossPoolProx > muProximityR) {
-        validatedConflictEdges.push({ from: pr.aId, to: pr.bId, crossPoolProximity: pr.crossPoolProx });
+  if (Array.isArray(qsiConflicts)) {
+    for (const vc of qsiConflicts) {
+      if (vc.mapperLabeledConflict && vc.validated) {
+        validatedConflictEdges.push({
+          from: vc.edgeFrom,
+          to: vc.edgeTo,
+          crossPoolProximity: vc.crossPoolProximity,
+        });
       }
     }
   }
@@ -619,14 +582,14 @@ export function computeClaimRouting(
     }
   }
 
-  // Detect damage outliers: non-consensus (supportRatio < 0.5) + totalDamage above threshold
+  // Detect damage outliers: non-consensus (supportRatio ≤ 0.5) + totalDamage above threshold
   const damageOutliersAll: DamageOutlier[] = [];
   if (damageThreshold !== null) {
     for (const c of claims) {
       const id = String(c.id);
       if (claimsInConflict.has(id)) continue;
       const supportRatio = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
-      if (supportRatio >= 0.5) continue;
+      if (supportRatio > 0.5) continue;
       const totalDamage = totalDamageByClaimIdR.get(id) ?? 0;
       if (totalDamage <= damageThreshold) continue;
 
@@ -667,10 +630,11 @@ export function computeClaimRouting(
   const highConsensusCount = supportRatios.filter((r) => r > 0.5).length;
   const convergenceRatio = claims.length > 0 ? highConsensusCount / claims.length : 0;
 
+  // Skip when nothing was routed for prompting — convergence is informational
+  // but irrelevant when there are no forks or outliers to ask about.
   const skipSurvey =
     conflictClusters.length === 0 &&
-    damageOutliers.length === 0 &&
-    convergenceRatio > 0.7;
+    damageOutliers.length === 0;
 
   // ── 4. Passthrough = everything not routed ─────────────────────────
   const routedIds = new Set<string>([
