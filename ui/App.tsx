@@ -17,6 +17,7 @@ import { Toast } from "./components/Toast";
 import { isHistoryPanelOpenAtom, connectionStatusAtom } from "./state/atoms"; // Import connection atom
 
 import { useInitialization } from "./hooks/useInitialization";
+import { useSessionSync } from "./hooks/useSessionSync";
 import { useSmartProviderDefaults } from "./hooks/providers/useSmartProviderDefaults";
 import { useProviderStatus } from "./hooks/providers/useProviderStatus";
 import { useOnClickOutside } from "usehooks-ts";
@@ -25,6 +26,7 @@ import { useKey } from "./hooks/ui/useKey";
 export default function App() {
   // This is now the entry point for all startup logic.
   const isInitialized = useInitialization();
+  useSessionSync(isInitialized);
   useProviderStatus({}, isInitialized);
   useSmartProviderDefaults(isInitialized);
 

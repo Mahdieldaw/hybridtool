@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { turnsMapAtom, pinnedSingularityProvidersAtom } from "../state/atoms";
+import { turnAtomFamily, pinnedSingularityProvidersAtom } from "../state/atoms";
 import type { AiTurn, SingularityOutput } from "../../shared/contract";
 
 export interface SingularityOutputState {
@@ -15,7 +15,8 @@ export interface SingularityOutputState {
 }
 
 export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?: string | null): SingularityOutputState {
-    const turnsMap = useAtomValue(turnsMapAtom);
+    // Subscribe only to the specific turn — prevents re-renders on unrelated streaming ticks
+    const turn = useAtomValue(turnAtomFamily(aiTurnId ?? ''));
     const pinnedProviders = useAtomValue(pinnedSingularityProvidersAtom);
     const setPinnedProviders = useSetAtom(pinnedSingularityProvidersAtom);
 
@@ -37,7 +38,6 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
 
         if (!aiTurnId) return defaultState;
 
-        const turn = turnsMap.get(aiTurnId);
         if (!turn || turn.type !== "ai") return defaultState;
 
         const aiTurn = turn as AiTurn;
@@ -148,5 +148,5 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
             error: (latestResponse.meta as any)?.error,
             setPinnedProvider
         };
-    }, [aiTurnId, turnsMap, forcedProviderId, pinnedProviders, setPinnedProvider]);
+    }, [aiTurnId, turn, forcedProviderId, pinnedProviders, setPinnedProvider]);
 }

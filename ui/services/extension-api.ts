@@ -146,6 +146,7 @@ class ExtensionAPI {
     await this.ensurePort({ force: true });
   }
 
+
   async executeWorkflow(request: PrimitiveWorkflowRequest): Promise<void> {
     try {
       const port = await this.ensurePort();

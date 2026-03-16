@@ -255,7 +255,18 @@ const BusController = {
     // --- END OF FIX ---
 
     // A map to store the sendResponse functions for requests pending a reply from the iframe.
+    // Each entry: { sendResponse, timeoutId } — TTL guards against iframe crash leaks.
     const pendingIframeResponses = new Map();
+
+    // Flush all pending responses with an error (called on iframe restart).
+    this.flushPendingIframeResponses = (reason = 'iframe_restarted') => {
+      for (const [id, entry] of pendingIframeResponses) {
+        clearTimeout(entry.timeoutId);
+        try { entry.sendResponse(JSON.stringify({ error: reason })); } catch (_) {}
+      }
+      pendingIframeResponses.clear();
+      console.log(`[BusController-os] Flushed all pending iframe responses (${reason})`);
+    };
 
     // LISTENER 1: Receives messages from the child iframe (oi.js)
     // This listener is set up ONCE.
@@ -271,10 +282,11 @@ const BusController = {
           "[BusController-os] Received response from iframe for reqId:",
           msg.resId,
         );
-        const sendResponse = pendingIframeResponses.get(msg.resId);
+        const entry = pendingIframeResponses.get(msg.resId);
+        clearTimeout(entry.timeoutId);
         try {
           const serialized = this._serialize(msg.result);
-          sendResponse(serialized);
+          entry.sendResponse(serialized);
         } catch (e) {
           console.warn(
             "[BusController-os] Failed to send serialized response to SW:",
@@ -365,7 +377,16 @@ const BusController = {
           const requestId = this._generateId();
 
           // Store the sendResponse function so the other listener can call it when the reply arrives.
-          pendingIframeResponses.set(requestId, sendResponse);
+          // 30s TTL: if the iframe never responds (crash/restart), drain the entry automatically.
+          const timeoutId = setTimeout(() => {
+            const pending = pendingIframeResponses.get(requestId);
+            if (pending) {
+              try { pending.sendResponse(JSON.stringify({ error: 'iframe_timeout' })); } catch (_) {}
+              pendingIframeResponses.delete(requestId);
+              console.warn(`[BusController-os] Pending iframe response timed out for reqId: ${requestId}`);
+            }
+          }, 30000);
+          pendingIframeResponses.set(requestId, { sendResponse, timeoutId });
 
           // Prepare args: prefer structured args, otherwise deserialize argsStr
           let args = [];

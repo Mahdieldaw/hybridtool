@@ -1,6 +1,6 @@
 // ui/hooks/useChat.ts - MAP-BASED STATE MANAGEMENT
 import { useCallback } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom, useStore } from "jotai";
 import api from "../../services/extension-api";
 import {
   turnsMapAtom,
@@ -18,19 +18,19 @@ import {
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
   activeProviderTargetAtom,
+  traversalStateByTurnAtom,
+  cleanupTurnAtoms,
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
   UserTurn,
-  AiTurn,
-  ProviderResponse,
 } from "../../../shared/contract";
 import { DEFAULT_THREAD } from "../../../shared/messaging";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { computeThinkFlag } from "../../../src/think/computeThinkFlag.js";
-import { hydrateArtifact } from "../../../src/persistence/artifact-hydration";
+import { parseSessionTurns } from "../../utils/parseSessionTurns";
 
 import type {
   HistorySessionSummary,
@@ -62,6 +62,8 @@ export function useChat() {
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
+  const setTraversalStateByTurn = useSetAtom(traversalStateByTurnAtom);
+  const store = useStore();
 
 
   const sendMessage = useCallback(
@@ -231,168 +233,7 @@ export function useChat() {
           setIsLoading(false);
           return;
         }
-        /**
-         * CRITICAL FIX: Transform backend "rounds" format
-         * Backend sends: { userTurnId, aiTurnId, user: {...}, providers: {...}, mappingResponses }
-         */
-        const newIds: string[] = [];
-        const newMap = new Map<string, TurnMessage>();
-
-        fullSession.turns.forEach((round: any) => {
-          // 1. Extract UserTurn
-          if (round.user && round.user.text) {
-            const userTurn: UserTurn = {
-              type: "user",
-              id:
-                round.userTurnId || round.user.id || `user-${round.createdAt}`,
-              text: round.user.text,
-              createdAt: round.user.createdAt || round.createdAt || Date.now(),
-              sessionId: fullSession.sessionId,
-              threadId: DEFAULT_THREAD,
-            };
-            newIds.push(userTurn.id);
-            newMap.set(userTurn.id, userTurn);
-          }
-
-          // 2. Extract AiTurn
-          const providers = round.providers || {};
-          const mappingRaw = (round as any).mappingResponses || {};
-          const singularityRaw = (round as any).singularityResponses || {};
-
-          const hasAnyResponseData =
-            Object.keys(providers).length > 0 ||
-            Object.keys(mappingRaw).length > 0 ||
-            Object.keys(singularityRaw).length > 0;
-          const hasAnyCognitiveData =
-            !!round.mapping?.artifact ||
-            !!round.singularityOutput ||
-            typeof round.pipelineStatus === "string";
-
-          if (hasAnyResponseData || hasAnyCognitiveData) {
-            const normalizeProviderResponse = (
-              resp: any,
-              providerId: string,
-            ): ProviderResponse => {
-              const createdAt =
-                typeof resp?.createdAt === "number"
-                  ? resp.createdAt
-                  : round.completedAt || round.createdAt || Date.now();
-              const updatedAt =
-                typeof resp?.updatedAt === "number" ? resp.updatedAt : createdAt;
-              let hydrated: any = resp?.artifact;
-              let hydrationError: string | null = null;
-              if (hydrated && typeof hydrated === "object") {
-                try {
-                  hydrated = hydrateArtifact(hydrated);
-                } catch (e) {
-                  hydrated = null;
-                  hydrationError = e instanceof Error ? e.message : String(e);
-                  console.warn("[useChat] hydrateArtifact failed; skipping artifact", e);
-                }
-              }
-              return {
-                providerId: (resp?.providerId as ProviderKey) || (providerId as ProviderKey),
-                text: typeof resp?.text === "string" ? resp.text : "",
-                status: resp?.status || "completed",
-                createdAt,
-                updatedAt,
-                meta: {
-                  ...(resp?.meta || {}),
-                  ...(hydrationError ? { _artifactHydrationError: hydrationError } : {}),
-                },
-                ...(Array.isArray(resp?.artifacts) ? { artifacts: resp.artifacts } : {}),
-                ...(resp?.artifact !== undefined ? { artifact: hydrated } : {}),
-              } as ProviderResponse;
-            };
-
-            const normalizeProviderResponses = (
-              data: any,
-              providerId: string,
-            ): ProviderResponse[] => {
-              if (Array.isArray(data)) {
-                return data.map((resp) =>
-                  normalizeProviderResponse(resp ?? {}, providerId),
-                );
-              }
-              return [normalizeProviderResponse(data ?? {}, providerId)];
-            };
-
-            const batchResponses: Record<string, ProviderResponse[]> | undefined =
-              Object.keys(providers).length > 0
-                ? (Object.fromEntries(
-                  Object.entries(providers).map(
-                    ([providerId, data]): [string, ProviderResponse[]] => [
-                      providerId,
-                      normalizeProviderResponses(data, providerId),
-                    ],
-                  ),
-                ) as Record<string, ProviderResponse[]>)
-                : undefined;
-
-            const batchPhaseFromLegacy =
-              !round.batch && batchResponses
-                ? {
-                  responses: Object.fromEntries(
-                    Object.entries(batchResponses).map(([pid, arr]) => {
-                      const last = (arr as any[])[(arr as any[]).length - 1] as any;
-                      return [
-                        pid,
-                        {
-                          text: String(last?.text || ""),
-                          modelIndex: Number(last?.meta?.modelIndex || 0),
-                          status: last?.status || "completed",
-                          meta: last?.meta,
-                        },
-                      ];
-                    }),
-                  ),
-                  timestamp: round.completedAt || round.createdAt || Date.now(),
-                }
-                : undefined;
-
-            const singularityPhaseFromLegacy =
-              !round.singularity && singularityRaw && Object.keys(singularityRaw).length > 0
-                ? (() => {
-                  let best: any = null;
-                  for (const arr of Object.values(singularityRaw)) {
-                    const a = Array.isArray(arr) ? arr : [arr];
-                    const last = a[a.length - 1];
-                    if (!best) best = last;
-                    const bestTs = Number(best?.updatedAt || best?.createdAt || 0);
-                    const ts = Number(last?.updatedAt || last?.createdAt || 0);
-                    if (ts >= bestTs) best = last;
-                  }
-                  return {
-                    prompt: "",
-                    output: String(best?.text || ""),
-                    timestamp: round.completedAt || round.createdAt || Date.now(),
-                  };
-                })()
-                : undefined;
-
-            const aiTurn: AiTurn = {
-              type: "ai",
-              id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
-              userTurnId: round.userTurnId,
-              sessionId: fullSession.sessionId,
-              threadId: DEFAULT_THREAD,
-              createdAt: round.completedAt || round.createdAt || Date.now(),
-              ...(round.batch ? { batch: round.batch } : batchPhaseFromLegacy ? { batch: batchPhaseFromLegacy } : {}),
-              ...(round.mapping ? { mapping: round.mapping } : {}),
-              ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
-              pipelineStatus: round.pipelineStatus || undefined,
-            };
-            if (mappingRaw && Object.keys(mappingRaw).length > 0) {
-              (aiTurn as any).mappingResponses = mappingRaw;
-            }
-            if (singularityRaw && Object.keys(singularityRaw).length > 0) {
-              (aiTurn as any).singularityResponses = singularityRaw;
-            }
-            newIds.push(aiTurn.id);
-            newMap.set(aiTurn.id, aiTurn);
-          }
-        });
-
+        const { ids: newIds, map: newMap } = parseSessionTurns(fullSession);
         console.log("[useChat] Loaded session with", newIds.length, "turns");
 
         // Replace Map + IDs atomically
@@ -429,8 +270,26 @@ export function useChat() {
         const result = await api.deleteBackgroundSession(sessionId);
         const removed = !!result?.removed;
 
-        // If the deleted session is currently active, clear chat state
+        // If the deleted session is currently active, clean up atoms and clear chat state
         if (removed && currentSessionId && currentSessionId === sessionId) {
+          const currentTurnIds = store.get(turnIdsAtom);
+          const currentTurnsMap = store.get(turnsMapAtom);
+          const pairs: Array<{ turnId: string; providerId: string }> = [];
+          for (const turnId of currentTurnIds) {
+            const turn = currentTurnsMap.get(turnId);
+            if (turn && turn.type === "ai") {
+              const providers = Object.keys((turn as any).batch?.responses || {});
+              for (const pid of providers) {
+                pairs.push({ turnId, providerId: pid });
+              }
+            }
+          }
+          cleanupTurnAtoms(currentTurnIds, pairs);
+          setTraversalStateByTurn((prev: Record<string, any>) => {
+            const next = { ...prev };
+            for (const turnId of currentTurnIds) delete next[turnId];
+            return next;
+          });
           setCurrentSessionId(null);
           setTurnsMap(new Map());
           setTurnIds([]);
@@ -446,11 +305,13 @@ export function useChat() {
     },
     [
       currentSessionId,
+      store,
       setCurrentSessionId,
       setTurnsMap,
       setTurnIds,
       setActiveAiTurnId,
       setActiveTarget,
+      setTraversalStateByTurn,
     ],
   );
 
@@ -459,8 +320,26 @@ export function useChat() {
       try {
         const response = await api.deleteBackgroundSessions(sessionIds);
         const removedIds = Array.isArray(response?.ids) ? response.ids : [];
-        // If active chat is among removed, clear state
+        // If active chat is among removed, clean up atoms and clear state
         if (currentSessionId && removedIds.includes(currentSessionId)) {
+          const currentTurnIds = store.get(turnIdsAtom);
+          const currentTurnsMap = store.get(turnsMapAtom);
+          const pairs: Array<{ turnId: string; providerId: string }> = [];
+          for (const turnId of currentTurnIds) {
+            const turn = currentTurnsMap.get(turnId);
+            if (turn && turn.type === "ai") {
+              const providers = Object.keys((turn as any).batch?.responses || {});
+              for (const pid of providers) {
+                pairs.push({ turnId, providerId: pid });
+              }
+            }
+          }
+          cleanupTurnAtoms(currentTurnIds, pairs);
+          setTraversalStateByTurn((prev: Record<string, any>) => {
+            const next = { ...prev };
+            for (const turnId of currentTurnIds) delete next[turnId];
+            return next;
+          });
           setCurrentSessionId(null);
           setTurnsMap(new Map());
           setTurnIds([]);
@@ -475,11 +354,13 @@ export function useChat() {
     },
     [
       currentSessionId,
+      store,
       setCurrentSessionId,
       setTurnsMap,
       setTurnIds,
       setActiveAiTurnId,
       setActiveTarget,
+      setTraversalStateByTurn,
     ],
   );
 

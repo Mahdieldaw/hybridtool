@@ -35,6 +35,7 @@ export class ConnectionHandler {
     this.isInitialized = false;
     this.lifecycleManager = null;
     this.backendInitPromise = null;
+    this._activeRecomputes = new Set();
   }
 
   /**
@@ -455,6 +456,19 @@ export class ConnectionHandler {
     let resolvedContext = null;
 
     const VALID_TYPES = ["initialize", "extend", "recompute"];
+
+    // Recompute guard: prevent concurrent recomputes for the same turn+provider+step.
+    let _recomputeKey = null;
+    if (executeRequest?.type === "recompute") {
+      const { sessionId, sourceTurnId, stepType, targetProvider } = executeRequest;
+      _recomputeKey = `${sessionId}:${sourceTurnId}:${stepType}:${targetProvider}`;
+      if (this._activeRecomputes.has(_recomputeKey)) {
+        console.warn(`[ConnectionHandler] Recompute already active for ${_recomputeKey}, skipping duplicate`);
+        return;
+      }
+      this._activeRecomputes.add(_recomputeKey);
+    }
+
     if (!executeRequest || !VALID_TYPES.includes(executeRequest.type)) {
       const errorMsg = `Invalid request type: ${executeRequest?.type}. Must be one of: ${VALID_TYPES.join(", ")}`;
       console.error(`[ConnectionHandler] ${errorMsg}`);
@@ -745,6 +759,8 @@ export class ConnectionHandler {
       } catch (e) {
         console.error("[ConnectionHandler] Failed to send error message:", e);
       }
+    } finally {
+      if (_recomputeKey) this._activeRecomputes.delete(_recomputeKey);
     }
   }
 

@@ -57,7 +57,8 @@ export function useInitialization(): boolean {
       setTurnIds((draft) => {
         draft.length = 0;
       });
-      setCurrentSessionId(null);
+      // Preserve currentSessionId from localStorage (atomWithStorage restores it).
+      // Session data will be rehydrated via SYNC_SESSION after port connects.
 
 
       setIsHistoryPanelOpen(false);

@@ -128,6 +128,10 @@ const IframeController = {
   async _restartIframe() {
     try {
       console.log("[OffscreenBootstrap] Restarting iframe...");
+      // Drain any pending IPC callbacks so they don't leak.
+      if (window["bus"] && typeof window["bus"]["flushPendingIframeResponses"] === "function") {
+        window["bus"]["flushPendingIframeResponses"]("iframe_restarted");
+      }
       if (this._iframe && this._iframe.parentNode) {
         this._iframe.parentNode.removeChild(this._iframe);
       }

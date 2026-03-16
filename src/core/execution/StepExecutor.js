@@ -252,8 +252,8 @@ export class StepExecutor {
             batchUpdates[providerId] = result;
           });
 
-          // Update contexts async
-          options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates, "batch");
+          // Persist contexts before proceeding — guarantees mapping step reads fresh data
+          await options.persistenceCoordinator.persistProviderContexts(context.sessionId, batchUpdates, "batch");
 
           const formattedResults = {};
           const authErrors = [];
@@ -539,6 +539,7 @@ export class StepExecutor {
     let enrichmentResult = null;
     let basinInversionResult = null;
     let clusteringModule = null;
+    let cellUnitEmbeddings = null; // Map<string, Float32Array> | null
     const geometryPromise = (async () => {
       const startedAtMs = nowMs();
       try {
@@ -725,7 +726,7 @@ export class StepExecutor {
         await statementEmbeddingPromise;
 
         // ── Cell-unit embeddings (table sidecar) ──────────────────────────
-        let cellUnitEmbeddings = null; // Map<string, Float32Array> | null
+        cellUnitEmbeddings = null; // reset before computing
         if (shadowResult.tableSidecar?.length > 0 && generateTextEmbeddings) {
           try {
             const { flattenCellUnits } = await import('../tableCellAllocation');
@@ -1559,9 +1560,19 @@ export class StepExecutor {
                                 ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
                                 : mappingProviderContexts,
                               onPartial: () => { },
-                              onAllComplete: (results) => {
+                              onAllComplete: async (results) => {
                                 const r = results?.get?.(payload.mappingProvider);
                                 surveyText = r?.text || '';
+                                // Persist the survey mapper's context — it's the last exchange
+                                // in this provider's thread for the turn, so the next turn's
+                                // batch continuation must start from here, not the semantic mapper's cursor
+                                if (r?.meta && Object.keys(r.meta).length > 0) {
+                                  await options.persistenceCoordinator.persistProviderContexts(
+                                    context.sessionId,
+                                    { [payload.mappingProvider]: { text: surveyText, meta: r.meta } },
+                                    "batch",
+                                  );
+                                }
                                 resolve({ text: surveyText });
                               },
                               onError: () => resolve({ text: '' }),
@@ -1831,6 +1842,16 @@ export class StepExecutor {
               }
             } catch (_) { }
 
+            // Persist semantic mapper's thread position for the next extend turn.
+            // If survey mapper runs it will overwrite this with the more recent cursor.
+            if (providerThreadMeta && Object.keys(providerThreadMeta).length > 0) {
+              await options.persistenceCoordinator.persistProviderContexts(
+                context.sessionId,
+                { [payload.mappingProvider]: { text: '', meta: providerThreadMeta } },
+                "batch",
+              );
+            }
+
             resolve({
               providerId: payload.mappingProvider,
               text: finalResultWithMeta.text,
@@ -2074,7 +2095,7 @@ export class StepExecutor {
                 stepType
               );
             },
-            onAllComplete: (results, errors) => {
+            onAllComplete: async (results, errors) => {
               let finalResult = results.get(pid);
               const providerError = errors?.get?.(pid);
 
@@ -2124,8 +2145,8 @@ export class StepExecutor {
                   true
                 );
 
-                // 4. Persist Context
-                persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
+                // 4. Persist Context — await so context is in IndexedDB before resolve
+                await persistenceCoordinator.persistProviderContexts(context.sessionId, {
                   [pid]: finalResult,
                 }, options.contextRole);
 

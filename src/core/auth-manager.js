@@ -15,6 +15,7 @@
  */
 
 import { AUTH_COOKIES, GEMINI_VARIANTS } from '../shared/auth-config';
+import { getHealthTracker } from './provider-health-tracker.js';
 
 class AuthManager {
     constructor() {
@@ -223,6 +224,18 @@ class AuthManager {
 
         if (changed) {
             await chrome.storage.local.set({ provider_auth_status: this._cookieStatus });
+        }
+
+        // If verification confirmed the provider is valid, clear any sticky auth-invalid
+        // flag in the health tracker so the circuit re-closes immediately.
+        if (valid) {
+            try {
+                const providerIds = baseProvider === 'gemini' ? GEMINI_VARIANTS : [providerId];
+                const tracker = getHealthTracker();
+                for (const pid of providerIds) {
+                    tracker.clearAuthInvalid(pid);
+                }
+            } catch (_) {}
         }
 
         return valid;

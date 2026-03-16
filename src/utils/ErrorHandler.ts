@@ -4,6 +4,14 @@
  */
 
 import { persistenceMonitor } from "../core/PersistenceMonitor";
+import {
+  AUTH_STATUS_CODES as _AUTH_STATUS_CODES,
+  AUTH_ERROR_PATTERNS as _AUTH_ERROR_PATTERNS,
+  RATE_LIMIT_PATTERNS as _RATE_LIMIT_PATTERNS,
+  isProviderAuthError as _isProviderAuthError,
+  isRateLimitError as _isRateLimitError,
+  isNetworkError as _isNetworkError,
+} from "./error-classification";
 
 // ============================================================
 // Inline types to avoid contract.ts dependencies
@@ -21,13 +29,6 @@ interface RetryPolicy {
   maxDelay: number;
   backoffMultiplier: number;
   jitter: boolean;
-}
-
-interface CircuitBreakerState {
-  state: "closed" | "open" | "half-open";
-  failures: number;
-  openedAt: number | null;
-  timeout: number;
 }
 
 type FallbackStrategy = (
@@ -116,27 +117,12 @@ export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
 };
 
 // ============================================================
-// Auth error detection patterns
+// Auth error detection patterns — re-exported from error-classification
 // ============================================================
 
-const AUTH_STATUS_CODES = new Set([401, 403]);
-
-const AUTH_ERROR_PATTERNS = [
-  /NOT_LOGIN/i,
-  /session.?expired/i,
-  /unauthorized/i,
-  /login.?required/i,
-  /authentication.?required/i,
-  /invalid.?session/i,
-  /please.?log.?in/i,
-];
-
-const RATE_LIMIT_PATTERNS = [
-  /rate.?limit/i,
-  /too.?many.?requests/i,
-  /quota.?exceeded/i,
-  /try.?again.?later/i,
-];
+const AUTH_STATUS_CODES = _AUTH_STATUS_CODES;
+const AUTH_ERROR_PATTERNS = _AUTH_ERROR_PATTERNS;
+const RATE_LIMIT_PATTERNS = _RATE_LIMIT_PATTERNS;
 
 export class HTOSError extends Error {
   name: string;
@@ -223,34 +209,13 @@ export class ProviderAuthError extends HTOSError {
 // Error classification helpers
 // ============================================================
 
+// Delegate to shared error-classification module — keep these exports for backwards compat.
 export function isProviderAuthError(error: unknown): boolean {
   if (error instanceof ProviderAuthError) return true;
-  if ((error as Record<string, unknown> | null)?.code === "AUTH_REQUIRED") return true;
-
-  const errorObj = error as Record<string, unknown> | null;
-  const status =
-    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
-  if (typeof status === "number" && AUTH_STATUS_CODES.has(status)) return true;
-
-  const message = (errorObj?.message as string) || String(error);
-  return AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  return _isProviderAuthError(error);
 }
 
-export function isRateLimitError(error: unknown): boolean {
-  const errorObj = error as Record<string, unknown> | null;
-  const status =
-    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
-  if (status === 429) return true;
-
-  const message = (errorObj?.message as string) || String(error);
-  return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(message));
-}
-
-export function isNetworkError(error: unknown): boolean {
-  const message =
-    ((error as Record<string, unknown> | null)?.message as string) || String(error);
-  return /failed.?to.?fetch|network|timeout|ECONNREFUSED|ENOTFOUND/i.test(message);
-}
+export { _isRateLimitError as isRateLimitError, _isNetworkError as isNetworkError };
 
 export function createProviderAuthError(
   providerId: string,
@@ -392,13 +357,11 @@ export class ErrorHandler {
   fallbackStrategies: Map<string, FallbackStrategy>;
   retryPolicies: Map<string, RetryPolicy>;
   errorCounts: Map<string, number>;
-  circuitBreakers: Map<string, CircuitBreakerState>;
 
   constructor() {
     this.fallbackStrategies = new Map();
     this.retryPolicies = new Map();
     this.errorCounts = new Map();
-    this.circuitBreakers = new Map();
 
     this.setupDefaultStrategies();
     this.setupDefaultRetryPolicies();
@@ -561,23 +524,13 @@ export class ErrorHandler {
     persistenceMonitor.recordError(htosError, context);
     this.incrementErrorCount(htosError.code);
 
-    if (this.isCircuitBreakerOpen(htosError.code)) {
-      throw new HTOSError("Circuit breaker open", "CIRCUIT_BREAKER_OPEN", {
-        originalError: htosError,
-      });
-    }
-
     if (htosError.recoverable) {
       try {
-        const result = await this.attemptRecovery(htosError, context);
-        this.updateCircuitBreaker(htosError.code, true);
-        return result;
+        return await this.attemptRecovery(htosError, context);
       } catch (recoveryError) {
         console.error("🚨 Recovery failed:", recoveryError);
       }
     }
-
-    this.updateCircuitBreaker(htosError.code, false);
 
     throw htosError;
   }
@@ -748,49 +701,6 @@ export class ErrorHandler {
     this.errorCounts.set(errorCode, count + 1);
   }
 
-  isCircuitBreakerOpen(errorCode: string): boolean {
-    const breaker = this.circuitBreakers.get(errorCode);
-    if (!breaker) return false;
-
-    const now = Date.now();
-    if (breaker.state === "open" && breaker.openedAt !== null && now - breaker.openedAt > breaker.timeout) {
-      breaker.state = "half-open";
-      console.log(`🔄 Circuit breaker for ${errorCode} moved to half-open`);
-    }
-
-    return breaker.state === "open";
-  }
-
-  updateCircuitBreaker(errorCode: string, success: boolean): void {
-    const threshold = 5;
-    const timeout = 60000;
-
-    if (!this.circuitBreakers.has(errorCode)) {
-      this.circuitBreakers.set(errorCode, {
-        state: "closed",
-        failures: 0,
-        openedAt: null,
-        timeout,
-      });
-    }
-
-    const breaker = this.circuitBreakers.get(errorCode)!;
-
-    if (success) {
-      breaker.failures = 0;
-      breaker.state = "closed";
-    } else {
-      breaker.failures++;
-      if (breaker.failures >= threshold) {
-        breaker.state = "open";
-        breaker.openedAt = Date.now();
-        console.warn(
-          `🚨 Circuit breaker opened for ${errorCode} after ${breaker.failures} failures`,
-        );
-      }
-    }
-  }
-
   async saveToLocalStorage(
     key: string,
     data: unknown,
@@ -883,17 +793,7 @@ export class ErrorHandler {
     persistenceMonitor.recordError(htosError, { providerId, ...context });
     this.incrementErrorCount(`${providerId}_${htosError.code}`);
 
-    const breakerKey = `provider_${providerId}`;
-    if (this.isCircuitBreakerOpen(breakerKey)) {
-      throw new HTOSError(
-        `${PROVIDER_CONFIG[providerId]?.displayName || providerId} is temporarily unavailable`,
-        "CIRCUIT_BREAKER_OPEN",
-        { providerId, originalError: htosError },
-      );
-    }
-
     if (htosError.code === "AUTH_REQUIRED") {
-      this.updateCircuitBreaker(breakerKey, false);
       throw createProviderAuthError(providerId, error, context);
     }
 
@@ -903,14 +803,8 @@ export class ErrorHandler {
 
     if (htosError.recoverable) {
       try {
-        const result = await this.attemptRecovery(htosError, {
-          ...context,
-          providerId,
-        });
-        this.updateCircuitBreaker(breakerKey, true);
-        return result;
+        return await this.attemptRecovery(htosError, { ...context, providerId });
       } catch (recoveryError) {
-        this.updateCircuitBreaker(breakerKey, false);
         if (recoveryError instanceof HTOSError && recoveryError.code === "NO_RECOVERY_STRATEGY") {
           throw htosError;
         }
@@ -918,24 +812,17 @@ export class ErrorHandler {
       }
     }
 
-    this.updateCircuitBreaker(breakerKey, false);
     throw htosError;
   }
 
   getProviderErrorStats(providerId: string): {
     providerId: string;
     errors: Record<string, number>;
-    circuitBreaker: { state: string; failures: number } | null;
   } {
     const prefix = `${providerId}_`;
-    const stats: {
-      providerId: string;
-      errors: Record<string, number>;
-      circuitBreaker: { state: string; failures: number } | null;
-    } = {
+    const stats: { providerId: string; errors: Record<string, number> } = {
       providerId,
       errors: {},
-      circuitBreaker: null,
     };
 
     for (const [code, count] of Array.from(this.errorCounts.entries())) {
@@ -944,30 +831,16 @@ export class ErrorHandler {
       }
     }
 
-    const breaker = this.circuitBreakers.get(`provider_${providerId}`);
-    if (breaker) {
-      stats.circuitBreaker = {
-        state: breaker.state,
-        failures: breaker.failures,
-      };
-    }
-
     return stats;
   }
 
   getErrorStats(): {
     totalErrors: number;
     errorsByCode: Record<string, number>;
-    circuitBreakers: Record<string, { state: string; failures: number; openedAt: number | null }>;
   } {
-    const stats: {
-      totalErrors: number;
-      errorsByCode: Record<string, number>;
-      circuitBreakers: Record<string, { state: string; failures: number; openedAt: number | null }>;
-    } = {
+    const stats: { totalErrors: number; errorsByCode: Record<string, number> } = {
       totalErrors: 0,
       errorsByCode: {},
-      circuitBreakers: {},
     };
 
     for (const [code, count] of Array.from(this.errorCounts.entries())) {
@@ -975,20 +848,11 @@ export class ErrorHandler {
       stats.totalErrors += count;
     }
 
-    for (const [code, breaker] of Array.from(this.circuitBreakers.entries())) {
-      stats.circuitBreakers[code] = {
-        state: breaker.state,
-        failures: breaker.failures,
-        openedAt: breaker.openedAt,
-      };
-    }
-
     return stats;
   }
 
   reset(): void {
     this.errorCounts.clear();
-    this.circuitBreakers.clear();
     console.log("🔄 Error handler reset");
   }
 }

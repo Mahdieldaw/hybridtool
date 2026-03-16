@@ -59,7 +59,7 @@ export function flattenCellUnits(tableSidecar: TableSidecar): CellUnitWithId[] {
       const rowIndex = entry.rows.findIndex(r => r[0] === cell.rowHeader);
       const colIndex = entry.headers.indexOf(cell.columnHeader);
       units.push({
-        id: `tc_${entry.modelIndex}_${tableIndex}_${rowIndex >= 0 ? rowIndex : cellIdx}_${colIndex >= 0 ? colIndex : 0}`,
+        id: `tc_${entry.modelIndex}_${tableIndex}_${cellIdx}`,
         tableIndex,
         rowIndex: rowIndex >= 0 ? rowIndex : cellIdx,
         colIndex: colIndex >= 0 ? colIndex : 0,

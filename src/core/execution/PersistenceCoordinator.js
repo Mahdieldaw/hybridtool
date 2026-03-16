@@ -5,23 +5,17 @@ export class PersistenceCoordinator {
   }
 
   /**
-   * Fire-and-forget persistence helper: batch update provider contexts and save session
-   * without blocking the workflow's resolution path.
+   * Persist provider contexts synchronously within the step finalization path.
+   * Awaiting this keeps a pending promise alive, preventing Chrome from suspending
+   * the service worker mid-pipeline. IndexedDB writes are fast so the impact is negligible.
    */
-  persistProviderContextsAsync(sessionId, updates, contextRole = null) {
-    // Defer to next tick to ensure prompt/mapping resolution proceeds immediately
-    setTimeout(async () => {
-      try {
-        await this.sessionManager.updateProviderContextsBatch(
-          sessionId,
-          updates,
-          { contextRole },
-        );
-        await this.sessionManager.saveSession(sessionId);
-      } catch (e) {
-        console.warn("[PersistenceCoordinator] Deferred persistence failed:", e);
-      }
-    }, 0);
+  async persistProviderContexts(sessionId, updates, contextRole = null) {
+    await this.sessionManager.updateProviderContextsBatch(
+      sessionId,
+      updates,
+      { contextRole },
+    );
+    await this.sessionManager.saveSession(sessionId);
   }
 
   buildPersistenceResultFromStepResults(steps, stepResults) {

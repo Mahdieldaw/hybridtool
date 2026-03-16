@@ -561,3 +561,31 @@ export const pinnedSingularityProvidersAtom = atom<Record<string, string>>({});
  */
 export const hasAutoOpenedPaneAtom = atom<string | null>(null);
 
+// =============================================================================
+// AtomFamily Cleanup Helper
+// =============================================================================
+/**
+ * Removes all atomFamily entries for a set of deleted turns.
+ * Call this before clearing turnsMap/turnIds on session delete to prevent
+ * unbounded atom accumulation.
+ */
+export function cleanupTurnAtoms(
+  turnIds: string[],
+  turnIdProviderPairs: Array<{ turnId: string; providerId: string }>
+): void {
+  for (const turnId of turnIds) {
+    turnAtomFamily.remove(turnId);
+    turnStreamingStateFamily.remove(turnId);
+    turnExpandedStateFamily.remove(turnId);
+    providerIdsForTurnFamily.remove(turnId);
+    workflowProgressForTurnFamily.remove(turnId);
+    providerErrorsForTurnFamily.remove(turnId);
+    retryableProvidersForTurnFamily.remove(turnId);
+  }
+  for (const pair of turnIdProviderPairs) {
+    providerResponseArrayFamily.remove(pair);
+    providerEffectiveStateFamily.remove(pair);
+    providerHistoryExpandedFamily.remove(`${pair.turnId}-${pair.providerId}`);
+  }
+}
+
