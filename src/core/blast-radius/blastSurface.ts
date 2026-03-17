@@ -23,7 +23,6 @@
 import type {
     BlastSurfaceClaimScore,
     BlastSurfaceRiskVector,
-    ClaimAbsorptionProfile,
     BlastSurfaceLayerC,
     BlastSurfaceLayerD,
     BlastSurfaceCascadeDetail,
@@ -102,15 +101,8 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         const canonicalSet = canonicalSets.get(claimId) ?? new Set<string>();
         const exclusiveIds = canonicalExclusiveIdsByClaim.get(claimId) ?? [];
 
-        // ── Layer B: Exclusive Vulnerability (kept for diagnostics) ───────
-        const layerB = computeLayerB({
-            claimId,
-            exclusiveIds,
-            canonicalSet,
-            claims,
-            canonicalSets,
-            statementEmbeddings,
-        });
+        // Layer B computation removed — Vernal twin map is canonical.
+        // computeLayerB() kept in this file for reference but no longer called.
 
         // ── Twin-map classification of exclusives ─────────────────────────
         const deletionIds: string[] = [];
@@ -288,7 +280,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         scores.push({
             claimId,
             claimLabel,
-            layerB,
             layerC,
             layerD,
             vernal: {
@@ -569,164 +560,6 @@ function computeNounSurvivalRatio(text: string): number {
         const survivingWords = skeleton.split(/\s+/).filter(w => w.length > 0);
         return survivingWords.length / words.length;
     } catch { return 0; }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// LAYER B — EXCLUSIVE VULNERABILITY
-//
-// For each of the claim's exclusive statements, check whether a "twin"
-// exists in any other claim's canonical set.
-// ═══════════════════════════════════════════════════════════════════════════
-
-function computeLayerB(input: {
-    claimId: string;
-    exclusiveIds: string[];
-    canonicalSet: Set<string>;
-    claims: Array<{ id: string }>;
-    canonicalSets: Map<string, Set<string>>;
-    statementEmbeddings: Map<string, Float32Array>;
-}): ClaimAbsorptionProfile {
-    const { claimId, exclusiveIds, canonicalSet, claims, canonicalSets, statementEmbeddings } = input;
-
-    const statements: ClaimAbsorptionProfile['statements'] = [];
-
-    const otherClaimIds = claims.map(c => c.id).filter(id => id !== claimId);
-    const crossClaimCandidateIds = new Set<string>();
-    for (const targetClaimId of otherClaimIds) {
-        const targetCanonical = canonicalSets.get(targetClaimId);
-        if (!targetCanonical || targetCanonical.size === 0) continue;
-        for (const tid of targetCanonical) {
-            if (canonicalSet.has(tid)) continue;
-            crossClaimCandidateIds.add(tid);
-        }
-    }
-
-    // Pre-index exclusive embeddings for the backward pass
-    const exclusiveEmbeddings = new Map<string, Float32Array>();
-    for (const sid of exclusiveIds) {
-        const emb = statementEmbeddings.get(sid);
-        if (emb) exclusiveEmbeddings.set(sid, emb);
-    }
-
-    for (const sid of exclusiveIds) {
-        const sEmb = exclusiveEmbeddings.get(sid) ?? null;
-
-        if (!sEmb) {
-            const carriers = otherClaimIds.map(targetClaimId => ({
-                targetClaimId,
-                hasTwin: false,
-                bestSim: -1,
-                bestCandidateId: null,
-                reciprocal: null,
-            }));
-            statements.push({
-                statementId: sid,
-                muS: 0,
-                sigmaS: 0,
-                tauSim: 0,
-                carriers,
-                carrierCount: 0,
-                orphan: true,
-            });
-            continue;
-        }
-
-        // Gate 1 threshold: μ+2σ of cross-claim candidate similarities
-        const candidateSims: number[] = [];
-        for (const tid of crossClaimCandidateIds) {
-            const tEmb = statementEmbeddings.get(tid);
-            if (!tEmb) continue;
-            candidateSims.push(cosineSimilarity(sEmb, tEmb));
-        }
-
-        const muS = candidateSims.length > 0
-            ? candidateSims.reduce((a, b) => a + b, 0) / candidateSims.length
-            : 0;
-        const variance = candidateSims.length > 0
-            ? candidateSims.reduce((s, v) => s + (v - muS) ** 2, 0) / candidateSims.length
-            : 0;
-        const sigmaS = Math.sqrt(variance);
-        const tauSim = clamp01(muS + 2 * sigmaS);
-
-        const carriers: ClaimAbsorptionProfile['statements'][number]['carriers'] = [];
-        let carrierCount = 0;
-
-        for (const targetClaimId of otherClaimIds) {
-            const targetCanonical = canonicalSets.get(targetClaimId);
-
-            // Forward pass: S looks into D's evidence pool
-            let bestSim = -Infinity;
-            let bestCandidateId: string | null = null;
-
-            if (targetCanonical && targetCanonical.size > 0) {
-                for (const tid of targetCanonical) {
-                    const tEmb = statementEmbeddings.get(tid);
-                    if (!tEmb) continue;
-                    const sim = cosineSimilarity(sEmb, tEmb);
-                    if (sim > bestSim) {
-                        bestSim = sim;
-                        bestCandidateId = tid;
-                    }
-                }
-            }
-
-            const bestSimOut = bestSim > -Infinity ? bestSim : -1;
-            let reciprocal: boolean | null = null;
-            let hasTwin = false;
-
-            // Gate 2: reciprocal best-match
-            if (bestCandidateId && bestSimOut > tauSim) {
-                const tEmb = statementEmbeddings.get(bestCandidateId);
-                if (tEmb) {
-                    // Backward pass: bestCandidate looks back into C's exclusive set
-                    let bestBackSim = -Infinity;
-                    let bestBackId: string | null = null;
-                    for (const [exId, exEmb] of exclusiveEmbeddings) {
-                        const sim = cosineSimilarity(tEmb, exEmb);
-                        if (sim > bestBackSim) {
-                            bestBackSim = sim;
-                            bestBackId = exId;
-                        }
-                    }
-                    reciprocal = bestBackId === sid;
-                    hasTwin = reciprocal;
-                }
-            }
-
-            if (hasTwin) carrierCount++;
-
-            carriers.push({
-                targetClaimId,
-                hasTwin,
-                bestSim: bestSimOut,
-                bestCandidateId,
-                reciprocal,
-            });
-        }
-
-        statements.push({
-            statementId: sid,
-            muS,
-            sigmaS,
-            tauSim,
-            carriers,
-            carrierCount,
-            orphan: carrierCount === 0,
-        });
-    }
-
-    const orphanCount = statements.reduce((s, st) => s + (st.orphan ? 1 : 0), 0);
-    const exclusiveCount = exclusiveIds.length;
-    const absorbableCount = exclusiveCount - orphanCount;
-    const orphanRatio = exclusiveCount > 0 ? orphanCount / exclusiveCount : 0;
-
-    return {
-        exclusiveCount,
-        orphanCount,
-        absorbableCount,
-        orphanRatio,
-        statements,
-    };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

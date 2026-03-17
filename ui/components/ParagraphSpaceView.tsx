@@ -63,7 +63,7 @@ const DEFAULT_HULL_STYLE: HullStyle = {
 };
 
 const MAPPER_EDGE_COLORS: Record<string, string> = {
-  supports: "rgba(16,185,129,0.6)",
+  supports: "rgba(168,85,247,0.6)",
   conflicts: "rgba(239,68,68,0.6)",
   tradeoff: "rgba(245,158,11,0.6)",
   prerequisite: "rgba(96,165,250,0.6)",
@@ -243,6 +243,10 @@ export function ParagraphSpaceView({
 
   // Region Toggles
   const [enabledRegionIds, setEnabledRegionIds] = useState<Set<string> | null>(null);
+  const [isRegionFilterOpen, setIsRegionFilterOpen] = useState(false);
+  const [isModelFilterOpen, setIsModelFilterOpen] = useState(false);
+  const [isMapLegendOpen, setIsMapLegendOpen] = useState(false);
+  const [isRiskLegendOpen, setIsRiskLegendOpen] = useState(false);
 
   const modelIndexCounts = useMemo(() => {
     const m = new Map<number, number>();
@@ -357,20 +361,43 @@ export function ParagraphSpaceView({
     return map;
   }, [regions]);
 
+  // Source paragraph IDs for the hovered claim (lightweight hover feedback)
+  const hoveredClaimSourceIds = useMemo(() => {
+    if (!hoveredClaimId || !claimCentroids) return null;
+    const found = claimCentroids.find(c => c.claimId === hoveredClaimId);
+    return found ? new Set(found.sourceParagraphIds) : null;
+  }, [hoveredClaimId, claimCentroids]);
+
+  // Region sibling IDs for the hovered node (highlight co-region nodes)
+  const hoveredNodeSiblingIds = useMemo(() => {
+    if (!hoveredParagraphId) return null;
+    const rid = nodeToRegionMap.get(hoveredParagraphId);
+    if (!rid) return null;
+    const region = (regions ?? []).find(r => r.id === rid);
+    if (!region?.nodeIds) return null;
+    return new Set(region.nodeIds.map(String));
+  }, [hoveredParagraphId, nodeToRegionMap, regions]);
+
+  // Highlighted regions: only from paragraph selection/hover, NOT from claim sources
+  // (claim → hull highlighting is handled separately via allSource in regionHulls)
   const highlightedRegionIds = useMemo(() => {
     const ids = new Set<string>();
     if (selectedParagraphId) {
       const rid = nodeToRegionMap.get(selectedParagraphId);
       if (rid) ids.add(rid);
     }
-    if (selectedClaimSourceIds) {
-      for (const pid of selectedClaimSourceIds) {
+    if (hoveredParagraphId) {
+      const rid = nodeToRegionMap.get(hoveredParagraphId);
+      if (rid) ids.add(rid);
+    }
+    if (hoveredClaimSourceIds) {
+      for (const pid of hoveredClaimSourceIds) {
         const rid = nodeToRegionMap.get(pid);
         if (rid) ids.add(rid);
       }
     }
     return ids;
-  }, [selectedParagraphId, selectedClaimSourceIds, nodeToRegionMap]);
+  }, [selectedParagraphId, hoveredParagraphId, hoveredClaimSourceIds, nodeToRegionMap]);
 
   // Clip geometry for source nodes (used for measuring-cylinder partial fill)
   const sourceNodeClipMap = useMemo(() => {
@@ -416,14 +443,11 @@ export function ParagraphSpaceView({
           totalDamage: rv.totalDamage,
         });
       } else {
-        // Fallback: derive locally from layerB/layerC (backward compat with cached data)
+        // Fallback: derive from layerC (backward compat with cached data)
         const canonicalCount = s.layerC?.canonicalCount ?? 0;
-        const exclusiveCount = s.layerB?.exclusiveCount ?? 0;
-        const orphanCount = s.layerB?.orphanCount ?? 0;
-        const absorbableCount = s.layerB?.absorbableCount ?? Math.max(0, exclusiveCount - orphanCount);
-        const type1 = Math.max(0, canonicalCount - exclusiveCount);
-        const type2 = absorbableCount;
-        const type3 = orphanCount;
+        const type2 = s.layerC?.exclusiveNonOrphanCount ?? 0;
+        const type3 = s.layerC?.exclusiveOrphanCount ?? 0;
+        const type1 = Math.max(0, canonicalCount - type2 - type3);
         const total = type1 + type2 + type3;
         const exclTotal = type2 + type3;
         m.set(id, {
@@ -447,16 +471,19 @@ export function ParagraphSpaceView({
         if (!id) return null;
         const nodeIds = Array.isArray(r?.nodeIds) ? r.nodeIds : [];
         const pts: Point[] = [];
-        let hasSource = false;
+        let sourceCount = 0;
+        let totalCount = 0;
         for (const nodeId of nodeIds) {
           const n = nodeById.get(String(nodeId));
           if (!n) continue;
+          totalCount++;
           const x = Number(n?.x);
           const y = Number(n?.y);
           if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
           pts.push({ x: toX(x), y: toY(y) });
-          if (selectedClaimSourceIds?.has(String(nodeId))) hasSource = true;
+          if (selectedClaimSourceIds?.has(String(nodeId))) sourceCount++;
         }
+        const allSource = totalCount > 0 && sourceCount === totalCount;
 
         let poly: Point[] = [];
         if (pts.length === 1) {
@@ -489,9 +516,9 @@ export function ParagraphSpaceView({
 
         if (poly.length < 3) return null;
         const kind = r?.kind ? String(r.kind) : undefined;
-        return { id, kind, points: poly, hasSource, nodeIds };
+        return { id, kind, points: poly, allSource, nodeIds };
       })
-      .filter(Boolean) as Array<{ id: string; kind?: string; points: Point[]; hasSource: boolean; nodeIds: string[] }>;
+      .filter(Boolean) as Array<{ id: string; kind?: string; points: Point[]; allSource: boolean; nodeIds: string[] }>;
   }, [regions, nodeById, showRegionHulls, toX, toY, selectedClaimSourceIds]);
 
   // Derived state for region visibility
@@ -556,7 +583,7 @@ export function ParagraphSpaceView({
 
   // Re-evaluating claim active state: check against nodeToRegionMap using paraCanonicalFractions keys
   const getClaimVisibility = useCallback((claimId: string) => {
-    if (enabledRegionIds === null) return true;
+    if (enabledRegionIds === null || enabledRegionIds.size === 0) return true;
     const c = claimCentroids?.find(c => c.claimId === claimId);
     if (!c?.paraCanonicalFractions) return true;
     for (const pid of c.paraCanonicalFractions.keys()) {
@@ -602,47 +629,113 @@ export function ParagraphSpaceView({
           </div>
         )}
 
-        {/* Legend Overlay */}
-        <div className="absolute top-4 left-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm pointer-events-none shadow-sm z-10 flex flex-col gap-2">
-          <div className="text-[9px] uppercase font-bold text-text-muted mb-0.5 tracking-wider">Map Legend</div>
-          {[
-            { label: "Supports", color: MAPPER_EDGE_COLORS.supports },
-            { label: "Conflicts", color: MAPPER_EDGE_COLORS.conflicts },
-            { label: "Tradeoff", color: MAPPER_EDGE_COLORS.tradeoff },
-            { label: "Prerequisite", color: MAPPER_EDGE_COLORS.prerequisite },
-          ].map((item) => (
-            <div key={item.label} className="flex items-center gap-2">
-              <svg className="w-6 h-2"><line x1="0" y1="4" x2="24" y2="4" stroke={item.color} strokeWidth="1.5" strokeDasharray="4 2" /></svg>
-              <span className="text-[10px] font-medium text-text-secondary">{item.label}</span>
+        {/* Legend Overlay — only visible when mapper edges are enabled */}
+        {showMapperEdgesProp && <div className="absolute top-4 left-4 bg-black/40 border border-white/10 rounded-lg p-2.5 backdrop-blur-sm shadow-sm z-10 pointer-events-auto transition-all">
+          {isMapLegendOpen ? (
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-text-muted tracking-wider hover:text-text-primary transition-colors"
+                onClick={(e) => { e.stopPropagation(); setIsMapLegendOpen(false); }}
+              >
+                <span>Map Legend</span>
+                <span className="opacity-60">▲</span>
+              </button>
+              {[
+                { label: "Supports", color: MAPPER_EDGE_COLORS.supports },
+                { label: "Conflicts", color: MAPPER_EDGE_COLORS.conflicts },
+                { label: "Tradeoff", color: MAPPER_EDGE_COLORS.tradeoff },
+                { label: "Prerequisite", color: MAPPER_EDGE_COLORS.prerequisite },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-2">
+                  <svg className="w-6 h-2"><line x1="0" y1="4" x2="24" y2="4" stroke={item.color} strokeWidth="1.5" strokeDasharray="4 2" /></svg>
+                  <span className="text-[10px] font-medium text-text-secondary">{item.label}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          ) : (
+            <button
+              type="button"
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+              onClick={(e) => { e.stopPropagation(); setIsMapLegendOpen(true); }}
+            >
+              <span className="text-[9px] uppercase font-bold text-text-muted tracking-wider">Legend</span>
+              <div className="flex items-center gap-1.5">
+                {[
+                  { label: "Supports", color: MAPPER_EDGE_COLORS.supports },
+                  { label: "Conflicts", color: MAPPER_EDGE_COLORS.conflicts },
+                  { label: "Tradeoff", color: MAPPER_EDGE_COLORS.tradeoff },
+                  { label: "Prerequisite", color: MAPPER_EDGE_COLORS.prerequisite },
+                ].map((item) => (
+                  <span key={item.label} className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: item.color, opacity: 0.85 }} title={item.label} />
+                ))}
+              </div>
+              <span className="text-text-muted opacity-60 text-[9px]">▼</span>
+            </button>
+          )}
+        </div>}
 
         {/* Risk Vector Legend */}
         {showRiskGlyphs && riskVectorMap.size > 0 && (
-          <div className="absolute bottom-4 left-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm pointer-events-none shadow-sm z-10 flex flex-col gap-1.5">
-            <div className="text-[9px] uppercase font-bold text-text-muted mb-0.5 tracking-wider">Pruning Risk</div>
-            {[
-              { label: "Deletion (excl. twinned)", color: RISK_COLORS.deletion, key: "D" },
-              { label: "Degradation (orphans)", color: RISK_COLORS.degradation, key: "S" },
-              { label: "Protected (shared)", color: RISK_COLORS.shared, key: "P" },
-            ].map((item) => (
-              <div key={item.key} className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: item.color, opacity: 0.85 }} />
-                <span className="text-[10px] font-medium text-text-secondary">{item.label}</span>
+          <div className="absolute bottom-4 left-4 bg-black/40 border border-white/10 rounded-lg p-2.5 backdrop-blur-sm shadow-sm z-10 pointer-events-auto transition-all">
+            {isRiskLegendOpen ? (
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-text-muted tracking-wider hover:text-text-primary transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setIsRiskLegendOpen(false); }}
+                >
+                  <span>Pruning Risk</span>
+                  <span className="opacity-60">▲</span>
+                </button>
+                {[
+                  { label: "Deletion (excl. twinned)", color: RISK_COLORS.deletion, key: "D" },
+                  { label: "Degradation (orphans)", color: RISK_COLORS.degradation, key: "S" },
+                  { label: "Protected (shared)", color: RISK_COLORS.shared, key: "P" },
+                ].map((item) => (
+                  <div key={item.key} className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: item.color, opacity: 0.85 }} />
+                    <span className="text-[10px] font-medium text-text-secondary">{item.label}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <button
+                type="button"
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); setIsRiskLegendOpen(true); }}
+              >
+                <span className="text-[9px] uppercase font-bold text-text-muted tracking-wider">Risk</span>
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { color: RISK_COLORS.deletion, key: "D", label: "Deletion" },
+                    { color: RISK_COLORS.degradation, key: "S", label: "Degradation" },
+                    { color: RISK_COLORS.shared, key: "P", label: "Protected" },
+                  ].map((item) => (
+                    <span key={item.key} className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: item.color, opacity: 0.85 }} title={item.label} />
+                  ))}
+                </div>
+                <span className="text-text-muted opacity-60 text-[9px]">▼</span>
+              </button>
+            )}
           </div>
         )}
 
         {colorParagraphsByModel && (
-          <div className="absolute top-4 right-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm shadow-sm z-10 pointer-events-auto min-w-[220px]">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[9px] uppercase font-bold text-text-muted tracking-wider">Models</div>
+          <div className="absolute top-4 right-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm shadow-sm z-20 pointer-events-auto min-w-[220px] max-w-[300px] flex flex-col transition-all">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-text-muted tracking-wider hover:text-text-primary transition-colors"
+                onClick={(e) => { e.stopPropagation(); setIsModelFilterOpen((v) => !v); }}
+              >
+                <span>Models ({enabledModelIndices.size}/{modelLegend.length})</span>
+                <span className="opacity-60">{isModelFilterOpen ? "▲" : "▼"}</span>
+              </button>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20"
+                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20 transition-colors"
                   onClick={(e) => {
                     e.stopPropagation();
                     setEnabledModelIndices(new Set(modelLegend.map((m) => m.modelIndex)));
@@ -652,7 +745,7 @@ export function ParagraphSpaceView({
                 </button>
                 <button
                   type="button"
-                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20"
+                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20 transition-colors"
                   onClick={(e) => {
                     e.stopPropagation();
                     setEnabledModelIndices(new Set());
@@ -662,67 +755,84 @@ export function ParagraphSpaceView({
                 </button>
               </div>
             </div>
-            {modelLegend.length === 0 ? (
-              <div className="mt-2 text-[10px] text-text-muted">
-                No model ordering found for this turn.
-              </div>
-            ) : (
-              <div className="mt-2 space-y-1 max-h-56 overflow-y-auto custom-scrollbar">
-                {modelLegend.map((m) => {
-                  const checked = enabledModelIndices.has(m.modelIndex);
-                  const dot = hexToRgba(m.color, 0.85) ?? m.color;
-                  return (
-                    <label
-                      key={`${m.modelIndex}-${m.providerId}`}
-                      className="flex items-center gap-2 text-[11px] text-text-secondary select-none cursor-pointer"
-                      title={m.providerId}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        className="rounded"
-                        checked={checked}
-                        onChange={() => {
-                          setEnabledModelIndices((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(m.modelIndex)) next.delete(m.modelIndex);
-                            else next.add(m.modelIndex);
-                            return next;
-                          });
-                        }}
-                      />
-                      <span className="w-2.5 h-2.5 rounded-full border border-white/20" style={{ backgroundColor: dot }} />
-                      <span className="font-mono text-[10px] text-text-muted">{m.abbrev}</span>
-                      <span className="truncate">{m.name}</span>
-                      <span className="ml-auto font-mono text-[10px] text-text-muted">{m.count}</span>
-                    </label>
-                  );
-                })}
-              </div>
+
+            {isModelFilterOpen && (
+              modelLegend.length === 0 ? (
+                <div className="mt-3 text-[10px] text-text-muted">
+                  No model ordering found for this turn.
+                </div>
+              ) : (
+                <div className="mt-3 space-y-1 max-h-[40vh] overflow-y-auto custom-scrollbar pr-1">
+                  {modelLegend.map((m) => {
+                    const checked = enabledModelIndices.has(m.modelIndex);
+                    const dot = hexToRgba(m.color, 0.85) ?? m.color;
+                    return (
+                      <label
+                        key={`${m.modelIndex}-${m.providerId}`}
+                        className="flex items-center justify-between gap-2 text-[10px] text-text-secondary select-none cursor-pointer hover:text-text-primary transition-colors py-1 border-b border-white/5 last:border-b-0"
+                        title={m.providerId}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            className="rounded-sm w-3 h-3 border-white/20 bg-black/20"
+                            checked={checked}
+                            onChange={() => {
+                              setEnabledModelIndices((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(m.modelIndex)) next.delete(m.modelIndex);
+                                else next.add(m.modelIndex);
+                                return next;
+                              });
+                            }}
+                          />
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />
+                          <span className="font-mono text-[10px] text-text-muted">{m.abbrev}</span>
+                          <span className="truncate font-medium">{m.name}</span>
+                        </div>
+                        <span className="font-mono text-[9px] opacity-40 flex-shrink-0">{m.count}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )
             )}
           </div>
         )}
 
-        {/* Region Toggles (Horizontal row at bottom) */}
+        {/* Region Toggles (Collapsible Panel at Bottom Right) */}
         {showRegionHulls && regions && regions.length > 0 && (
-          <div className="absolute bottom-4 left-4 right-4 bg-black/50 border border-white/10 rounded-lg p-2.5 backdrop-blur-md shadow-lg z-10 pointer-events-auto">
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2 pr-3 border-r border-white/10">
-                <div className="text-[9px] uppercase font-bold text-text-muted tracking-wider">Regions</div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="text-[9px] text-text-muted hover:text-text-primary px-1 rounded border border-white/10 hover:border-white/20 transition-colors"
-                    onClick={(e) => { e.stopPropagation(); setEnabledRegionIds(null); }}
-                  >All</button>
-                  <button
-                    type="button"
-                    className="text-[9px] text-text-muted hover:text-text-primary px-1 rounded border border-white/10 hover:border-white/20 transition-colors"
-                    onClick={(e) => { e.stopPropagation(); setEnabledRegionIds(new Set()); }}
-                  >None</button>
-                </div>
+          <div className={`absolute right-4 bg-black/50 border border-white/10 rounded-lg p-3 backdrop-blur-md shadow-lg z-20 pointer-events-auto min-w-[220px] max-w-[300px] flex flex-col transition-all ${selectedParagraphId && paragraphDataMap.has(selectedParagraphId) ? "bottom-[196px]" : "bottom-4"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 text-[9px] uppercase font-bold text-text-muted tracking-wider hover:text-text-primary transition-colors"
+                onClick={(e) => { e.stopPropagation(); setIsRegionFilterOpen((v) => !v); }}
+              >
+                <span>Regions ({enabledRegionIds === null ? regions.length : enabledRegionIds.size}/{regions.length})</span>
+                <span className="opacity-60">{isRegionFilterOpen ? "▲" : "▼"}</span>
+              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setEnabledRegionIds(null); }}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded border border-white/10 hover:border-white/20 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setEnabledRegionIds(new Set()); }}
+                >
+                  None
+                </button>
               </div>
-              <div className="flex items-center gap-x-4 gap-y-1.5 flex-wrap flex-1 min-w-0">
+            </div>
+
+            {isRegionFilterOpen && (
+              <div className="mt-3 space-y-1 max-h-[40vh] overflow-y-auto custom-scrollbar pr-1">
                 {regions.map((r, i) => {
                   const checked = isRegionEnabled(r.id);
                   const color = hsvToHex((i * 137.5) % 360, 60, 80);
@@ -730,32 +840,34 @@ export function ParagraphSpaceView({
                   return (
                     <label
                       key={r.id}
-                      className="flex items-center gap-1.5 text-[10px] text-text-secondary select-none cursor-pointer hover:text-text-primary transition-colors pr-2"
+                      className="flex items-center justify-between gap-2 text-[10px] text-text-secondary select-none cursor-pointer hover:text-text-primary transition-colors py-1 border-b border-white/5 last:border-b-0"
                       title={r.id}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <input
-                        type="checkbox"
-                        className="rounded-sm w-3 h-3 border-white/20 bg-black/20"
-                        checked={checked}
-                        onChange={() => {
-                          setEnabledRegionIds((prev) => {
-                            const list = Array.isArray(regions) ? regions : [];
-                            const next = new Set(prev === null ? list.map(x => x.id) : prev);
-                            if (next.has(r.id)) next.delete(r.id);
-                            else next.add(r.id);
-                            return next;
-                          });
-                        }}
-                      />
-                      <span className="w-2 h-2 rounded-full border border-white/20" style={{ backgroundColor: dot }} />
-                      <span className="truncate max-w-[80px] font-medium">{r.id.split('-').slice(0, 2).join('-')}</span>
-                      <span className="font-mono text-[9px] opacity-40">({r.nodeIds?.length || 0})</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          className="rounded-sm w-3 h-3 border-white/20 bg-black/20"
+                          checked={checked}
+                          onChange={() => {
+                            setEnabledRegionIds((prev) => {
+                              const list = Array.isArray(regions) ? regions : [];
+                              const next = new Set(prev === null ? list.map(x => x.id) : prev);
+                              if (next.has(r.id)) next.delete(r.id);
+                              else next.add(r.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />
+                        <span className="truncate font-medium">{r.id.split('-').slice(0, 2).join('-')}</span>
+                      </div>
+                      <span className="font-mono text-[9px] opacity-40 flex-shrink-0">({r.nodeIds?.length || 0})</span>
                     </label>
                   );
                 })}
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -799,9 +911,9 @@ export function ParagraphSpaceView({
             if (!isRegionEnabled(h.id)) return null;
             const style = REGION_KIND_STYLE[h.kind || ""] || DEFAULT_HULL_STYLE;
             
-            // Highlight region if any of its nodes are selected or hovered, OR if it has a selected claim source
+            // Highlight region if all its nodes are claimed, or if it contains a selected/hovered node
             const isHighlighted = highlightedRegionIds.has(h.id);
-            const isSpanned = (hasSelection && highlightSpannedHulls && h.hasSource) || isHighlighted;
+            const isSpanned = (hasSelection && highlightSpannedHulls && h.allSource) || isHighlighted;
             
             return (
               <polygon
@@ -810,7 +922,7 @@ export function ParagraphSpaceView({
                 fill={isHighlighted ? "rgba(251,191,36,0.08)" : style.fill}
                 stroke={isHighlighted || isSpanned ? "rgba(251,191,36,0.8)" : style.stroke}
                 strokeWidth={isHighlighted || isSpanned ? 3.5 : 1.5}
-                opacity={hasSelection && !isSpanned && enabledRegionIds === null ? 0.3 : 1}
+                opacity={hasSelection && !isSpanned ? 0.65 : 1}
                 strokeDasharray={isHighlighted ? "none" : (isSpanned ? "4 2" : "none")}
               />
             );
@@ -837,7 +949,7 @@ export function ParagraphSpaceView({
                   <line
                     key={`mut-${i}`}
                     x1={x1} y1={y1} x2={x2} y2={y2}
-                    stroke={bothSource ? "rgba(16,185,129,0.7)" : "rgba(16,185,129,0.10)"}
+                    stroke={bothSource ? "rgba(16,185,129,0.7)" : "rgba(16,185,129,0.35)"}
                     strokeWidth={bothSource ? 2.5 : 1}
                   />
                 );
@@ -862,7 +974,7 @@ export function ParagraphSpaceView({
                 stroke={color}
                 strokeWidth={1.5}
                 strokeDasharray="6 4"
-                opacity={dimmed ? 0.15 : 0.8}
+                opacity={dimmed ? 0.40 : 0.8}
               >
                 {edge.reason && <title>{edge.type}: {edge.reason}</title>}
               </line>
@@ -896,23 +1008,26 @@ export function ParagraphSpaceView({
             const fill = (colorParagraphsByModel ? modelFill : basinColor) ?? "rgba(148,163,184,0.65)";
 
             const isSource = hasSelection && highlightSourceParagraphs && selectedClaimSourceIds!.has(id);
+            const isHovSource = !!hoveredClaimSourceIds?.has(id);
+            const isHovSibling = !!hoveredNodeSiblingIds?.has(id);
             const isHovered = hoveredParagraphId === id;
             const isParaSelected = selectedParagraphId === id;
-            
+
             const regionId = nodeToRegionMap.get(id);
-            const inActiveRegion = regionId ? isRegionEnabled(regionId) : true;
-            
+            const noRegionFilter = enabledRegionIds === null || enabledRegionIds.size === 0;
+            const inActiveRegion = noRegionFilter || (regionId ? isRegionEnabled(regionId) : true);
+
             const modelEnabled =
               !colorParagraphsByModel ||
               nodeModelIndex == null ||
               modelLegend.length === 0 ||
               (enabledModelIndices.size > 0 && enabledModelIndices.has(nodeModelIndex));
-              
-            const inHighlightedRegion = regionId && highlightedRegionIds.has(regionId);
-            const baseOpacity = hasSelection && highlightSourceParagraphs 
-               ? (isSource ? 1 : inHighlightedRegion ? 0.65 : 0.20) 
-               : 0.85;
-            const nodeOpacity = (modelEnabled && inActiveRegion) ? baseOpacity : baseOpacity * 0.08;
+
+            const baseOpacity = hasSelection && highlightSourceParagraphs
+               ? (isSource ? 1 : 0.55)
+               : isHovSource || isHovered ? 1 : isHovSibling ? 0.95 : 0.85;
+            const forceVisible = isSource || isParaSelected || isHovSource || isHovSibling;
+            const nodeOpacity = (modelEnabled && inActiveRegion) || forceVisible ? baseOpacity : baseOpacity * 0.25;
             const paraData = paragraphDataMap.get(id);
             const hasText = !!paraData?._fullParagraph;
             const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : (n.modelIndex != null ? `M${n.modelIndex}` : null);
@@ -959,11 +1074,11 @@ export function ParagraphSpaceView({
                 key={id}
                 cx={x}
                 cy={y}
-                r={isParaSelected ? r + 1.5 : r}
+                r={isParaSelected ? r + 1.5 : isHovSource ? r + 0.5 : r}
                 fill={isParaSelected ? "rgba(251,191,36,0.9)" : fill}
                 opacity={nodeOpacity}
-                stroke={isParaSelected ? "rgba(255,255,255,0.9)" : isHovered ? "rgba(255,255,255,0.4)" : "none"}
-                strokeWidth={isParaSelected ? 2 : 1}
+                stroke={isParaSelected ? "rgba(255,255,255,0.9)" : isHovSource ? "rgba(245,158,11,0.7)" : isHovered ? "rgba(255,255,255,0.6)" : isHovSibling ? "rgba(255,255,255,0.35)" : "none"}
+                strokeWidth={isParaSelected ? 2 : isHovSource ? 1.5 : isHovered ? 1.5 : isHovSibling ? 1 : 1}
                 onMouseEnter={() => setHoveredParagraphId(id)}
                 onMouseLeave={() => setHoveredParagraphId(null)}
                 onClick={hasText ? (e) => { e.stopPropagation(); setSelectedParagraphId(isParaSelected ? null : id); } : undefined}
@@ -980,8 +1095,8 @@ export function ParagraphSpaceView({
             const isHov = hoveredClaimId === c.claimId;
             const isSel = selectedClaimId === c.claimId;
             const claimVisible = getClaimVisibility(c.claimId);
-            const displayOpacity = claimVisible ? 1 : 0.08;
-            if (!claimVisible && !isSel && !isHov && enabledRegionIds !== null) {
+            const displayOpacity = claimVisible || isSel ? 1 : 0.25;
+            if (!claimVisible && !isSel && !isHov && enabledRegionIds !== null && enabledRegionIds.size > 0) {
               return null; // Cull completely if it's inactive and not selected to reduce clutter
             }
             const bulk = c.provenanceBulk ?? 1;
@@ -1079,35 +1194,36 @@ export function ParagraphSpaceView({
             );
           })}
         </svg>
-      </div>
 
-      {selectedParagraphId && paragraphDataMap.has(selectedParagraphId) && (() => {
-        const p = paragraphDataMap.get(selectedParagraphId)!;
-        return (
-          <div className="flex-none border-t border-white/10 bg-black/30 overflow-y-auto" style={{ maxHeight: 200 }}>
-            <div className="px-3 py-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-mono text-text-muted">{p.id}</span>
-                <button
-                  className="text-[10px] text-text-muted hover:text-text-primary"
-                  onClick={() => setSelectedParagraphId(null)}
-                >✕</button>
-              </div>
-              <p className="text-xs text-text-primary leading-relaxed mb-2">{p._fullParagraph}</p>
-              {Array.isArray(p.statements) && p.statements.length > 0 && (
-                <div className="space-y-1">
-                  {p.statements.map((s) => (
-                    <div key={s.id} className="text-[11px] text-text-muted border-l-2 border-white/10 pl-2">
-                      {s.stance && <span className="font-mono text-[9px] text-text-muted mr-1 uppercase">[{s.stance}]</span>}
-                      {s.text}
-                    </div>
-                  ))}
+        {/* Paragraph inspect panel — absolute overlay inside the relative container */}
+        {selectedParagraphId && paragraphDataMap.has(selectedParagraphId) && (() => {
+          const p = paragraphDataMap.get(selectedParagraphId)!;
+          return (
+            <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/60 backdrop-blur-sm overflow-y-auto z-30 pointer-events-auto" style={{ maxHeight: 180 }}>
+              <div className="px-3 py-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-mono text-text-muted">{p.id}</span>
+                  <button
+                    className="text-[10px] text-text-muted hover:text-text-primary"
+                    onClick={() => setSelectedParagraphId(null)}
+                  >✕</button>
                 </div>
-              )}
+                <p className="text-xs text-text-primary leading-relaxed mb-2">{p._fullParagraph}</p>
+                {Array.isArray(p.statements) && p.statements.length > 0 && (
+                  <div className="space-y-1">
+                    {p.statements.map((s) => (
+                      <div key={s.id} className="text-[11px] text-text-muted border-l-2 border-white/10 pl-2">
+                        {s.stance && <span className="font-mono text-[9px] text-text-muted mr-1 uppercase">[{s.stance}]</span>}
+                        {s.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
+      </div>
     </div>
   );
 }

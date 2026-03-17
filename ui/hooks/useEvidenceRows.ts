@@ -260,14 +260,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       for (const id of excl) exclusiveIds.add(String(id));
     }
 
-    const blastAbsorptionByStmt = new Map<string, any>();
-    const bsScores: any[] = Array.isArray(blastSurface?.scores) ? blastSurface.scores : [];
-    const bs = bsScores.find((s: any) => String(s?.claimId ?? "").trim() === selectedClaimId) ?? null;
-    const statements: any[] = Array.isArray(bs?.layerB?.statements) ? bs.layerB.statements : [];
-    for (const st of statements) {
-      const id = String(st?.statementId ?? "").trim();
-      if (id) blastAbsorptionByStmt.set(id, st);
-    }
+    // Vernal twin map — canonical source for per-statement twin data
+    const twinMap = blastSurface?.twinMap ?? null;
+    const vernalTwins: Record<string, any> = twinMap?.twins ?? {};
+    const vernalThresholds: Record<string, number> = twinMap?.thresholds ?? {};
 
     const claimDensityRaw = typeof claimObj?.density === 'number' && Number.isFinite(claimObj.density)
       ? claimObj.density as number
@@ -281,7 +277,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       mixedByStmt,
       exclusiveIds,
       directTopIds,
-      blastAbsorptionByStmt,
+      vernalTwins,
+      vernalThresholds,
       claimDensityRaw,
       densityLiftForClaim
     };
@@ -335,33 +332,20 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
-      const abs = claimMaps?.blastAbsorptionByStmt.get(stmtId) ?? null;
+      // Vernal twin map data for this statement
+      const twinResult = claimMaps?.vernalTwins[stmtId] ?? null;
+      const tauSim = claimMaps?.vernalThresholds[stmtId] ?? null;
       const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
       const isExclusiveFromFate = (fateEntry?.claimIds.length ?? 0) === 1;
       const isExclusive = selectedClaimId
         ? isExclusiveFromClaim || isExclusiveFromFate
         : false;
 
-      const bestAbsSim = (() => {
-        const carriers: any[] = Array.isArray(abs?.carriers) ? abs.carriers : [];
-        let best = -Infinity;
-        for (const c of carriers) {
-          const v = typeof c?.bestSim === "number" && Number.isFinite(c.bestSim) ? c.bestSim : -Infinity;
-          if (v > best) best = v;
-        }
-        return best > -Infinity ? best : null;
-      })();
+      const bestAbsSim = twinResult && typeof twinResult.similarity === 'number' && Number.isFinite(twinResult.similarity)
+        ? twinResult.similarity
+        : null;
 
-      const simTwin = (() => {
-        const tauSim = typeof abs?.tauSim === "number" && Number.isFinite(abs.tauSim) ? abs.tauSim : null;
-        if (tauSim === null) return null;
-        const carriers: any[] = Array.isArray(abs?.carriers) ? abs.carriers : [];
-        for (const c of carriers) {
-          const v = typeof c?.bestSim === "number" && Number.isFinite(c.bestSim) ? c.bestSim : -Infinity;
-          if (v > tauSim) return true;
-        }
-        return false;
-      })();
+      const simTwin = typeof tauSim === 'number' ? twinResult !== null : null;
 
       let calculatedEcho = 0;
       // Calculate statement-level cascade echo
@@ -399,10 +383,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         zone: mixed?.zone ?? null,
         paragraphOrigin: mixed?.paragraphOrigin ?? null,
 
-        bs_twin: typeof abs?.orphan === "boolean" ? !abs.orphan : null,
+        bs_twin: twinResult !== undefined ? twinResult !== null : null,
         bs_simTwin: simTwin,
         bs_bestSim: bestAbsSim,
-        bs_t_sim: typeof abs?.tauSim === "number" && Number.isFinite(abs.tauSim) ? abs.tauSim : null,
+        bs_t_sim: typeof tauSim === "number" && Number.isFinite(tauSim) ? tauSim : null,
         bs_cascadeEcho: calculatedEcho,
 
         tm_twin: globalMaps?.twinMapByStmt.has(stmtId)

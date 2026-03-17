@@ -107,6 +107,9 @@ export class CognitivePipelineHandler {
           } catch (_) { }
 
           const safeCognitiveArtifact = dehydrateArtifact(mappingArtifact);
+          const mapperProviderId = mappingResult?.providerId
+            || context?.mappingProvider
+            || null;
           const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
           if (currentAiTurn) {
             currentAiTurn.pipelineStatus = 'awaiting_traversal';
@@ -115,6 +118,11 @@ export class CognitivePipelineHandler {
             }
             if (safeCognitiveArtifact) {
               currentAiTurn.mapping = { artifact: safeCognitiveArtifact };
+            }
+            // Persist mapper identity so getProviderArtifact can guard
+            // the shared-slot fallback in multi-mapper turns after rehydration.
+            if (mapperProviderId) {
+              currentAiTurn.meta = { ...(currentAiTurn.meta || {}), mapper: mapperProviderId };
             }
             await this.sessionManager.adapter.put("turns", currentAiTurn);
           }

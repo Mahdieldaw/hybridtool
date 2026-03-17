@@ -51,6 +51,18 @@
     background-color: transparent;
 }
 
+/* Hide MathML — KaTeX outputs both MathML (accessibility) and HTML (visual).
+   Without this rule both are visible, causing duplicate equation text. */
+.katex-mathml {
+    position: absolute;
+    clip: rect(1px, 1px, 1px, 1px);
+    padding: 0;
+    border: 0;
+    height: 1px;
+    width: 1px;
+    overflow: hidden;
+}
+
 .katex-html {
     display: inline-block;
 }

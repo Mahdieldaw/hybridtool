@@ -1419,7 +1419,7 @@ export class StepExecutor {
                   const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
                     await import('./deterministicPipeline');
 
-                  let derived = await computeDerivedFields({
+                  const derived = await computeDerivedFields({
                     enrichedClaims,
                     mapperClaimsForProvenance,
                     parsedEdges: unifiedEdges,
@@ -1444,9 +1444,9 @@ export class StepExecutor {
                     cellUnitEmbeddings: cellUnitEmbeddings || null,
                   });
 
-                  let cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
-                  let blastSurfaceResult = derived.blastSurfaceResult;
-                  let mapperArtifact_claimProvenance = derived.claimProvenance;
+                  const cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
+                  const blastSurfaceResult = derived.blastSurfaceResult;
+                  const mapperArtifact_claimProvenance = derived.claimProvenance;
 
                   let questionSelectionInstrumentation = null;
 
@@ -1472,16 +1472,9 @@ export class StepExecutor {
                   try {
                     const { computeClaimRouting } =
                       await import('../blast-radius/questionSelection');
-                    claimRouting = computeClaimRouting({
-                      blastSurfaceResult: blastSurfaceResult ?? null,
-                      edges: unifiedEdges,
-                      enrichedClaims,
-                      queryRelevanceScores: queryRelevance?.statementScores ?? null,
-                      modelCount: citationOrder.length,
-                      claimCentroids: claimEmbeddings ?? new Map(),
-                      queryEmbedding: queryEmbedding ?? null,
-                      statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
-                    }, questionSelectionInstrumentation?.validatedConflicts);
+                    claimRouting = computeClaimRouting(
+                      null, null, questionSelectionInstrumentation
+                    );
                     console.log(
                       `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.damageOutliers.length} outlier(s), skip=${claimRouting.skipSurvey}`
                     );
@@ -1523,12 +1516,16 @@ export class StepExecutor {
                       }));
 
                       let surveyPrompt = null;
+                      let claimsExpectedInSurvey = claimsForSurvey;
                       if (claimRouting) {
                         if (!claimRouting.skipSurvey) {
+                          const routedSet = new Set(claimRouting.routedClaimIds);
+                          const routedClaims = claimsForSurvey.filter((c) => routedSet.has(c.id));
+                          claimsExpectedInSurvey = routedClaims;
                           surveyPrompt = buildRoutedSurveyPrompt({
                             userQuery: payload.originalPrompt,
                             routing: claimRouting,
-                            allClaims: claimsForSurvey,
+                            allClaims: routedClaims,
                             batchTexts: indexedSourceData.map((s) => ({
                               modelIndex: s.modelIndex,
                               content: s.text,
@@ -1586,7 +1583,7 @@ export class StepExecutor {
                           surveyRationale = parsed.rationale;
 
                           // Coverage check: did the model assess every claim it was asked about?
-                          const expectedIds = claimsForSurvey.map((c) => c.id);
+                          const expectedIds = claimsExpectedInSurvey.map((c) => c.id);
                           const coverage = validateAssessmentCoverage(expectedIds, parsed.assessments);
                           if (coverage.errors.length > 0) {
                             parsed.errors.push(...coverage.errors);
@@ -1625,33 +1622,10 @@ export class StepExecutor {
                     }
                   }
 
-                  if (Array.isArray(rawGates) && rawGates.length > 0) {
-                    derived = await computeDerivedFields({
-                      enrichedClaims,
-                      mapperClaimsForProvenance,
-                      parsedEdges: unifiedEdges,
-                      parsedConditionals: surveyGateConditionals,
-                      shadowStatements: shadowResult.statements,
-                      shadowParagraphs: paragraphResult.paragraphs,
-                      statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
-                      paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
-                      claimEmbeddings: claimEmbeddings || new Map(),
-                      queryEmbedding,
-                      substrate,
-                      preSemantic: preSemanticInterpretation,
-                      regions,
-                      geoRecord: null,
-                      existingQueryRelevance: queryRelevance,
-                      modelCount: citationOrder.length,
-                      queryText: payload.originalPrompt,
-                      competitiveWeights: this._competitiveWeights || null,
-                      competitiveExcess: this._competitiveExcess || null,
-                      competitiveThresholds: this._competitiveThresholds || null,
-                    });
-                    cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
-                    blastSurfaceResult = derived.blastSurfaceResult;
-                    mapperArtifact_claimProvenance = derived.claimProvenance;
-                  }
+                  // Survey gates add conditionals but no new claims/edges/statements.
+                  // Structural analysis only reads claims + edges (not conditionals),
+                  // and mixed provenance / table allocation / blast surface are unchanged.
+                  // No recomputation needed after survey mapper.
 
                   // ── TRAVERSAL + ARTIFACT ASSEMBLY (uses shared pipeline) ──
                   const { traversalGraph } = buildTraversalData({

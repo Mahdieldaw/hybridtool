@@ -17,10 +17,10 @@ export function dehydrateArtifact(fullArtifact: any): any {
     "statementScores",
     "preSemantic",
     "basinInversion",
-    "surveyRationale",
-    "surveyGates",
     "statementAllocation",
     "continuousField",
+    // NOTE: surveyGates and surveyRationale are intentionally NOT stripped —
+    // they are LLM-produced and not recoverable from REGENERATE_EMBEDDINGS.
   ]) {
     if (out[k] !== undefined) delete out[k];
   }

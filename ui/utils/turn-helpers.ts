@@ -221,23 +221,18 @@ export function getProviderArtifact(aiTurn: any, activePid?: string | null): any
       if (last?.artifact && typeof last.artifact === 'object') {
         return last.artifact;
       }
-      // Provider entry exists but has no artifact — return null.
-      // Do NOT fall back to the shared slot (it belongs to a different provider).
-      if (arr.length > 0) {
-        return null;
-      }
+      // Provider entry exists but has no artifact (e.g. mapping response
+      // was persisted at awaiting_traversal before the artifact was built).
+      // Fall through to the shared slot with a meta.mapper guard so we
+      // never return a different mapper's artifact in multi-mapper turns.
     }
-    // No entry at all for this provider — fall through to shared slot
-    // only if it actually belongs to this provider.
     const mapperRaw = aiTurn?.meta?.mapper;
     if (mapperRaw != null && String(mapperRaw).trim() !== '') {
       const mapperPid = normalizeProviderId(String(mapperRaw));
-      if (mapperPid === pid) {
-        const raw = aiTurn?.mapping?.artifact ?? null;
-        return raw && typeof raw === 'object' ? raw : null;
-      }
+      if (mapperPid !== pid) return null;
     }
-    return null;
+    const raw = aiTurn?.mapping?.artifact ?? null;
+    return raw && typeof raw === 'object' ? raw : null;
   }
   // No specific provider requested — use shared slot
   const raw = aiTurn?.mapping?.artifact ?? null;

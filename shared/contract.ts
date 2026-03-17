@@ -932,7 +932,7 @@ export interface BlastSurfaceRiskVector {
 export interface BlastSurfaceClaimScore {
   claimId: string;
   claimLabel: string;
-  layerB: ClaimAbsorptionProfile;
+  layerB?: ClaimAbsorptionProfile;
   layerC: BlastSurfaceLayerC;
   layerD: BlastSurfaceLayerD;
   vernal?: BlastSurfaceVernalScore;
@@ -1015,6 +1015,8 @@ export interface QuestionSelectionInstrumentation {
   validatedConflicts: ValidatedConflict[];
   gate: QuestionSelectionGate;
   ceiling: QuestionSelectionCeiling;
+  /** Single-authority routing — computed here, extracted by computeClaimRouting */
+  routing: ClaimRoutingResult;
   meta: {
     processingTimeMs: number;
   };
@@ -1023,7 +1025,7 @@ export interface QuestionSelectionInstrumentation {
 export interface ClaimRoutingResult {
   conflictClusters: Array<{
     claimIds: string[];
-    edges: Array<{ from: string; to: string; jaccard: number; crossPoolProximity: number | null }>;
+    edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
   }>;
   damageOutliers: Array<{
     claimId: string;
@@ -1037,6 +1039,8 @@ export interface ClaimRoutingResult {
   }>;
   passthrough: string[];
   skipSurvey: boolean;
+  /** Combined set: claimsInRoutedConflict ∪ post-ceiling damageOutliers */
+  routedClaimIds: string[];
   diagnostics: {
     damageThreshold: number | null;
     damageDistribution: number[];

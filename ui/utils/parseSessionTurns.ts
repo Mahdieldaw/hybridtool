@@ -156,6 +156,7 @@ export function parseSessionTurns(fullSession: any): {
         ...(round.batch ? { batch: round.batch } : batchPhaseFromLegacy ? { batch: batchPhaseFromLegacy } : {}),
         ...(round.mapping ? { mapping: round.mapping } : {}),
         ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
+        ...(round.meta ? { meta: round.meta } : {}),
         pipelineStatus: round.pipelineStatus || undefined,
       };
       if (mappingRaw && Object.keys(mappingRaw).length > 0) {

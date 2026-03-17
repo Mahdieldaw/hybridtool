@@ -742,11 +742,13 @@ export const DecisionMapSheet = React.memo(() => {
   const [isRightCollapsed, setIsRightCollapsed] = useState(false); // drag-to-edge collapse of right panel
   const [splitRatio, setSplitRatio] = useState(40); // percentage for graph pane
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+  const isDraggingSplitRef = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const [isTableCollapsed, setIsTableCollapsed] = useState(false);
   const [isClaimPanelCollapsed, setIsClaimPanelCollapsed] = useState(false);
   const [verticalSplitPct, setVerticalSplitPct] = useState(60);
   const [isDraggingVerticalSplit, setIsDraggingVerticalSplit] = useState(false);
+  const isDraggingVerticalSplitRef = useRef(false);
   const [isCardsCollapsed, setIsCardsCollapsed] = useState(false);
   const verticalSplitContainerRef = useRef<HTMLDivElement>(null);
   const [tableMode, setTableMode] = useState<'statement' | 'paragraph'>('statement');
@@ -786,28 +788,37 @@ export const DecisionMapSheet = React.memo(() => {
   const handleSplitPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    isDraggingSplitRef.current = true;
     setIsDraggingSplit(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     (e.target as Element).setPointerCapture(e.pointerId);
   }, []);
 
+  const lastSplitRafRef = useRef<number | null>(null);
   const handleSplitPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDraggingSplit || !splitContainerRef.current) return;
+    if (!isDraggingSplitRef.current || !splitContainerRef.current) return;
     e.preventDefault();
-    const rect = splitContainerRef.current.getBoundingClientRect();
-    const pct = ((e.clientX - rect.left) / rect.width) * 100;
-    // Allow dragging into collapse zones but clamp the actual ratio
-    setSplitRatio(Math.max(5, Math.min(95, pct)));
-  }, [isDraggingSplit]);
+    const clientX = e.clientX;
+    if (lastSplitRafRef.current != null) cancelAnimationFrame(lastSplitRafRef.current);
+    lastSplitRafRef.current = requestAnimationFrame(() => {
+      lastSplitRafRef.current = null;
+      if (!splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = ((clientX - rect.left) / rect.width) * 100;
+      setSplitRatio(Math.max(5, Math.min(95, pct)));
+    });
+  }, []);
 
   const handleSplitPointerUp = useCallback((e: React.PointerEvent) => {
-    if (!isDraggingSplit) return;
+    if (!isDraggingSplitRef.current) return;
     e.preventDefault();
+    isDraggingSplitRef.current = false;
     setIsDraggingSplit(false);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
     (e.target as Element).releasePointerCapture(e.pointerId);
+    if (lastSplitRafRef.current != null) { cancelAnimationFrame(lastSplitRafRef.current); lastSplitRafRef.current = null; }
 
     // Snap-to-edge collapse: if released in edge zone (<10% or >90%), collapse that side
     if (splitContainerRef.current) {
@@ -827,33 +838,43 @@ export const DecisionMapSheet = React.memo(() => {
       // Clamp to 30-70 range for normal stops
       setSplitRatio(Math.max(20, Math.min(80, pct)));
     }
-  }, [isDraggingSplit]);
+  }, []);
 
   // ── Vertical split (table / cards) drag handlers ──
   const handleVerticalSplitPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    isDraggingVerticalSplitRef.current = true;
     setIsDraggingVerticalSplit(true);
     document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
     (e.target as Element).setPointerCapture(e.pointerId);
   }, []);
 
+  const lastVerticalRafRef = useRef<number | null>(null);
   const handleVerticalSplitPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDraggingVerticalSplit || !verticalSplitContainerRef.current) return;
+    if (!isDraggingVerticalSplitRef.current || !verticalSplitContainerRef.current) return;
     e.preventDefault();
-    const rect = verticalSplitContainerRef.current.getBoundingClientRect();
-    const pct = ((e.clientY - rect.top) / rect.height) * 100;
-    setVerticalSplitPct(Math.max(15, Math.min(90, pct)));
-  }, [isDraggingVerticalSplit]);
+    const clientY = e.clientY;
+    if (lastVerticalRafRef.current != null) cancelAnimationFrame(lastVerticalRafRef.current);
+    lastVerticalRafRef.current = requestAnimationFrame(() => {
+      lastVerticalRafRef.current = null;
+      if (!verticalSplitContainerRef.current) return;
+      const rect = verticalSplitContainerRef.current.getBoundingClientRect();
+      const pct = ((clientY - rect.top) / rect.height) * 100;
+      setVerticalSplitPct(Math.max(15, Math.min(90, pct)));
+    });
+  }, []);
 
   const handleVerticalSplitPointerUp = useCallback((e: React.PointerEvent) => {
-    if (!isDraggingVerticalSplit) return;
+    if (!isDraggingVerticalSplitRef.current) return;
     e.preventDefault();
+    isDraggingVerticalSplitRef.current = false;
     setIsDraggingVerticalSplit(false);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
     (e.target as Element).releasePointerCapture(e.pointerId);
+    if (lastVerticalRafRef.current != null) { cancelAnimationFrame(lastVerticalRafRef.current); lastVerticalRafRef.current = null; }
     if (verticalSplitContainerRef.current) {
       const rect = verticalSplitContainerRef.current.getBoundingClientRect();
       const pct = ((e.clientY - rect.top) / rect.height) * 100;
@@ -864,7 +885,7 @@ export const DecisionMapSheet = React.memo(() => {
       }
       setVerticalSplitPct(Math.max(20, Math.min(80, pct)));
     }
-  }, [isDraggingVerticalSplit]);
+  }, []);
 
   const allColumns = useMemo(
     () => tableMode === 'paragraph'

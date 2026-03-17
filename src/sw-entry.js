@@ -833,9 +833,33 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           const parsedClaims = Array.isArray(parseResult.output.claims) ? parseResult.output.claims : [];
           const parsedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-          const parsedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
           const parsedNarrative = String(parseResult.output?.narrative || parseResult.narrative || "").trim();
           if (parsedClaims.length === 0) { sendResponse({ success: false, error: "Parsed 0 claims from mapping text" }); return; }
+
+          // Merge conditionals from parsing + survey gates from stored artifact.
+          // Survey gates are LLM-produced and not in the mapping text, so we
+          // recover them from the persisted artifact to avoid losing them.
+          const mapperConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+          const storedArtifact = turnRaw?.mapping?.artifact;
+          const storedSurveyGates = Array.isArray(storedArtifact?.surveyGates) ? storedArtifact.surveyGates : [];
+          const surveyGateConditionals = storedSurveyGates
+            .filter(g => g && g.id && Array.isArray(g.affectedClaims) && g.affectedClaims.length > 0)
+            .map(g => ({
+              id: g.id,
+              question: String(g.question || '').trim(),
+              affectedClaims: g.affectedClaims.map(c => String(c).trim()).filter(Boolean),
+              construct: null,
+              hinge: null,
+              classification: 'conditional_gate',
+            }));
+          const existingCondIds = new Set(mapperConditionals.map(c => c?.id).filter(Boolean));
+          const parsedConditionals = [
+            ...mapperConditionals,
+            ...surveyGateConditionals.filter(c => !existingCondIds.has(c.id)),
+          ];
+          if (surveyGateConditionals.length > 0) {
+            console.log(`[Regenerate] Recovered ${surveyGateConditionals.length} survey gate conditional(s) from stored artifact`);
+          }
 
           console.log(`[Regenerate] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges from provider ${providerId}`);
 
@@ -893,9 +917,11 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           // Model count from batch responses (deduplicated per provider)
+          // Only count providers that actually returned content — failed/empty
+          // responses must not inflate the denominator for supportRatio.
           const uniqueBatchProviders = new Set(
             responsesForTurn
-              .filter((r) => r && r.responseType === "batch")
+              .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
               .map((r) => normalizeProvId(r.providerId))
           );
           const modelCount = Math.max(citationOrderArr.length, uniqueBatchProviders.size, 1);
@@ -1148,17 +1174,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               statementEmbeddings: statementEmbeddings ?? null,
               muPairwise,
             });
-            claimRouting = computeClaimRouting({
-              blastSurfaceResult: derived?.blastSurfaceResult ?? null,
-              edges: Array.isArray(parsedEdges) ? parsedEdges : [],
-              enrichedClaims,
-              queryRelevanceScores: derived?.queryRelevance?.statementScores ?? queryRelevance?.statementScores ?? null,
-              modelCount,
-              claimCentroids: claimEmbeddings ?? new Map(),
-              queryEmbedding: queryEmbedding ?? null,
-              statementEmbeddings: statementEmbeddings ?? null,
-              muPairwise,
-            }, questionSelectionInstrumentation?.validatedConflicts);
+            claimRouting = computeClaimRouting(
+              null, null, questionSelectionInstrumentation
+            );
           } catch (_) {
             questionSelectionInstrumentation = null;
             claimRouting = null;
@@ -1185,6 +1203,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             queryText,
             modelCount,
             shadowStatements,
+            surveyGates: storedSurveyGates.length > 0 ? storedSurveyGates : undefined,
+            surveyRationale: storedArtifact?.surveyRationale ?? null,
             statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
             paragraphSemanticDensity: geoRecord?.meta?.paragraphSemanticDensityScores ?? undefined,
             claimSemanticDensity: claimDensityScores?.size > 0
@@ -1782,6 +1802,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               ...(primaryAi?.batch ? { batch: primaryAi.batch } : {}),
               ...(primaryAi?.mapping ? { mapping: primaryAi.mapping } : {}),
               ...(primaryAi?.singularity ? { singularity: primaryAi.singularity } : {}),
+              ...(primaryAi?.meta ? { meta: primaryAi.meta } : {}),
               ...(Object.keys(providers).length > 0 ? { providers } : {}),
               ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
               ...(Object.keys(singularityResponses).length > 0 ? { singularityResponses } : {}),

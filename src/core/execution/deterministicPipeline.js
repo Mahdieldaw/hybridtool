@@ -128,6 +128,7 @@ export async function computeDerivedFields({
         edges: parsedEdges,
         conditionals: parsedConditionals,
         narrative: '',
+        model_count: modelCount,
       }, null);
       result.cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
     }

@@ -323,8 +323,12 @@ export function computeQuestionSelectionInstrumentation(
     const score = blastScoresByClaimId.get(String(c.id)) ?? null;
     const td = score?.riskVector?.totalDamage;
     const totalDamage = typeof td === 'number' && Number.isFinite(td) ? td : null;
-    const orphanRatio = typeof score?.layerB?.orphanRatio === 'number' && Number.isFinite(score.layerB.orphanRatio)
-      ? score.layerB.orphanRatio
+    // Derive orphanRatio from Vernal twin map: degradationRisk (no twin) / total exclusive
+    const degRisk = score?.riskVector?.degradationRisk;
+    const delRisk = score?.riskVector?.deletionRisk;
+    const exclTotal = (typeof degRisk === 'number' ? degRisk : 0) + (typeof delRisk === 'number' ? delRisk : 0);
+    const orphanRatio = exclTotal > 0 && typeof degRisk === 'number' && Number.isFinite(degRisk)
+      ? degRisk / exclTotal
       : null;
     totalDamageByClaimId.set(String(c.id), totalDamage);
     orphanRatioByClaimId.set(String(c.id), orphanRatio);
@@ -417,22 +421,128 @@ export function computeQuestionSelectionInstrumentation(
   const wouldSkip = sigmaDamage < epsilon;
   const hasValidatedConflicts = validatedConflicts.some((c) => c.validated);
 
+  // All geometrically validated edges — broad view for debug panel
   const validatedEdges = validatedConflicts.filter((c) => c.validated);
+
+  // Routing-aligned edges: only pairs that also have mapper confirmation.
+  // Used for ceiling math so the panel's theoretical ceiling matches routing.
+  const routingConflictEdges = validatedConflicts.filter((c) => c.validated && c.mapperLabeledConflict);
   const independentConflictClusters = countConnectedComponents(
-    validatedEdges.map((c) => ({ a: c.edgeFrom, b: c.edgeTo }))
+    routingConflictEdges.map((c) => ({ a: c.edgeFrom, b: c.edgeTo }))
   );
+
+  // Only claims in fully validated conflicts are excluded from outlier eligibility.
+  // Claims in geometry-only conflicts (no mapper confirmation) can still be outliers.
+  const claimsInRoutedConflict = new Set<string>();
+  for (const c of routingConflictEdges) {
+    claimsInRoutedConflict.add(c.edgeFrom);
+    claimsInRoutedConflict.add(c.edgeTo);
+  }
 
   const damageOutlierClaimIds: string[] = [];
   if (sigmaDamage > 0) {
     const threshold = meanDamage + sigmaDamage;
     for (const p of claimProfiles) {
-      if (p.supportRatio > 0.5) continue;          // consensus claims are not outliers
+      if (claimsInRoutedConflict.has(p.claimId)) continue; // already routed as conflict
+      if (p.supportRatio > 0.5) continue;                  // consensus claims are not outliers
       const v = p.totalDamage;
       if (typeof v === 'number' && Number.isFinite(v) && v > threshold) damageOutlierClaimIds.push(p.claimId);
     }
   }
 
-  const theoreticalCeiling = Math.min(3, independentConflictClusters + damageOutlierClaimIds.length);
+  const theoreticalCeiling = independentConflictClusters + damageOutlierClaimIds.length;
+
+  // ── Routing (single-authority — the debug path is the superset) ──────
+  // Build full ConflictCluster[] from routingConflictEdges
+  const conflictClusters: ConflictCluster[] = [];
+  if (routingConflictEdges.length > 0) {
+    const adj = new Map<string, Set<string>>();
+    for (const e of routingConflictEdges) {
+      if (!adj.has(e.edgeFrom)) adj.set(e.edgeFrom, new Set());
+      if (!adj.has(e.edgeTo)) adj.set(e.edgeTo, new Set());
+      adj.get(e.edgeFrom)!.add(e.edgeTo);
+      adj.get(e.edgeTo)!.add(e.edgeFrom);
+    }
+    const visited = new Set<string>();
+    for (const node of adj.keys()) {
+      if (visited.has(node)) continue;
+      const component: string[] = [];
+      const stack = [node];
+      visited.add(node);
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        component.push(cur);
+        for (const n of adj.get(cur) || []) {
+          if (visited.has(n)) continue;
+          visited.add(n);
+          stack.push(n);
+        }
+      }
+      const clusterEdges = routingConflictEdges
+        .filter((e) => component.includes(e.edgeFrom) && component.includes(e.edgeTo))
+        .map((e) => ({ from: e.edgeFrom, to: e.edgeTo, crossPoolProximity: e.crossPoolProximity }));
+      conflictClusters.push({ claimIds: component, edges: clusterEdges });
+    }
+  }
+
+  // Query distance (centroid-level) for outlier prompt-type classification
+  const queryDistanceByClaimId = new Map<string, number>();
+  if (input.queryEmbedding) {
+    for (const c of claims) {
+      const id = String(c.id);
+      const centroid = input.claimCentroids.get(id);
+      if (centroid && input.queryEmbedding) {
+        const sim = cosineSimilarity(centroid, input.queryEmbedding);
+        queryDistanceByClaimId.set(id, Number.isFinite(sim) ? sim : 0);
+      }
+    }
+  }
+  let queryDistanceThreshold: number | null = null;
+  if (queryDistanceByClaimId.size > 0) {
+    const qVals = Array.from(queryDistanceByClaimId.values());
+    const muQ = mean(qVals);
+    const sigQ = sigma(qVals, muQ);
+    if (sigQ > 0.01) queryDistanceThreshold = muQ - sigQ;
+  }
+
+  // Build rich DamageOutlier objects from the outlier IDs
+  const claimMap = new Map<string, EnrichedClaim>();
+  for (const c of claims) claimMap.set(String(c.id), c);
+
+  const damageOutliersAll: DamageOutlier[] = damageOutlierClaimIds.map((id) => {
+    const c = claimMap.get(id)!;
+    const profile = claimProfiles.find((p) => p.claimId === id)!;
+    const qDist = queryDistanceByClaimId.get(id) ?? null;
+    return {
+      claimId: id,
+      claimLabel: String(c.label ?? id),
+      claimText: String((c as any).text ?? ''),
+      totalDamage: profile.totalDamage ?? 0,
+      supportRatio: profile.supportRatio,
+      queryDistance: qDist,
+      supporters: Array.isArray(c.supporters) ? c.supporters : [],
+      promptType: 'isolate' as const,
+    };
+  }).sort((a, b) => b.totalDamage - a.totalDamage);
+
+  // Apply slot ceiling: conflicts get priority, outliers fill remaining slots
+  const slotsForOutliers = Math.max(0, theoreticalCeiling - conflictClusters.length);
+  const damageOutliers = damageOutliersAll.slice(0, slotsForOutliers);
+
+  // Convergence / skip
+  const supportRatios = claims.map((c) =>
+    typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0
+  );
+  const highConsensusCount = supportRatios.filter((r) => r > 0.5).length;
+  const convergenceRatio = claims.length > 0 ? highConsensusCount / claims.length : 0;
+  const skipSurvey = conflictClusters.length === 0 && damageOutliers.length === 0;
+
+  // Passthrough = everything not routed
+  const routedClaimIds = new Set<string>([
+    ...claimsInRoutedConflict,
+    ...damageOutliers.map((o) => o.claimId),
+  ]);
+  const passthrough = claims.map((c) => String(c.id)).filter((id) => !routedClaimIds.has(id));
 
   return {
     claimProfiles,
@@ -453,6 +563,20 @@ export function computeQuestionSelectionInstrumentation(
       theoreticalCeiling,
       actualClaimsSent: claims.length,
     },
+    routing: {
+      conflictClusters,
+      damageOutliers,
+      passthrough,
+      skipSurvey,
+      routedClaimIds: Array.from(routedClaimIds),
+      diagnostics: {
+        damageThreshold: sigmaDamage > 0 ? meanDamage + sigmaDamage : null,
+        damageDistribution: totalDamageValues,
+        convergenceRatio,
+        totalClaims: claims.length,
+        queryDistanceThreshold,
+      },
+    },
     meta: {
       processingTimeMs: performance.now() - startMs,
     },
@@ -460,200 +584,39 @@ export function computeQuestionSelectionInstrumentation(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// STRUCTURAL ROUTING
+// STRUCTURAL ROUTING — thin extractor
 //
-// Classifies claims into three categories based on geometry:
-//   1. Conflict clusters — validated tension edges → fork articulation prompt
-//   2. Isolate candidates — sole-source + meaningful orphans → misleadingness test
-//   3. Passthrough — consensus or structurally redundant → no survey question
-//
-// The routing replaces the composite-weight policy (0.30/0.25/...) and hard
-// cap of 3. The number of questions is derived from the topology: one per
-// conflict cluster + zero-or-one per isolate that fails the misleadingness
-// test. No magic numbers; the count is measured, not imposed.
+// Routing is now computed inside computeQuestionSelectionInstrumentation
+// (single authority). This function extracts the routing sub-object so
+// existing callers don't need to change shape.
 // ─────────────────────────────────────────────────────────────────────────
 
 export function computeClaimRouting(
-  input: QuestionSelectionInput,
-  qsiConflicts?: ValidatedConflict[],
+  _input: QuestionSelectionInput,
+  _qsiConflicts?: ValidatedConflict[],
+  qsi?: QuestionSelectionInstrumentation | null,
 ): ClaimRouting {
-  const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
-  const claimIds = claims.map((c) => String(c.id));
-
-  // ── 1. Validated conflict clusters ──────────────────────────────────
-  // Use QSI's all-pairs validated conflicts (thresholded against the full
-  // distribution mean) and filter to mapper-labeled pairs.  This avoids a
-  // duplicate proximity computation and eliminates the self-referential
-  // threshold bug where a single mapper pair could never validate itself.
-  const validatedConflictEdges: Array<{ from: string; to: string; crossPoolProximity: number | null }> = [];
-  if (Array.isArray(qsiConflicts)) {
-    for (const vc of qsiConflicts) {
-      if (vc.mapperLabeledConflict && vc.validated) {
-        validatedConflictEdges.push({
-          from: vc.edgeFrom,
-          to: vc.edgeTo,
-          crossPoolProximity: vc.crossPoolProximity,
-        });
-      }
-    }
+  if (!qsi?.routing) {
+    // Fallback: no routing available (should not happen in normal flow)
+    return {
+      conflictClusters: [],
+      damageOutliers: [],
+      passthrough: [],
+      skipSurvey: true,
+      diagnostics: {
+        damageThreshold: null,
+        damageDistribution: [],
+        convergenceRatio: 0,
+        totalClaims: 0,
+        queryDistanceThreshold: null,
+      },
+    };
   }
-
-  // Build connected components from validated conflict edges
-  const conflictClusters: ConflictCluster[] = [];
-  if (validatedConflictEdges.length > 0) {
-    const adj = new Map<string, Set<string>>();
-    for (const e of validatedConflictEdges) {
-      if (!adj.has(e.from)) adj.set(e.from, new Set());
-      if (!adj.has(e.to)) adj.set(e.to, new Set());
-      adj.get(e.from)!.add(e.to);
-      adj.get(e.to)!.add(e.from);
-    }
-    const visited = new Set<string>();
-    for (const node of adj.keys()) {
-      if (visited.has(node)) continue;
-      const component: string[] = [];
-      const stack = [node];
-      visited.add(node);
-      while (stack.length > 0) {
-        const cur = stack.pop()!;
-        component.push(cur);
-        for (const n of adj.get(cur) || []) {
-          if (visited.has(n)) continue;
-          visited.add(n);
-          stack.push(n);
-        }
-      }
-      const clusterEdges = validatedConflictEdges.filter(
-        (e) => component.includes(e.from) && component.includes(e.to)
-      );
-      conflictClusters.push({ claimIds: component, edges: clusterEdges });
-    }
-  }
-
-  const claimsInConflict = new Set<string>();
-  for (const cluster of conflictClusters) {
-    for (const id of cluster.claimIds) claimsInConflict.add(id);
-  }
-
-  // ── 2. Damage-outlier detection ────────────────────────────────────
-  // Read totalDamage from blast surface riskVector
-  const bsScores = input.blastSurfaceResult?.scores ?? [];
-  const blastByClaimId = new Map<string, any>();
-  for (const s of bsScores) {
-    if (!s?.claimId) continue;
-    blastByClaimId.set(String(s.claimId), s);
-  }
-
-  const totalDamageByClaimIdR = new Map<string, number>();
-  for (const c of claims) {
-    const id = String(c.id);
-    const score = blastByClaimId.get(id);
-    const td = score?.riskVector?.totalDamage;
-    totalDamageByClaimIdR.set(id,
-      typeof td === 'number' && Number.isFinite(td) ? td : 0);
-  }
-
-  // μ+σ threshold on totalDamage distribution
-  const damageValues = Array.from(totalDamageByClaimIdR.values());
-  const muDamage = mean(damageValues);
-  const sigmaDamage = sigma(damageValues, muDamage);
-  const damageThreshold = sigmaDamage > 0 ? muDamage + sigmaDamage : null;
-
-  // Query-distance for prompt-type classification (kept from original)
-  const queryDistanceByClaimId = new Map<string, number>();
-  if (input.queryEmbedding) {
-    for (const c of claims) {
-      const id = String(c.id);
-      const centroid = input.claimCentroids.get(id);
-      if (centroid && input.queryEmbedding) {
-        const sim = cosineSimilarity(centroid, input.queryEmbedding);
-        queryDistanceByClaimId.set(id, Number.isFinite(sim) ? sim : 0);
-      }
-    }
-  }
-
-  let queryDistanceThreshold: number | null = null;
-  if (queryDistanceByClaimId.size > 0) {
-    const qVals = Array.from(queryDistanceByClaimId.values());
-    const muQ = mean(qVals);
-    const sigQ = sigma(qVals, muQ);
-    if (sigQ > 0.01) {
-      queryDistanceThreshold = muQ - sigQ;
-    }
-  }
-
-  // Detect damage outliers: non-consensus (supportRatio ≤ 0.5) + totalDamage above threshold
-  const damageOutliersAll: DamageOutlier[] = [];
-  if (damageThreshold !== null) {
-    for (const c of claims) {
-      const id = String(c.id);
-      if (claimsInConflict.has(id)) continue;
-      const supportRatio = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
-      if (supportRatio > 0.5) continue;
-      const totalDamage = totalDamageByClaimIdR.get(id) ?? 0;
-      if (totalDamage <= damageThreshold) continue;
-
-      const qDist = queryDistanceByClaimId.get(id) ?? null;
-      const isSoleSource = Array.isArray(c.supporters) && c.supporters.length === 1;
-      const isQueryDistant =
-        queryDistanceThreshold !== null && qDist !== null
-          ? qDist < queryDistanceThreshold
-          : false;
-
-      // All outliers use 'isolate' promptType for now (logged for future pattern analysis)
-      const promptType: 'isolate' | 'conditionality' = 'isolate';
-      void isSoleSource; void isQueryDistant; // reserved for future classification
-
-      damageOutliersAll.push({
-        claimId: id,
-        claimLabel: String(c.label ?? id),
-        claimText: String((c as any).text ?? ''),
-        totalDamage,
-        supportRatio,
-        queryDistance: qDist,
-        supporters: Array.isArray(c.supporters) ? c.supporters : [],
-        promptType,
-      });
-    }
-  }
-
-  // Rank by totalDamage desc, apply slot ceiling
-  damageOutliersAll.sort((a, b) => b.totalDamage - a.totalDamage);
-  const ceiling = Math.min(3, conflictClusters.length + damageOutliersAll.length);
-  const slotsForOutliers = Math.max(0, ceiling - conflictClusters.length);
-  const damageOutliers = damageOutliersAll.slice(0, slotsForOutliers);
-
-  // ── 3. Convergence skip ────────────────────────────────────────────
-  const supportRatios = claims.map((c) =>
-    typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0
-  );
-  const highConsensusCount = supportRatios.filter((r) => r > 0.5).length;
-  const convergenceRatio = claims.length > 0 ? highConsensusCount / claims.length : 0;
-
-  // Skip when nothing was routed for prompting — convergence is informational
-  // but irrelevant when there are no forks or outliers to ask about.
-  const skipSurvey =
-    conflictClusters.length === 0 &&
-    damageOutliers.length === 0;
-
-  // ── 4. Passthrough = everything not routed ─────────────────────────
-  const routedIds = new Set<string>([
-    ...claimsInConflict,
-    ...damageOutliers.map((o) => o.claimId),
-  ]);
-  const passthrough = claimIds.filter((id) => !routedIds.has(id));
-
   return {
-    conflictClusters,
-    damageOutliers,
-    passthrough,
-    skipSurvey,
-    diagnostics: {
-      damageThreshold,
-      damageDistribution: damageValues,
-      convergenceRatio,
-      totalClaims: claims.length,
-      queryDistanceThreshold,
-    },
+    conflictClusters: qsi.routing.conflictClusters,
+    damageOutliers: qsi.routing.damageOutliers,
+    passthrough: qsi.routing.passthrough,
+    skipSurvey: qsi.routing.skipSurvey,
+    diagnostics: qsi.routing.diagnostics,
   };
 }
