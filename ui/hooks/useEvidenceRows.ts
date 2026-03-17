@@ -333,7 +333,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
       // Vernal twin map data for this statement
-      const twinResult = claimMaps?.vernalTwins[stmtId] ?? null;
+      const twinResult = claimMaps?.vernalTwins[stmtId];
       const tauSim = claimMaps?.vernalThresholds[stmtId] ?? null;
       const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
       const isExclusiveFromFate = (fateEntry?.claimIds.length ?? 0) === 1;
@@ -345,7 +345,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         ? twinResult.similarity
         : null;
 
-      const simTwin = typeof tauSim === 'number' ? twinResult !== null : null;
+      const simTwin = typeof tauSim === 'number' && twinResult !== undefined ? twinResult !== null : null;
 
       let calculatedEcho = 0;
       // Calculate statement-level cascade echo

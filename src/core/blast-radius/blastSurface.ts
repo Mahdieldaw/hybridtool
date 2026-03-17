@@ -8,7 +8,6 @@
 // with L1 measurements derived from mixed-method provenance.
 //
 // Layer A: Per-claim evidence inventory (already computed, passed as input)
-// Layer B: Exclusive vulnerability — twin detection on exclusive statements
 // Layer C: Evidence mass — canonicalCount, exclusiveCount, coreCount trio
 // Layer D: Cascade echo — provenance overlap weighted by exclusivity
 //
@@ -102,7 +101,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         const exclusiveIds = canonicalExclusiveIdsByClaim.get(claimId) ?? [];
 
         // Layer B computation removed — Vernal twin map is canonical.
-        // computeLayerB() kept in this file for reference but no longer called.
+
 
         // ── Twin-map classification of exclusives ─────────────────────────
         const deletionIds: string[] = [];
