@@ -132,7 +132,7 @@ export function applyStreamingTurnUpdate(
             conditionals: existingArtifact?.semantic?.conditionals || [],
             narrative: nextText,
           },
-          traversal: existingArtifact?.traversal || { forcingPoints: [], graph: { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] } },
+          traversal: existingArtifact?.traversal || { forcingPoints: [], graph: { claims: [], edges: [], conditionals: [], tiers: [], maxTier: 0 } },
         } as any,
         timestamp: Date.now(),
       };
@@ -204,37 +204,3 @@ export function normalizeBackendRoundsToTurns(
   return normalized;
 }
 
-/**
- * Resolve the active provider's artifact.
- * Per-provider artifacts are stored in mappingResponses[pid][].artifact.
- * The shared slot (aiTurn.mapping.artifact) is only used when no specific
- * provider is requested — never as a cross-provider fallback.
- */
-export function getProviderArtifact(aiTurn: any, activePid?: string | null): any | null {
-  if (activePid != null) {
-    const pid = normalizeProviderId(String(activePid));
-    const responses = aiTurn?.mappingResponses;
-    if (responses && typeof responses === 'object') {
-      const entry = responses[pid];
-      const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
-      const last = arr.length > 0 ? arr[arr.length - 1] : null;
-      if (last?.artifact && typeof last.artifact === 'object') {
-        return last.artifact;
-      }
-      // Provider entry exists but has no artifact (e.g. mapping response
-      // was persisted at awaiting_traversal before the artifact was built).
-      // Fall through to the shared slot with a meta.mapper guard so we
-      // never return a different mapper's artifact in multi-mapper turns.
-    }
-    const mapperRaw = aiTurn?.meta?.mapper;
-    if (mapperRaw != null && String(mapperRaw).trim() !== '') {
-      const mapperPid = normalizeProviderId(String(mapperRaw));
-      if (mapperPid !== pid) return null;
-    }
-    const raw = aiTurn?.mapping?.artifact ?? null;
-    return raw && typeof raw === 'object' ? raw : null;
-  }
-  // No specific provider requested — use shared slot
-  const raw = aiTurn?.mapping?.artifact ?? null;
-  return raw && typeof raw === 'object' ? raw : null;
-}

@@ -75,7 +75,6 @@ export interface TraversalGraph {
   edges?: any[];
   conditionals?: any[];
   tiers?: any[];
-  tensions?: any[];
 }
 
 // ===========================================================================
@@ -212,29 +211,6 @@ function normalizeEdges(input: any): { edges: MapperEdge[]; conflictBlocks: Map<
 
   const edges: any[] = [];
   const rawClaims = Array.isArray(input?.claims) ? input.claims : [];
-
-  const tensions = Array.isArray(input?.tensions) ? input.tensions : [];
-  if (tensions.length > 0) {
-    const seen = new Set<string>();
-    for (const t of tensions) {
-      const aId = String(t?.claimAId || '').trim();
-      const bId = String(t?.claimBId || '').trim();
-      if (!aId || !bId) continue;
-      const pk = pairKeyFor(aId, bId);
-      if (seen.has(pk)) continue;
-      seen.add(pk);
-      const question = String(t?.question || '').trim() || undefined;
-      const e: any = { from: aId, to: bId, type: 'conflicts', question } satisfies MapperEdge;
-      if (Array.isArray(t?.sourceStatementIds)) {
-        e.sourceStatementIds = t.sourceStatementIds.map((s: any) => String(s)).filter(Boolean);
-      }
-      edges.push(e);
-      if (Array.isArray(t?.blockedByGates)) {
-        conflictBlocks.set(pk, t.blockedByGates.map((g: any) => String(g)).filter(Boolean));
-      }
-    }
-    return { edges: edges as MapperEdge[], conflictBlocks };
-  }
 
   const seen = new Set<string>();
   for (const claim of rawClaims) {

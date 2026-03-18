@@ -139,16 +139,6 @@ export type Determinant =
     no_means?: string;
   };
 
-export interface MapperGate {
-  id: string;
-  claims: string[];
-  construct: string;
-  classification: 'forced_choice' | 'conditional_gate';
-  fork: string;
-  hinge: string;
-  question: string;
-}
-
 /**
  * Gate produced by the Survey Mapper (runs after blast radius filter).
  * Each gate tests one hidden real-world assumption about the user's situation.
@@ -173,7 +163,6 @@ export interface UnifiedMapperOutput {
   determinants?: Determinant[];
   edges: Edge[];
   conditionals?: ConditionalPruner[];
-  gates?: MapperGate[];
 }
 
 export interface ConditionMatch {
@@ -1213,9 +1202,6 @@ export interface SerializedForcingPoint {
   gateId?: string;
   claimId?: string;
   options?: ConflictOption[];
-  tensionSourceIds?: string[];
-  unlocks: string[];
-  prunes: string[];
   blockedBy: string[];
   sourceStatementIds: string[];
 }
@@ -1836,7 +1822,8 @@ export interface BatchPhase {
 }
 
 export interface MappingPhase {
-  artifact: CognitiveArtifact | any; // Use CognitiveArtifact when available; tolerate partial shapes
+  /** @deprecated Moved to ephemeral Tier 3. Use buildArtifactForProvider() instead. */
+  artifact?: CognitiveArtifact | any;
   timestamp: number;
 }
 
@@ -1858,6 +1845,13 @@ export interface SingularityPhase {
   chewedSubstrateSummary?: ChewedSubstrateSummary | null;
 }
 
+export interface ShadowData {
+  statements: PipelineShadowStatement[];
+  paragraphs: PipelineShadowParagraph[];
+  audit?: ShadowAudit;
+  delta?: PipelineShadowDeltaResult | null;
+}
+
 // Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
 export interface AiTurn {
   id: string;
@@ -1872,6 +1866,12 @@ export interface AiTurn {
   batch?: BatchPhase;
   mapping?: MappingPhase;
   singularity?: SingularityPhase;
+
+  /** Tier 1: Per-turn immutable shadow data (replaces artifact nesting) */
+  shadow?: ShadowData;
+
+  /** Tier 1: Per-turn traversal state (persisted across sessions) */
+  traversalState?: any;
 
   /** Per-provider mapping responses with full artifacts for provider-aware resolution */
   mappingResponses?: Record<string, any[]>;
@@ -2263,6 +2263,12 @@ export interface ProviderResponse {
     mapper?: string;
     [key: string]: any; // Keep index signature for genuinely unknown provider metadata, but we've explicitly typed the known ones.
   };
+  /** LLM-produced survey gates (Tier 2: per-provider mutable) */
+  surveyGates?: SurveyGate[];
+  /** LLM-produced survey rationale (Tier 2: per-provider mutable) */
+  surveyRationale?: string;
+  /** Concierge-produced traversal state adjustments */
+  traversalState?: any;
 }
 
 export interface Thread {

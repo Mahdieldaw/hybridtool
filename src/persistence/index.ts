@@ -15,7 +15,13 @@ export interface PersistenceLayer {
 }
 
 export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
-  const db = await openDatabase();
+  const dbPromise = openDatabase();
+  const db = await Promise.race([
+    dbPromise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout: openDatabase did not resolve within 10s (upgrade may be blocked)")), 10_000)
+    ),
+  ]);
   const storeNames = Array.from(db.objectStoreNames);
   const expectedStores = STORE_CONFIGS.map((cfg) => cfg.name);
   const missingStores = expectedStores.filter(

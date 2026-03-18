@@ -758,25 +758,33 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
       case "REGENERATE_EMBEDDINGS":
         (async () => {
           const { aiTurnId, providerId, persist } = message.payload || {};
-          if (!aiTurnId || !providerId) { sendResponse({ success: false, error: "Missing aiTurnId or providerId" }); return; }
-          const shouldPersistArtifact = persist !== false;
-          const turnRaw = await sm.adapter.get("turns", aiTurnId);
-          if (!turnRaw) { sendResponse({ success: false, error: "Turn not found" }); return; }
+          if (!aiTurnId || !providerId) {
+            sendResponse({ success: false, error: "Missing aiTurnId or providerId" });
+            return;
+          }
+          // Tier 3: artifacts are ephemeral — `persist` flag is ignored.
 
-          const { generateStatementEmbeddings, generateEmbeddings, generateTextEmbeddings, stripInlineMarkdown, structuredTruncate, DEFAULT_CONFIG } = await import('./clustering');
-          const { generateClaimEmbeddings, reconstructProvenance } = await import('./ConciergeService/claimAssembly');
-          const { parseSemanticMapperOutput } = await import('./ConciergeService/semanticMapper');
-          const { packEmbeddingMap, unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
-          const { buildCognitiveArtifact } = await import('../shared/cognitive-artifact');
-          const { buildGeometricSubstrate } = await import('./geometry/substrate');
-          const { buildPreSemanticInterpretation, computePerModelQueryRelevance } = await import('./geometry/interpretation');
-          const { computeBasinInversion } = await import('../shared/geometry/basinInversion');
-          const { computeQueryRelevance } = await import('./geometry/queryRelevance');
-          const { enrichStatementsWithGeometry } = await import('./geometry/enrichment');
+          const turnRaw = await sm.adapter.get("turns", aiTurnId);
+          if (!turnRaw) {
+            sendResponse({ success: false, error: "Turn not found" });
+            return;
+          }
+
+          // ── Minimal imports (geometry I/O + codec only) ──
+          const {
+            generateStatementEmbeddings,
+            generateEmbeddings,
+            generateTextEmbeddings,
+            stripInlineMarkdown,
+            structuredTruncate,
+            DEFAULT_CONFIG,
+          } = await import("./clustering");
+          const { packEmbeddingMap, unpackEmbeddingMap } = await import("./persistence/embeddingCodec");
           const dims = DEFAULT_CONFIG.embeddingDimensions;
 
           const normalizeProvId = (pid) => String(pid || "").trim().toLowerCase();
 
+          // ── Load query text (shared) ──
           const userTurnId = turnRaw.userTurnId;
           let queryText = "";
           if (userTurnId) {
@@ -790,7 +798,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           const coerceJson = (value) => {
             if (!value) return null;
-            if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
+            if (typeof value === "string") {
+              try {
+                return JSON.parse(value);
+              } catch {
+                return null;
+              }
+            }
             return value;
           };
 
@@ -803,10 +817,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
               entries.sort((a, b) => a[0] - b[0]);
               return entries.map(([, pid]) => normalizeProvId(pid));
-            } catch { return []; }
+            } catch {
+              return [];
+            }
           };
 
-          // ── A. Load provider responses and parse claims from mapping text ──
+          // ── A. Load provider responses (mappingResp + text only) ──
           let responsesForTurn = [];
           try {
             if (sm.adapter?.getResponsesByTurnId) {
@@ -820,87 +836,62 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           const mappingResp = responsesForTurn
-            .filter((r) => r && r.responseType === "mapping" && normalizeProvId(r.providerId) === normalizeProvId(providerId))
+            .filter(
+              (r) =>
+                r &&
+                r.responseType === "mapping" &&
+                normalizeProvId(r.providerId) === normalizeProvId(providerId)
+            )
             .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0] || null;
 
           const mappingText = String(mappingResp?.text || "").trim();
-          if (!mappingText) { sendResponse({ success: false, error: "No mapping response text found for this provider" }); return; }
-
-          const parseResult = parseSemanticMapperOutput(mappingText);
-          if (!parseResult?.success || !parseResult?.output) {
-            sendResponse({ success: false, error: "Failed to parse mapping response text into claims/edges" }); return;
+          if (!mappingText) {
+            sendResponse({ success: false, error: "No mapping response text found for this provider" });
+            return;
           }
 
-          const parsedClaims = Array.isArray(parseResult.output.claims) ? parseResult.output.claims : [];
-          const parsedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-          const parsedNarrative = String(parseResult.output?.narrative || parseResult.narrative || "").trim();
-          if (parsedClaims.length === 0) { sendResponse({ success: false, error: "Parsed 0 claims from mapping text" }); return; }
+          // ── Survey gates recovery (Tier 2: provider response only) ──
+          const storedSurveyGates = Array.isArray(mappingResp?.surveyGates)
+            ? mappingResp.surveyGates
+            : [];
+          const storedSurveyRationale = mappingResp?.surveyRationale ?? null;
 
-          // Merge conditionals from parsing + survey gates from stored artifact.
-          // Survey gates are LLM-produced and not in the mapping text, so we
-          // recover them from the persisted artifact to avoid losing them.
-          const mapperConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
-          const storedArtifact = turnRaw?.mapping?.artifact;
-          const storedSurveyGates = Array.isArray(storedArtifact?.surveyGates) ? storedArtifact.surveyGates : [];
-          const surveyGateConditionals = storedSurveyGates
-            .filter(g => g && g.id && Array.isArray(g.affectedClaims) && g.affectedClaims.length > 0)
-            .map(g => ({
-              id: g.id,
-              question: String(g.question || '').trim(),
-              affectedClaims: g.affectedClaims.map(c => String(c).trim()).filter(Boolean),
-              construct: null,
-              hinge: null,
-              classification: 'conditional_gate',
-            }));
-          const existingCondIds = new Set(mapperConditionals.map(c => c?.id).filter(Boolean));
-          const parsedConditionals = [
-            ...mapperConditionals,
-            ...surveyGateConditionals.filter(c => !existingCondIds.has(c.id)),
-          ];
-          if (surveyGateConditionals.length > 0) {
-            console.log(`[Regenerate] Recovered ${surveyGateConditionals.length} survey gate conditional(s) from stored artifact`);
-          }
-
-          console.log(`[Regenerate] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges from provider ${providerId}`);
-
-          // ── B. Load immutable data (shared per turn) ──
+          // ── B. Shadow + batch sources (no parsing here) ──
+          const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
           const mappingFromTurn = coerceJson(turnRaw.mapping);
           const turnArtifact = mappingFromTurn?.artifact || mappingFromTurn || null;
 
-          // Shadow: reconstruct from batch responses if needed
           let shadowStatements = turnArtifact?.shadow?.statements;
           let shadowParagraphs = turnArtifact?.shadow?.paragraphs;
-          const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
+          let batchSources = [];
 
           if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
             try {
-              // Deduplicate by provider ID: if a pipeline ran multiple times, the db
-              // may have multiple batch entries for the same provider. Keep only the
-              // latest response per provider to prevent statement duplication.
               const allBatchResps = responsesForTurn
                 .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
-                .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+                .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
               const seenBatchProviders = new Map();
               for (const r of allBatchResps) {
                 const pid = normalizeProvId(r.providerId);
                 if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
               }
-              const batchResps = Array.from(seenBatchProviders.values())
-                .sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-              const sources = batchResps.map((r, idx) => {
+              const batchResps = Array.from(seenBatchProviders.values()).sort(
+                (a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0)
+              );
+
+              batchSources = batchResps.map((r, idx) => {
                 const pid = normalizeProvId(r.providerId);
                 const fromCitation = citationOrderArr.length > 0 ? citationOrderArr.indexOf(pid) : -1;
                 const fromMeta = Number(r?.meta?.modelIndex);
-                const modelIndex = fromCitation >= 0 ? fromCitation + 1 : (Number.isFinite(fromMeta) && fromMeta > 0 ? fromMeta : idx + 1);
+                const modelIndex =
+                  fromCitation >= 0
+                    ? fromCitation + 1
+                    : Number.isFinite(fromMeta) && fromMeta > 0
+                      ? fromMeta
+                      : idx + 1;
                 return { modelIndex, content: String(r.text || "") };
               });
-              if (sources.length > 0) {
-                const { extractShadowStatements, projectParagraphs } = await import('./shadow');
-                const shadowResult = extractShadowStatements(sources);
-                const paragraphResult = projectParagraphs(shadowResult.statements);
-                shadowStatements = shadowResult.statements;
-                shadowParagraphs = paragraphResult.paragraphs;
-              }
             } catch (err) {
               console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
               sendResponse({ success: false, error: "Shadow reconstruction failed" });
@@ -908,17 +899,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             }
           }
 
-          if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
-            sendResponse({ success: false, error: "No shadow statements available" }); return;
-          }
-          if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-            const { projectParagraphs } = await import('./shadow');
-            shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
-          }
-
-          // Model count from batch responses (deduplicated per provider)
-          // Only count providers that actually returned content — failed/empty
-          // responses must not inflate the denominator for supportRatio.
+          // ── Model count ──
           const uniqueBatchProviders = new Set(
             responsesForTurn
               .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
@@ -926,36 +907,57 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           );
           const modelCount = Math.max(citationOrderArr.length, uniqueBatchProviders.size, 1);
 
-          // ── C. Geometry embeddings (immutable, generate if missing) ──
+          // ── C. Geometry embeddings (I/O — generate if missing) — UNCHANGED ──
           let geoRecord = await sm.loadEmbeddings(aiTurnId);
+          const needsRegeneration =
+            !geoRecord?.statementEmbeddings ||
+            !geoRecord?.paragraphEmbeddings ||
+            (geoRecord.meta?.paragraphCount === 0 && Array.isArray(shadowParagraphs) && shadowParagraphs.length > 0) ||
+            !geoRecord?.meta?.semanticDensityScores ||
+            !geoRecord?.meta?.densityRegressionModel ||
+            !geoRecord?.meta?.paragraphSemanticDensityScores ||
+            geoRecord?.meta?.querySemanticDensity == null ||
+            geoRecord.meta?.embeddingVersion !== 2;
 
-          const needsRegeneration = !geoRecord?.statementEmbeddings
-            || !geoRecord?.paragraphEmbeddings
-            || (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0)
-            || !geoRecord?.meta?.semanticDensityScores
-            || !geoRecord?.meta?.densityRegressionModel
-            || !geoRecord?.meta?.paragraphSemanticDensityScores
-            || geoRecord?.meta?.querySemanticDensity == null
-            || geoRecord.meta?.embeddingVersion !== 2;
           if (needsRegeneration) {
-            // Force re-generation if missing, empty, or lacking density scores
+            if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+              if (batchSources.length > 0) {
+                const { extractShadowStatements, projectParagraphs } = await import("./shadow");
+                const shadowResult = extractShadowStatements(batchSources);
+                shadowStatements = shadowResult.statements;
+                shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
+              }
+              if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+                sendResponse({ success: false, error: "No shadow statements for embedding generation" });
+                return;
+              }
+              if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
+                const { projectParagraphs } = await import("./shadow");
+                shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
+              }
+            }
+
             const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
             const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
+
             let queryEmbedding = null;
             let queryDensityScore = null;
             if (queryText) {
               const cleaned = stripInlineMarkdown(String(queryText)).trim();
               const truncated = structuredTruncate(cleaned, 1740);
-              const prefixed = truncated && !truncated.toLowerCase().startsWith('represent this sentence')
-                ? `Represent this sentence for searching relevant passages: ${truncated}` : truncated;
+              const prefixed =
+                truncated && !truncated.toLowerCase().startsWith("represent this sentence")
+                  ? `Represent this sentence for searching relevant passages: ${truncated}`
+                  : truncated;
               if (prefixed) {
-                const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG, { captureRawMagnitudes: true });
-                queryEmbedding = batch.embeddings.get('0') || null;
-                // Project query density through statement regression model
-                const qMag = batch.rawMagnitudes?.get('0') ?? null;
-                const qLen = batch.textLengths?.get('0') ?? null;
+                const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG, {
+                  captureRawMagnitudes: true,
+                });
+                queryEmbedding = batch.embeddings.get("0") || null;
+                const qMag = batch.rawMagnitudes?.get("0") ?? null;
+                const qLen = batch.textLengths?.get("0") ?? null;
                 if (qMag != null && qLen != null && stmtResult.densityRegressionModel) {
-                  const { projectSemanticDensity } = await import('./clustering/semanticDensity');
+                  const { projectSemanticDensity } = await import("./clustering/semanticDensity");
                   queryDensityScore = projectSemanticDensity(qMag, qLen, stmtResult.densityRegressionModel);
                 }
               }
@@ -964,17 +966,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             const packedStatements = packEmbeddingMap(stmtResult.embeddings, dims);
             const packedParagraphs = packEmbeddingMap(paraResult.embeddings, dims);
             const queryBuffer = queryEmbedding
-              ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
+              ? queryEmbedding.buffer.slice(
+                  queryEmbedding.byteOffset,
+                  queryEmbedding.byteOffset + queryEmbedding.byteLength
+                )
               : null;
 
-            const densityMap = stmtResult.semanticDensityScores;
-            const densityObj = densityMap && densityMap.size > 0
-              ? Object.fromEntries(densityMap)
-              : null;
-            const paraDensityMap = paraResult.semanticDensityScores;
-            const paraDensityObj = paraDensityMap && paraDensityMap.size > 0
-              ? Object.fromEntries(paraDensityMap)
-              : null;
+            const densityObj =
+              stmtResult.semanticDensityScores?.size > 0
+                ? Object.fromEntries(stmtResult.semanticDensityScores)
+                : null;
+            const paraDensityObj =
+              paraResult.semanticDensityScores?.size > 0
+                ? Object.fromEntries(paraResult.semanticDensityScores)
+                : null;
 
             await sm.persistEmbeddings(aiTurnId, {
               statementEmbeddings: packedStatements.buffer,
@@ -990,7 +995,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 paragraphIndex: packedParagraphs.index,
                 ...(densityObj ? { semanticDensityScores: densityObj } : {}),
                 ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
-                ...(stmtResult.densityRegressionModel ? { densityRegressionModel: stmtResult.densityRegressionModel } : {}),
+                ...(stmtResult.densityRegressionModel
+                  ? { densityRegressionModel: stmtResult.densityRegressionModel }
+                  : {}),
                 ...(queryDensityScore != null ? { querySemanticDensity: queryDensityScore } : {}),
                 embeddingVersion: 2,
                 timestamp: Date.now(),
@@ -1000,60 +1007,60 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings) {
-            sendResponse({ success: false, error: "Geometry embeddings unavailable" }); return;
+            sendResponse({ success: false, error: "Geometry embeddings unavailable" });
+            return;
           }
 
-          const statementEmbeddings = unpackEmbeddingMap(geoRecord.statementEmbeddings, geoRecord.meta.statementIndex, geoRecord.meta.dimensions);
-          const paragraphEmbeddings = unpackEmbeddingMap(geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, geoRecord.meta.dimensions);
+          const statementEmbeddings = unpackEmbeddingMap(
+            geoRecord.statementEmbeddings,
+            geoRecord.meta.statementIndex,
+            geoRecord.meta.dimensions
+          );
+          const paragraphEmbeddings = unpackEmbeddingMap(
+            geoRecord.paragraphEmbeddings,
+            geoRecord.meta.paragraphIndex,
+            geoRecord.meta.dimensions
+          );
           const queryEmbedding =
             geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
               ? new Float32Array(geoRecord.queryEmbedding)
               : null;
 
-          const paraVectors = Array.from(paragraphEmbeddings.values());
-          const paraIds = Array.from(paragraphEmbeddings.keys());
-          const basinInversionResult = geoRecord?.meta?.basinInversion || computeBasinInversion(paraIds, paraVectors);
+          // ══════════════════════════════════════════════════════════════
+          // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
+          // ══════════════════════════════════════════════════════════════
+          const { buildArtifactForProvider } = await import("./core/execution/deterministicPipeline");
 
-          const substrate = buildGeometricSubstrate(
-            shadowParagraphs,
+          const buildResult = await buildArtifactForProvider({
+            mappingText,
+            shadowStatements: Array.isArray(shadowStatements) && shadowStatements.length > 0
+              ? shadowStatements
+              : null,
+            shadowParagraphs: Array.isArray(shadowParagraphs) && shadowParagraphs.length > 0
+              ? shadowParagraphs
+              : null,
+            batchSources,
+            statementEmbeddings,
             paragraphEmbeddings,
-            geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
-            undefined, // default config
-            basinInversionResult
-          );
+            queryEmbedding,
+            geoRecord,
+            claimEmbeddings: null, // always regenerate for now
+            surveyGates: storedSurveyGates.length > 0 ? storedSurveyGates : undefined,
+            surveyRationale: storedSurveyRationale,           // ← updated to use the new variable
+            queryText,
+            modelCount,
+          });
 
-          const queryBoost = queryEmbedding
-            ? computePerModelQueryRelevance(queryEmbedding, statementEmbeddings, shadowParagraphs)
-            : null;
-          const preSemantic = buildPreSemanticInterpretation(substrate, shadowParagraphs, paragraphEmbeddings, queryBoost, basinInversionResult);
-          const regions = preSemantic?.regionization?.regions || [];
+          const {
+            cognitiveArtifact,
+            mapperArtifact,
+            enrichedClaims,
+            parsedClaims,
+            claimEmbeddings,
+            claimDensityScores,
+          } = buildResult;
 
-          try {
-            enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions);
-          } catch (_) { }
-
-          let queryRelevance = null;
-          try {
-            if (queryEmbedding) {
-              queryRelevance = computeQueryRelevance({
-                queryEmbedding,
-                statements: shadowStatements,
-                statementEmbeddings,
-                paragraphEmbeddings,
-                paragraphs: shadowParagraphs,
-                substrate,
-                regionization: preSemantic?.regionization || null,
-                regionProfiles: preSemantic?.regionProfiles || null,
-              });
-            }
-          } catch (_) { }
-
-          // ── D. Claim embeddings (per-provider, from parsed claims) ──
-          const mapperClaimsForProvenance = parsedClaims.map((c) => ({
-            id: c.id, label: c.label, text: c.text,
-            supporters: Array.isArray(c.supporters) ? c.supporters : [],
-          }));
-
+          // ── Persist claim embeddings ──
           const hashString = (input) => {
             let h = 5381;
             for (let i = 0; i < input.length; i++) {
@@ -1061,270 +1068,89 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             }
             return (h >>> 0).toString(16);
           };
+                // ── Persist claim embeddings ──
+          // IMPORTANT: hash uses RAW parsedClaims (pre-enrichment) so the cache key
+          // stays stable even after provenance/density enrichment.
           const claimsHash = hashString(
             parsedClaims
               .map((c) => `${String(c?.id || '')}\u001f${String(c?.label || '')}\u001f${String(c?.text || '')}`)
               .join('\u001e')
           );
 
-          const densityModel = geoRecord?.meta?.densityRegressionModel || null;
-          const { embeddings: claimEmbeddings, semanticDensityScores: claimDensityScores } =
-            await generateClaimEmbeddings(mapperClaimsForProvenance, densityModel);
-          const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
-          await sm.persistClaimEmbeddings(aiTurnId, providerId, {
-            claimEmbeddings: packedClaims.buffer,
-            meta: {
-              dimensions: dims,
-              claimCount: packedClaims.index.length,
-              claimIndex: packedClaims.index,
-              claimsHash,
-              timestamp: Date.now(),
-            },
-          });
+          if (claimEmbeddings && claimEmbeddings.size > 0) {
+            const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
+            await sm.persistClaimEmbeddings(aiTurnId, providerId, {
+              claimEmbeddings: packedClaims.buffer,
+              meta: {
+                dimensions: dims,
+                claimCount: packedClaims.index.length,
+                claimIndex: packedClaims.index,
+                claimsHash,
+                timestamp: Date.now(),
+              },
+            });
+          }
 
-          console.log(`[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${claimEmbeddings?.size || 0} claims`);
+          console.log(
+            `[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${
+              claimEmbeddings?.size || 0
+            } claims`
+          );
 
-          // Log semantic density scores if available
+          // Log semantic density
           const cachedDensity = geoRecord?.meta?.semanticDensityScores;
-          if (cachedDensity && typeof cachedDensity === 'object') {
+          if (cachedDensity && typeof cachedDensity === "object") {
             const entries = Object.entries(cachedDensity).sort((a, b) => b[1] - a[1]);
             const values = entries.map(([, v]) => v);
             const mean = values.reduce((a, b) => a + b, 0) / values.length;
-            console.log(`[Regenerate] Semantic density:`, JSON.stringify({
-              count: entries.length,
-              mean,
-              topDense: entries.slice(0, 3).map(([id, score]) => ({ id, score })),
-              topHollow: entries.slice(-3).reverse().map(([id, score]) => ({ id, score })),
-            }));
-          }
-
-          // ── E. Deterministic pipeline (shared with live path) ──
-          const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
-            await import('./core/execution/deterministicPipeline');
-
-          const provenanceResult = await reconstructProvenance(
-            mapperClaimsForProvenance,
-            shadowStatements,
-            shadowParagraphs,
-            paragraphEmbeddings,
-            regions,
-            modelCount,
-            statementEmbeddings,
-            claimEmbeddings,
-          );
-          const enrichedClaims = provenanceResult.claims ?? provenanceResult;
-          const competitiveWeights = provenanceResult.competitiveWeights ?? null;
-          const competitiveExcess = provenanceResult.competitiveExcess ?? null;
-          const competitiveThresholds = provenanceResult.competitiveThresholds ?? null;
-
-          // Compute claim density + densityLift
-          if (claimDensityScores && geoRecord?.meta?.semanticDensityScores) {
-            const stmtDensityObj = geoRecord.meta.semanticDensityScores;
-            for (const claim of enrichedClaims) {
-              const claimScore = claimDensityScores.get(claim.id);
-              if (claimScore == null) continue;
-              claim.density = claimScore;
-              if (!claim.sourceStatementIds?.length) continue;
-              const assigned = claim.sourceStatementIds
-                .map(sid => stmtDensityObj[sid]).filter(v => v != null);
-              if (assigned.length === 0) continue;
-              claim.densityLift = claimScore - assigned.reduce((a, b) => a + b, 0) / assigned.length;
-            }
-          }
-
-          const derived = await computeDerivedFields({
-            enrichedClaims,
-            mapperClaimsForProvenance,
-            parsedEdges,
-            parsedConditionals,
-            shadowStatements,
-            shadowParagraphs,
-            statementEmbeddings,
-            paragraphEmbeddings,
-            claimEmbeddings,
-            queryEmbedding,
-            substrate,
-            preSemantic,
-            regions,
-            geoRecord,
-            existingQueryRelevance: queryRelevance,
-            modelCount,
-            queryText,
-            competitiveWeights,
-            competitiveExcess,
-            competitiveThresholds,
-          });
-
-          let questionSelectionInstrumentation = null;
-          let claimRouting = null;
-
-          const muPairwise = substrate?.meta?.similarityStats?.mean ?? null;
-
-          try {
-            const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
-              await import('./core/blast-radius/questionSelection');
-            questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
-              blastSurfaceResult: derived?.blastSurfaceResult ?? null,
-              edges: Array.isArray(derived?.semanticEdges) ? derived.semanticEdges : [],
-              enrichedClaims,
-              queryRelevanceScores: derived?.queryRelevance?.statementScores ?? queryRelevance?.statementScores ?? null,
-              modelCount,
-              claimCentroids: claimEmbeddings ?? new Map(),
-              queryEmbedding: queryEmbedding ?? null,
-              statementEmbeddings: statementEmbeddings ?? null,
-              muPairwise,
-            });
-            claimRouting = computeClaimRouting(
-              null, null, questionSelectionInstrumentation
+            console.log(
+              `[Regenerate] Semantic density:`,
+              JSON.stringify({
+                count: entries.length,
+                mean,
+                topDense: entries.slice(0, 3).map(([id, score]) => ({ id, score })),
+                topHollow: entries.slice(-3).reverse().map(([id, score]) => ({ id, score })),
+              })
             );
-          } catch (_) {
-            questionSelectionInstrumentation = null;
-            claimRouting = null;
           }
 
-          const shadowDelta = derived.shadowDelta;
-
-          // Traversal (no survey mapper in regenerate — no LLM)
-          const { traversalGraph } = buildTraversalData({
-            enrichedClaims,
-            edges: parsedEdges,
-            conditionals: parsedConditionals,
-            conflictTiering: false,
-          });
-          const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
-
-          const mapperArtifact = assembleMapperArtifact({
-            derived,
-            enrichedClaims,
-            traversalGraph,
-            forcingPoints,
-            parsedNarrative,
-            parsedConditionals,
-            queryText,
-            modelCount,
-            shadowStatements,
-            surveyGates: storedSurveyGates.length > 0 ? storedSurveyGates : undefined,
-            surveyRationale: storedArtifact?.surveyRationale ?? null,
-            statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
-            paragraphSemanticDensity: geoRecord?.meta?.paragraphSemanticDensityScores ?? undefined,
-            claimSemanticDensity: claimDensityScores?.size > 0
-              ? Object.fromEntries(claimDensityScores)
-              : undefined,
-            querySemanticDensity: geoRecord?.meta?.querySemanticDensity ?? undefined,
-          });
-          mapperArtifact.preSemantic = preSemantic || null;
-          if (questionSelectionInstrumentation) {
-            mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
-          }
-          if (claimRouting) {
-            mapperArtifact.claimRouting = claimRouting;
-          }
-
-          // ── G. Build full cognitive artifact ──
-          const coords = substrate?.layout2d?.coordinates || {};
-          const regionsByNode = new Map();
-          for (const r of regions) {
-            for (const nodeId of r?.nodeIds || []) {
-              if (nodeId && !regionsByNode.has(nodeId)) regionsByNode.set(nodeId, r.id);
-            }
-          }
-          const componentsByNode = new Map();
-          for (const c of substrate?.topology?.components || []) {
-            for (const nodeId of c?.nodeIds || []) {
-              if (nodeId && !componentsByNode.has(nodeId)) componentsByNode.set(nodeId, c.id);
-            }
-          }
-          const substrateGraph = {
-            nodes: (substrate?.nodes || []).map((n) => {
-              const p = n.paragraphId;
-              const xy = coords[p] || [0, 0];
-              return {
-                ...n,
-                x: xy[0],
-                y: xy[1],
-                regionId: regionsByNode.get(p) ?? null,
-                componentId: componentsByNode.get(p) ?? null,
-              };
-            }),
-            edges: (substrate?.graphs?.knn?.edges || []).map((e) => ({ source: e.source, target: e.target, similarity: e.similarity })),
-            mutualEdges: (substrate?.graphs?.mutual?.edges || []).map((e) => ({ source: e.source, target: e.target, similarity: e.similarity })),
-            strongEdges: (substrate?.graphs?.strong?.edges || []).map((e) => ({ source: e.source, target: e.target, similarity: e.similarity })),
-            softThreshold: substrate?.graphs?.strong?.softThreshold ?? 0,
-            similarityStats: substrate?.meta?.similarityStats,
-            ...(substrate?.meta?.extendedSimilarityStats ? { extendedSimilarityStats: substrate.meta.extendedSimilarityStats } : {}),
-            ...(Array.isArray(substrate?.meta?.allPairwiseSimilarities)
-              ? { allPairwiseSimilarities: substrate.meta.allPairwiseSimilarities.slice(0, 20000) }
-              : {}),
-          };
-
-          const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
-            shadow: { extraction: { statements: shadowStatements }, delta: shadowDelta || null },
-            paragraphProjection: { paragraphs: shadowParagraphs },
-            substrate: { graph: substrateGraph, shape: null },
-            preSemantic: preSemantic || null,
-            ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
-          });
-          if (questionSelectionInstrumentation) {
-            cognitiveArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
-          }
-          if (claimRouting) {
-            cognitiveArtifact.claimRouting = claimRouting;
-          }
-
-          // ── G.1 Diagnostic: verify critical fields in cognitive artifact ──
-          console.log(`[Regenerate] Artifact diagnostics:`,
-            `shadow.paragraphs=${Array.isArray(cognitiveArtifact?.shadow?.paragraphs) ? cognitiveArtifact.shadow.paragraphs.length : 'missing'}`,
-            `shadow.statements=${Array.isArray(cognitiveArtifact?.shadow?.statements) ? cognitiveArtifact.shadow.statements.length : 'missing'}`,
-            `claimProvenance=${cognitiveArtifact?.claimProvenance ? 'present' : 'missing'}`,
-            `alignment=${cognitiveArtifact?.geometry?.alignment ? 'present' : 'missing'}`,
-            `basinInversion=${cognitiveArtifact?.geometry?.basinInversion ? cognitiveArtifact.geometry.basinInversion.status : 'missing'}`,
-            `statementAllocation=${cognitiveArtifact?.statementAllocation ? 'present' : 'missing'}`,
-            `blastSurface=${cognitiveArtifact?.blastSurface ? 'present' : 'missing'}`,
-            `blastVernal=${Array.isArray(cognitiveArtifact?.blastSurface?.scores) && cognitiveArtifact.blastSurface.scores.length > 0 && cognitiveArtifact.blastSurface.scores[0]?.vernal ? 'present' : 'missing'}`,
+          // ── G.1 Diagnostic ──
+          console.log(
+            `[Regenerate] Artifact diagnostics:`,
+            `shadow.paragraphs=${
+              Array.isArray(cognitiveArtifact?.shadow?.paragraphs)
+                ? cognitiveArtifact.shadow.paragraphs.length
+                : "missing"
+            }`,
+            `shadow.statements=${
+              Array.isArray(cognitiveArtifact?.shadow?.statements)
+                ? cognitiveArtifact.shadow.statements.length
+                : "missing"
+            }`,
+            `claimProvenance=${cognitiveArtifact?.claimProvenance ? "present" : "missing"}`,
+            `alignment=${cognitiveArtifact?.geometry?.alignment ? "present" : "missing"}`,
+            `basinInversion=${
+              cognitiveArtifact?.geometry?.basinInversion
+                ? cognitiveArtifact.geometry.basinInversion.status
+                : "missing"
+            }`,
+            `blastSurface=${cognitiveArtifact?.blastSurface ? "present" : "missing"}`
           );
 
-          // ── H. Persist as provider-specific artifact ──
-          const mergeArtifacts = (base, patch) => {
-            if (!patch || typeof patch !== "object") return base;
-            if (!base || typeof base !== "object") return patch;
-            if (Array.isArray(base) || Array.isArray(patch)) {
-              if (Array.isArray(patch) && patch.length > 0) return patch;
-              return base;
-            }
-            const out = { ...base };
-            for (const [k, v] of Object.entries(patch)) {
-              if (v === undefined || v === null) continue;
-              const prev = out[k];
-              if (prev && typeof prev === "object" && !Array.isArray(prev) && typeof v === "object" && !Array.isArray(v)) {
-                out[k] = mergeArtifacts(prev, v);
-              } else if (Array.isArray(v)) {
-                out[k] = v.length > 0 ? v : prev;
-              } else {
-                out[k] = v;
-              }
-            }
-            return out;
-          };
-
-          let artifactPatched = false;
-          let artifactForUi = cognitiveArtifact || null;
-          if (shouldPersistArtifact && cognitiveArtifact && mappingResp?.id) {
-            const existingArtifact =
-              mappingResp?.artifact && typeof mappingResp.artifact === "object" ? mappingResp.artifact : null;
-            const mergedArtifact = mergeArtifacts(existingArtifact, cognitiveArtifact);
-            artifactForUi = mergedArtifact;
-
-            const { dehydrateArtifact } = await import('./persistence/artifact-hydration');
-            const dehydrated = dehydrateArtifact(mergedArtifact);
-
-            const updated = { ...mappingResp, artifact: dehydrated, updatedAt: Date.now() };
-            await sm.adapter.put("provider_responses", updated, mappingResp.id);
-            artifactPatched = true;
-            console.log(`[Regenerate] Full artifact persisted for provider ${providerId}: ${enrichedClaims.length} claims, ${(mapperArtifact.edges?.length || 0)} edges`);
-          }
-
-          sendResponse({ success: true, data: { artifactPatched, artifact: artifactForUi, claimCount: enrichedClaims.length, edgeCount: mapperArtifact.edges?.length || 0 } });
-        })().catch(e => { console.error('[Regenerate] Failed:', e); sendResponse({ success: false, error: getErrorMessage(e) }); });
+          // ── H. Persist as provider-specific artifact (unchanged) ──
+          // Tier 3: artifact is ephemeral — return to UI but never persist.
+          sendResponse({
+            success: true,
+            data: {
+              artifact: cognitiveArtifact,
+              claimCount: enrichedClaims.length,
+              edgeCount: mapperArtifact.edges?.length || 0,
+            },
+          });
+        })().catch((e) => {
+          console.error("[Regenerate] Failed:", e);
+          sendResponse({ success: false, error: getErrorMessage(e) });
+        });
         return true;
 
       case "GET_CHEWED_SUBSTRATE_FOR_TURN":
@@ -1365,17 +1191,50 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const mappingResp = (responsesForTurn || [])
             .filter((r) => r && r.responseType === "mapping")
             .filter((r) => (mappingProvider ? normalizeProvId(r.providerId) === mappingProvider : true))
-            .slice()
-            .reverse()
-            .find((r) => r && r.artifact && typeof r.artifact === "object") || null;
+            .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0] || null;
 
-          let mappingArtifact = mappingResp?.artifact || turnRaw?.mapping?.artifact || null;
-          if (typeof mappingArtifact === "string") {
+          // Tier 3: artifact is ephemeral — always rebuild on demand
+          let mappingArtifact = null;
+          if (!mappingArtifact && mappingResp?.text) {
             try {
-              const parsed = JSON.parse(mappingArtifact);
-              mappingArtifact = parsed && typeof parsed === "object" ? parsed : null;
-            } catch {
-              mappingArtifact = null;
+              const { buildArtifactForProvider } = await import('./core/execution/deterministicPipeline');
+              const geoRecord = await sm.loadEmbeddings(key);
+              if (geoRecord?.statementEmbeddings && geoRecord?.paragraphEmbeddings) {
+                const dims = geoRecord.meta?.dimensions;
+                const stmtEmb = unpackEmbeddingMap(geoRecord.statementEmbeddings, geoRecord.meta.statementIndex, dims);
+                const paraEmb = unpackEmbeddingMap(geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, dims);
+                const qEmb = geoRecord?.queryEmbedding?.byteLength > 0
+                  ? new Float32Array(geoRecord.queryEmbedding) : null;
+
+                const surveyGates = Array.isArray(mappingResp.surveyGates)
+                  ? mappingResp.surveyGates : undefined;
+
+                const userTurn = turnRaw.userTurnId
+                  ? await sm.adapter.get("turns", turnRaw.userTurnId) : null;
+                const queryText = userTurn?.text || userTurn?.content || "";
+
+                const batchResps = (responsesForTurn || [])
+                  .filter(r => r?.responseType === "batch" && r.text?.trim());
+                const batchSources = batchResps.map((r, idx) => ({
+                  modelIndex: idx + 1,
+                  content: String(r.text || ""),
+                }));
+
+                const buildResult = await buildArtifactForProvider({
+                  mappingText: mappingResp.text,
+                  batchSources,
+                  statementEmbeddings: stmtEmb,
+                  paragraphEmbeddings: paraEmb,
+                  queryEmbedding: qEmb,
+                  geoRecord,
+                  surveyGates,
+                  queryText,
+                  modelCount: Math.max(batchResps.length, 1),
+                });
+                mappingArtifact = buildResult.cognitiveArtifact;
+              }
+            } catch (rebuildErr) {
+              console.warn('[GET_CHEWED_SUBSTRATE] Artifact rebuild failed:', rebuildErr);
             }
           }
 
@@ -1505,95 +1364,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         return true;
 
 
-
-      case "DEHYDRATE_ALL_STORED_ARTIFACTS":
-        (async () => {
-          const { dehydrateArtifact } = await import('./persistence/artifact-hydration');
-
-          const summarizeBytes = (value) => {
-            try {
-              return new Blob([JSON.stringify(value)]).size;
-            } catch {
-              return 0;
-            }
-          };
-
-          const adapter = sm?.adapter;
-          if (!adapter) {
-            sendResponse({ success: false, error: "Persistence adapter not available" });
-            return;
-          }
-
-          const providerResponses = await adapter.getAll("provider_responses");
-          let scannedProviderResponses = 0;
-          let updatedProviderResponses = 0;
-          let providerRespBytesBefore = 0;
-          let providerRespBytesAfter = 0;
-
-          for (const r of providerResponses || []) {
-            scannedProviderResponses += 1;
-            if (!r || typeof r !== "object") continue;
-            if (!r.id) continue;
-            const artifact = r.artifact;
-            if (!artifact || typeof artifact !== "object") continue;
-            providerRespBytesBefore += summarizeBytes(artifact);
-            const dehydrated = dehydrateArtifact(artifact);
-            providerRespBytesAfter += summarizeBytes(dehydrated);
-            const beforeStr = JSON.stringify(artifact);
-            const afterStr = JSON.stringify(dehydrated);
-            if (beforeStr === afterStr) continue;
-            await adapter.put("provider_responses", { ...r, artifact: dehydrated, updatedAt: Date.now() }, r.id);
-            updatedProviderResponses += 1;
-          }
-
-          const turns = await adapter.getAll("turns");
-          let scannedTurns = 0;
-          let updatedTurns = 0;
-          let turnBytesBefore = 0;
-          let turnBytesAfter = 0;
-
-          for (const t of turns || []) {
-            scannedTurns += 1;
-            if (!t || typeof t !== "object") continue;
-            if (!t.id) continue;
-            const mapping = t.mapping;
-            if (!mapping || typeof mapping !== "object") continue;
-
-            const mappingArtifact = mapping?.artifact;
-            if (!mappingArtifact || typeof mappingArtifact !== "object") continue;
-
-            turnBytesBefore += summarizeBytes(mappingArtifact);
-            const dehydrated = dehydrateArtifact(mappingArtifact);
-            turnBytesAfter += summarizeBytes(dehydrated);
-
-            const beforeStr = JSON.stringify(mappingArtifact);
-            const afterStr = JSON.stringify(dehydrated);
-            if (beforeStr === afterStr) continue;
-
-            const nextMapping = { ...mapping, artifact: dehydrated };
-            await adapter.put("turns", { ...t, mapping: nextMapping, updatedAt: Date.now() }, t.id);
-            updatedTurns += 1;
-          }
-
-          sendResponse({
-            success: true,
-            data: {
-              providerResponses: {
-                scanned: scannedProviderResponses,
-                updated: updatedProviderResponses,
-                approxBytesBefore: providerRespBytesBefore,
-                approxBytesAfter: providerRespBytesAfter,
-              },
-              turns: {
-                scanned: scannedTurns,
-                updated: updatedTurns,
-                approxBytesBefore: turnBytesBefore,
-                approxBytesAfter: turnBytesAfter,
-              },
-            }
-          });
-        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
-        return true;
 
       case "GET_PARAGRAPH_EMBEDDINGS_RECORD":
         (async () => {
@@ -1738,7 +1508,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 updatedAt: r.updatedAt || r.createdAt || Date.now(),
                 meta: r.meta || {},
                 responseIndex: r.responseIndex ?? 0,
-                ...(r.artifact ? { artifact: r.artifact } : {}),
+                // Tier 2: include per-mapper mutable data on mapping responses (no artifact)
+                ...(r.responseType === "mapping" && Array.isArray(r.surveyGates) ? { surveyGates: r.surveyGates } : {}),
+                ...(r.responseType === "mapping" && r.surveyRationale != null ? { surveyRationale: r.surveyRationale } : {}),
+                ...(r.responseType === "mapping" && r.traversalState ? { traversalState: r.traversalState } : {}),
               };
 
               if (r.responseType === "batch") {
@@ -1800,7 +1573,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
               ...(primaryAi?.batch ? { batch: primaryAi.batch } : {}),
-              ...(primaryAi?.mapping ? { mapping: primaryAi.mapping } : {}),
+              // Tier 3: mapping.artifact is ephemeral — not sent in history payload.
+              // UI rebuilds artifacts on demand via BUILD_ARTIFACT / REGENERATE_EMBEDDINGS.
               ...(primaryAi?.singularity ? { singularity: primaryAi.singularity } : {}),
               ...(primaryAi?.meta ? { meta: primaryAi.meta } : {}),
               ...(Object.keys(providers).length > 0 ? { providers } : {}),

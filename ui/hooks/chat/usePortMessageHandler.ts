@@ -1,6 +1,6 @@
 // ui/hooks/usePortMessageHandler.ts - ALIGNED VERSION
 import { useCallback, useRef, useEffect } from "react";
-import { useSetAtom, useAtomValue } from "jotai";
+import { useSetAtom, useAtomValue, useStore } from "jotai";
 import {
   turnsMapAtom,
   turnIdsAtom,
@@ -21,6 +21,7 @@ import {
   isSplitOpenAtom,
   hasAutoOpenedPaneAtom,
   surveyTestAtom,
+  providerArtifactFamily,
 
 } from "../../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../../state/atoms";
@@ -120,6 +121,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
   const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
   const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
   const setSurveyTest = useSetAtom(surveyTestAtom);
+  const jotaiStore = useStore();
 
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
@@ -762,7 +764,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
                           shadow: { statements: [], paragraphs: [], audit: {}, delta: null },
                           geometry: { embeddingStatus: "none", substrate: { nodes: [], edges: [] } },
                           semantic: { claims: [], edges: [], conditionals: [], narrative: errText || "" },
-                          traversal: { forcingPoints: [], graph: { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] } },
+                          traversal: { forcingPoints: [], graph: { claims: [], edges: [], conditionals: [], tiers: [], maxTier: 0 } },
                         },
                         timestamp: now,
                       } as any;
@@ -902,6 +904,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
         case "MAPPER_ARTIFACT_READY": {
           const {
             aiTurnId,
+            providerId: mapperPid,
             mapping,
             singularityOutput,
             pipelineStatus,
@@ -921,6 +924,20 @@ export function usePortMessageHandler(enabled: boolean = true) {
             }
           }
 
+          // Tier 3: write artifact to ephemeral Jotai atom (never on the turn)
+          if (artifact && typeof artifact === "object") {
+            const pid = mapperPid
+              ? normalizeProviderId(String(mapperPid))
+              : null;
+            if (pid) {
+              jotaiStore.set(
+                providerArtifactFamily({ turnId: aiTurnId, providerId: pid }),
+                artifact,
+              );
+            }
+          }
+
+          // Update turn metadata (pipelineStatus, singularity) — but NOT mapping.artifact
           setTurnsMap((draft: Map<string, TurnMessage>) => {
             const existing = draft.get(aiTurnId);
             if (!existing) {
@@ -932,7 +949,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 threadId: DEFAULT_THREAD,
                 userTurnId: "unknown",
                 createdAt: now,
-                ...(artifact ? { mapping: { artifact, timestamp: now } } : {}),
                 ...(singularityOutput
                   ? {
                     singularity: {
@@ -953,10 +969,8 @@ export function usePortMessageHandler(enabled: boolean = true) {
             if (existing.type !== "ai") return;
             const aiTurn = existing as AiTurnWithUI;
 
-            // Update with cognitive artifacts
             const updatedTurn = {
               ...aiTurn,
-              ...(artifact ? { mapping: { artifact, timestamp: Date.now() } } : {}),
               ...(singularityOutput
                 ? {
                   singularity: {
@@ -968,22 +982,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
             };
-
-            // Also store artifact on per-provider entry for provider-aware resolution
-            const mapperPid = aiTurn.meta?.mapper;
-            if (mapperPid && artifact) {
-              const responses = { ...(aiTurn as any).mappingResponses } as any;
-              const pid = normalizeProviderId(String(mapperPid));
-              const existingArr = responses[pid];
-              const arr = Array.isArray(existingArr) ? existingArr.slice() : existingArr ? [existingArr] : [];
-              if (arr.length > 0) {
-                arr[arr.length - 1] = { ...arr[arr.length - 1], artifact };
-              } else {
-                arr.push({ providerId: pid, text: '', artifact, status: 'completed', createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
-              }
-              responses[pid] = arr;
-              (updatedTurn as any).mappingResponses = responses;
-            }
 
             (updatedTurn as any).mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
             draft.set(aiTurnId, updatedTurn);

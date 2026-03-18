@@ -3,7 +3,7 @@ import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
 import { normalizeCitationSourceOrder } from '../../shared/citation-utils.js';
-import { dehydrateArtifact } from '../../persistence/artifact-hydration';
+// dehydrateArtifact removed — Tier 3 artifacts are ephemeral (never persisted)
 
 /** Extract claims array from a CognitiveArtifact or legacy MapperArtifact */
 function extractClaims(artifact) {
@@ -54,16 +54,15 @@ export class CognitivePipelineHandler {
       // ══════════════════════════════════════════════════════════════════
       // TRAVERSAL GATING CHECK (Pipeline Pause)
       // ══════════════════════════════════════════════════════════════════
-      const hasTraversalGraph = !!mappingArtifact?.traversal?.graph;
+        const hasTraversalGraph = !!mappingArtifact?.traversal?.graph;
       const hasForcingPoints =
         Array.isArray(mappingArtifact?.traversal?.forcingPoints) && mappingArtifact.traversal.forcingPoints.length > 0;
       const isTraversalContinuation = request?.isTraversalContinuation || context?.isTraversalContinuation;
-
       const shouldPauseForTraversal = hasTraversalGraph && hasForcingPoints;
+
       if (shouldPauseForTraversal && !isTraversalContinuation) {
         console.log("[CognitiveHandler] Traversal detected with conflicts. Pausing pipeline for user input.");
 
-        // 1. Update Turn Status
         const aiTurnId = context.canonicalAiTurnId;
         try {
           let batchPhase = undefined;
@@ -106,29 +105,21 @@ export class CognitivePipelineHandler {
               : undefined;
           } catch (_) { }
 
-          const safeCognitiveArtifact = dehydrateArtifact(mappingArtifact);
-          const mapperProviderId = mappingResult?.providerId
-            || context?.mappingProvider
-            || null;
+          // Tier 3: artifact is ephemeral — persist only status + metadata.
+          const mapperProviderId = mappingResult?.providerId || context?.mappingProvider || null;
+
           const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
           if (currentAiTurn) {
             currentAiTurn.pipelineStatus = 'awaiting_traversal';
             if (!currentAiTurn.batch && batchPhase) {
               currentAiTurn.batch = batchPhase;
             }
-            if (safeCognitiveArtifact) {
-              currentAiTurn.mapping = { artifact: safeCognitiveArtifact };
-            }
-            // Persist mapper identity so getProviderArtifact can guard
-            // the shared-slot fallback in multi-mapper turns after rehydration.
             if (mapperProviderId) {
               currentAiTurn.meta = { ...(currentAiTurn.meta || {}), mapper: mapperProviderId };
             }
             await this.sessionManager.adapter.put("turns", currentAiTurn);
           }
 
-          // Safe fallback object for messaging, handling case where currentAiTurn is null
-          const fallbackCognitiveArtifact = safeCognitiveArtifact;
           const aiTurnForMessage = currentAiTurn
             ? { ...currentAiTurn, pipelineStatus: 'awaiting_traversal' }
             : {
@@ -140,29 +131,28 @@ export class CognitivePipelineHandler {
               createdAt: Date.now(),
               pipelineStatus: 'awaiting_traversal',
               ...(batchPhase ? { batch: batchPhase } : {}),
-              ...(fallbackCognitiveArtifact ? { mapping: { artifact: fallbackCognitiveArtifact } } : {}),
               meta: {},
             };
 
-          // 2. Notify UI
+          // 2. Notify UI — send full in-memory artifact (UI stores in Jotai atom)
           this.port.postMessage({
             type: "MAPPER_ARTIFACT_READY",
             sessionId: context.sessionId,
             aiTurnId: context.canonicalAiTurnId,
-            mapping: { artifact: safeCognitiveArtifact, timestamp: Date.now() },
+            providerId: mapperProviderId,
+            mapping: { artifact: mappingArtifact, timestamp: Date.now() },
             singularityOutput: null,
             singularityProvider: null,
             pipelineStatus: 'awaiting_traversal'
           });
 
-          // Send finalized update so usage hooks pick up the status change immediately
           this.port.postMessage({
             type: "TURN_FINALIZED",
             sessionId: context.sessionId,
             userTurnId: context.canonicalUserTurnId,
             aiTurnId: aiTurnId,
             turn: {
-              user: { id: context.canonicalUserTurnId, sessionId: context.sessionId }, // Minimal user turn ref
+              user: { id: context.canonicalUserTurnId, sessionId: context.sessionId },
               ai: aiTurnForMessage
             }
           });
@@ -171,7 +161,7 @@ export class CognitivePipelineHandler {
           console.error("[CognitiveHandler] Failed to pause pipeline:", err);
         }
 
-        return "awaiting_traversal"; // Stop execution without finalization
+        return "awaiting_traversal";
       }
 
       // ✅ Execute Singularity step automatically
@@ -637,26 +627,103 @@ export class CognitivePipelineHandler {
         // Allow overriding prompt for traversal continuation
         const originalPrompt = payload.userMessage || extractUserMessage(userTurn);
 
-        // Resolve cognitive artifact from turn's mapping phase or payload
-        let mappingArtifact =
-          payload?.mapping?.artifact ||
-          aiTurn?.mapping?.artifact ||
-          null;
+        // Tier 3: Artifact is ephemeral. Try payload (UI in-memory) first,
+        // then rebuild via buildArtifactForProvider (single source of truth).
+        let mappingArtifact = payload?.mapping?.artifact || null;
 
         const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
+
         const latestSingularityResponse = (priorResponses || [])
           .filter((r) => r && r.responseType === "singularity")
           .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0];
+
         const frozenSingularityPromptType = latestSingularityResponse?.meta?.frozenSingularityPromptType;
         const frozenSingularityPromptSeed = latestSingularityResponse?.meta?.frozenSingularityPromptSeed;
         const frozenSingularityPrompt = latestSingularityResponse?.meta?.frozenSingularityPrompt;
+
         const mappingResponses = (priorResponses || [])
           .filter((r) => r && r.responseType === "mapping" && r.providerId)
           .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
         const latestMappingText = mappingResponses?.[0]?.text || "";
         const latestMappingMeta = mappingResponses?.[0]?.meta || {};
 
-        // Fallback: parse raw text via canonical V4 parser, then convert to cognitive
+        // Phase 2 rebuild (preferred path — uses the ONE code path)
+        if (!mappingArtifact && latestMappingText) {
+          try {
+            const { buildArtifactForProvider } = await import('./deterministicPipeline');
+            const { unpackEmbeddingMap } = await import('../../persistence/embeddingCodec');
+
+            const geoRecord = await this.sessionManager.loadEmbeddings(aiTurnId);
+            if (geoRecord?.statementEmbeddings && geoRecord?.paragraphEmbeddings) {
+              const dims = geoRecord.meta?.dimensions;
+              const statementEmbeddings = unpackEmbeddingMap(
+                geoRecord.statementEmbeddings, geoRecord.meta.statementIndex, dims);
+              const paragraphEmbeddings = unpackEmbeddingMap(
+                geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, dims);
+              const queryEmbedding =
+                geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
+                  ? new Float32Array(geoRecord.queryEmbedding) : null;
+
+              // Survey gates from provider response (Phase 2 storage location)
+              const mappingProvResp = mappingResponses?.[0];
+              const surveyGates = Array.isArray(mappingProvResp?.surveyGates)
+                ? mappingProvResp.surveyGates : undefined;
+              const surveyRationale = mappingProvResp?.surveyRationale ?? null;
+
+              // Citation-order-aware batch sources (matches existing continuation logic)
+              const citationOrderArr = normalizeCitationSourceOrder(latestMappingMeta?.citationSourceOrder);
+              const normalizeProvId = (pid) => String(pid || '').trim().toLowerCase();
+
+              const allBatchResps = (priorResponses || [])
+                .filter(r => r?.responseType === 'batch' && r.providerId && r.text?.trim())
+                .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+
+              // Deduplicate: keep latest per provider
+              const seenBatchProviders = new Map();
+              for (const r of allBatchResps) {
+                const pid = normalizeProvId(r.providerId);
+                if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
+              }
+
+              const batchSources = Array.from(seenBatchProviders.values()).map((r, idx) => {
+                const pid = normalizeProvId(r.providerId);
+                let modelIndex;
+                if (citationOrderArr.length > 0) {
+                  const citIdx = citationOrderArr.indexOf(pid);
+                  modelIndex = citIdx >= 0 ? citIdx + 1 : idx + 1;
+                } else {
+                  const stored = typeof r.responseIndex === 'number'
+                    ? r.responseIndex
+                    : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : null);
+                  modelIndex = stored != null && stored > 0 ? stored : idx + 1;
+                }
+                return { modelIndex, content: String(r.text || '') };
+              });
+
+              const modelCount = Math.max(citationOrderArr.length, seenBatchProviders.size, 1);
+
+              const buildResult = await buildArtifactForProvider({
+                mappingText: latestMappingText,
+                batchSources,
+                statementEmbeddings,
+                paragraphEmbeddings,
+                queryEmbedding,
+                geoRecord,
+                surveyGates,
+                surveyRationale,
+                queryText: originalPrompt,
+                modelCount,
+              });
+              mappingArtifact = buildResult.cognitiveArtifact;
+              console.log(`[CognitiveHandler] Rebuilt artifact via buildArtifactForProvider: ${buildResult.enrichedClaims.length} claims`);
+            }
+          } catch (rebuildErr) {
+            console.warn('[CognitiveHandler] buildArtifactForProvider failed (fallback to parse):', rebuildErr);
+          }
+        }
+
+        // Final legacy fallback (parse-into-shell)
         if (!mappingArtifact && mappingResponses?.[0]) {
           const parsed = parseSemanticMapperOutput(String(latestMappingText));
           if (parsed.success && parsed.output) {
@@ -667,6 +734,10 @@ export class CognitivePipelineHandler {
             shell.query = originalPrompt;
             mappingArtifact = buildCognitiveArtifact(shell, null);
           }
+        }
+
+        if (!mappingArtifact) {
+          throw new Error(`Mapping artifact missing for turn ${aiTurnId}.`);
         }
 
         if (!mappingArtifact) {
@@ -955,6 +1026,28 @@ export class CognitivePipelineHandler {
           { text: result?.text || "", status: result?.status || "completed", meta: result?.meta || {} },
         );
 
+        // Tier 2: persist traversal state to the MAPPING provider response.
+        // The traversal answers belong to the mapper's claim set, not the singularity output.
+        if (payload?.isTraversalContinuation && payload?.traversalState) {
+          try {
+            const mapperPid = aiTurn.meta?.mapper || mappingResponses?.[0]?.providerId;
+            if (mapperPid) {
+              const mappingResp = mappingResponses?.find(
+                r => String(r.providerId || '').toLowerCase() === String(mapperPid).toLowerCase()
+              );
+              if (mappingResp?.id) {
+                await adapter.put('provider_responses', {
+                  ...mappingResp,
+                  traversalState: payload.traversalState,
+                  updatedAt: Date.now(),
+                }, mappingResp.id);
+              }
+            }
+          } catch (e) {
+            console.warn('[CognitiveHandler] Traversal state persistence (non-blocking):', e);
+          }
+        }
+
         // Re-fetch and emit final turn
         const responses = await adapter.getResponsesByTurnId(aiTurnId);
         const buckets = {
@@ -1035,15 +1128,10 @@ export class CognitivePipelineHandler {
             timestamp: Date.now(),
           }
           : undefined;
-        const finalCognitiveArtifact = finalAiTurn?.mapping?.artifact || mappingArtifact;
-        const mappingPhase = finalCognitiveArtifact
-          ? { artifact: finalCognitiveArtifact, timestamp: Date.now() }
-          : undefined;
-
+        // Tier 3: artifact is ephemeral — do NOT persist mapping.artifact to turn.
         try {
           const t = finalAiTurn;
           if (t) {
-            if (mappingPhase) t.mapping = mappingPhase;
             if (singularityPhase) t.singularity = singularityPhase;
             if (batchPhase && !t.batch) t.batch = batchPhase;
             await adapter.put("turns", t);
@@ -1079,7 +1167,6 @@ export class CognitivePipelineHandler {
               threadId: aiTurn.threadId || DEFAULT_THREAD,
               createdAt: aiTurn.createdAt || Date.now(),
               ...(batchPhase ? { batch: batchPhase } : {}),
-              ...(mappingPhase ? { mapping: mappingPhase } : {}),
               ...(singularityPhase ? { singularity: singularityPhase } : {}),
               meta: finalAiTurn?.meta || aiTurn.meta || {},
               pipelineStatus: finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus,

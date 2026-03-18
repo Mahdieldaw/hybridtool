@@ -1607,8 +1607,6 @@ export class StepExecutor {
                               id: gate.id,
                               question: String(gate.question || '').trim(),
                               affectedClaims: affected,
-                              construct: null,
-                              hinge: null,
                               classification: 'conditional_gate',
                             });
 
@@ -1620,7 +1618,32 @@ export class StepExecutor {
                       rawGates = [];
                       surveyRationale = null;
                     }
+                  }       if (rawGates.length > 0 && options.sessionManager && context.canonicalAiTurnId) {
+                  try {
+                    const existingMappingResps = await options.sessionManager.adapter.getResponsesByTurnId(context.canonicalAiTurnId);
+                    const mappingResp = (existingMappingResps || [])
+                      .filter(r => r?.responseType === 'mapping' && r?.providerId === payload.mappingProvider)
+                      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
+
+                    if (mappingResp?.id) {
+                      const updated = {
+                        ...mappingResp,
+                        surveyGates: rawGates,
+                        surveyRationale: surveyRationale || null,
+                        updatedAt: Date.now(),
+                      };
+                      await options.sessionManager.adapter.put('provider_responses', updated, mappingResp.id);
+                      console.log(`[StepExecutor] Persisted ${rawGates.length} survey gate(s) to mapping provider response`);
+                    }
+                  } catch (persistErr) {
+                    console.warn('[StepExecutor] Survey gate persistence (non-blocking):', persistErr);
                   }
+                }
+
+                // Survey gates add conditionals but no new claims/edges/statements.
+                // Structural analysis only reads claims + edges (not conditionals),
+                // and mixed provenance / table allocation / blast surface are unchanged.
+                // No recomputation needed after survey mapper.
 
                   // Survey gates add conditionals but no new claims/edges/statements.
                   // Structural analysis only reads claims + edges (not conditionals),

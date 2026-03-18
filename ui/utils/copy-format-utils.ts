@@ -3,7 +3,7 @@ import { TurnMessage, ParsedTheme } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
-import { getProviderArtifact } from "./turn-helpers";
+// Tier 3: artifacts are ephemeral — not available on turn objects
 
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
@@ -298,16 +298,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                     return Array.isArray(arr) && arr.some(r => r.text);
                 });
             }
-            const mappingArtifact = getProviderArtifact(aiTurn, (aiTurn as any)?.meta?.mapper) || null;
-            if (!decisionMap && mappingArtifact?.semantic) {
-                decisionMap = {
-                    narrative: mappingArtifact.semantic.narrative,
-                    claims: mappingArtifact.semantic.claims || [],
-                    edges: mappingArtifact.semantic.edges || [],
-                    topology: null
-                };
-            }
-
+            // Tier 3: artifact is ephemeral, parse from mapping response text
             if (targetMapPid && mapResponses[targetMapPid]) {
                 const resps = mapResponses[targetMapPid];
                 const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;

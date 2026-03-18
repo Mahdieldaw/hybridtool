@@ -1954,7 +1954,7 @@ export function ContinuousFieldCard({ artifact }: { artifact: any }) {
 }
 
 export function CarrierDetectionCard({ artifact }: { artifact: any }) {
-  const substrateSummary = artifact?.chewedSubstrateSummary ?? null;
+  const substrateSummary = artifact?.substrateSummary ?? artifact?.chewedSubstrateSummary ?? null;
   const fatesObj: Record<string, any> = artifact?.completeness?.statementFates ?? {};
   const qsi = artifact?.questionSelectionInstrumentation ?? null;
   const claimRouting = artifact?.claimRouting ?? null;

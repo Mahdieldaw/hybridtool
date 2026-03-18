@@ -2,7 +2,7 @@
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter";
-import { dehydrateArtifact } from "./artifact-hydration";
+// dehydrateArtifact removed — Tier 3 artifacts are ephemeral (never persisted)
 import { DEFAULT_THREAD } from "../../shared/messaging";
 import type {
   PersistRequest,
@@ -411,9 +411,6 @@ export class SessionManager {
             ...(providerContexts || {}),
           },
           isComplete,
-          batchResponseCount: this.countResponses(result.batchOutputs),
-          mappingResponseCount: this.countResponses(result.mappingOutputs),
-          singularityResponseCount: this.countResponses(result.singularityOutputs),
           ...(batch !== undefined ? { batch } : {}),
           ...(mapping !== undefined ? { mapping } : {}),
           ...(singularity !== undefined ? { singularity } : {}),
@@ -533,9 +530,6 @@ export class SessionManager {
       providerContexts,
       isComplete,
       sequence: 1,
-      batchResponseCount: this.countResponses(result.batchOutputs),
-      mappingResponseCount: this.countResponses(result.mappingOutputs),
-      singularityResponseCount: this.countResponses(result.singularityOutputs),
       ...(batch !== undefined ? { batch } : {}),
       ...(mapping !== undefined ? { mapping } : {}),
       ...(singularity !== undefined ? { singularity } : {}),
@@ -618,9 +612,6 @@ export class SessionManager {
             ...(newContexts || {}),
           },
           isComplete,
-          batchResponseCount: this.countResponses(result.batchOutputs),
-          mappingResponseCount: this.countResponses(result.mappingOutputs),
-          singularityResponseCount: this.countResponses(result.singularityOutputs),
           ...(batch !== undefined ? { batch } : {}),
           ...(mapping !== undefined ? { mapping } : {}),
           ...(singularity !== undefined ? { singularity } : {}),
@@ -713,9 +704,6 @@ export class SessionManager {
       providerContexts: mergedContexts,
       isComplete,
       sequence: nextSequence + 1,
-      batchResponseCount: this.countResponses(result.batchOutputs),
-      mappingResponseCount: this.countResponses(result.mappingOutputs),
-      singularityResponseCount: this.countResponses(result.singularityOutputs),
       ...(batch !== undefined ? { batch } : {}),
       ...(mapping !== undefined ? { mapping } : {}),
       ...(singularity !== undefined ? { singularity } : {}),
@@ -816,13 +804,6 @@ export class SessionManager {
       if (freshTurn) {
         freshTurn.updatedAt = now;
 
-        if (stepType === "batch")
-          freshTurn.batchResponseCount = ((freshTurn.batchResponseCount as number) || 0) + 1;
-        else if (stepType === "mapping")
-          freshTurn.mappingResponseCount = ((freshTurn.mappingResponseCount as number) || 0) + 1;
-        else if (stepType === "singularity")
-          freshTurn.singularityResponseCount = ((freshTurn.singularityResponseCount as number) || 0) + 1;
-
         if (stepType === "batch") {
           const contexts = (freshTurn.providerContexts || {}) as Record<string, unknown>;
           const existingCtx = (contexts[targetProvider!] || {}) as Record<string, unknown>;
@@ -908,13 +889,20 @@ export class SessionManager {
     }
 
     // 2. Mapping (idempotent/singleton per provider)
-    for (const [providerId, output] of Object.entries(result?.mappingOutputs || {})) {
+
+
+     for (const [providerId, output] of Object.entries(result?.mappingOutputs || {})) {
       const existing = existingResponses.find(
         (r: any) => r.providerId === providerId && r.responseType === "mapping" && r.responseIndex === 0,
       );
-
       const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
       const createdAtKeep = existing?.createdAt || now;
+
+      // Phase 2: Extract survey gates/rationale from artifact (new home)
+      const outputAny = output as any;
+      const artifactObj = outputAny?.artifact;
+      const surveyGates = Array.isArray(artifactObj?.surveyGates) ? artifactObj.surveyGates : undefined;
+      const surveyRationale = artifactObj?.surveyRationale ?? undefined;
 
       recordsToSave.push({
         id: respId,
@@ -923,15 +911,19 @@ export class SessionManager {
         providerId,
         responseType: "mapping",
         responseIndex: 0,
-        text: (output as any)?.text || existing?.text || "",
-        status: normalizeStatus((output as any)?.status ?? existing?.status),
-        meta: this._safeMeta((output as any)?.meta ?? existing?.meta ?? {}),
-        ...((output as any)?.artifact ? { artifact: dehydrateArtifact((output as any).artifact) } : {}),
+        text: outputAny?.text || existing?.text || "",
+        status: normalizeStatus(outputAny?.status ?? existing?.status),
+        meta: this._safeMeta(outputAny?.meta ?? existing?.meta ?? {}),
+        // Tier 2: survey gates live on the provider response
+        ...(surveyGates ? { surveyGates } : {}),
+        ...(surveyRationale != null ? { surveyRationale } : {}),
+        // Tier 3: artifact is ephemeral — NOT persisted.
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
       });
     }
+       
 
     // 3. Singularity (idempotent/singleton per provider)
     for (const [providerId, output] of Object.entries(result?.singularityOutputs || {})) {
@@ -1083,13 +1075,6 @@ export class SessionManager {
     if (typeof isActive === "boolean") out.isActive = isActive;
 
     return out;
-  }
-
-  /**
-   * Helper function to count responses in a response bucket
-   */
-  countResponses(responseBucket: Record<string, unknown> | undefined): number {
-    return responseBucket ? Object.keys(responseBucket).length : 0;
   }
 
   /**

@@ -1,7 +1,7 @@
 import type { UserTurn, AiTurn, ProviderKey, ProviderResponse } from "../../shared/contract";
 import type { TurnMessage } from "../types";
 import { DEFAULT_THREAD } from "../../shared/messaging";
-import { hydrateArtifact } from "../../src/persistence/artifact-hydration";
+// hydrateArtifact removed — Tier 3 artifacts are ephemeral (rebuilt on demand)
 
 /**
  * Parse a full session payload (from GET_HISTORY_SESSION) into a Map + ordered IDs.
@@ -56,28 +56,17 @@ export function parseSessionTurns(fullSession: any): {
             : round.completedAt || round.createdAt || Date.now();
         const updatedAt =
           typeof resp?.updatedAt === "number" ? resp.updatedAt : createdAt;
-        let hydrated: any = resp?.artifact;
-        let hydrationError: string | null = null;
-        if (hydrated && typeof hydrated === "object") {
-          try {
-            hydrated = hydrateArtifact(hydrated);
-          } catch (e) {
-            hydrated = null;
-            hydrationError = e instanceof Error ? e.message : String(e);
-          }
-        }
+        // Tier 3: artifacts are ephemeral — not in the history payload.
+        // Survey gates are now on the provider response (Tier 2).
         return {
           providerId: (resp?.providerId as ProviderKey) || (providerId as ProviderKey),
           text: typeof resp?.text === "string" ? resp.text : "",
           status: resp?.status || "completed",
           createdAt,
           updatedAt,
-          meta: {
-            ...(resp?.meta || {}),
-            ...(hydrationError ? { _artifactHydrationError: hydrationError } : {}),
-          },
-          ...(Array.isArray(resp?.artifacts) ? { artifacts: resp.artifacts } : {}),
-          ...(resp?.artifact !== undefined ? { artifact: hydrated } : {}),
+          meta: resp?.meta || {},
+          ...(Array.isArray(resp?.surveyGates) ? { surveyGates: resp.surveyGates } : {}),
+          ...(resp?.surveyRationale != null ? { surveyRationale: resp.surveyRationale } : {}),
         } as ProviderResponse;
       };
 
@@ -154,7 +143,7 @@ export function parseSessionTurns(fullSession: any): {
         threadId: DEFAULT_THREAD,
         createdAt: round.completedAt || round.createdAt || Date.now(),
         ...(round.batch ? { batch: round.batch } : batchPhaseFromLegacy ? { batch: batchPhaseFromLegacy } : {}),
-        ...(round.mapping ? { mapping: round.mapping } : {}),
+        // Tier 3: mapping.artifact is ephemeral — not in history payload
         ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
         ...(round.meta ? { meta: round.meta } : {}),
         pipelineStatus: round.pipelineStatus || undefined,

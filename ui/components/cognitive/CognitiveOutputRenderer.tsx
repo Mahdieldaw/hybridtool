@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { AiTurn } from '../../../shared/contract';
 import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
@@ -14,7 +14,7 @@ import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { TraversalGraphView } from '../traversal/TraversalGraphView';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
-import { getProviderArtifact } from '../../utils/turn-helpers';
+import { useProviderArtifact } from '../../hooks/useProviderArtifact';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
@@ -34,7 +34,30 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
     const activeMappingPid = useAtomValue(mappingProviderAtom);
-    const mappingArtifact = getProviderArtifact(aiTurn, activeMappingPid || aiTurn.meta?.mapper) || null;
+    const effectivePid = activeMappingPid || aiTurn.meta?.mapper;
+    const { artifact: mappingArtifact, rebuild: rebuildArtifact } = useProviderArtifact(aiTurn.id, effectivePid);
+
+    // Tier 2: completed traversal state from mapping provider response
+    const completedTraversalState = useMemo(() => {
+        if (!effectivePid) return aiTurn.singularity?.traversalState;
+        const pid = String(effectivePid).trim().toLowerCase();
+        const responses = (aiTurn as any)?.mappingResponses;
+        if (responses && typeof responses === 'object') {
+            const entry = responses[pid];
+            const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+            const last = arr.length > 0 ? arr[arr.length - 1] : null;
+            if (last?.traversalState) return last.traversalState;
+        }
+        // Legacy fallback: singularity phase
+        return aiTurn.singularity?.traversalState;
+    }, [aiTurn, effectivePid]);
+
+    // Tier 3: trigger lazy rebuild if artifact not yet in memory
+    useEffect(() => {
+        if (!mappingArtifact && effectivePid && aiTurn.pipelineStatus !== 'error') {
+            rebuildArtifact();
+        }
+    }, [mappingArtifact, effectivePid, aiTurn.pipelineStatus, rebuildArtifact]);
 
     // Derived transition state
     const isTransitioning = singularityState.isLoading;
@@ -326,7 +349,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         claims={mappingArtifact!.semantic?.claims || []}
                         originalQuery={mappingArtifact!.meta?.query || ''}
                         aiTurnId={aiTurn.id}
-                        completedTraversalState={aiTurn.singularity?.traversalState}
+                        completedTraversalState={completedTraversalState}
                         sessionId={effectiveSessionId!}
                         pipelineStatus={aiTurn.pipelineStatus}
                         hasReceivedSingularityResponse={hasSingularityText}

@@ -84,21 +84,15 @@ export function buildCognitiveArtifact(
           claims: traversalGraph.claims ?? [],
           edges: traversalGraph.edges ?? [],
           conditionals: traversalGraph.conditionals ?? [],
-          tensions: traversalGraph.tensions ?? [],
           tiers: traversalGraph.tiers ?? [],
           maxTier: traversalGraph.maxTier ?? 0,
-          roots: traversalGraph.roots ?? [],
-          cycles: traversalGraph.cycles ?? [],
         }
         : {
           claims: [],
           edges: [],
           conditionals: [],
-          tensions: [],
           tiers: [],
           maxTier: 0,
-          roots: [],
-          cycles: [],
         },
     },
     meta: {

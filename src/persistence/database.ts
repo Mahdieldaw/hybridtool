@@ -3,8 +3,8 @@
 import { StoreConfig, MetadataRecord } from "./types";
 
 export const DB_NAME = "OpusDeusDB";
-export const DB_VERSION = 9;
-export const SCHEMA_VERSION = 9;
+export const DB_VERSION = 10;
+export const SCHEMA_VERSION = 10;
 
 // Store configurations - conversation-only architecture
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -283,6 +283,61 @@ export async function openDatabase(): Promise<IDBDatabase> {
           console.warn("Failed to complete v8 migration:", e);
         }
       }
+
+      // Migration to v10: Move survey gates from artifacts (L3) to provider responses (L2)
+      if (oldVersion < 10) {
+        try {
+          const turnsStore = transaction.objectStore("turns");
+          const responsesStore = transaction.objectStore("provider_responses");
+
+          // We need to iterate all turns to find those with survey gates in their artifacts
+          const cursorRequest = turnsStore.openCursor();
+          cursorRequest.onsuccess = (e) => {
+            const cursor = (e.target as IDBRequest).result as IDBCursorWithValue;
+            if (cursor) {
+              const turn = cursor.value;
+              const artifact = turn?.mapping?.artifact;
+              const surveyGates = artifact?.surveyGates;
+              const surveyRationale = artifact?.surveyRationale;
+
+              if (Array.isArray(surveyGates) && surveyGates.length > 0) {
+                const mapperProviderId = turn.meta?.mapper;
+                if (mapperProviderId) {
+                  const aiTurnId = turn.id;
+                  // Use compound key index to find the exact mapping response
+                  const index = responsesStore.index("byCompoundKey");
+                  const getRequest = index.get([aiTurnId, mapperProviderId, "mapping", 0]);
+                  
+                  getRequest.onsuccess = (ev) => {
+                    const response = (ev.target as IDBRequest).result;
+                    if (response) {
+                      response.surveyGates = surveyGates;
+                      if (surveyRationale) response.surveyRationale = surveyRationale;
+                      responsesStore.put(response);
+                      console.log(`[Migration v10] Moved survey gates for turn ${aiTurnId} (provider: ${mapperProviderId})`);
+                    }
+                  };
+                }
+              }
+              cursor.continue();
+            }
+          };
+
+          const metadataStore = transaction.objectStore("metadata");
+          const now = Date.now();
+          const rec: MetadataRecord = {
+            id: "schema_version_record",
+            key: "schema_version",
+            value: 10,
+            createdAt: now,
+            updatedAt: now,
+          };
+          metadataStore.put(rec);
+          console.log("Completed v10 migration setup (data move will proceed via cursor)");
+        } catch (e) {
+          console.warn("Failed to initiate v10 migration:", e);
+        }
+      }
     };
 
     request.onsuccess = () => {
@@ -321,6 +376,10 @@ export async function openDatabase(): Promise<IDBDatabase> {
       console.warn(
         "Database upgrade blocked by another tab. Please close other tabs.",
       );
+      // If blocked for more than 5s, reject so startup doesn't hang forever
+      setTimeout(() => {
+        reject(new Error("Database upgrade blocked by another connection. Close other tabs and reload."));
+      }, 5000);
     };
   });
 }

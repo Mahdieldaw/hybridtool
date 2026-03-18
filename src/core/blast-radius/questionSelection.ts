@@ -561,7 +561,7 @@ export function computeQuestionSelectionInstrumentation(
       damageOutlierCount: damageOutlierClaimIds.length,
       damageOutlierClaimIds,
       theoreticalCeiling,
-      actualClaimsSent: claims.length,
+      actualClaimsSent: routedClaimIds.size,
     },
     routing: {
       conflictClusters,

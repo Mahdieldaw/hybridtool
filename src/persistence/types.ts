@@ -86,17 +86,19 @@ export interface AiTurnRecord extends BaseTurnRecord {
 
   // Serialized phase data (stored as JSON blobs)
   batch?: object | string;
+  /** @deprecated Use building on-the-fly; stored artifact here is legacy. */
   mapping?: object | string;
   singularity?: object | string;
+
+  /** Tier 1: Per-turn immutable shadow data */
+  shadow?: any;
+
+  /** Tier 1: Per-turn traversal state (top-level overrides) */
+  traversalState?: any;
 
   // Storage metadata
   lastContextSummary?: string;
   pipelineStatus?: string;
-
-  // Denormalized counts (OPTIONAL - for query optimization only)
-  batchResponseCount?: number;
-  mappingResponseCount?: number;
-  singularityResponseCount?: number;
 
   // Foreign keys (NOT embedded objects)
   providerResponseIds?: string[];
@@ -123,7 +125,14 @@ export interface ProviderResponseRecord {
   error?: string;
   content?: string;
   metadata?: Record<string, any>;
+  /** @deprecated Ephemeral Tier 3 artifacts are no longer persisted here. */
   artifact?: any;
+  /** Tier 2: Per-provider mutable survey gates */
+  surveyGates?: any[];
+  /** Tier 2: Per-provider mutable survey rationale */
+  surveyRationale?: string;
+  /** Tier 2: Per-provider mutable traversal state adjustments */
+  traversalState?: any;
   tokenUsage?: {
     promptTokens: number;
     completionTokens: number;

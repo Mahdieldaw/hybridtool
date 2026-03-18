@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, mappingRecomputeSelectionByRoundAtom, activeRecomputeStateAtom, turnsMapAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, mappingRecomputeSelectionByRoundAtom, activeRecomputeStateAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
@@ -45,8 +45,7 @@ import type { GraphTopology } from "../../shared/contract";
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
-import { mergeArtifacts } from "../utils/merge-artifacts";
-import { getProviderArtifact } from "../utils/turn-helpers";
+import { useProviderArtifact } from "../hooks/useProviderArtifact";
 
 const DEBUG_DECISION_MAP_SHEET = false;
 const decisionMapSheetDbg = (...args: any[]) => {
@@ -703,8 +702,6 @@ export const DecisionMapSheet = React.memo(() => {
   const sessionId = useAtomValue(currentSessionIdAtom);
   const lastSessionIdRef = useRef<string | null>(sessionId);
   const { runMappingForAiTurn } = useRoundActions();
-  const setTurnsMap = useSetAtom(turnsMapAtom);
-
   const setToast = useSetAtom(toastAtom);
   const [regenState, setRegenState] = useState<"idle" | "running" | "done" | "error">("idle");
 
@@ -991,12 +988,18 @@ export const DecisionMapSheet = React.memo(() => {
     return preferred || historical || undefined;
   }, [mappingProvider, aiTurnSafe, mappingSelectionByRound, activeRecomputeState]);
 
+  // Tier 3: read ephemeral artifact from Jotai atom
+  const { artifact: artifactFromAtom, rebuild: rebuildArtifact } = useProviderArtifact(
+    aiTurnSafe?.id,
+    activeMappingPid,
+  );
   const mappingArtifact = useMemo(() => {
-    const picked = getProviderArtifact(aiTurnSafe, activeMappingPid);
-    if (!picked) return null;
-    const parsed = normalizeArtifactCandidate(picked);
-    return (parsed || picked) && typeof (parsed || picked) === "object" ? (parsed || picked) : null;
-  }, [aiTurnSafe, activeMappingPid]);
+    if (!artifactFromAtom) return null;
+    const parsed = normalizeArtifactCandidate(artifactFromAtom);
+    return (parsed || artifactFromAtom) && typeof (parsed || artifactFromAtom) === "object"
+      ? (parsed || artifactFromAtom)
+      : null;
+  }, [artifactFromAtom]);
 
   const citationSourceOrder = useMemo(() => {
     const fromArtifact =
@@ -1025,55 +1028,12 @@ export const DecisionMapSheet = React.memo(() => {
   const evidenceRows = useEvidenceRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
   const paragraphRows = useParagraphRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
 
-  const viewArtifactRequestRef = useRef<string | null>(null);
+  // Tier 3: auto-rebuild artifact if not yet in the atom
   useEffect(() => {
-    const aiTurnId = aiTurnSafe?.id ? String(aiTurnSafe.id) : "";
-    const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : "";
-    if (!aiTurnId || !pid) return;
-
-    // Always load geometry+shadow since instrument layout needs them regardless of selected layer
-    const hasGeometry = Array.isArray(mappingArtifact?.geometry?.substrate?.nodes) && mappingArtifact.geometry.substrate.nodes.length > 0;
-    const hasShadow = !!mappingArtifact?.shadow && (Array.isArray(mappingArtifact.shadow.statements) ? mappingArtifact.shadow.statements.length > 0 : typeof mappingArtifact.shadow.statements === "object");
-    const hasStatementAllocation = !!mappingArtifact?.statementAllocation;
-    const bs = (mappingArtifact as any)?.blastSurface;
-    const scores = Array.isArray(bs?.scores) ? bs.scores : [];
-    const hasBlastSurface = !!bs && scores.length > 0;
-    const hasBlastVernal = hasBlastSurface && scores.some((s: any) => typeof s?.vernal === "object" && s.vernal != null);
-    if (hasGeometry && hasShadow && hasStatementAllocation && hasBlastVernal) return;
-
-    const key = `${aiTurnId}::${pid}`;
-    if (viewArtifactRequestRef.current === key) return;
-    viewArtifactRequestRef.current = key;
-
-    chrome.runtime.sendMessage(
-      { type: "REGENERATE_EMBEDDINGS", payload: { aiTurnId, providerId: pid, persist: false } },
-      (response) => {
-        if (viewArtifactRequestRef.current !== key) return;
-        if (chrome.runtime.lastError || !response?.success) {
-          viewArtifactRequestRef.current = null;  // allow retry
-          return;
-        }
-        const artifact = response?.data?.artifact;
-        if (!artifact || typeof artifact !== "object") return;
-
-        setTurnsMap((draft: Map<string, any>) => {
-          const turn = draft.get(aiTurnId);
-          if (!turn) return;
-          if (!turn.mappingResponses) turn.mappingResponses = {};
-          const existing = turn.mappingResponses[pid];
-          const arr = Array.isArray(existing) ? existing : existing ? [existing] : [];
-          if (arr.length > 0) {
-            const prev = arr[arr.length - 1];
-            arr[arr.length - 1] = { ...prev, artifact: mergeArtifacts(prev?.artifact, artifact) };
-          } else {
-            arr.push({ providerId: pid, text: "", artifact, status: "completed", createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
-          }
-          turn.mappingResponses[pid] = arr;
-          turn.mappingVersion = (turn.mappingVersion ?? 0) + 1;
-        });
-      },
-    );
-  }, [aiTurnSafe?.id, activeMappingPid, mappingArtifact, setTurnsMap]);
+    if (!aiTurnSafe?.id || !activeMappingPid) return;
+    if (mappingArtifact) return; // already available
+    rebuildArtifact();
+  }, [aiTurnSafe?.id, activeMappingPid, mappingArtifact, rebuildArtifact]);
 
   const providerContexts = useAtomValue(providerContextsAtom);
 
@@ -1323,42 +1283,14 @@ export const DecisionMapSheet = React.memo(() => {
   }, [aiTurn, activeMappingPid, runMappingForAiTurn]);
 
   const handleRegenerateEmbeddings = useCallback(() => {
-    const aiTurnId = aiTurnSafe?.id ? String(aiTurnSafe.id) : "";
-    const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : "";
-    if (!aiTurnId || !pid || regenState === "running") return;
+    if (regenState === "running") return;
     setRegenState("running");
-    chrome.runtime.sendMessage(
-      { type: "REGENERATE_EMBEDDINGS", payload: { aiTurnId, providerId: pid, persist: false } },
-      (response) => {
-        if (chrome.runtime.lastError || !response?.success) {
-          console.warn("[DecisionMapSheet] Regenerate failed:", chrome.runtime.lastError?.message || response?.error);
-          setRegenState("error");
-          setTimeout(() => setRegenState("idle"), 2000);
-          return;
-        }
-        const newArtifact = response?.data?.artifact;
-        if (newArtifact && typeof newArtifact === "object") {
-          setTurnsMap((draft: Map<string, any>) => {
-            const turn = draft.get(aiTurnId);
-            if (!turn) return;
-            if (!turn.mappingResponses) turn.mappingResponses = {};
-            const existing = turn.mappingResponses[pid];
-            const arr = Array.isArray(existing) ? existing : existing ? [existing] : [];
-            if (arr.length > 0) {
-              const prev = arr[arr.length - 1];
-              arr[arr.length - 1] = { ...prev, artifact: mergeArtifacts(prev?.artifact, newArtifact) };
-            } else {
-              arr.push({ providerId: pid, text: "", artifact: newArtifact, status: "completed", createdAt: Date.now(), updatedAt: Date.now(), meta: {}, responseIndex: 0 });
-            }
-            turn.mappingResponses[pid] = arr;
-            turn.mappingVersion = (turn.mappingVersion ?? 0) + 1;
-          });
-        }
-        setRegenState("done");
-        setTimeout(() => setRegenState("idle"), 2000);
-      },
-    );
-  }, [aiTurnSafe?.id, activeMappingPid, regenState, setTurnsMap]);
+    rebuildArtifact();
+    // Rebuild is async; the atom updates when the response arrives.
+    // For UX feedback, transition state after a brief delay.
+    setTimeout(() => setRegenState("done"), 800);
+    setTimeout(() => setRegenState("idle"), 2800);
+  }, [regenState, rebuildArtifact]);
 
   return (
     <AnimatePresence>

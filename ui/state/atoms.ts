@@ -562,6 +562,23 @@ export const pinnedSingularityProvidersAtom = atom<Record<string, string>>({});
 export const hasAutoOpenedPaneAtom = atom<string | null>(null);
 
 // =============================================================================
+// Tier 3: Ephemeral Artifact Store
+// =============================================================================
+/**
+ * Tier 3 artifact atom family — keyed by turnId::providerId.
+ * Artifacts are NEVER persisted; they live only in memory and are rebuilt
+ * on page load, mapper switch, or regenerate via buildArtifactForProvider().
+ *
+ * Write: usePortMessageHandler (MAPPER_ARTIFACT_READY, REGENERATE response)
+ * Read:  useProviderArtifact hook → DecisionMapSheet, CognitiveOutputRenderer
+ */
+export const providerArtifactFamily = atomFamily(
+  (_params: { turnId: string; providerId: string }) =>
+    atom<any | null>(null),
+  (a, b) => a.turnId === b.turnId && a.providerId === b.providerId
+);
+
+// =============================================================================
 // AtomFamily Cleanup Helper
 // =============================================================================
 /**
@@ -585,6 +602,7 @@ export function cleanupTurnAtoms(
   for (const pair of turnIdProviderPairs) {
     providerResponseArrayFamily.remove(pair);
     providerEffectiveStateFamily.remove(pair);
+    providerArtifactFamily.remove(pair);
     providerHistoryExpandedFamily.remove(`${pair.turnId}-${pair.providerId}`);
   }
 }
