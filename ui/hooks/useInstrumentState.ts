@@ -3,7 +3,7 @@ import { useState, useCallback, useMemo } from "react";
 // Keep PipelineLayer exported for backward compatibility (used in Reference Shelf cards)
 export type PipelineLayer =
   | 'substrate' | 'mutual-graph' | 'basin-inversion' | 'query-relevance'
-  | 'competitive-provenance' | 'continuous-field' | 'carrier-detection'
+  | 'competitive-provenance' | 'carrier-detection'
   | 'model-ordering' | 'blast-radius' | 'alignment' | 'raw-artifacts'
   | 'provenance-comparison' | 'mixed-provenance';
 

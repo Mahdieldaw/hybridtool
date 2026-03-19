@@ -1619,7 +1619,7 @@ export class StepExecutor {
                       surveyRationale = null;
                     }
                   }
-                  if (rawGates.length > 0 && options.sessionManager && context.canonicalAiTurnId) {
+                  if (rawGates.length > 0 && options.sessionManager?.adapter && context.canonicalAiTurnId) {
                     try {
                       const existingMappingResps = await options.sessionManager.adapter.getResponsesByTurnId(context.canonicalAiTurnId);
                       const mappingResp = (existingMappingResps || [])

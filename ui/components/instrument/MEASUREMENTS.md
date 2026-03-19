@@ -66,7 +66,7 @@ Topology of the full pairwise similarity field. Detects whether the distribution
 |---|---|---|
 | **D = P90 − P10** | Discrimination range (same as Substrate) | Prerequisite: D must be ≥ 0.05 for any basin to be detectable. |
 | **T_v** | Valley threshold | The cosine similarity value where the density dips between basins. Represents the "natural gap" between unrelated and related paragraph pairs. Only meaningful when status = "ok". |
-| **valleyDepthSigma** | Depth of valley in standard deviations | How pronounced the valley is. Deeper = cleaner threshold. Shallow valley = ambiguous separation. |
+| **valleyDepthSigma** | Depth of valley in standard deviations. Path: `basinInversion.meta.peakDetection.valley.depthSigma` | How pronounced the valley is. Deeper = cleaner threshold. Shallow valley = ambiguous separation. |
 | **Basins** | Detected density peaks (above T_v) | Each basin is a cluster of mutually similar paragraphs. Should be ≥ number of claims. |
 | **trenchDepth** (per basin) | Depth of separation from adjacent basin | How isolated this basin is. Deep trench = clearly distinct cluster. |
 | **Zone Population** | % of pairs in High / Valley / Low zones | High zone (> μ+σ): strongly similar pairs. Valley zone (μ-σ to μ+σ): ambiguous. Low zone (< μ-σ): genuinely different. Healthy geometry has a meaningful split; pathological geometry puts > 80% in one zone. |
@@ -103,6 +103,8 @@ Source: `artifact.geometry.query.relevance.statementScores` where each entry is 
 
 Two-level competitive assignment of evidence to claims, plus derived bulk and exclusivity measurements. Source: `artifact.statementAllocation` (§1 new system) and `artifact.claimProvenance` (old paragraph-based system).
 
+> **Note**: `artifact.statementAllocation` is not currently populated by the pipeline but the UI reads it with graceful fallback. Could be derived from `mixedProvenance.perClaim[*].canonicalStatementIds` in the future.
+
 ### Entropy Distribution
 
 How many claims each statement was assigned to after competitive allocation.
@@ -119,7 +121,7 @@ How many claims each statement was assigned to after competitive allocation.
 
 | Column | What it measures |
 |---|---|
-| **Old Pool** | `artifact.claimProvenance.competitiveAssignmentDiagnostics[claimId].poolSize` (legacy §0 paragraph pool size). |
+| **Old Pool** | Legacy §0 paragraph pool size, derived from `claim.paragraphAssignment` when available. |
 | **New Pool** | `artifact.statementAllocation.perClaim[claimId].poolSize` (unified geo §1 statement pool size). |
 | **Bulk** | `artifact.statementAllocation.perClaim[claimId].provenanceBulk` (sum of §1 weights). |
 | **Ratio** | `NewPool / OldPool` when OldPool > 0. Cross-unit (statements ÷ paragraphs), so not a percentage. |
@@ -164,6 +166,7 @@ If none exist, the UI falls back to computing a local Pearson r when possible.
 
 ## Continuous Field (L1)
 
+> **Not currently computed.** The producer function (`computeContinuousField`) has been removed. The claim-centric scoring in `computeMixedMethodProvenance` supersedes this.
 Per-claim z-score relevance field. Scores every statement against every claim without any threshold — a continuous gravity model. Source: `artifact.continuousField`.
 
 ### Per-Claim Field Summary
@@ -202,6 +205,8 @@ These are the fault lines. A statement competitively assigned to claim A but dee
 ---
 
 ## Compare (L1)
+
+> **Note**: The Continuous column data source (`artifact.continuousField`) has been removed (see Continuous Field deprecation above). The Statement Allocation column is not currently populated but the UI shell remains. Only the Direct (control) and Competitive §1 columns are expected to have data in current artifacts.
 
 Three-column side-by-side comparison of all assignment methods per claim. Source: `artifact.continuousField.perClaim` and `artifact.statementAllocation.perClaim`.
 
@@ -256,16 +261,16 @@ Extra computed pieces implemented in the UI and now documented as canonical:
 - `geometryCorrelation` precedence and fallback (see above).
 - `entropy` breakdown: prefers `artifact.statementAllocation.entropy`; otherwise derived from `artifact.statementAllocation.assignmentCounts` (per-statement assigned-claim count). Reported values: counts for 1-claim, 2-claim, 3+-claims and total statements.
 - `stmtToPara` and `paraTextMap`: maps constructed from `artifact.shadow.paragraphs` to trace which paragraph a statement came from and to render sample paragraph text in pool comparisons.
-- `paragraphSimilarityPerClaim`: read from `artifact.paragraphSimilarityField?.perClaim` when present — used to show ranked paragraphs for a claim using a `sim` field.
+- `paragraphSimilarityPerClaim`: read from `artifact.paragraphSimilarityField?.perClaim` when present — used to show ranked paragraphs for a claim using a `sim` field. **Note:** The producer function `computeParagraphSimilarityField` has been removed — redundant with claim-centric scoring in `computeMixedMethodProvenance`. This path will be absent in new artifacts.
 - `assignedParagraphsByClaim`: assigned paragraphs from legacy (§0) paragraph assignment, built from `claim.sourceStatementIds` → statement-to-paragraph map.
-- `rankedParagraphsByClaim`: a ranked paragraph list per claim from `artifact.paragraphSimilarityField.perClaim[claimId].field`. Each row includes `{ id, text, sim, w1 }` where `w1` is computed in the UI as the per-paragraph sum of §1 statement weights (from `artifact.statementAllocation.perClaim[claimId].directStatementProvenance`) when available.
+- `rankedParagraphsByClaim`: a ranked paragraph list per claim from `artifact.paragraphSimilarityField.perClaim[claimId].field`. Each row includes `{ id, text, sim, w1 }` where `w1` is computed in the UI as the per-paragraph sum of §1 statement weights (from `artifact.statementAllocation.perClaim[claimId].directStatementProvenance`) when available. **Note:** The producer `computeParagraphSimilarityField` has been removed; this section will not render for new artifacts.
 - `assignmentDiagnostics`, `perClaimAlloc`, `comparisonRows`: UI aggregates used to render the Old vs New pool table. `comparisonRows` includes per-claim OldPool, NewPool, Bulk, Ratio.
 - `continuousSummary`: small summary of `artifact.continuousField` including claim count, total core size (sum of cores across claims) and disagreement count derived from `continuousField.disagreementMatrix`.
 - `dualCoordinateActive`: boolean flag `statementAllocation.dualCoordinateActive` indicating whether the §1 allocator ran in "dual coordinate" mode. In the current UI it is displayed as a badge; `w1` is shown whenever per-paragraph weights can be computed (independent of this flag).
 
 Important artifact paths used by these computations:
 - `artifact.statementAllocation` (perClaim, entropy, assignmentCounts, dualCoordinateActive)
-- `artifact.claimProvenance` (competitiveAssignmentDiagnostics, claimExclusivity, geometryCorrelation)
+- `artifact.claimProvenance` (claimExclusivity)
 - `artifact.continuousField` (perClaim, disagreementMatrix)
 - `artifact.paragraphSimilarityField` (perClaim)
 - `artifact.shadow.paragraphs`, `artifact.shadow.statements`
@@ -302,7 +307,6 @@ Ranks models by their geometric irreplaceability — how much unique evidence ea
 | Measurement | What it tells you |
 |---|---|
 | **Irreplaceability** | Score 0–1. A model with high irreplaceability has statements that are geometrically unique — their removal would create evidence gaps. Low irreplaceability = redundant model; another model covers the same territory. |
-| **queryRelevanceBoost** | Adjustment to irreplaceability from query alignment. A model whose outputs are highly query-relevant gets a boost even if it overlaps with others geometrically. |
 | **soloCarrierRegions** | Regions where this model is the only carrier. High solo carrier count = if this model is removed, those regions have no coverage. |
 | **lowDiversityContribution** | Penalty for contributing to regions that already have many contributors. Present in the artifact breakdown; not currently surfaced in the instrument card table. |
 | **Spread (max − min irreplaceability)** | How differentiated the models are. Low spread = all models contribute roughly equally. High spread = some models are essential and some are redundant. |
@@ -311,7 +315,7 @@ Ranks models by their geometric irreplaceability — how much unique evidence ea
 
 ## Blast Radius (legacy — not a runtime gate)
 
-> **Superseded**: This composite score no longer gates which claims reach the survey mapper. Structural routing (conflict clusters, isolate candidates, passthrough) replaced it. The blast *surface* (`artifact.blastSurface`) is the current damage-assessment layer. If `artifact.blastRadiusFilter` is present in an artifact, treat it as historical diagnostics only.
+> **Superseded**: This composite score no longer gates which claims reach the survey mapper. Structural routing (conflict clusters, damage outliers, passthrough) replaced it. The blast *surface* (`artifact.blastSurface`) is the current damage-assessment layer. If `artifact.blastRadiusFilter` is present in an artifact, treat it as historical diagnostics only.
 
 Historical composite claim importance score that used to gate which claims became survey question candidates. The current pipeline does not use this as a runtime gate; if `artifact.blastRadiusFilter` is present, treat it as legacy diagnostics only.
 
@@ -485,6 +489,8 @@ Graph-theoretic analysis of the semantic edge graph:
 - Chain depth: longest dependency chain from this claim
 - Cascade risks: claims that would cause many downstream failures if removed
 
+> **Note**: `problemStructure` / `structuralAnalysis` is computed client-side by `computeStructuralAnalysis(artifact)` from `artifact.semantic.{claims, edges}`. It is NOT persisted in the artifact — it is view-time derived.
+
 ### Blast Radius (deeper)
 
 Same as instrument Blast Radius tab but with histograms of composite score distribution and detailed modifier breakdown.
@@ -501,7 +507,7 @@ Where results are stored
 Where it runs
 - Producer: `computeBlastSurface(...)` in [blastSurface.ts](../../../src/core/blast-radius/blastSurface.ts)
 - Wired in deterministic regen pipeline: [deterministicPipeline.js](../../../src/core/execution/deterministicPipeline.js)
-Layers (A–D) as implemented
+Layers (A, C, D) as implemented
 
 - **Layer A — Per-claim evidence inventory (inputs, already computed elsewhere)**
   - Canonical statement sets come from mixed-method provenance:
@@ -509,32 +515,19 @@ Layers (A–D) as implemented
   - Canonical exclusivity is derived from those canonical sets:
     - A canonical statement is “exclusive” to claim C if it appears in no other claim’s canonical set (owner count ≤ 1).
 
-- **Layer B — Exclusive vulnerability via speculative twin detection (L1)**
-  - Goal: for each claim’s exclusive canonical statement `S`, determine whether a “twin” exists in other claims’ canonical territory that could plausibly replace it.
-  - Output per claim: `scores[i].layerB` (`ClaimAbsorptionProfile`)
-    - `exclusiveCount`, `orphanCount`, `absorbableCount`, `orphanRatio`
-    - `statements[]` with per-exclusive-statement twin diagnostics
-    - `absorptionByTarget` counts (which other claim “absorbs” how many exclusives)
-  - Candidate pool (for μ/σ baselines):
-    - `crossClaimCandidateIds = (⋃ canonical(otherClaims)) \ canonical(thisClaim)`
-  - Gate 1 (similarity, adaptive per statement):
-    - For each exclusive `S`, compute `μ_S` and `σ_S` over `cos(S, T)` for all `T ∈ crossClaimCandidateIds`.
-    - Similarity threshold: `τ_sim = clamp01( μ_S + 2·σ_S )`.
-    - For each target claim D, find the single best-matching candidate `T* ∈ canonical(D)`; it is eligible only if `cos(S, T*) > τ_sim`.
-  - Gate 2 (core-vs-corpus differential, always applied in `layerB`):
-    - `coreAffinity(T*) = mean cos(T*, C)` over `C ∈ canonical(thisClaim)` excluding `S`
-    - `corpusAffinity(T*) = mean cos(T*, X)` over all statement embeddings `X` (excluding `T*`)
-    - `differential = coreAffinity - corpusAffinity`
-    - A twin “exists” only when `differential > 0` (prevents generic corpus-wide paraphrases from counting as replacements).
-  - Optional stricter variant: `scores[i].layerBGate2` (`ClaimAbsorptionProfileGate2`)
-    - Adds a claim-territory gate: candidate must also satisfy `cos(T*, claimEmbedding) > territoryThreshold`
-    - `territoryThreshold` prefers an adaptive directionality threshold `τ_dir`; falls back to mixed-provenance `globalMu` when direction stats are unavailable.
+- **Twin map — Front-line twin detection (L1)**
+  - Computed once before the per-claim loop by `computeTwinMap()`.
+  - For each exclusive statement, determines whether a “twin” exists in other claims’ canonical territory.
+  - Output: `twinMap.twins[statementId]` — per-statement twin classification (has twin or orphan).
+  - Per-claim Vernal scoring uses the twin map to derive `degradationRisk` (orphans — exclusive statements with no twin) and `deletionRisk` (statements with twins that would be absorbed).
 
 - **Layer C — Evidence mass trio (L1/L1.5)**
-  - Output per claim: `scores[i].layerC`
+  - Output per claim: `scores[i].layerC` (`BlastSurfaceLayerC`)
     - `canonicalCount`: mixed-method canonical statement count
-    - `exclusiveCount`: exclusive statement count within canonical set
-    - `coreCount`: dense core count from mixed-method provenance
+    - `nonExclusiveCount`: Type 1 — statements shared with other claims (protected by living parents on single prune)
+    - `exclusiveNonOrphanCount`: Type 2 — exclusive statements WITH a twin ("deletion risk")
+    - `exclusiveOrphanCount`: Type 3 — exclusive statements with NO twin ("degradation risk")
+    - `allocatedCellUnits` (optional): table cell-units allocated to this claim
 
 - **Layer D — Cascade echo via provenance overlap (L1)**
   - Goal: estimate collateral destabilization if claim C is pruned by counting how much other claims’ canonical evidence overlaps.
@@ -544,7 +537,7 @@ Layers (A–D) as implemented
 
 Vernal / “Bernal” merged score (Append 2.0 + 2.5, instrumentation)
 - Output per claim: `scores[i].vernal`
-  - Vulnerability: `vulnerableStatementIds` are the `layerB` orphans; `vulnerableCount = |vulnerableStatementIds|`.
+  - Vulnerability: `vulnerableStatementIds` are the twin map orphans (exclusive statements with no twin); `vulnerableCount = |vulnerableStatementIds|`.
   - Query loss: `destroyedQueryMean` is the mean query relevance over vulnerable statements (prefers `queryRelevanceScores[statementId].querySimilarity`; falls back to `(cos(stmt, query)+1)/2`; clamped to [0,1]).
   - Cascade exposure (vernal): for each other claim D that shares canonical statements with C, add `(sharedCount / |canonical(D)|) × vulnerableCount(D)`.
   - `structuralMass = vulnerableCount(C) + cascadeExposure`
@@ -555,11 +548,28 @@ Vernal / “Bernal” merged score (Append 2.0 + 2.5, instrumentation)
   - `structuralStep`: `sigmaM` (when `sigmaM > 0.01`), else `max(median(structuralMass)×0.1, 0.1)`
   - `adaptiveAccelerator = min(1, sigmaQ / 0.25)`
   - `lambda = structuralStep × adaptiveAccelerator`
-- Status: this merged score is surfaced for diagnostics, and its scalar `compositeScore` is copied into question-selection instrumentation for convenience (`claimProfiles[*].vernalComposite`).
+- Status: this merged score is surfaced for diagnostics, and the risk vector's `totalDamage` is copied into question-selection instrumentation for convenience (`claimProfiles[*].totalDamage`).
+
+#### Risk Vector (`scores[i].riskVector`, `BlastSurfaceRiskVector`)
+
+Per-claim risk decomposition displayed in the UI blast surface cards:
+
+| Field | What it measures |
+|---|---|
+| `deletionRisk` | Count of Type 2 exclusive non-orphan statements — removed on prune (highest removal risk). |
+| `degradationRisk` | Count of Type 3 exclusive orphan statements — skeletonized on prune, irrecoverable but never deleted. |
+| `cascadeFragility` | Continuous protection-depth: `Σ 1/(parentCount-1)` over non-exclusive statements. Dimensionally compatible with statement counts. |
+| `isolation` | `(Type2 + Type3) / canonicalCount`. 0 = fully shared, 1 = fully isolated. |
+| `orphanCharacter` | `Type3 / (Type2 + Type3)`. 0 = all twinned, 1 = all orphaned. NaN-safe: 0 when no exclusives. |
+| `simplex` | `[type1Frac, type2Frac, type3Frac]` summing to 1.0 — visualization coordinates (fraction of canonical statements in each type). |
+| `deletionDamage` | `Σ (1 - twinSimilarity)` over Type 2 statements. Higher = lossier twins. |
+| `degradationDamage` | `Σ (1 - nounSurvivalRatio)` over Type 3 statements. Higher = more context destroyed. |
+| `totalDamage` | `deletionDamage + degradationDamage`. Ranking value for question priority. |
+| `deletionCertainty` | Breakdown of Type 2 into: unconditional (2a: twin unclassified), conditional (2b: twin in another claim with multiple parents), fragile (2c: twin exclusive to its host). |
 
 ### Question Selection Instrumentation (Layers F + G)
 
-Observation-only measurements for future question gating/ceiling logic. None of these affect runtime. All claims are sent to the survey mapper regardless of these scores.
+Single-authority routing computation. `computeQuestionSelectionInstrumentation()` determines which claims are routed to the survey mapper (conflict clusters, damage outliers) and which pass through. `computeClaimRouting()` is a thin extractor that reads `qsi.routing`.
 
 Where results are stored
 - `artifact.questionSelectionInstrumentation` (`QuestionSelectionInstrumentation`)
@@ -570,13 +580,19 @@ What the UI shows (Carrier Detection card)
   - `muInterClaim = mean cosine across all unique claim centroid pairs`
   - `validated = centroidSimilarity < muInterClaim` (claims more distant than average → genuine fork)
 - **Question Selection Profile (F2–F4)**: `claimProfiles[]` per claim:
-  - Blast Surface copy fields: `vernalComposite`, `orphanRatio`
+  - Blast Surface copy fields: `totalDamage` (from risk vector), `orphanRatio` (now derived from twin map: `degradationRisk / (degradationRisk + deletionRisk)`)
   - Consensus (F3): `supportRatio`, `modelCount`, `consensusDiscount` (what a discount would be; not applied)
   - Sole-source off-topic (F4): `soleSource`, `queryRelevanceRaw`, `wouldPenalize` where threshold is distribution-derived (`μ - σ` across all claims)
   - Query tilt banding (F2): `damageBand`, `queryTiltReorder` (rank change within band if sorted by query relevance)
 - **Survey Gate & Ceiling (G)**: `gate` + `ceiling` summaries:
-  - `gate.wouldSkip` and `gate.overrideSkip` are informational only — actual routing is handled by structural routing (conflict clusters / isolate candidates / passthrough), not this instrumentation layer
-  - `ceiling.theoreticalCeiling` is informational only; `ceiling.actualClaimsSent` reflects the structurally-routed subset, not all claims
+  - `gate.skipSurvey`: true when no conflict clusters and no damage outliers
+  - `ceiling.theoreticalCeiling = independentConflictClusters + damageOutlierClaimIds.length`; `ceiling.actualClaimsSent` reflects the routed subset
+- **Routing**: `routing` contains the authoritative claim routing:
+  - `conflictClusters[]`: validated conflict edges grouped into independent clusters
+  - `damageOutliers[]`: non-consensus claims with `totalDamage > μ+σ` — routed for misleadingness test
+  - `passthrough[]`: all claims not in conflict clusters or damage outliers
+  - `skipSurvey`: true when no claims are routed (no conflicts, no damage outliers)
+  - `diagnostics`: routing decision context — `damageThreshold` (μ+σ), `damageDistribution` (raw totalDamage values), `convergenceRatio`, `totalClaims`, `queryDistanceThreshold`
 
 ### Skeletonization
 
@@ -610,10 +626,10 @@ The Diagnostics tab can trigger a regen run:
 | ~~0.60~~ | ~~Carrier detection~~ | ~~Source-to-surviving-claim similarity needed to classify as "carried"~~ | Deleted with CarrierDetector |
 | ~~0.72~~ | ~~Clustering merge default~~ | ~~Default threshold for merging close paragraphs into the same cluster~~ | Legacy |
 | ~~0.78~~ | ~~Soft threshold ceiling~~ | ~~Upper clamp for the dynamically computed soft threshold~~ | Legacy |
-| 0.85 | Paraphrase detection / twin map | Near-paraphrase gate (cosine); paired with Jaccard > 0.5 as secondary gate | Active |
+| 0.85 | Alignment split alert (`DEFAULT_SPLIT_THRESHOLD` in alignment.ts) | Threshold used in `computeAlignment()` for split alerts — claim sources span distant regions | Active |
 | 0.92 | Merge alert | Claim-to-claim similarity threshold for near-duplicate alert | Active |
 | μ+σ | §1 statement allocation threshold | Per-statement dynamic threshold for cross-claim competition (or just μ when N=2 claims) | Active — canonical |
-| μ+2σ | Twin map / blast surface Layer B | Per-statement adaptive threshold for twin detection across claim boundaries | Active — canonical |
+| μ+2σ | Twin map (`computeTwinMap`) | Per-statement adaptive threshold for twin detection across claim boundaries | Active — canonical |
 | T_v | Basin inversion valley | Dynamic threshold from topology; separates "soft" from "strong" similarities | Active |
 
 ---
@@ -625,11 +641,11 @@ Below are the canonical artifact property paths the UI reads for each major meas
 - Substrate / Mutual / Basin → `artifact.geometry.substrate`, `artifact.geometry.substrate.mutualEdges`, `artifact.geometry.basinInversion`
 - Query relevance → `artifact.geometry.query.relevance.statementScores` (aggregated to claims via `claim.sourceStatementIds`)
 - Statement allocation (competitive §1) → `artifact.statementAllocation.perClaim`, `artifact.statementAllocation.assignmentCounts`, `artifact.statementAllocation.entropy`
-- Claim provenance (paragraph legacy + exclusivity) → `artifact.claimProvenance` (including `claimExclusivity`, `competitiveAssignmentDiagnostics`, `geometryCorrelation`)
+- Claim provenance (paragraph legacy + exclusivity) → `artifact.claimProvenance` (including `claimExclusivity`)
 - Continuous field → `artifact.continuousField` (includes `perClaim`, `disagreementMatrix`)
-- Blast surface (Vernal twins A–D) → `artifact.blastSurface` (includes per-claim `layerB/layerC/layerD` and `vernal`)
-- Question selection instrumentation (F+G, observation only) → `artifact.questionSelectionInstrumentation`
-- Paragraph similarity / ranked paragraphs → `artifact.paragraphSimilarityField?.perClaim`
+- Blast surface (Vernal twins A/C/D) → `artifact.blastSurface` (includes per-claim `layerC/layerD`, `vernal`, and `twinMap`)
+- Question selection instrumentation (F+G, single routing authority) → `artifact.questionSelectionInstrumentation`
+- ~~Paragraph similarity / ranked paragraphs → `artifact.paragraphSimilarityField?.perClaim`~~ (producer removed; absent in new artifacts)
 - Shadow corpus (statements / paragraphs) → `artifact.shadow.statements`, `artifact.shadow.paragraphs`
 - Instrumentation overrides / computed geometry correlation → `artifact.instrumentation.*`
 
@@ -666,7 +682,7 @@ Primary outputs added to each LinkedClaim (persisted into artifact and read by t
 
 Secondary / diagnostic outputs written nearby (artifact keys):
 - `artifact.statementAllocation` — (new §1 system) includes `perClaim` weights, `assignmentCounts`, `entropy`, and `dualCoordinateActive`. When present the UI shows statement-level pools, and can compute per-paragraph `w1` by summing weights of statements mapped into each paragraph.
-- `artifact.claimProvenance` — contains diagnostic objects like `competitiveAssignmentDiagnostics`, `claimExclusivity` and any Jaccard overlap matrices the exporter persisted.
+- `artifact.claimProvenance` — contains `claimExclusivity` and any Jaccard overlap matrices the exporter persisted.
 - `artifact.claimProvenance.geometryCorrelation` — when computed server-side it is placed here; UI will fall back to other paths if missing.
 
 Implementation notes / invariants (important for UI correctness):
@@ -684,7 +700,7 @@ Where the UI reads these values:
 Developer checklist when changing reconstructProvenance or related exporters:
 - Persist `sourceStatementIds` on `semantic.claims` before returning the artifact to the UI.
 - If you add or change the definition of `excess` / `threshold`, update `provenanceBulk` computation and the UI docs here.
-- When adding a new diagnostic array (e.g., `competitiveAssignmentDiagnostics`), update `artifact.claimProvenance` mapping and add a short one-line entry in the Implementation mapping section above.
+- When adding a new diagnostic array, update `artifact.claimProvenance` mapping and add a short one-line entry in the Implementation mapping section above.
 
 ### Mixed-Method Provenance (implemented)
 

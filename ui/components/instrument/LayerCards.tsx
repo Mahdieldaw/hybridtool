@@ -1878,80 +1878,6 @@ export function CompetitiveProvenanceCard({
   );
 }
 
-export function ContinuousFieldCard({ artifact }: { artifact: any }) {
-  const cf = artifact?.continuousField ?? null;
-  const perClaim: Record<string, any> = cf?.perClaim ?? {};
-  const disagreements: any[] = Array.isArray(cf?.disagreementMatrix) ? cf.disagreementMatrix : [];
-
-  const claimRows = useMemo(() => {
-    return Object.values(perClaim).map((c: any) => ({
-      id: String(c.claimId ?? ""),
-      coreSetSize: typeof c.coreSetSize === "number" ? c.coreSetSize : null,
-      mu_claim: typeof c.mu_claim === "number" ? c.mu_claim : null,
-      sigma_claim: typeof c.sigma_claim === "number" ? c.sigma_claim : null,
-      fieldLen: Array.isArray(c.field) ? c.field.length : 0,
-      topEvidence: Array.isArray(c.field)
-        ? [...c.field].sort((a: any, b: any) => (b.evidenceScore ?? 0) - (a.evidenceScore ?? 0)).slice(0, 3)
-        : [],
-    }));
-  }, [perClaim]);
-
-  if (!cf || claimRows.length === 0) {
-    return <div className="text-xs text-text-muted italic py-4">Continuous field data not available. Re-run the pipeline to generate it.</div>;
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
-        <span className="text-[9px] text-text-muted">per-claim z-score relevance field (unified geo §2)</span>
-      </div>
-
-      <InterpretiveCallout
-        text={(() => {
-          const totalCore = claimRows.reduce((sum, r) => sum + (r.coreSetSize ?? 0), 0);
-          return `${fmtInt(claimRows.length)} claims profiled. ${fmtInt(totalCore)} core statements total. ${fmtInt(disagreements.length)} competitive↔continuous disagreements.`;
-        })()}
-        variant={disagreements.length > 0 ? 'warn' : 'ok'}
-      />
-
-      <CardSection title="Per-Claim Field Summary">
-        <SortableTable
-          columns={[
-            { key: "id", header: "Claim", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[120px] inline-block">{r.id}</span> },
-            { key: "fieldLen", header: "Stmts", sortValue: (r: any) => r.fieldLen, cell: (r: any) => <span className="font-mono">{fmtInt(r.fieldLen)}</span> },
-            { key: "coreSetSize", header: "Core", sortValue: (r: any) => r.coreSetSize, cell: (r: any) => <span className={clsx("font-mono", (r.coreSetSize ?? 0) === 0 && "text-amber-400")}>{fmtInt(r.coreSetSize)}</span> },
-            { key: "mu_claim", header: "μ_sim", sortValue: (r: any) => r.mu_claim, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.mu_claim, 3)}</span> },
-            { key: "sigma_claim", header: "σ_sim", sortValue: (r: any) => r.sigma_claim, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.sigma_claim, 3)}</span> },
-          ]}
-          rows={claimRows}
-          defaultSortKey="coreSetSize"
-          defaultSortDir="desc"
-          maxRows={12}
-        />
-      </CardSection>
-
-      {disagreements.length > 0 && (
-        <CardSection title={`Competitive vs Continuous Divergence (${disagreements.length})`}>
-          <div className="text-[9px] text-text-muted mb-1">Statements where competitive winner ≠ continuous field winner</div>
-          <SortableTable
-            columns={[
-              { key: "statementId", header: "Stmt", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[80px] inline-block">{String(r.statementId)}</span> },
-              { key: "competitiveWinner", header: "Comp→", cell: (r: any) => <span className="font-mono text-[10px] truncate max-w-[80px] inline-block">{String(r.competitiveWinner)}</span> },
-              { key: "continuousWinner", header: "Field→", cell: (r: any) => <span className="font-mono text-[10px] truncate max-w-[80px] inline-block">{String(r.continuousWinner)}</span> },
-              { key: "competitiveWeight", header: "W_comp", sortValue: (r: any) => r.competitiveWeight, cell: (r: any) => <span className="font-mono">{fmt(r.competitiveWeight, 3)}</span> },
-              { key: "continuousScore", header: "E_field", sortValue: (r: any) => r.continuousScore, cell: (r: any) => <span className="font-mono">{fmt(r.continuousScore, 3)}</span> },
-            ]}
-            rows={disagreements}
-            defaultSortKey="competitiveWeight"
-            defaultSortDir="desc"
-            maxRows={10}
-          />
-        </CardSection>
-      )}
-    </div>
-  );
-}
 
 export function CarrierDetectionCard({ artifact }: { artifact: any }) {
   const substrateSummary = artifact?.substrateSummary ?? artifact?.chewedSubstrateSummary ?? null;
@@ -2457,7 +2383,7 @@ export function AlignmentCard({ artifact }: { artifact: any }) {
 
 // ============================================================================
 // PROVENANCE COMPARISON CARD
-// Three-column side-by-side: Direct cosine (control) · Competitive §1 · Continuous §2
+// Per-claim competitive provenance (statementAllocation)
 // ============================================================================
 
 export function ProvenanceComparisonCard({ artifact }: { artifact: any }) {
@@ -2470,11 +2396,6 @@ export function ProvenanceComparisonCard({ artifact }: { artifact: any }) {
     }
     return m;
   }, [artifact]);
-
-  const cfPerClaim = useMemo(
-    () => (artifact?.continuousField?.perClaim ?? {}) as Record<string, any>,
-    [artifact],
-  );
 
   const saPerClaim = useMemo(
     () => (artifact?.statementAllocation?.perClaim ?? {}) as Record<string, any>,
@@ -2490,48 +2411,31 @@ export function ProvenanceComparisonCard({ artifact }: { artifact: any }) {
   const claimData = useMemo(() => {
     return claims.map((claim: any) => {
       const id = String(claim.id);
-      const cfData = cfPerClaim[id] ?? null;
       const saData = saPerClaim[id] ?? null;
 
-      const field: any[] = Array.isArray(cfData?.field) ? cfData.field : [];
       const compRows: any[] = Array.isArray(saData?.directStatementProvenance)
         ? saData.directStatementProvenance
         : [];
 
-      // Col 1 — Direct: rank all statements by raw cosine sim
-      const directRows = [...field]
-        .sort((a, b) => (b.sim_claim ?? 0) - (a.sim_claim ?? 0))
-        .slice(0, TOP_N);
-
-      // Col 2 — Competitive §1: statements that won cross-claim competition, ranked by weight
       const competitiveRows = [...compRows]
         .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
-        .slice(0, TOP_N);
-
-      // Col 3 — Continuous §2: all statements ranked by z_claim + z_core
-      const continuousRows = [...field]
-        .sort((a, b) => (b.evidenceScore ?? 0) - (a.evidenceScore ?? 0))
         .slice(0, TOP_N);
 
       return {
         id,
         label: String(claim.label ?? id),
-        totalStatements: field.length,
         competitiveCount: compRows.length,
-        directRows,
         competitiveRows,
-        continuousRows,
       };
     });
-  }, [claims, cfPerClaim, saPerClaim]);
+  }, [claims, saPerClaim]);
 
-  const hasCF = Object.keys(cfPerClaim).length > 0;
   const hasSA = Object.keys(saPerClaim).length > 0;
 
-  if (!hasCF && !hasSA) {
+  if (!hasSA) {
     return (
       <div className="text-xs text-text-muted italic py-4">
-        No comparison data available. Run the pipeline to generate statement allocation and continuous field data.
+        No comparison data available. Run the pipeline to generate statement allocation data.
       </div>
     );
   }
@@ -2543,23 +2447,7 @@ export function ProvenanceComparisonCard({ artifact }: { artifact: any }) {
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
-        <span className="text-[9px] text-text-muted">provenance method comparison</span>
-      </div>
-
-      {/* Column legend */}
-      <div className="grid grid-cols-3 gap-1.5 text-[9px]">
-        <div className="bg-slate-500/10 border border-slate-500/20 rounded p-1.5">
-          <div className="font-semibold text-slate-300 mb-0.5">Direct (control)</div>
-          <div className="text-text-muted">Raw cos(statement, claim). No threshold. All statements ranked by similarity.</div>
-        </div>
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded p-1.5">
-          <div className="font-semibold text-blue-300 mb-0.5">Competitive §1</div>
-          <div className="text-text-muted">Statements above μ+σ in cross-claim competition, filtered by supporters. Ranked by weight w(S,C).</div>
-        </div>
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-1.5">
-          <div className="font-semibold text-emerald-300 mb-0.5">Continuous §2</div>
-          <div className="text-text-muted">All statements. Ranked by evidenceScore = z_claim + z_core (within-claim z-score, no threshold).</div>
-        </div>
+        <span className="text-[9px] text-text-muted">competitive provenance per claim</span>
       </div>
 
       {/* Claim accordion */}
@@ -2574,8 +2462,6 @@ export function ProvenanceComparisonCard({ artifact }: { artifact: any }) {
               <span className="text-[11px] font-medium text-text-primary truncate flex-1 mr-2">{cd.label}</span>
               <div className="flex items-center gap-2 flex-none text-[9px] text-text-muted">
                 <span className="text-blue-400">{cd.competitiveCount} comp</span>
-                <span>·</span>
-                <span>{cd.totalStatements} total</span>
                 <svg
                   className={clsx("w-3 h-3 transition-transform ml-1", expandedId === cd.id && "rotate-180")}
                   fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -2586,72 +2472,25 @@ export function ProvenanceComparisonCard({ artifact }: { artifact: any }) {
             </button>
 
             {expandedId === cd.id && (
-              <div className="grid grid-cols-3 divide-x divide-white/5 bg-black/10">
-                {/* Col 1: Direct */}
-                <div className="p-2.5 space-y-1.5">
-                  <div className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Direct — top {cd.directRows.length}</div>
-                  {cd.directRows.length === 0 ? (
-                    <div className="text-[9px] text-text-muted italic">No field data</div>
-                  ) : (
-                    cd.directRows.map((row: any) => {
-                      const text = stmtTextMap.get(row.statementId) ?? row.statementId;
-                      return (
-                        <div key={row.statementId} className="flex items-start gap-1.5">
-                          <span className="font-mono text-[9px] text-slate-400 flex-none w-10 text-right leading-snug pt-px">
-                            {(row.sim_claim ?? 0).toFixed(3)}
-                          </span>
-                          <span className="text-[9px] text-text-secondary leading-snug" title={text}>
-                            {trunc(text)}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Col 2: Competitive */}
-                <div className="p-2.5 space-y-1.5">
-                  <div className="text-[9px] font-semibold text-blue-400 uppercase tracking-wide mb-0.5">Competitive — {cd.competitiveCount} assigned</div>
-                  {cd.competitiveRows.length === 0 ? (
-                    <div className="text-[9px] text-text-muted italic">No statements passed threshold</div>
-                  ) : (
-                    cd.competitiveRows.map((row: any) => {
-                      const text = stmtTextMap.get(row.statementId) ?? row.statementId;
-                      return (
-                        <div key={row.statementId} className="flex items-start gap-1.5">
-                          <span className="font-mono text-[9px] text-blue-400 flex-none w-10 text-right leading-snug pt-px">
-                            {(row.weight ?? 0).toFixed(3)}
-                          </span>
-                          <span className="text-[9px] text-text-secondary leading-snug" title={text}>
-                            {trunc(text)}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Col 3: Continuous */}
-                <div className="p-2.5 space-y-1.5">
-                  <div className="text-[9px] font-semibold text-emerald-400 uppercase tracking-wide mb-0.5">Continuous — top {cd.continuousRows.length}</div>
-                  {cd.continuousRows.length === 0 ? (
-                    <div className="text-[9px] text-text-muted italic">No field data</div>
-                  ) : (
-                    cd.continuousRows.map((row: any) => {
-                      const text = stmtTextMap.get(row.statementId) ?? row.statementId;
-                      return (
-                        <div key={row.statementId} className="flex items-start gap-1.5">
-                          <span className="font-mono text-[9px] text-emerald-400 flex-none w-10 text-right leading-snug pt-px">
-                            {(row.evidenceScore ?? 0).toFixed(2)}
-                          </span>
-                          <span className="text-[9px] text-text-secondary leading-snug" title={text}>
-                            {trunc(text)}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+              <div className="bg-black/10 p-2.5 space-y-1.5">
+                <div className="text-[9px] font-semibold text-blue-400 uppercase tracking-wide mb-0.5">Competitive — {cd.competitiveCount} assigned</div>
+                {cd.competitiveRows.length === 0 ? (
+                  <div className="text-[9px] text-text-muted italic">No statements passed threshold</div>
+                ) : (
+                  cd.competitiveRows.map((row: any) => {
+                    const text = stmtTextMap.get(row.statementId) ?? row.statementId;
+                    return (
+                      <div key={row.statementId} className="flex items-start gap-1.5">
+                        <span className="font-mono text-[9px] text-blue-400 flex-none w-10 text-right leading-snug pt-px">
+                          {(row.weight ?? 0).toFixed(3)}
+                        </span>
+                        <span className="text-[9px] text-text-secondary leading-snug" title={text}>
+                          {trunc(text)}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>

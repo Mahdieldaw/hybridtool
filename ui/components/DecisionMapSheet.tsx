@@ -608,30 +608,21 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       return ser(artifact?.geometry?.query);
     case 'competitive-provenance':
       return ser({ claimProvenance: artifact?.claimProvenance, statementAllocation: artifact?.statementAllocation });
-    case 'continuous-field':
-      return ser(artifact?.continuousField);
     case 'provenance-comparison': {
-      // Mirrors ProvenanceComparisonCard: top-10 per column per claim
-      const claims = safeArr(artifact?.semantic?.claims);
-      const cfPerClaim: Record<string, any> = artifact?.continuousField?.perClaim ?? {};
       const saPerClaim: Record<string, any> = artifact?.statementAllocation?.perClaim ?? {};
       const stmtText = new Map<string, string>();
       for (const s of safeArr(artifact?.shadow?.statements)) {
         stmtText.set(String(s.id), String(s.text ?? ''));
       }
       const TOP_N = 10;
+      const claims = safeArr(artifact?.semantic?.claims);
       return ser(claims.map((claim: any) => {
         const id = String(claim.id);
-        const field: any[] = safeArr(cfPerClaim[id]?.field);
         const compRows: any[] = safeArr(saPerClaim[id]?.directStatementProvenance);
         return {
           id, label: String(claim.label ?? id),
-          direct: [...field].sort((a, b) => (b.sim_claim ?? 0) - (a.sim_claim ?? 0)).slice(0, TOP_N)
-            .map((r: any) => ({ statementId: r.statementId, sim: r.sim_claim, text: stmtText.get(String(r.statementId)) ?? r.statementId })),
           competitive: [...compRows].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, TOP_N)
             .map((r: any) => ({ statementId: r.statementId, weight: r.weight, text: stmtText.get(String(r.statementId)) ?? r.statementId })),
-          continuous: [...field].sort((a, b) => (b.evidenceScore ?? 0) - (a.evidenceScore ?? 0)).slice(0, TOP_N)
-            .map((r: any) => ({ statementId: r.statementId, evidenceScore: r.evidenceScore, text: stmtText.get(String(r.statementId)) ?? r.statementId })),
         };
       }));
     }
