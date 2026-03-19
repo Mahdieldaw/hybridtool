@@ -3,7 +3,7 @@ import type { ProviderResponse, UserTurn, ProviderKey } from "../../shared/contr
 import type { AiTurnWithUI } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 import { DEFAULT_THREAD } from "../../shared/messaging";
-import { normalizeProviderId } from "./provider-id-mapper";
+
 
 /**
  * Normalize a response value to ProviderResponse[]

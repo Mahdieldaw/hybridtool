@@ -31,7 +31,7 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     style
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 70);
+    const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 55);
     const [isDragging, setIsDragging] = useState(false);
 
     // Use controlled ratio if provided, otherwise internal

@@ -49,13 +49,11 @@ The mechanism is distribution-relative rather than threshold-based. A statement 
 
 Once provenance is reconstructed, the blast surface scores each claim by the structural damage caused if that claim were removed. This is pure L1 math — cosine similarities and set membership on provenance outputs, no semantic interpretation.
 
-**Statement Twin Map (computed first).** Before per-claim scoring begins, the blast surface runs a corpus-wide twin adjacency computation. For every statement in the corpus, the map records its reciprocal best-match twin if one exists. The algorithm is the same one Layer B applies to exclusive statements — forward best-match from the cross-claim candidate pool, distribution-relative threshold gate (μ+2σ of that statement's cross-claim similarity distribution), reciprocal backward pass — extended in two ways: coverage spans all statements, not just exclusives; and the candidate pool includes unclassified statements (not owned by any claim) alongside other claims' canonical sets. Survival filtering does not happen here. The map records all geometric twins against the full intact corpus; which of those twins survives a given pruning decision is determined at triage time.
+**Statement Twin Map (computed first).** Before per-claim scoring begins, the blast surface runs a corpus-wide twin adjacency computation. For every statement in the corpus, the map records its reciprocal best-match twin if one exists. The algorithm: forward best-match from the cross-claim candidate pool, distribution-relative threshold gate (μ+2σ of that statement's cross-claim similarity distribution), reciprocal backward pass. Coverage spans all statements, not just exclusives; the candidate pool includes unclassified statements (not owned by any claim) alongside other claims' canonical sets. Survival filtering does not happen here. The map records all geometric twins against the full intact corpus; which of those twins survives a given pruning decision is determined at triage time.
 
-Computing the twin map before the per-claim loop is what lets the risk vector and triage engine read from the same source. Previously, Layer B classified orphans using only its own exclusive set as the backward-pass pool, while the triage engine searched a wider pool at pruning time. The two computations disagreed on which statements had twins. Promoting the twin map to front-line classification — and sourcing both risk vector and triage from it — eliminates that disagreement entirely.
+Computing the twin map before the per-claim loop is what lets the risk vector and triage engine read from the same source. Both the per-claim scoring (type classification, vernal composite, risk vector) and the pruning-time triage engine read twin status from this single map — no separate algorithm, no threshold divergence.
 
-**Layer B — Exclusive Vulnerability (Diagnostics).** Computed alongside the twin map, unchanged, for the blast score dashboard. For each claim, it identifies exclusive statements, applies the dual-gate twin detection to them, and classifies orphans and carriers. Because Layer B's algorithm is a strict subset of the twin map's — same gates, same pool structure, narrower scope — its results for any exclusive statement should agree with the twin map. This agreement is a validation check during development; the two should never diverge.
-
-**Layer C — Evidence Mass.** The canonical statement count, plus a three-way type split now sourced from the twin map. Type 1: non-exclusive statements shared with other claims — protected regardless of what happens to this claim. Type 2: exclusive statements with a twin in the corpus — removable on prune, because the idea has a carrier elsewhere. Type 3: exclusive statements with no twin anywhere — skeletonized on prune, because no carrier exists. The three counts sum to canonical count and sit on a 2D simplex. Two derived ratios surface the claim's evidence character: `isolation` = (Type 2 + Type 3) / canonical (fraction of exclusive evidence); `orphanCharacter` = Type 3 / (Type 2 + Type 3) (within exclusives, fraction that are true orphans).
+**Layer C — Evidence Mass.** The canonical statement count, plus a three-way type split sourced from the twin map. Type 1: non-exclusive statements shared with other claims — protected regardless of what happens to this claim. Type 2: exclusive statements with a twin in the corpus — removable on prune, because the idea has a carrier elsewhere. Type 3: exclusive statements with no twin anywhere — skeletonized on prune, because no carrier exists. The three counts sum to canonical count and sit on a 2D simplex. Two derived ratios surface the claim's evidence character: `isolation` = (Type 2 + Type 3) / canonical (fraction of exclusive evidence); `orphanCharacter` = Type 3 / (Type 2 + Type 3) (within exclusives, fraction that are true orphans).
 
 **Layer D — Cascade Echo.** Measures how much of other claims' evidence would be destabilized if this claim were pruned. For each other claim that shares canonical statements with the target, calculates the overlap fraction weighted by the other claim's exclusivity ratio. High cascade echo means the claim acts as a structural anchor for other ideas.
 
@@ -67,7 +65,7 @@ queryTilt = lambda × destroyedQueryMean
 compositeScore = structuralMass + queryTilt
 ```
 
-`cascadeExposure` is the vernal-specific cross-claim propagation: for each other claim that shares canonical statements, sums (overlapFraction × otherClaim's orphanCount). `destroyedQueryMean` is the mean cosine similarity between orphaned statements and the query embedding (normalized to [0,1]). lambda = structuralStep × adaptiveAccelerator, where structuralStep = σ_M and adaptiveAccelerator = min(1.0, σ_Q / 0.25). `orphanCount` is now sourced from the twin map's Type 3 classification rather than Layer B directly — same statements, authoritative source.
+`cascadeExposure` is the vernal-specific cross-claim propagation: for each other claim that shares canonical statements, sums (overlapFraction × otherClaim's orphanCount). `destroyedQueryMean` is the mean cosine similarity between orphaned statements and the query embedding (normalized to [0,1]). lambda = structuralStep × adaptiveAccelerator, where structuralStep = σ_M and adaptiveAccelerator = min(1.0, σ_Q / 0.25). `orphanCount` is sourced from the twin map's Type 3 classification.
 
 Caveat: the equation adds statement-counts to a scaled cosine similarity. The 0.25 denominator in the adaptive accelerator is a hardcoded assumption about the typical spread of query-relevance scores. If actual σ_Q is consistently much smaller than 0.25, queryTilt effectively vanishes and the composite reduces to pure structural mass. This should be instrumented across runs to verify the balance matches intent.
 
@@ -91,7 +89,7 @@ Caveat: the equation adds statement-counts to a scaled cosine similarity. The 0.
 - **2b (conditional)** — the twin belongs to another claim and has multiple parents. Safe under the current prune, but contingent: if that host claim is pruned in a later decision and the twin loses its other parents, the carrier disappears.
 - **2c (fragile)** — the twin is exclusive to its host claim. If that host claim is pruned in any future decision, the twin disappears and what was logged as a removal becomes an irrecoverable loss. A claim with ten Type 2 statements all rated 2c is structurally far more precarious than its deletion count suggests.
 
-The `riskVector` is an additive optional field on `BlastSurfaceClaimScore`. The vernal composite, Layer B, Layer D, and all existing consumers are unchanged.
+The `riskVector` is an additive optional field on `BlastSurfaceClaimScore`. The vernal composite, Layer D, and all existing consumers are unchanged.
   
 
 --- 
@@ -110,21 +108,19 @@ Before any LLM generates questions, the geometry classifies claims into three ca
 
 The diagnostic UI independently runs cross-pool proximity across all claim pairs (not just mapper-labeled ones) to surface the full agreement and tension landscape. This all-pairs output is for instrumentation only — it does not feed into routing decisions or question generation.
 
-**Isolate candidates.** Claims that meet three criteria simultaneously: (1) sole-source — supported by exactly one model; (2) high orphan ratio — a distribution-relative proportion of their exclusive statements have no twins in the corpus; (3) query-distant — the claim's centroid is far from the query embedding (below μ−σ of the claim-query similarity distribution), meaning it introduces concepts the user didn't mention. This is the golden-thread signature: irreplaceable evidence from a single model, bringing in something from left field. Worth protecting, but must check for unsurfaced preconditions. 
+**Damage outliers.** Non-consensus claims (supportRatio ≤ 0.5) not already in a conflict cluster, whose totalDamage exceeds μ+σ of the damage distribution across all claims. TotalDamage (from the risk vector) measures the actual corpus loss a prune would cause — not just how many statements break, but how lossy the surviving twins are and how much context skeletonization destroys. This captures sole-source golden threads, minority positions with irreplaceable evidence, and any claim whose removal would disproportionately degrade the corpus — regardless of model count or query distance. Consensus claims (supportRatio > 0.5) are never routed as outliers; their evidence is well-distributed and survives pruning without user intervention.
 
-**Passthrough.** Everything else — consensus claims and structurally redundant sole-source claims — passes through without touching the survey mapper. Silence is architectural, not prompt-engineered. 
+**Passthrough.** Everything else — consensus claims and non-consensus claims below the damage threshold — passes through without touching the survey mapper. Silence is architectural, not prompt-engineered.
 
-If convergence is high and no conflicts or isolates are detected, the survey is skipped entirely. No LLM call is made. 
-
-Open question: The skip logic does not currently check whether minority-supported claims (those below the 50% consensus threshold but not sole-source) represent structurally interesting alternatives to the consensus. A claim supported by 2 of 6 models with low orphan ratio falls through as passthrough without being questioned. The most valuable gate may be precisely between the consensus recommendation and a minority position — this routing gap is under review. 
+If no conflicts validate and no damage outliers are detected, the survey is skipped entirely. No LLM call is made. The skip condition is purely structural — it does not require a convergence ratio threshold.
 
 ### Routed Prompts 
 
-The survey mapper receives targeted tasks matched to the structural category, not an open-ended landscape to evaluate. 
+The survey mapper receives only the routed claims — those in validated conflict clusters or identified as damage outliers — not the full claim set. Each routed claim gets a targeted task matched to its structural category.
 
 **Fork articulation** — for conflict clusters. The geometry has already confirmed these claims occupy genuinely different positions. The mapper's job is narrow: translate the geometrically-confirmed tension into a single natural-language yes/no question that distinguishes the branches for this user. It asks about the observable real-world condition that makes one branch applicable and the other inapplicable. 
 
-**Misleadingness test** — for isolate candidates. The mapper runs a two-sentence filter: (1) "This claim would mislead the user if they [describe wasted action] because it silently requires that they [state condition]." (2) "The user can verify this with: '[yes/no question]?''' If sentence 1 cannot be written truthfully from what the claim actually says, the claim passes without a gate. This tests for false affordances — the illusion of a door where there's a wall. 
+**Misleadingness test** — for damage outliers. The mapper runs a two-sentence filter: (1) "This claim would mislead the user if they [describe wasted action] because it silently requires that they [state condition]." (2) "The user can verify this with: '[yes/no question]?''' If sentence 1 cannot be written truthfully from what the claim actually says, the claim passes without a gate. This tests for false affordances — the illusion of a door where there's a wall. 
 
 The completion trap — the LLM's pathological need to generate a question for every claim it sees — is broken by design. The LLM never sees "assess all claims." It sees one pre-selected structural feature and writes one targeted response. Most claims never reach the LLM at all. 
 
@@ -136,7 +132,7 @@ Each binary answer is one bit of user information entering the system. Each bit 
 The user answers the gate questions. Claims that fail are pruned. The triage engine determines the fate of every statement as a pure set operation on the blast surface's pre-computed twin map — no embedding computation at traversal time.**Survival pool.** Any statement with at least one surviving parent claim, plus any unclassified statement (not owned by any claim). Unclassified statements are never stranded — they were never conditional on any claim's survival.**Fates.** Every statement receives exactly one:
  - `PROTECTED` — in the survival pool. Survives as full text.
  - `REMOVE` — stranded, twin map contains a surviving twin in the survival pool. Geometry confirms the idea has a living carrier; original text is removed.
- - `SKELETONIZE` — stranded, no surviving twin. Stripped to noun-only skeleton via compromise.js part-of-speech extraction. Entities survive; relational framing does not.If `blastSurface.twinMap` is missing (older cached artifacts), all stranded statements fall back to SKELETONIZE. Conservative — never removes without twin evidence. Logs warning.**CarrierDetector deleted.** The previous triage path used Layer B for exclusives and fell back to CarrierDetector.ts for everything else — a separate algorithm with different thresholds. The twin map extends Layer B's algorithm to all statements, making CarrierDetector redundant. The cross-model paraphrase pass (0.85 cosine + Jaccard) is absorbed into the twin map's reciprocal best-match. `residualFallbackCount` is deprecated — no fallback path exists.Performance: triage drops from O(n × m) embedding computations at traversal time to O(n) map lookups. All geometric work is pre-computed at blast surface time, which runs once per pipeline execution.
+ - `SKELETONIZE` — stranded, no surviving twin. Stripped to noun-only skeleton via compromise.js part-of-speech extraction. Entities survive; relational framing does not.If `blastSurface.twinMap` is missing (older cached artifacts), all stranded statements fall back to SKELETONIZE. Conservative — never removes without twin evidence. Logs warning.**No separate triage algorithm.** The twin map covers all statements (not just exclusives), so the triage engine is a pure map-lookup. The cross-model paraphrase pass (0.85 cosine + Jaccard) is absorbed into the twin map's reciprocal best-match. No fallback path exists.Performance: triage drops from O(n × m) embedding computations at traversal time to O(n) map lookups. All geometric work is pre-computed at blast surface time, which runs once per pipeline execution.
   
 
 --- 
@@ -181,11 +177,11 @@ Provenance Reconstruction → competitive + claim-centric + mixed-method merge
 
     ↓
 
-Blast Surface → risk vector + statement twin map; Layer B: exclusive twins → vernal composite
+Blast Surface → statement twin map, risk vector, vernal composite
 
     ↓
 
-Structural Routing → conflict clusters | isolate candidates | passthrough
+Structural Routing → conflict clusters | damage outliers | passthrough
 
     ↓
 
@@ -211,19 +207,35 @@ User-constrained output
 
 ---
  
- ## Stored Primitives
- 
- The pipeline stores four categories of data. Everything else is derived at view-time from these primitives. If you change a derivation function, reload, and navigate to any historical turn, the new function's output appears without recompute.
- 
- **Batch text responses** — raw text from each model, keyed by `(turn_id, model_id)`, frozen on creation, never invalidated. Downstream: shadow extraction.
- 
+ ## Persistence Model
+
+ The pipeline persists only what cannot be re-derived, organized into three tiers. The CognitiveArtifact — the full navigable structure the UI renders — is **never stored**. It is rebuilt on demand from the tiers below by `buildArtifactForProvider()`, a single code path shared by the live pipeline, background regeneration, and traversal continuation. If you change a derivation function, reload, and navigate to any historical turn, the new function's output appears without re-running any model.
+
+ ### Tier 1 — Per-turn immutable
+
+ **Batch text responses** — raw text from each model, keyed by `(turn_id, model_id)`, frozen on creation, never invalidated. Downstream: shadow extraction, synthesis.
+
  **Embeddings** — Float32Array per statement and paragraph, keyed by `(turn_id, embedding_model_id)`. Invalidated on embedding model change. Downstream: every geometric computation.
- 
- **Mapper output** — raw mapper text parsed into claims and edges, keyed by `(turn_id, mapper_model_id)`. Invalidated on mapper model change. Downstream: claim centroids, provenance, synthesis.
- 
+
+ Shadow data (statements and paragraphs) is **not** independently persisted — it is deterministically re-extracted from batch text on every rebuild. The extraction is mechanical NLP (compromise.js), fast, and produces identical output from the same input.
+
+ ### Tier 2 — Per-provider mutable
+
+ **Mapper output** — raw mapper text, keyed by `(turn_id, mapper_model_id)`. Invalidated on mapper model change. Downstream: claim centroids, provenance, synthesis.
+
  **Claim embeddings** — Float32Array per claim centroid, keyed by `(turn_id, mapper_provider_id)`. Invalidated on mapper model change. This is the L2 bridge: generated once by `generateClaimEmbeddings`, consumed by provenance reconstruction and all downstream L1 computations.
- 
- These four primitives are sufficient to derive the complete geometry and provenance layers. Geometry is never recomputed — it derives at view-time from cached embeddings. Mapping reruns on model change or explicit request. Synthesis reruns on synthesis model change or explicit request.
+
+ **Survey gates** — LLM-produced gate questions and rationale, stored on the mapping `ProviderResponse` as `surveyGates` and `surveyRationale`. These are the only LLM outputs from the survey mapper that must survive across sessions — the structural routing and damage scores that selected them are re-derived from Tier 1 data.
+
+ **Traversal state** — user gate answers and pruning decisions, stored on the `SingularityPhase` of the turn record and on the mapping `ProviderResponse`. Accumulated across traversal continuation exchanges.
+
+ ### Tier 3 — Ephemeral (never persisted)
+
+ **CognitiveArtifact** — the full artifact including geometry, provenance, blast surface, traversal graph, and forcing points. Built by `buildArtifactForProvider()` from Tier 1 + Tier 2 inputs. Held in memory by the UI (Jotai atom) for the active session. On reload or tab restore, rebuilt from persisted tiers — typically in under 2 seconds.
+
+ ### Background persistence
+
+ The pipeline runs in a service worker. If the user navigates away or closes the tab while a turn is in flight, the service worker completes execution and persists all Tier 1 and Tier 2 data. Provider thread contexts are awaited (not fire-and-forget) at each stage boundary, ensuring the next turn's continuation starts from the correct cursor regardless of whether the previous turn's UI was still open when it finished.
 
 ## Key Architectural Principles 
 
@@ -248,7 +260,7 @@ User-constrained output
 
 ## The complete information flow: 
 
-One sentence of user intent → fanned to N models → hundreds of independent statements → embedded into a measured geometric landscape → mapped into claims with provenance reconstructed geometrically → risk vector measured per claim, statement twin map pre-computed across full corpus → claims routed by geometry into conflicts, isolates, or passthrough → targeted questions generated only for structurally flagged claims → user collapses the space through binary decisions → stranded evidence triaged against pre-computed twin map: removed where twins survive, skeletonized where they don't → synthesizer reads the surviving corpus blind → output reflects what the user's reality forces to be true. 
+One sentence of user intent → fanned to N models → hundreds of independent statements → embedded into a measured geometric landscape → mapped into claims with provenance reconstructed geometrically → risk vector measured per claim, statement twin map pre-computed across full corpus → claims routed by geometry into conflicts, damage outliers, or passthrough → targeted questions generated only for structurally flagged claims → user collapses the space through binary decisions → stranded evidence triaged against pre-computed twin map: removed where twins survive, skeletonized where they don't → synthesizer reads the surviving corpus blind → output reflects what the user's reality forces to be true. 
 
 The pipeline is the codec, not the codebook. The corpus didn't exist before the user asked. The landscape is measured in real time. What's pre-built is the measurement apparatus — the sequence of distributional methods, competitive assignments, global-floor filtering, twin detection gates, and skeletonization rules that extract structural truth from noisy measurement. That apparatus works on any corpus the same way Shannon's error-correcting codes work on any message: not by knowing the content, but by knowing the structure of the noise. 
 

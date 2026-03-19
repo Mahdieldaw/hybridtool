@@ -1195,7 +1195,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           // Tier 3: artifact is ephemeral — always rebuild on demand
           let mappingArtifact = null;
-          if (!mappingArtifact && mappingResp?.text) {
+          if (mappingResp?.text) {
             try {
               const { buildArtifactForProvider } = await import('./core/execution/deterministicPipeline');
               const geoRecord = await sm.loadEmbeddings(key);

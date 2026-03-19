@@ -7,7 +7,6 @@ import { useAtomValue } from "jotai";
 import {
     providerEffectiveStateFamily,
     activeRecomputeStateAtom,
-    chatInputHeightAtom,
     turnIdsAtom,
     turnsMapAtom,
     workflowProgressForTurnFamily,
@@ -119,8 +118,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
         return { status, text, hasText, isStreaming: isGenerating, isError, artifacts, errorMsg, requiresReauth, retryable, stage };
     }, [latestResponse, shownProviderId, workflowProgress, providerErrors]);
-
-    const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Branch send handler
     const handleBranchSend = useCallback(() => {
@@ -385,7 +382,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                 ============================================ */}
             <div
                 className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-auto custom-scrollbar relative z-10"
-                style={{ paddingBottom: (chatInputHeight || 80) + 24 }}
+                style={{ paddingBottom: 24 }}
             >
                 <div className="p-4 w-fit min-w-full">
                     {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && (

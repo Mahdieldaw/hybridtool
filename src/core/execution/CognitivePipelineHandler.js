@@ -152,7 +152,7 @@ export class CognitivePipelineHandler {
             userTurnId: context.canonicalUserTurnId,
             aiTurnId: aiTurnId,
             turn: {
-              user: { id: context.canonicalUserTurnId, sessionId: context.sessionId },
+              user: { id: context.canonicalUserTurnId, type: "user", text: userMessageForSingularity || "", createdAt: Date.now(), sessionId: context.sessionId },
               ai: aiTurnForMessage
             }
           });
@@ -655,8 +655,8 @@ export class CognitivePipelineHandler {
             const { unpackEmbeddingMap } = await import('../../persistence/embeddingCodec');
 
             const geoRecord = await this.sessionManager.loadEmbeddings(aiTurnId);
-            if (geoRecord?.statementEmbeddings && geoRecord?.paragraphEmbeddings) {
-              const dims = geoRecord.meta?.dimensions;
+            if (geoRecord?.statementEmbeddings && geoRecord?.paragraphEmbeddings && geoRecord?.meta) {
+              const dims = geoRecord.meta.dimensions;
               const statementEmbeddings = unpackEmbeddingMap(
                 geoRecord.statementEmbeddings, geoRecord.meta.statementIndex, dims);
               const paragraphEmbeddings = unpackEmbeddingMap(
@@ -734,10 +734,6 @@ export class CognitivePipelineHandler {
             shell.query = originalPrompt;
             mappingArtifact = buildCognitiveArtifact(shell, null);
           }
-        }
-
-        if (!mappingArtifact) {
-          throw new Error(`Mapping artifact missing for turn ${aiTurnId}.`);
         }
 
         if (!mappingArtifact) {

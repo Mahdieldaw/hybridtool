@@ -328,7 +328,7 @@ export async function openDatabase(): Promise<IDBDatabase> {
           const rec: MetadataRecord = {
             id: "schema_version_record",
             key: "schema_version",
-            value: 10,
+            value: SCHEMA_VERSION,
             createdAt: now,
             updatedAt: now,
           };

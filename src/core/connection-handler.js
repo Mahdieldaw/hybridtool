@@ -150,12 +150,9 @@ export class ConnectionHandler {
       const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
 
       const resps = await adapter.getResponsesByTurnId(aiTurnId);
-      const buckets = {
-        batchResponses: {},
-        singularityResponses: {},
-      };
+      const batchResponses = {};
       for (const r of resps || []) {
-        if (!r) continue;
+        if (!r || r.responseType !== "batch") continue;
         const entry = {
           providerId: r.providerId,
           text: r.text || "",
@@ -165,42 +162,25 @@ export class ConnectionHandler {
           meta: r.meta || {},
           responseIndex: r.responseIndex ?? 0,
         };
-        if (r.responseType === "batch") {
-          (buckets.batchResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "singularity") {
-          (buckets.singularityResponses[r.providerId] ||= []).push(entry);
-        }
+        (batchResponses[r.providerId] ||= []).push(entry);
       }
 
-      for (const group of Object.values(buckets)) {
-        for (const pid of Object.keys(group)) {
-          group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-        }
+      for (const pid of Object.keys(batchResponses)) {
+        batchResponses[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
       }
 
-      let inferredSingularityOutput = aiTurn.singularityOutput;
-      if (!inferredSingularityOutput) {
-        try {
-          const firstProviderId = Object.keys(buckets.singularityResponses || {})[0];
-          const arr = firstProviderId ? buckets.singularityResponses[firstProviderId] : null;
-          const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
-          if (last?.meta?.singularityOutput) inferredSingularityOutput = last.meta.singularityOutput;
-        } catch (_) { }
-      }
-
-      // Require at least some responses to finalize
+      // Require at least some data to finalize
       const hasAny =
-        Object.keys(buckets.batchResponses).length > 0 ||
-        Object.keys(buckets.singularityResponses).length > 0 ||
+        Object.keys(batchResponses).length > 0 ||
         !!aiTurn.batch ||
         !!aiTurn.mapping ||
         !!aiTurn.singularity;
       if (!hasAny) return;
 
-      const batchPhase = Object.keys(buckets.batchResponses || {}).length > 0
+      const batchPhase = Object.keys(batchResponses || {}).length > 0
         ? {
           responses: Object.fromEntries(
-            Object.entries(buckets.batchResponses).map(([pid, arr]) => {
+            Object.entries(batchResponses).map(([pid, arr]) => {
               const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
               return [
                 pid,
@@ -216,21 +196,9 @@ export class ConnectionHandler {
         }
         : undefined;
 
-      const singularityPhase = inferredSingularityOutput
-        ? {
-          prompt: inferredSingularityOutput.prompt || "",
-          output: inferredSingularityOutput.output || inferredSingularityOutput.text || "",
-          traversalState: aiTurn.traversalState,
-          timestamp:
-            Number(inferredSingularityOutput.timestamp) ||
-            Number(aiTurn?.singularity?.timestamp) ||
-            Date.now(),
-        }
-        : undefined;
-
       const finalBatch = aiTurn.batch || batchPhase;
       const finalMapping = aiTurn.mapping;
-      const finalSingularity = aiTurn.singularity || singularityPhase;
+      const finalSingularity = aiTurn.singularity;
 
 
 

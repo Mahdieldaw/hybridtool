@@ -13,6 +13,7 @@ interface SingularityOutputViewProps {
     singularityState: SingularityOutputState;
     onRecompute: (options?: any) => void;
     isLoading?: boolean;
+    copyAllText?: string;
 }
 
 interface SingularityError {
@@ -54,7 +55,8 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     aiTurn,
     singularityState,
     onRecompute,
-    isLoading
+    isLoading,
+    copyAllText
 }) => {
     const [showRegenMenu, setShowRegenMenu] = useState(false);
     const { output, isError, error, providerId, requestedProviderId } = singularityState;
@@ -236,6 +238,14 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                             label="Copy response"
                             variant="icon"
                         />
+                        {copyAllText && (
+                            <CopyButton
+                                text={copyAllText}
+                                label="Copy all outputs (singularity + mapper + batch)"
+                                variant="pill"
+                                buttonText="Copy All"
+                            />
+                        )}
                         {/* Re-run current (Refresher) - Optional but useful since main click doesn't re-run anymore */}
                         <button
                             onClick={() => {

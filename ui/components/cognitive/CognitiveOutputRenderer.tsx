@@ -122,6 +122,56 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         return String(singularityState.output?.text || "").trim().length > 0;
     }, [singularityState.output]);
 
+    // Build "Copy All" text: Singularity → Mapper → Batch (same format as batch copy)
+    const copyAllText = useMemo(() => {
+        const parts: string[] = [];
+
+        // 1. Singularity output
+        const singText = String(singularityState.output?.text || "").trim();
+        if (singText) {
+            const singProvider = singularityState.output?.providerId
+                ? LLM_PROVIDERS_CONFIG.find(p => p.id === singularityState.output?.providerId)?.name || singularityState.output?.providerId
+                : "Singularity";
+            parts.push(`**${singProvider} (Singularity)**:\n\n${singText}\n`);
+        }
+
+        // 2. Mapper output (raw text from mapping response)
+        const mapPid = effectivePid ? String(effectivePid) : null;
+        if (mapPid) {
+            const mapResponses = (aiTurn as any)?.mappingResponses;
+            if (mapResponses && typeof mapResponses === 'object') {
+                const entry = mapResponses[mapPid];
+                const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+                const last = arr.length > 0 ? arr[arr.length - 1] : null;
+                const mapText = typeof last?.text === 'string' ? last.text.trim() : '';
+                if (mapText) {
+                    const mapperName = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === mapPid)?.name || mapPid;
+                    parts.push(`**${mapperName} (Mapper)**:\n\n${mapText}\n`);
+                }
+            }
+        }
+
+        // 3. Batch outputs (same format as "Copy all council outputs")
+        const batchResponses = aiTurn.batch?.responses;
+        if (batchResponses && typeof batchResponses === 'object') {
+            const ordered = LLM_PROVIDERS_CONFIG.map(p => String(p.id));
+            const batchKeys = Object.keys(batchResponses);
+            const extras = batchKeys.filter(k => !ordered.includes(k)).sort();
+            const allKeys = [...ordered, ...extras].filter(k => !!batchResponses[k as keyof typeof batchResponses]);
+
+            for (const pid of allKeys) {
+                const resp = batchResponses[pid as keyof typeof batchResponses] as any;
+                const providerName = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid)?.name || pid;
+                const text = typeof resp?.text === 'string' ? resp.text.trim() : '';
+                if (text) {
+                    parts.push(`**${providerName}**:\n\n${text}\n`);
+                }
+            }
+        }
+
+        return parts.length > 0 ? parts.join('\n') : '';
+    }, [singularityState.output, aiTurn, effectivePid]);
+
     const [isOrbTrayExpanded, setIsOrbTrayExpanded] = useState(false);
 
     const mapperProviderId = useMemo(() => {
@@ -335,6 +385,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     singularityState={singularityState}
                     onRecompute={triggerAndSwitch}
                     isLoading={isTransitioning}
+                    copyAllText={copyAllText}
                 />
             ) : currentView === 'traverse' && canShowTraversal ? (
                 <div className="animate-in fade-in duration-500">

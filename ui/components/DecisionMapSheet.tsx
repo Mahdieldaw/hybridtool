@@ -750,6 +750,29 @@ export const DecisionMapSheet = React.memo(() => {
   const verticalSplitContainerRef = useRef<HTMLDivElement>(null);
   const [tableMode, setTableMode] = useState<'statement' | 'paragraph'>('statement');
 
+  // Scroll preservation on collapse/expand: save scrollTop before toggle, restore after render
+  const rightPanelScrollRef = useRef<number>(0);
+  const rightPanelScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const pendingScrollRestoreRef = useRef(false);
+
+  const saveRightPanelScroll = useCallback(() => {
+    if (rightPanelScrollContainerRef.current) {
+      rightPanelScrollRef.current = rightPanelScrollContainerRef.current.scrollTop;
+    }
+  }, []);
+
+  // Restore scroll after layout changes (table/graph/cards collapse)
+  useEffect(() => {
+    if (pendingScrollRestoreRef.current) {
+      pendingScrollRestoreRef.current = false;
+      requestAnimationFrame(() => {
+        if (rightPanelScrollContainerRef.current) {
+          rightPanelScrollContainerRef.current.scrollTop = rightPanelScrollRef.current;
+        }
+      });
+    }
+  }, [isTableCollapsed, isGraphCollapsed, isCardsCollapsed]);
+
   // Reset view when switching table mode
   useEffect(() => {
     const views = tableMode === 'paragraph' ? PARAGRAPH_VIEWS : DEFAULT_VIEWS;
@@ -1282,14 +1305,19 @@ export const DecisionMapSheet = React.memo(() => {
     runMappingForAiTurn(aiTurn.id, providerId);
   }, [aiTurn, activeMappingPid, runMappingForAiTurn]);
 
+  const regenTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => regenTimersRef.current.forEach(clearTimeout), []);
+
   const handleRegenerateEmbeddings = useCallback(() => {
     if (regenState === "running") return;
+    regenTimersRef.current.forEach(clearTimeout);
+    regenTimersRef.current = [];
     setRegenState("running");
     rebuildArtifact();
-    // Rebuild is async; the atom updates when the response arrives.
+    // Rebuild is callback-based; the atom updates when the response arrives.
     // For UX feedback, transition state after a brief delay.
-    setTimeout(() => setRegenState("done"), 800);
-    setTimeout(() => setRegenState("idle"), 2800);
+    regenTimersRef.current.push(setTimeout(() => setRegenState("done"), 800));
+    regenTimersRef.current.push(setTimeout(() => setRegenState("idle"), 2800));
   }, [regenState, rebuildArtifact]);
 
   return (
@@ -1399,6 +1427,20 @@ export const DecisionMapSheet = React.memo(() => {
                     >
                       Copy Map
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const text = rawMappingText || '';
+                        if (!text) return;
+                        navigator.clipboard.writeText(text).then(() => {
+                          setToast({ id: Date.now(), message: "Raw Response Copied!", type: "success" });
+                        });
+                      }}
+                      disabled={!rawMappingText}
+                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 text-text-secondary hover:text-text-primary disabled:opacity-50"
+                    >
+                      Copy Raw
+                    </button>
                   </div>
                 </div>
                 <button
@@ -1434,7 +1476,7 @@ export const DecisionMapSheet = React.memo(() => {
                   <button
                     type="button"
                     className="text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors rounded-md px-0.5 py-1 text-xs"
-                    onClick={() => setIsGraphCollapsed(false)}
+                    onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsGraphCollapsed(false); }}
                     title="Expand graph"
                   >
                     ▶
@@ -1453,7 +1495,7 @@ export const DecisionMapSheet = React.memo(() => {
                     <button
                       type="button"
                       className="px-3 text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors text-xs border-l border-white/10"
-                      onClick={() => setIsGraphCollapsed(true)}
+                      onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsGraphCollapsed(true); }}
                       title="Collapse graph"
                     >
                       ◀
@@ -1641,7 +1683,7 @@ export const DecisionMapSheet = React.memo(() => {
                                 ? "border-brand-500/40 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20"
                                 : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
                             )}
-                            onClick={() => setIsTableCollapsed(v => !v)}
+                            onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsTableCollapsed(v => !v); }}
                             title={isTableCollapsed ? "Expand table" : "Collapse table"}
                           >
                             {isTableCollapsed ? "Expand table" : "Collapse table"}
@@ -1657,12 +1699,12 @@ export const DecisionMapSheet = React.memo(() => {
                             <button
                               type="button"
                               className="px-2 py-1 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] text-text-muted hover:text-text-primary transition-colors"
-                              onClick={() => setIsTableCollapsed(false)}
+                              onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsTableCollapsed(false); }}
                             >
                               Expand
                             </button>
                           </div>
-                          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar" ref={el => { if (isTableCollapsed) rightPanelScrollContainerRef.current = el; }}>
                             {([
                               { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
@@ -1768,7 +1810,7 @@ export const DecisionMapSheet = React.memo(() => {
                             <button
                               type="button"
                               className="absolute right-2 text-[9px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded transition-colors z-10 bg-black/20"
-                              onClick={(e) => { e.stopPropagation(); setIsCardsCollapsed(v => !v); }}
+                              onClick={(e) => { e.stopPropagation(); saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsCardsCollapsed(v => !v); }}
                               title={isCardsCollapsed ? "Expand reference shelf" : "Collapse reference shelf"}
                             >
                               {isCardsCollapsed ? '▲' : '▼'}
@@ -1782,13 +1824,13 @@ export const DecisionMapSheet = React.memo(() => {
                               <button
                                 type="button"
                                 className="text-text-muted hover:text-text-primary text-[10px] hover:underline"
-                                onClick={() => setIsCardsCollapsed(false)}
+                                onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsCardsCollapsed(false); }}
                               >
                                 Expand ▲
                               </button>
                             </div>
                           ) : (
-                            <div className="overflow-y-auto custom-scrollbar min-h-0">
+                            <div className="overflow-y-auto custom-scrollbar min-h-0" ref={el => { if (!isTableCollapsed) rightPanelScrollContainerRef.current = el; }}>
                               {([
                                 { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
@@ -1835,6 +1877,7 @@ export const DecisionMapSheet = React.memo(() => {
                       activeMappingPid={activeMappingPid}
                       artifact={mappingArtifact}
                       aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
+                      rawMappingText={rawMappingText}
                     />
                   )}
                 </div>

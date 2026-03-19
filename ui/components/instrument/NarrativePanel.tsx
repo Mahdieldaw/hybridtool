@@ -9,14 +9,16 @@ interface NarrativePanelProps {
   activeMappingPid?: string;
   artifact?: any | null;
   aiTurnId?: string | null;
+  rawMappingText?: string;
 }
 
-export function NarrativePanel({ narrativeText, activeMappingPid, artifact, aiTurnId }: NarrativePanelProps) {
+export function NarrativePanel({ narrativeText, activeMappingPid, artifact, aiTurnId, rawMappingText }: NarrativePanelProps) {
   const provider = activeMappingPid ? getProviderConfig(activeMappingPid) : undefined;
   const color = activeMappingPid ? getProviderColor(activeMappingPid) : "#8b5cf6";
   const [rawOpen, setRawOpen] = useState(false);
   const [rawJson, setRawJson] = useState<string>("");
   const [rawError, setRawError] = useState<string | null>(null);
+  const [showRawText, setShowRawText] = useState(false);
 
   const stringifyForDebug = useMemo(() => {
     return (value: any) => {
@@ -56,18 +58,43 @@ export function NarrativePanel({ narrativeText, activeMappingPid, artifact, aiTu
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Provider badge */}
+      {/* Provider badge + Raw Text toggle */}
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
         <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
         <span className="text-[12px] font-medium text-text-primary">
           {provider?.name || activeMappingPid || "Mapper"}
         </span>
         <span className="text-[11px] text-text-muted ml-1">Narrative</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            className={clsx(
+              "px-2.5 py-1 rounded-md border text-[10px] transition-colors",
+              showRawText
+                ? "border-brand-500/40 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20"
+                : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
+            )}
+            onClick={() => setShowRawText(v => !v)}
+            title={showRawText ? "Show narrative" : "Show mapper's full raw response"}
+          >
+            {showRawText ? "Narrative" : "Raw Text"}
+          </button>
+        </div>
       </div>
 
-      {/* Narrative content */}
+      {/* Narrative content OR Raw mapper text */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4">
-        {narrativeText ? (
+        {showRawText ? (
+          <div className="prose prose-sm prose-invert max-w-none">
+            {rawMappingText ? (
+              <MarkdownDisplay content={rawMappingText} />
+            ) : (
+              <div className="text-text-muted text-sm py-4">
+                No raw mapper text available.
+              </div>
+            )}
+          </div>
+        ) : narrativeText ? (
           <div className="prose prose-sm prose-invert max-w-none">
             <MarkdownDisplay content={narrativeText} />
           </div>

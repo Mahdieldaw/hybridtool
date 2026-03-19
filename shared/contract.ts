@@ -1845,13 +1845,6 @@ export interface SingularityPhase {
   chewedSubstrateSummary?: ChewedSubstrateSummary | null;
 }
 
-export interface ShadowData {
-  statements: PipelineShadowStatement[];
-  paragraphs: PipelineShadowParagraph[];
-  audit?: ShadowAudit;
-  delta?: PipelineShadowDeltaResult | null;
-}
-
 // Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
 export interface AiTurn {
   id: string;
@@ -1867,11 +1860,11 @@ export interface AiTurn {
   mapping?: MappingPhase;
   singularity?: SingularityPhase;
 
-  /** Tier 1: Per-turn immutable shadow data (replaces artifact nesting) */
-  shadow?: ShadowData;
-
-  /** Tier 1: Per-turn traversal state (persisted across sessions) */
-  traversalState?: any;
+  // Shadow data is NOT stored on the turn — it is re-extracted from batch text
+  // by buildArtifactForProvider(). See: deterministicPipeline.js
+  //
+  // Traversal state is stored on SingularityPhase.traversalState and
+  // ProviderResponse.traversalState, not here.
 
   /** Per-provider mapping responses with full artifacts for provider-aware resolution */
   mappingResponses?: Record<string, any[]>;
