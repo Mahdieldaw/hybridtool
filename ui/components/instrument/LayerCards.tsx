@@ -1275,7 +1275,6 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
 function BlastVernalInline({ artifact }: { artifact: any }) {
   const bs = artifact?.blastSurface;
   const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
-  const vMeta = bs?.meta?.vernal ?? null;
   const statementTextById = useMemo(() => {
     const m = new Map<string, string>();
     for (const s of safeArr<any>(artifact?.shadow?.statements)) {
@@ -1289,12 +1288,6 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
 
   type VernalRow = {
     id: string; label: string;
-    compositeScore: number | null;
-    structuralMass: number | null;
-    vulnerableCount: number;
-    cascadeExposure: number | null;
-    destroyedQueryMean: number | null;
-    queryTilt: number | null;
     canonicalCount: number | null;
     riskTotal: number | null;
     deletionRisk: number | null;
@@ -1312,7 +1305,6 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
 
   const rows = useMemo<VernalRow[]>(() =>
     scores.map((s: any) => {
-      const v = s?.vernal || {};
       const rv = s?.riskVector;
       const lc = s?.layerC;
       const del = typeof rv?.deletionRisk === "number" ? rv.deletionRisk : null;
@@ -1320,12 +1312,6 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
       return {
         id: s?.claimId || "",
         label: s?.claimLabel || "",
-        compositeScore: typeof v.compositeScore === "number" && Number.isFinite(v.compositeScore) ? v.compositeScore : null,
-        structuralMass: typeof v.structuralMass === "number" && Number.isFinite(v.structuralMass) ? v.structuralMass : null,
-        vulnerableCount: typeof v.vulnerableCount === "number" && Number.isFinite(v.vulnerableCount) ? v.vulnerableCount : 0,
-        cascadeExposure: typeof v.cascadeExposure === "number" && Number.isFinite(v.cascadeExposure) ? v.cascadeExposure : null,
-        destroyedQueryMean: typeof v.destroyedQueryMean === "number" && Number.isFinite(v.destroyedQueryMean) ? v.destroyedQueryMean : null,
-        queryTilt: typeof v.queryTilt === "number" && Number.isFinite(v.queryTilt) ? v.queryTilt : null,
         canonicalCount: typeof lc?.canonicalCount === "number" ? lc.canonicalCount : null,
         riskTotal: del !== null && deg !== null ? del + deg : null,
         deletionRisk: del,
@@ -1344,16 +1330,6 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     [scores]
   );
 
-  const maxComposite = useMemo(() => {
-    const vals = rows.map(r => r.compositeScore).filter((v): v is number => v != null);
-    return vals.length > 0 ? Math.max(...vals) : null;
-  }, [rows]);
-
-  const lambda = typeof vMeta?.lambda === "number" && Number.isFinite(vMeta.lambda) ? vMeta.lambda : null;
-  const structuralStep = typeof vMeta?.structuralStep === "number" && Number.isFinite(vMeta.structuralStep) ? vMeta.structuralStep : null;
-  const sigmaM = typeof vMeta?.sigmaM === "number" && Number.isFinite(vMeta.sigmaM) ? vMeta.sigmaM : null;
-  const sigmaQ = typeof vMeta?.sigmaQ === "number" && Number.isFinite(vMeta.sigmaQ) ? vMeta.sigmaQ : null;
-  const adaptive = typeof vMeta?.adaptiveAccelerator === "number" && Number.isFinite(vMeta.adaptiveAccelerator) ? vMeta.adaptiveAccelerator : null;
 
   type VulnerableStatementRow = { id: string; claimId: string; claimLabel: string; statementId: string; text: string };
   const vulnerableRows = useMemo<VulnerableStatementRow[]>(() => {
@@ -1361,7 +1337,7 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     for (const s of scores) {
       const claimId = String(s?.claimId ?? "");
       const claimLabel = String(s?.claimLabel ?? claimId);
-      const ids = Array.isArray(s?.vernal?.vulnerableStatementIds) ? s.vernal.vulnerableStatementIds : [];
+      const ids = Array.isArray(s?.riskVector?.degradationStatementIds) ? s.riskVector.degradationStatementIds : [];
       for (const sidRaw of ids) {
         const sid = String(sidRaw ?? "").trim();
         if (!sid) continue;
@@ -1372,7 +1348,7 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
     return out;
   }, [scores, statementTextById]);
 
-  const hasAny = rows.some(r => r.compositeScore != null || r.structuralMass != null || r.vulnerableCount > 0);
+  const hasAny = rows.some(r => r.riskTotal != null && r.riskTotal > 0);
   if (!bs || scores.length === 0 || !hasAny) return null;
 
   return (
@@ -1380,33 +1356,21 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
       <div className="border-t border-white/10 my-3" />
       <div className="flex items-center gap-2 mb-2">
         <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
-        <span className="text-xs font-semibold text-text-secondary">Blast — Merged Append 2.0 + 2.5</span>
+        <span className="text-xs font-semibold text-text-secondary">Blast Surface — Risk Vectors</span>
       </div>
 
       <CardSection title="Summary">
         <div className="grid grid-cols-3 gap-x-4">
           <StatRow label="Claims Scored" value={fmtInt(scores.length)} />
-          <StatRow label="Max Composite" value={fmt(maxComposite, 3)} />
-          <StatRow label="Lambda" value={fmt(lambda, 4)} />
-          <StatRow label="Structural Step" value={fmt(structuralStep, 4)} />
-          <StatRow label="Sigma M" value={fmt(sigmaM, 4)} />
-          <StatRow label="Sigma Q" value={fmt(sigmaQ, 4)} />
-          <StatRow label="Adaptive" value={fmt(adaptive, 3)} />
         </div>
       </CardSection>
 
-      <CardSection title="Per-Claim Vernal Scores">
+      <CardSection title="Per-Claim Risk Vectors">
         <SortableTable
           columns={[
             { key: "label", header: "Claim", cell: (r) => <span className="text-[10px] truncate max-w-[120px] inline-block">{r.label || r.id}</span> },
-            { key: "compositeScore", header: "BR", title: "Legacy blast-radius composite: structural mass + cascade exposure + query tilt. Drives current question selection.", sortValue: (r) => r.compositeScore, cell: (r) => <span className="font-mono text-text-secondary">{fmt(r.compositeScore, 3)}</span> },
-            { key: "structuralMass", header: "M", title: "Structural mass: exclusive statements weighted by cascade depth (Layer D).", sortValue: (r) => r.structuralMass, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.structuralMass, 3)}</span> },
-            { key: "vulnerableCount", header: "V", title: "Vulnerable count: number of other claims that lose canonical coverage if this claim is pruned.", sortValue: (r) => r.vulnerableCount, cell: (r) => <span className={clsx("font-mono", r.vulnerableCount > 0 ? "text-amber-400" : "text-emerald-400")}>{r.vulnerableCount}</span> },
-            { key: "cascadeExposure", header: "D", title: "Cascade exposure: depth-weighted structural mass (Layer D echo).", sortValue: (r) => r.cascadeExposure, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.cascadeExposure, 3)}</span> },
-            { key: "destroyedQueryMean", header: "Q", title: "Destroyed query mean: avg query similarity of this claim's exclusively-owned statements.", sortValue: (r) => r.destroyedQueryMean, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.destroyedQueryMean, 3)}</span> },
-            { key: "queryTilt", header: "Tilt", title: "Query tilt: D × Q — how much query-relevant evidence is exclusively owned by this claim.", sortValue: (r) => r.queryTilt, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.queryTilt, 3)}</span> },
             { key: "canonicalCount", header: "K", title: "Canonical count (K): total statements owned by this claim. Denominator for Del, Deg, Iso.", sortValue: (r) => r.canonicalCount, cell: (r) => <span className="font-mono text-text-muted">{r.canonicalCount ?? "–"}</span> },
-            { key: "riskTotal", header: "RΣ", title: "Risk total (Del + Deg): exclusive statement count — statements that will be removed or skeletonized on prune. Direct risk-vector analog to BR.", sortValue: (r) => r.riskTotal, cell: (r) => <span className={clsx("font-mono text-[10px] font-semibold", r.riskTotal != null && r.riskTotal > 0 ? "text-rose-400" : "text-text-muted")}>{r.riskTotal ?? "–"}</span> },
+            { key: "riskTotal", header: "RΣ", title: "Risk total (Del + Deg): exclusive statement count — statements that will be removed or skeletonized on prune.", sortValue: (r) => r.riskTotal, cell: (r) => <span className={clsx("font-mono text-[10px] font-semibold", r.riskTotal != null && r.riskTotal > 0 ? "text-rose-400" : "text-text-muted")}>{r.riskTotal ?? "–"}</span> },
             { key: "deletionRisk", header: "Del", title: "Deletion risk (Type 2): exclusive non-orphan statements. These will be fully REMOVED from the corpus on prune — the highest-severity loss.", sortValue: (r) => r.deletionRisk, cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.deletionRisk ?? "–"}</span> },
             { key: "degradationRisk", header: "Deg", title: "Degradation risk (Type 3): exclusive orphan statements. These will be SKELETONIZED — entities survive but relational framing is stripped.", sortValue: (r) => r.degradationRisk, cell: (r) => <span className="font-mono text-[10px] text-amber-400">{r.degradationRisk ?? "–"}</span> },
             { key: "cascadeFragility", header: "Frag", title: "Cascade fragility: Σ 1/(parentCount−1) over shared statements. Measures how thin protection becomes on prune. Parent=2 contributes 1.0, parent=10 contributes 0.1.", sortValue: (r) => r.cascadeFragility, cell: (r) => <span className="font-mono text-[10px] text-blue-400">{r.cascadeFragility !== null ? r.cascadeFragility.toFixed(1) : "–"}</span> },
@@ -1420,7 +1384,7 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
             { key: "fragile", header: "2c", title: "Certainty 2c: twin exclusive to its host claim. Highest risk — if host pruned, twin also lost.", sortValue: (r) => r.fragile, cell: (r) => <span className="font-mono text-[10px] text-red-300">{r.fragile ?? "–"}</span> },
           ]}
           rows={rows}
-          defaultSortKey="compositeScore"
+          defaultSortKey="totalDamage"
           defaultSortDir="desc"
           maxRows={12}
         />
@@ -1484,7 +1448,7 @@ function BlastCascadeInline({ artifact, selectedEntity }: { artifact: any; selec
     const claimData = new Map<string, { v: number; n: number }>();
     for (const s of scores) {
       claimData.set(String(s.claimId), {
-        v: s?.vernal?.vulnerableCount ?? 0,
+        v: s?.riskVector?.degradationRisk ?? 0,
         n: s?.layerC?.canonicalCount ?? 0
       });
     }

@@ -437,30 +437,14 @@ export class StepExecutor {
       } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
     );
 
-    const providerOrder = Array.isArray(payload.providerOrder)
-      ? payload.providerOrder
-      : sourceData.map((s) => s.providerId);
-    const normalizedProviderOrder = providerOrder
-      .map((pid) => String(pid || '').trim())
-      .filter(Boolean);
-    const uniqueProviderOrder = [];
-    const providerSeen = new Set();
-    for (const pid of normalizedProviderOrder) {
-      if (providerSeen.has(pid)) continue;
-      providerSeen.add(pid);
-      uniqueProviderOrder.push(pid);
-    }
-
-    const sourceProviderIds = sourceData.map((s) => s.providerId);
-    const sourceProviderIdSet = new Set(sourceProviderIds);
-
-    const citationOrder = uniqueProviderOrder.filter((pid) =>
-      sourceProviderIdSet.has(pid),
+    // Canonical provider ordering: deterministic regardless of arrival order.
+    // Providers are sorted by the fixed CANONICAL_PROVIDER_ORDER; unknown
+    // providers are appended alphabetically.  Missing providers simply don't
+    // appear — remaining providers shift up in modelIndex but never reorder.
+    const { canonicalCitationOrder } = await import('../../../shared/provider-config');
+    const citationOrder = canonicalCitationOrder(
+      sourceData.map((s) => s.providerId),
     );
-    for (const pid of sourceProviderIds) {
-      if (citationOrder.includes(pid)) continue;
-      citationOrder.push(pid);
-    }
 
     const indexedSourceData = sourceData.map((s) => {
       const modelIndex = citationOrder.indexOf(s.providerId) + 1;
@@ -483,14 +467,10 @@ export class StepExecutor {
     // 1. Import new modules dynamically
     // Import shadow module once at function scope so callbacks can use its exports without awaiting
     const shadowModule = await import('../../shadow');
-    const { extractShadowStatements, computeShadowDelta, getTopUnreferenced } = shadowModule;
+    const { extractShadowStatements } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
     const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
-    const { extractForcingPoints } = await import('../../utils/cognitive/traversalEngine');
     const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
-    const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
-    const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
-    const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
     const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
 
     const nowMs = () =>
@@ -504,11 +484,10 @@ export class StepExecutor {
     };
 
     // 2. Shadow Extraction (Mechanical)
-    // Map sourceData to expected format (modelIndex, content)
-    const shadowInput = sourceData.map(s => {
-      const idx = citationOrder.findIndex(pid => pid === s.providerId) + 1;
-      return { modelIndex: idx > 0 ? idx : 99, content: s.text };
-    });
+    // Use indexedSourceData which already has canonical modelIndex assignments
+    const shadowInput = indexedSourceData.map(s => ({
+      modelIndex: s.modelIndex, content: s.text,
+    }));
 
     console.log(`[StepExecutor] Extracting shadow statements from ${shadowInput.length} models...`);
     const shadowResult = extractShadowStatements(shadowInput);
@@ -1114,10 +1093,16 @@ export class StepExecutor {
               const paraDensityObj = paragraphDensityScores && paragraphDensityScores.size > 0
                 ? Object.fromEntries(paragraphDensityScores)
                 : null;
+              // Pack cell-unit embeddings if available
+              const packedCellUnits = cellUnitEmbeddings && cellUnitEmbeddings.size > 0
+                ? packEmbeddingMap(cellUnitEmbeddings, dims)
+                : null;
+
               options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
                 ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
                 ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
                 ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
+                ...(packedCellUnits ? { cellUnitEmbeddings: packedCellUnits.buffer } : {}),
                 meta: {
                   embeddingModelId: DEFAULT_CONFIG.modelId,
                   dimensions: dims,
@@ -1126,6 +1111,7 @@ export class StepExecutor {
                   hasQuery: Boolean(queryBuffer),
                   ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
                   ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
+                  ...(packedCellUnits ? { cellUnitCount: packedCellUnits.index.length, cellUnitIndex: packedCellUnits.index } : {}),
                   ...(densityObj ? { semanticDensityScores: densityObj } : {}),
                   ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
                   ...(statementEmbeddingResult?.densityRegressionModel ? { densityRegressionModel: statementEmbeddingResult.densityRegressionModel } : {}),
@@ -1296,20 +1282,17 @@ export class StepExecutor {
 
             let mapperArtifact = null;
             const rawText = finalResult?.text || "";
-            let shadowDelta = null;
-            let topUnindexed = null;
-            let referencedIds = null;
             let structuralValidation = null;
-            const paragraphClusteringSummary = null; // clustering not implemented in this path
 
             if (finalResult?.text) {
-              try {
-                await geometryPromise;
-              } catch (_) { }
-              // 4. Parse (New Parser)
+              // 4. Parse (New Parser) — no geometry dependency
               const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
 
               if (parseResult.success && parseResult.output) {
+                // Wait for geometry — assembly needs embeddings, regions, substrate
+                try {
+                  await geometryPromise;
+                } catch (_) { }
                 // 5. Assembly & Traversal (Mechanical)
                 const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
                   ? preSemanticInterpretation.regionization.regions
@@ -1468,20 +1451,14 @@ export class StepExecutor {
                     questionSelectionInstrumentation = null;
                   }
 
-                  let claimRouting = null;
-                  try {
-                    const { computeClaimRouting } =
-                      await import('../blast-radius/questionSelection');
-                    claimRouting = computeClaimRouting(
-                      null, null, questionSelectionInstrumentation
-                    );
-                    console.log(
-                      `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.damageOutliers.length} outlier(s), skip=${claimRouting.skipSurvey}`
-                    );
-                  } catch (err) {
-                    console.warn('[ClaimRouting] Failed, falling back to old survey prompt:', getErrorMessage(err));
-                    claimRouting = null;
-                  }
+                  const { computeClaimRouting } =
+                    await import('../blast-radius/questionSelection');
+                  const claimRouting = computeClaimRouting(
+                    questionSelectionInstrumentation
+                  );
+                  console.log(
+                    `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.damageOutliers.length} outlier(s), skip=${claimRouting.skipSurvey}`
+                  );
 
                   let surveyRationale = null;
                   const semanticContinuationMeta = (() => {
@@ -1501,7 +1478,6 @@ export class StepExecutor {
                   if (shouldRunSurvey) {
                     try {
                       const {
-                        buildSurveyMapperPrompt,
                         buildRoutedSurveyPrompt,
                         parseSurveyMapperOutput: parseSurveyOutput,
                         validateAssessmentCoverage,
@@ -1517,29 +1493,20 @@ export class StepExecutor {
 
                       let surveyPrompt = null;
                       let claimsExpectedInSurvey = claimsForSurvey;
-                      if (claimRouting) {
-                        if (!claimRouting.skipSurvey) {
-                          const routedSet = new Set(claimRouting.routedClaimIds);
-                          const routedClaims = claimsForSurvey.filter((c) => routedSet.has(c.id));
-                          claimsExpectedInSurvey = routedClaims;
-                          surveyPrompt = buildRoutedSurveyPrompt({
-                            userQuery: payload.originalPrompt,
-                            routing: claimRouting,
-                            allClaims: routedClaims,
-                            batchTexts: indexedSourceData.map((s) => ({
-                              modelIndex: s.modelIndex,
-                              content: s.text,
-                            })),
-                            edges: unifiedEdges,
-                          });
-                        }
-                      } else {
-                        surveyPrompt = buildSurveyMapperPrompt(
-                          payload.originalPrompt,
-                          claimsForSurvey,
-                          unifiedEdges,
-                          indexedSourceData.map((s) => ({ modelIndex: s.modelIndex, content: s.text }))
-                        );
+                      if (!claimRouting.skipSurvey) {
+                        const routedSet = new Set(claimRouting.routedClaimIds);
+                        const routedClaims = claimsForSurvey.filter((c) => routedSet.has(c.id));
+                        claimsExpectedInSurvey = routedClaims;
+                        surveyPrompt = buildRoutedSurveyPrompt({
+                          userQuery: payload.originalPrompt,
+                          routing: claimRouting,
+                          allClaims: routedClaims,
+                          batchTexts: indexedSourceData.map((s) => ({
+                            modelIndex: s.modelIndex,
+                            content: s.text,
+                          })),
+                          edges: unifiedEdges,
+                        });
                       }
 
                       if (!surveyPrompt) {
@@ -1682,7 +1649,6 @@ export class StepExecutor {
                   // Add StepExecutor-specific fields
                   mapperArtifact.preSemantic = preSemanticInterpretation || null;
                   if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
-                  if (paragraphClusteringSummary) mapperArtifact.paragraphClustering = paragraphClusteringSummary;
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
                   if (questionSelectionInstrumentation) {
                     mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
@@ -1786,10 +1752,8 @@ export class StepExecutor {
               return;
             }
 
-            const citationSourceOrder = {};
-            citationOrder.forEach((pid, idx) => {
-              citationSourceOrder[idx + 1] = pid;
-            });
+            const { buildCitationSourceOrder } = await import('../../../shared/provider-config');
+            const citationSourceOrder = buildCitationSourceOrder(citationOrder);
 
             if (mapperArtifact && typeof mapperArtifact === 'object') {
               mapperArtifact.citationSourceOrder = citationSourceOrder;
@@ -1816,7 +1780,6 @@ export class StepExecutor {
             const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
               shadow: {
                 extraction: shadowResult || null,
-                delta: shadowDelta || null,
               },
               paragraphProjection: paragraphResult || null,
               substrate: {

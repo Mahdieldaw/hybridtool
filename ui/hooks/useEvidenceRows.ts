@@ -58,6 +58,10 @@ export interface EvidenceRow {
   inContinuousCore: boolean;
   inMixed: boolean;
   inDirectTopN: boolean;
+
+  // Table cell-unit metadata
+  isTableCell: boolean;
+  tableMeta: { rowHeader: string; columnHeader: string; value: string } | null;
 }
 
 // ============================================================================
@@ -157,7 +161,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const bsScores: any[] = Array.isArray(a?.blastSurface?.scores) ? a.blastSurface.scores : [];
     const claimData = new Map<string, { v: number; n: number }>();
     for (const s of bsScores) {
-      const v = s?.vernal?.vulnerableCount ?? 0;
+      const v = s?.riskVector?.degradationRisk ?? 0;
       const n = s?.layerC?.canonicalCount ?? 0;
       claimData.set(String(s.claimId), { v, n });
     }
@@ -260,10 +264,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       for (const id of excl) exclusiveIds.add(String(id));
     }
 
-    // Vernal twin map — canonical source for per-statement twin data
+    // Twin map — canonical source for per-statement twin data
     const twinMap = blastSurface?.twinMap ?? null;
-    const vernalTwins: Record<string, any> = twinMap?.twins ?? {};
-    const vernalThresholds: Record<string, number> = twinMap?.thresholds ?? {};
+    const twinResults: Record<string, any> = twinMap?.twins ?? {};
+    const twinThresholds: Record<string, number> = twinMap?.thresholds ?? {};
 
     const claimDensityRaw = typeof claimObj?.density === 'number' && Number.isFinite(claimObj.density)
       ? claimObj.density as number
@@ -277,8 +281,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       mixedByStmt,
       exclusiveIds,
       directTopIds,
-      vernalTwins,
-      vernalThresholds,
+      twinResults,
+      twinThresholds,
       claimDensityRaw,
       densityLiftForClaim
     };
@@ -333,8 +337,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
       // Vernal twin map data for this statement
-      const twinResult = claimMaps?.vernalTwins[stmtId];
-      const tauSim = claimMaps?.vernalThresholds[stmtId] ?? null;
+      const twinResult = claimMaps?.twinResults[stmtId];
+      const tauSim = claimMaps?.twinThresholds[stmtId] ?? null;
       const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
       const isExclusiveFromFate = (fateEntry?.claimIds.length ?? 0) === 1;
       const isExclusive = selectedClaimId
@@ -422,6 +426,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         inContinuousCore: mixed?.zone === 'core',
         inMixed: mixed != null,
         inDirectTopN: selectedClaimId ? (claimMaps?.directTopIds.has(stmtId) ?? false) : false,
+
+        isTableCell: !!stmt.isTableCell,
+        tableMeta: stmt.tableMeta ?? null,
       };
     });
   }, [artifact, globalMaps, claimMaps, selectedClaimId]);

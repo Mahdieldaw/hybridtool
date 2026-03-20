@@ -133,7 +133,7 @@ const CodeText = ({ className = '', children, ...props }: any) => {
   // inline code: bubble style
   return (
     <code
-      className={`inline font-mono text-xs text-text-primary bg-surface-highlight/80 border border-border-subtle rounded px-1.5 py-0.5 whitespace-normal align-baseline ${className}`}
+      className={`inline font-mono text-xs text-text-primary bg-surface-raised border border-border-subtle rounded px-1.5 py-0.5 whitespace-normal align-baseline ${className}`}
       {...props}
     >
       {children}

@@ -97,9 +97,7 @@ export {
 
 // Functions - StatementTypes
 export {
-    getStancePatterns,
     getStancePriority,
-    getSignalPatterns,
     classifyStance,
     detectSignals,
     computeSignalWeight,
@@ -114,10 +112,6 @@ export {
 // Functions - ShadowExtractor
 export {
     extractShadowStatements,
-    filterByStance,
-    filterByModel,
-    filterBySignals,
-    filterByConfidence,
 } from './ShadowExtractor';
 
 export {
@@ -127,10 +121,6 @@ export {
 export {
     computeShadowDelta,
     getTopUnreferenced,
-    getHighSignalUnreferenced,
-    getUnreferencedByStance,
-    formatUnreferencedForPrompt,
-    formatAuditSummary,
     extractReferencedIds,
 } from './ShadowDelta';
 

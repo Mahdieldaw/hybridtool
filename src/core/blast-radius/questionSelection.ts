@@ -592,8 +592,6 @@ export function computeQuestionSelectionInstrumentation(
 // ─────────────────────────────────────────────────────────────────────────
 
 export function computeClaimRouting(
-  _input: QuestionSelectionInput,
-  _qsiConflicts?: ValidatedConflict[],
   qsi?: QuestionSelectionInstrumentation | null,
 ): ClaimRouting {
   if (!qsi?.routing) {

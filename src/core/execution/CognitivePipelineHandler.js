@@ -2,18 +2,7 @@ import { parseSemanticMapperOutput, createEmptyMapperArtifact } from '../../../s
 import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
-import { normalizeCitationSourceOrder } from '../../shared/citation-utils.js';
 // dehydrateArtifact removed — Tier 3 artifacts are ephemeral (never persisted)
-
-/** Extract claims array from a CognitiveArtifact or legacy MapperArtifact */
-function extractClaims(artifact) {
-  return artifact?.semantic?.claims || artifact?.claims || [];
-}
-
-/** Extract edges array from a CognitiveArtifact or legacy MapperArtifact */
-function extractEdges(artifact) {
-  return artifact?.semantic?.edges || artifact?.edges || [];
-}
 
 export class CognitivePipelineHandler {
   constructor(port, persistenceCoordinator, sessionManager) {
@@ -27,7 +16,7 @@ export class CognitivePipelineHandler {
    * Orchestrates the transition to the Singularity (Concierge) phase.
    * Executes Singularity step, persists state, and notifies UI that artifacts are ready.
    */
-  async orchestrateSingularityPhase(request, context, steps, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
+  async orchestrateSingularityPhase(request, context, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
     try {
       const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
         v.status === "completed" && v.result?.mapping?.artifact,
@@ -238,9 +227,10 @@ export class CognitivePipelineHandler {
           // ══════════════════════════════════════════════════════════════════
           // Calculate turn number within current instance
           // ══════════════════════════════════════════════════════════════════
-          // Race Condition Fix: Idempotency Check
+          // Safety net: should not fire after workflow-engine refactor (singularity now a proper step).
+          // Kept as defensive guard against re-entry bugs.
           if (conciergeState?.lastProcessedTurnId === context.canonicalAiTurnId) {
-            console.log(`[CognitivePipeline] Turn ${context.canonicalAiTurnId} already processed, skipping duplicate execution.`);
+            console.warn(`[CognitivePipeline] Turn ${context.canonicalAiTurnId} already processed (idempotency safety net).`);
             return true;
           }
 
@@ -671,8 +661,8 @@ export class CognitivePipelineHandler {
                 ? mappingProvResp.surveyGates : undefined;
               const surveyRationale = mappingProvResp?.surveyRationale ?? null;
 
-              // Citation-order-aware batch sources (matches existing continuation logic)
-              const citationOrderArr = normalizeCitationSourceOrder(latestMappingMeta?.citationSourceOrder);
+              // Canonical provider ordering for deterministic statement IDs
+              const { canonicalCitationOrder } = await import('../../../shared/provider-config');
               const normalizeProvId = (pid) => String(pid || '').trim().toLowerCase();
 
               const allBatchResps = (priorResponses || [])
@@ -686,25 +676,75 @@ export class CognitivePipelineHandler {
                 if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
               }
 
-              const batchSources = Array.from(seenBatchProviders.values()).map((r, idx) => {
-                const pid = normalizeProvId(r.providerId);
-                let modelIndex;
-                if (citationOrderArr.length > 0) {
-                  const citIdx = citationOrderArr.indexOf(pid);
-                  modelIndex = citIdx >= 0 ? citIdx + 1 : idx + 1;
-                } else {
-                  const stored = typeof r.responseIndex === 'number'
-                    ? r.responseIndex
-                    : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : null);
-                  modelIndex = stored != null && stored > 0 ? stored : idx + 1;
+              const canonicalOrder = canonicalCitationOrder(
+                Array.from(seenBatchProviders.keys())
+              );
+              const batchSources = canonicalOrder.map((pid, idx) => ({
+                modelIndex: idx + 1,
+                content: String(seenBatchProviders.get(pid)?.text || ''),
+              })).filter(s => s.content);
+
+              const modelCount = Math.max(canonicalOrder.length, seenBatchProviders.size, 1);
+
+              // Extract shadow + tables once; load cell-unit embeddings from cache
+              let shadowStatements = null;
+              let shadowParagraphs = null;
+              let tableSidecar = [];
+              let cellUnitEmbeddings = null;
+              try {
+                const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
+                const shadowResult = extractShadowStatements(batchSources);
+                shadowStatements = shadowResult.statements;
+                shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
+                tableSidecar = shadowResult.tableSidecar || [];
+                // Load cell-unit embeddings from cache, or backfill if old turn
+                if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
+                  const { unpackEmbeddingMap } = await import('../../persistence/embeddingCodec');
+                  cellUnitEmbeddings = unpackEmbeddingMap(
+                    geoRecord.cellUnitEmbeddings,
+                    geoRecord.meta.cellUnitIndex,
+                    geoRecord.meta.dimensions
+                  );
+                  console.log(`[CognitiveHandler] Loaded ${cellUnitEmbeddings.size} cell-unit embeddings from cache`);
+                } else if (tableSidecar.length > 0) {
+                  // Backfill: old turn has no cached cell-unit embeddings — generate + persist
+                  const { flattenCellUnits } = await import('../tableCellAllocation');
+                  const { generateTextEmbeddings, stripInlineMarkdown, DEFAULT_CONFIG } = await import('../../clustering');
+                  const cellUnits = flattenCellUnits(tableSidecar);
+                  if (cellUnits.length > 0) {
+                    const cellTexts = cellUnits.map(cu => stripInlineMarkdown(cu.text));
+                    const cellIds = cellUnits.map(cu => cu.id);
+                    const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
+                    cellUnitEmbeddings = new Map();
+                    for (let ci = 0; ci < cellIds.length; ci++) {
+                      const emb = cellBatch.embeddings.get(String(ci));
+                      if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
+                    }
+                    // Persist to geoRecord so next open uses cache
+                    if (cellUnitEmbeddings.size > 0 && geoRecord) {
+                      const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
+                      const dims = geoRecord.meta?.dimensions || cellUnitEmbeddings.values().next().value?.length;
+                      if (dims) {
+                        const packed = packEmbeddingMap(cellUnitEmbeddings, dims);
+                        geoRecord.cellUnitEmbeddings = packed.buffer;
+                        geoRecord.meta = geoRecord.meta || {};
+                        geoRecord.meta.cellUnitIndex = packed.index;
+                        geoRecord.meta.cellUnitCount = packed.index.length;
+                        await this.sessionManager.adapter.putBinary('embeddings', geoRecord);
+                      }
+                    }
+                    console.log(`[CognitiveHandler] Backfilled ${cellUnitEmbeddings.size} cell-unit embeddings`);
+                  }
                 }
-                return { modelIndex, content: String(r.text || '') };
-              });
+              } catch (cellErr) {
+                console.warn('[CognitiveHandler] Shadow/cell-unit load failed:', cellErr?.message || String(cellErr));
+              }
 
-              const modelCount = Math.max(citationOrderArr.length, seenBatchProviders.size, 1);
-
+              const { buildCitationSourceOrder: buildCSO } = await import('../../../shared/provider-config');
               const buildResult = await buildArtifactForProvider({
                 mappingText: latestMappingText,
+                shadowStatements,
+                shadowParagraphs,
                 batchSources,
                 statementEmbeddings,
                 paragraphEmbeddings,
@@ -712,8 +752,11 @@ export class CognitivePipelineHandler {
                 geoRecord,
                 surveyGates,
                 surveyRationale,
+                citationSourceOrder: buildCSO(canonicalOrder),
                 queryText: originalPrompt,
                 modelCount,
+                tableSidecar,
+                cellUnitEmbeddings,
               });
               mappingArtifact = buildResult.cognitiveArtifact;
               console.log(`[CognitiveHandler] Rebuilt artifact via buildArtifactForProvider: ${buildResult.enrichedClaims.length} claims`);
@@ -744,50 +787,26 @@ export class CognitivePipelineHandler {
           try {
             const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
 
-            // Reconstruct citationOrder from mapping meta using shared helper
-            const citationOrderArr = normalizeCitationSourceOrder(latestMappingMeta?.citationSourceOrder);
+            // Canonical provider ordering for deterministic statement IDs
+            const { canonicalCitationOrder: canonTraversal } = await import('../../../shared/provider-config');
 
-            console.log(`[CognitiveHandler] Resolved citation order:`, citationOrderArr);
-
-            const sourceDataFromResponses = (priorResponses || [])
-              .filter((r) => r && r.responseType === "batch" && r.providerId && r.text?.trim())
-              .map((r, idx) => {
-                // Use citationOrder to derive the same 1-indexed modelIndex
-                // that StepExecutor.executeMappingStep used during shadow extraction
-                let modelIndex;
-                if (citationOrderArr.length > 0) {
-                  const citIdx = citationOrderArr.indexOf(r.providerId);
-                  modelIndex = citIdx >= 0 ? citIdx + 1 : idx + 1;
-                } else {
-                  // Fallback: try stored values, but ensure 1-indexed
-                  const stored = typeof r.responseIndex === 'number'
-                    ? r.responseIndex
-                    : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : null);
-                  modelIndex = stored != null && stored > 0 ? stored : idx + 1;
-                }
-                return {
-                  providerId: r.providerId,
-                  modelIndex,
-                  text: r.text,
-                };
-              });
-
-            // Deduplicate: if two sources ended up with the same modelIndex, fix it
-            const usedIndices = new Set();
-            let nextFallback = sourceDataFromResponses.reduce((max, s) => Math.max(max, s.modelIndex), 0) + 1;
-            for (const s of sourceDataFromResponses) {
-              if (usedIndices.has(s.modelIndex)) {
-                console.warn(`[Skeletonization] Duplicate modelIndex ${s.modelIndex} for ${s.providerId}, reassigning to ${nextFallback}`);
-                s.modelIndex = nextFallback++;
-              }
-              usedIndices.add(s.modelIndex);
+            const batchRespMap = new Map();
+            for (const r of (priorResponses || []).filter(r => r?.responseType === 'batch' && r.providerId && r.text?.trim())) {
+              const pid = String(r.providerId || '').trim().toLowerCase();
+              if (pid && !batchRespMap.has(pid)) batchRespMap.set(pid, r);
             }
+
+            const traversalCanonicalOrder = canonTraversal(Array.from(batchRespMap.keys()));
+            const sourceDataFromResponses = traversalCanonicalOrder.map((pid, idx) => ({
+              providerId: pid,
+              modelIndex: idx + 1,
+              text: batchRespMap.get(pid)?.text || '',
+            })).filter(s => s.text?.trim());
 
             console.log('[Skeletonization] Source data from DB:', {
               count: sourceDataFromResponses.length,
               providers: sourceDataFromResponses.map(s => `${s.providerId}(idx=${s.modelIndex})`),
               hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
-              citationOrderAvailable: citationOrderArr.length > 0,
             });
 
 

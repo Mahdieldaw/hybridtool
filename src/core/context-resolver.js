@@ -5,7 +5,7 @@ import {
   extractUserMessage
 } from './context-utils.js';
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
-import { computeStructuralAnalysis } from './PromptMethods';
+import { parseSemanticMapperOutput } from '../../shared/parsing-utils.js';
 
 /**
  * ContextResolver
@@ -273,58 +273,34 @@ export class ContextResolver {
   }
 
   async _resolveLastStoredAnalysis(sessionId, session, lastTurn) {
-    const direct = this._extractStoredAnalysisFromTurn(lastTurn);
-    if (direct) return direct;
+    // Try last turn first
+    const fromLast = await this._parseMappingFromTurn(lastTurn?.id);
+    if (fromLast) return fromLast;
 
+    // Try structural turn
     const structuralTurnId = session?.lastStructuralTurnId;
-    let structuralTurn = null;
-
     if (structuralTurnId) {
-      try {
-        structuralTurn = await this._getTurn(structuralTurnId);
-      } catch (err) {
-        console.debug('[ContextResolver] Failed to fetch structural turn:', structuralTurnId, err);
-      }
-    }
-
-    if (structuralTurn) {
-      const fromStructural = this._extractStoredAnalysisFromTurn(structuralTurn);
+      const fromStructural = await this._parseMappingFromTurn(structuralTurnId);
       if (fromStructural) return fromStructural;
     }
 
-    const fallbackFromArtifact = await this._computeStoredAnalysisFromArtifact(lastTurn?.mapping?.artifact);
-    if (fallbackFromArtifact) return fallbackFromArtifact;
-
-    if (structuralTurn) {
-      const fromArtifact = await this._computeStoredAnalysisFromArtifact(structuralTurn.mapping?.artifact);
-      if (fromArtifact) return fromArtifact;
-    }
-
+    // Last resort: scan backwards for any turn with a mapping response
     if (!structuralTurnId) {
-      // Check adapter exists and is ready before use
       const adapter = this.sessionManager?.adapter;
       const adapterReady = adapter && (
         typeof adapter.isReady === 'function' ? adapter.isReady() : true
       );
-
-      if (!adapterReady) {
-        console.debug("[ContextResolver] Adapter not ready, skipping turn scan");
-        return null;
-      }
+      if (!adapterReady) return null;
 
       try {
         const turns = await adapter.getTurnsBySessionId(sessionId);
-        if (Array.isArray(turns) && turns.length > 0) {
+        if (Array.isArray(turns)) {
           for (let i = turns.length - 1; i >= 0; i--) {
             const t = turns[i];
             if (!t || typeof t !== "object") continue;
             if (t.type !== "ai" && t.role !== "assistant") continue;
-
-            const stored = this._extractStoredAnalysisFromTurn(t);
-            if (stored) return stored;
-
-            const computed = await this._computeStoredAnalysisFromArtifact(t.mapping?.artifact);
-            if (computed) return computed;
+            const result = await this._parseMappingFromTurn(t.id);
+            if (result) return result;
           }
         }
       } catch (e) {
@@ -335,29 +311,23 @@ export class ContextResolver {
     return null;
   }
 
-  _extractStoredAnalysisFromTurn(turn) {
-    if (!turn || typeof turn !== "object") return null;
-    const candidate = turn.storedAnalysis || turn.structuralAnalysis || null;
-    if (!candidate || typeof candidate !== "object") return null;
-
-    const claimsWithLeverage = candidate.claimsWithLeverage;
-    const edges = candidate.edges;
-
-    if (!Array.isArray(claimsWithLeverage) || !Array.isArray(edges)) return null;
-    return { claimsWithLeverage, edges };
-  }
-
-  async _computeStoredAnalysisFromArtifact(artifact) {
-    if (!artifact || typeof artifact !== "object") return null;
-    const claims = artifact.semantic?.claims;
-    const edges = artifact.semantic?.edges;
-    if (!Array.isArray(claims) || !Array.isArray(edges)) return null;
-    if (claims.length === 0 && edges.length === 0) return null;
-
+  async _parseMappingFromTurn(turnId) {
+    if (!turnId) return null;
     try {
-      const analysis = computeStructuralAnalysis(artifact);
-      if (!analysis || !Array.isArray(analysis.claimsWithLeverage) || !Array.isArray(analysis.edges)) return null;
-      return { claimsWithLeverage: analysis.claimsWithLeverage, edges: analysis.edges };
+      const responses = await this._getProviderResponsesForTurn(turnId);
+      const mappingResp = (Array.isArray(responses) ? responses : [])
+        .filter(r => r && r.responseType === 'mapping')
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
+
+      if (!mappingResp?.text) return null;
+
+      const parsed = parseSemanticMapperOutput(String(mappingResp.text));
+      if (!parsed.success || !parsed.output) return null;
+
+      const { claims, edges } = parsed.output;
+      if (!Array.isArray(claims) || claims.length === 0) return null;
+
+      return { claims, edges: edges || [] };
     } catch (_) {
       return null;
     }

@@ -6,10 +6,7 @@ import {
     extractShadowStatements,
     computeShadowDelta,
     extractReferencedIds,
-    formatAuditSummary,
     getTopUnreferenced,
-    filterByStance,
-    filterBySignals,
 } from './index';
 
 // ===========================================================================
@@ -100,31 +97,6 @@ for (const stmt of shadowResult.statements.slice(0, 5)) {
 // FILTERING TESTS
 // ===========================================================================
 
-console.log('===========================================================');
-console.log('TEST 3: Filtering');
-console.log('===========================================================\n');
-
-const prescriptiveStmts = filterByStance(shadowResult.statements, 'prescriptive');
-console.log(`Prescriptive statements: ${prescriptiveStmts.length}`);
-for (const stmt of prescriptiveStmts.slice(0, 3)) {
-    console.log(`  - "${stmt.text}"`);
-}
-console.log();
-
-const cautionaryStmts = filterByStance(shadowResult.statements, 'cautionary');
-console.log(`Cautionary statements: ${cautionaryStmts.length}`);
-for (const stmt of cautionaryStmts.slice(0, 3)) {
-    console.log(`  - "${stmt.text}"`);
-}
-console.log();
-
-const sequenceStmts = filterBySignals(shadowResult.statements, { sequence: true });
-console.log(`Statements with sequence signal: ${sequenceStmts.length}`);
-for (const stmt of sequenceStmts.slice(0, 3)) {
-    console.log(`  - "${stmt.text}"`);
-}
-console.log();
-
 // ===========================================================================
 // SHADOW DELTA TEST
 // ===========================================================================
@@ -149,9 +121,6 @@ const delta = computeShadowDelta(
     usedStatementIds,
     'How do I validate inputs in my application?'
 );
-
-console.log(formatAuditSummary(delta));
-console.log();
 
 const topUnreferenced = getTopUnreferenced(delta, 5);
 console.log(`Top ${topUnreferenced.length} unreferenced statements (by adjusted score):\n`);

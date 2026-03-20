@@ -766,6 +766,9 @@ function TableRow({
               ) : (
                 <>
                   <span className="text-[9px] text-text-muted font-mono">id:{row.statementId}</span>
+                  {row.isTableCell && (
+                    <span className="text-[9px] text-cyan-400/70 font-mono px-1 py-0 rounded bg-cyan-500/10">table</span>
+                  )}
                   <span className="text-[9px] text-text-muted font-mono">{row.providerAbbrev ?? `M${row.modelIndex}`}</span>
                   {row.paragraphId && (
                     <span className="text-[9px] text-text-muted font-mono">¶{row.paragraphId}</span>

@@ -224,18 +224,10 @@ export const SIGNAL_PATTERNS: SignalPatterns = {
 // HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function getStancePatterns(stance: Stance): RegExp[] {
-    return STANCE_PATTERNS[stance];
-}
-
 export function getStancePriority(stance: Stance): number {
     const idx = STANCE_PRIORITY.indexOf(stance);
     if (idx === -1) return 0; // Default priority for unknown stance
     return STANCE_PRIORITY.length - idx;
-}
-
-export function getSignalPatterns(signalType: keyof SignalPatterns): RegExp[] {
-    return SIGNAL_PATTERNS[signalType];
 }
 
 /**

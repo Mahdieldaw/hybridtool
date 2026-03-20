@@ -858,45 +858,36 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
           // ── B. Shadow + batch sources (no parsing here) ──
           const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
-          const mappingFromTurn = coerceJson(turnRaw.mapping);
-          const turnArtifact = mappingFromTurn?.artifact || mappingFromTurn || null;
 
-          let shadowStatements = turnArtifact?.shadow?.statements;
-          let shadowParagraphs = turnArtifact?.shadow?.paragraphs;
+          let shadowStatements = null;
+          let shadowParagraphs = null;
           let batchSources = [];
 
-          if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
-            try {
-              const allBatchResps = responsesForTurn
-                .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
-                .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+          // Always rebuild batch sources from DB responses (canonical ordering)
+          try {
+            const allBatchResps = responsesForTurn
+              .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
+              .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
-              const seenBatchProviders = new Map();
-              for (const r of allBatchResps) {
-                const pid = normalizeProvId(r.providerId);
-                if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
-              }
-              const batchResps = Array.from(seenBatchProviders.values()).sort(
-                (a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0)
-              );
-
-              batchSources = batchResps.map((r, idx) => {
-                const pid = normalizeProvId(r.providerId);
-                const fromCitation = citationOrderArr.length > 0 ? citationOrderArr.indexOf(pid) : -1;
-                const fromMeta = Number(r?.meta?.modelIndex);
-                const modelIndex =
-                  fromCitation >= 0
-                    ? fromCitation + 1
-                    : Number.isFinite(fromMeta) && fromMeta > 0
-                      ? fromMeta
-                      : idx + 1;
-                return { modelIndex, content: String(r.text || "") };
-              });
-            } catch (err) {
-              console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
-              sendResponse({ success: false, error: "Shadow reconstruction failed" });
-              return;
+            const seenBatchProviders = new Map();
+            for (const r of allBatchResps) {
+              const pid = normalizeProvId(r.providerId);
+              if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
             }
+
+            const { canonicalCitationOrder } = await import("../shared/provider-config");
+            const canonicalOrder = canonicalCitationOrder(
+              Array.from(seenBatchProviders.keys())
+            );
+
+            batchSources = canonicalOrder.map((pid, idx) => {
+              const r = seenBatchProviders.get(pid);
+              return { modelIndex: idx + 1, content: String(r?.text || "") };
+            }).filter(s => s.content);
+          } catch (err) {
+            console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
+            sendResponse({ success: false, error: "Shadow reconstruction failed" });
+            return;
           }
 
           // ── Model count ──
@@ -907,35 +898,63 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           );
           const modelCount = Math.max(citationOrderArr.length, uniqueBatchProviders.size, 1);
 
-          // ── C. Geometry embeddings (I/O — generate if missing) — UNCHANGED ──
+          // ── B.1 Always re-extract shadow from batch (ground truth for current code) ──
+          // Never trust stored shadow statements — extraction rules may have changed.
+          let tableSidecar = [];
+          if (batchSources.length > 0) {
+            const { extractShadowStatements, projectParagraphs } = await import("./shadow");
+            const shadowResult = extractShadowStatements(batchSources);
+            shadowStatements = shadowResult.statements;
+            shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
+            tableSidecar = shadowResult.tableSidecar || [];
+            console.log(`[Regenerate] Fresh extraction: ${shadowStatements.length} stmts, ${shadowParagraphs.length} paras, ${tableSidecar.length} tables`);
+          }
+          if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+            sendResponse({ success: false, error: "No shadow statements for embedding generation" });
+            return;
+          }
+          if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
+            const { projectParagraphs } = await import("./shadow");
+            shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
+          }
+
+          // ── C. Geometry embeddings — regenerate if missing or stale ──
           let geoRecord = await sm.loadEmbeddings(aiTurnId);
+
+          // Check if cached embeddings match current shadow extraction
+          const cachedStmtIds = new Set(geoRecord?.meta?.statementIndex || []);
+          const currentStmtIds = new Set(shadowStatements.map((s) => s.id));
+          const cachedParaIds = new Set(geoRecord?.meta?.paragraphIndex || []);
+          const currentParaIds = new Set(shadowParagraphs.map((p) => p.id));
+
+          const stmtIdMismatch =
+            cachedStmtIds.size !== currentStmtIds.size ||
+            [...currentStmtIds].some((id) => !cachedStmtIds.has(id));
+          const paraIdMismatch =
+            cachedParaIds.size !== currentParaIds.size ||
+            [...currentParaIds].some((id) => !cachedParaIds.has(id));
+
+          if (stmtIdMismatch || paraIdMismatch) {
+            console.log(
+              `[Regenerate] Embedding cache stale:`,
+              stmtIdMismatch ? `stmts ${cachedStmtIds.size}→${currentStmtIds.size}` : '',
+              paraIdMismatch ? `paras ${cachedParaIds.size}→${currentParaIds.size}` : '',
+            );
+          }
+
           const needsRegeneration =
             !geoRecord?.statementEmbeddings ||
             !geoRecord?.paragraphEmbeddings ||
-            (geoRecord.meta?.paragraphCount === 0 && Array.isArray(shadowParagraphs) && shadowParagraphs.length > 0) ||
+            (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0) ||
             !geoRecord?.meta?.semanticDensityScores ||
             !geoRecord?.meta?.densityRegressionModel ||
             !geoRecord?.meta?.paragraphSemanticDensityScores ||
             geoRecord?.meta?.querySemanticDensity == null ||
-            geoRecord.meta?.embeddingVersion !== 2;
+            geoRecord.meta?.embeddingVersion !== 2 ||
+            stmtIdMismatch ||
+            paraIdMismatch;
 
           if (needsRegeneration) {
-            if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
-              if (batchSources.length > 0) {
-                const { extractShadowStatements, projectParagraphs } = await import("./shadow");
-                const shadowResult = extractShadowStatements(batchSources);
-                shadowStatements = shadowResult.statements;
-                shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
-              }
-              if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
-                sendResponse({ success: false, error: "No shadow statements for embedding generation" });
-                return;
-              }
-              if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-                const { projectParagraphs } = await import("./shadow");
-                shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
-              }
-            }
 
             const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
             const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
@@ -1026,10 +1045,55 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               ? new Float32Array(geoRecord.queryEmbedding)
               : null;
 
+          // ── D. Load or generate cell-unit embeddings ──
+          let cellUnitEmbeddings = null;
+          if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
+            // Load from cache
+            cellUnitEmbeddings = unpackEmbeddingMap(
+              geoRecord.cellUnitEmbeddings,
+              geoRecord.meta.cellUnitIndex,
+              geoRecord.meta.dimensions
+            );
+          } else if (tableSidecar.length > 0) {
+            // Generate + persist
+            try {
+              const { flattenCellUnits } = await import("./core/tableCellAllocation");
+              const cellUnits = flattenCellUnits(tableSidecar);
+              if (cellUnits.length > 0) {
+                const cellTexts = cellUnits.map((cu) => stripInlineMarkdown(cu.text));
+                const cellIds = cellUnits.map((cu) => cu.id);
+                const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
+                cellUnitEmbeddings = new Map();
+                for (let ci = 0; ci < cellIds.length; ci++) {
+                  const emb = cellBatch.embeddings.get(String(ci));
+                  if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
+                }
+                // Persist to geo record
+                if (cellUnitEmbeddings.size > 0) {
+                  const packedCells = packEmbeddingMap(cellUnitEmbeddings, dims);
+                  const existingRecord = await sm.loadEmbeddings(aiTurnId);
+                  if (existingRecord) {
+                    existingRecord.cellUnitEmbeddings = packedCells.buffer;
+                    existingRecord.meta = existingRecord.meta || {};
+                    existingRecord.meta.cellUnitIndex = packedCells.index;
+                    existingRecord.meta.cellUnitCount = packedCells.index.length;
+                    await sm.adapter.putBinary("embeddings", existingRecord);
+                    geoRecord = existingRecord;
+                  }
+                }
+                console.log(`[Regenerate] Embedded + cached ${cellUnitEmbeddings.size} table cell-units`);
+              }
+            } catch (cellErr) {
+              console.warn("[Regenerate] Cell-unit embedding failed:", cellErr?.message || String(cellErr));
+            }
+          }
+
           // ══════════════════════════════════════════════════════════════
           // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
           // ══════════════════════════════════════════════════════════════
           const { buildArtifactForProvider } = await import("./core/execution/deterministicPipeline");
+          const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } = await import("../shared/provider-config");
+          const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));
 
           const buildResult = await buildArtifactForProvider({
             mappingText,
@@ -1046,9 +1110,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             geoRecord,
             claimEmbeddings: null, // always regenerate for now
             surveyGates: storedSurveyGates.length > 0 ? storedSurveyGates : undefined,
-            surveyRationale: storedSurveyRationale,           // ← updated to use the new variable
+            surveyRationale: storedSurveyRationale,
+            citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
             queryText,
             modelCount,
+            tableSidecar,
+            cellUnitEmbeddings,
           });
 
           const {
@@ -1215,11 +1282,66 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
                 const batchResps = (responsesForTurn || [])
                   .filter(r => r?.responseType === "batch" && r.text?.trim());
-                const batchSources = batchResps.map((r, idx) => ({
+                // Canonical ordering for deterministic statement IDs
+                const { canonicalCitationOrder: canonOrder } = await import("../shared/provider-config");
+                const seenResp = new Map();
+                for (const r of batchResps) {
+                  const pid = String(r.providerId || "").trim().toLowerCase();
+                  if (pid && !seenResp.has(pid)) seenResp.set(pid, r);
+                }
+                const orderedPids = canonOrder(Array.from(seenResp.keys()));
+                const batchSources = orderedPids.map((pid, idx) => ({
                   modelIndex: idx + 1,
-                  content: String(r.text || ""),
-                }));
+                  content: String(seenResp.get(pid)?.text || ""),
+                })).filter(s => s.content);
 
+                // Extract shadow + tables; load cell-unit embeddings from cache
+                const { extractShadowStatements } = await import("./shadow");
+                const shadowResult = extractShadowStatements(batchSources);
+                const tableSidecar = shadowResult.tableSidecar || [];
+                let cellUnitEmbeddings = null;
+                if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
+                  cellUnitEmbeddings = unpackEmbeddingMap(
+                    geoRecord.cellUnitEmbeddings,
+                    geoRecord.meta.cellUnitIndex,
+                    geoRecord.meta.dimensions
+                  );
+                } else if (tableSidecar.length > 0) {
+                  // Backfill: old turn has no cached cell-unit embeddings — generate + persist
+                  try {
+                    const { flattenCellUnits } = await import("./core/tableCellAllocation");
+                    const { generateTextEmbeddings, stripInlineMarkdown, DEFAULT_CONFIG } = await import("./clustering");
+                    const cellUnits = flattenCellUnits(tableSidecar);
+                    if (cellUnits.length > 0) {
+                      const cellTexts = cellUnits.map(cu => stripInlineMarkdown(cu.text));
+                      const cellIds = cellUnits.map(cu => cu.id);
+                      const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
+                      cellUnitEmbeddings = new Map();
+                      for (let ci = 0; ci < cellIds.length; ci++) {
+                        const emb = cellBatch.embeddings.get(String(ci));
+                        if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
+                      }
+                      // Persist so next open uses cache
+                      if (cellUnitEmbeddings.size > 0 && geoRecord) {
+                        const { packEmbeddingMap } = await import("./persistence/embeddingCodec");
+                        const dims = geoRecord.meta?.dimensions || cellUnitEmbeddings.values().next().value?.length;
+                        if (dims) {
+                          const packed = packEmbeddingMap(cellUnitEmbeddings, dims);
+                          geoRecord.cellUnitEmbeddings = packed.buffer;
+                          geoRecord.meta = geoRecord.meta || {};
+                          geoRecord.meta.cellUnitIndex = packed.index;
+                          geoRecord.meta.cellUnitCount = packed.index.length;
+                          await sm.adapter.putBinary("embeddings", geoRecord);
+                        }
+                      }
+                      console.log(`[GET_CHEWED_SUBSTRATE] Backfilled ${cellUnitEmbeddings.size} cell-unit embeddings`);
+                    }
+                  } catch (cellErr) {
+                    console.warn("[GET_CHEWED_SUBSTRATE] Cell-unit backfill failed:", cellErr?.message || String(cellErr));
+                  }
+                }
+
+                const { buildCitationSourceOrder: chewBuildCSO } = await import("../shared/provider-config");
                 const buildResult = await buildArtifactForProvider({
                   mappingText: mappingResp.text,
                   batchSources,
@@ -1228,8 +1350,11 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                   queryEmbedding: qEmb,
                   geoRecord,
                   surveyGates,
+                  citationSourceOrder: chewBuildCSO(orderedPids),
                   queryText,
                   modelCount: Math.max(batchResps.length, 1),
+                  tableSidecar,
+                  cellUnitEmbeddings,
                 });
                 mappingArtifact = buildResult.cognitiveArtifact;
               }
@@ -1291,7 +1416,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             [];
           const citationOrderNorm = citationOrderArr.map(normalizeProvId);
 
-          const sourceData = (() => {
+          const sourceData = await (async () => {
             if (Array.isArray(sourceDataFromUi) && sourceDataFromUi.length > 0) {
               return sourceDataFromUi
                 .map((s) => ({
@@ -1315,11 +1440,14 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               batchTextByProvider.set(pid, t);
             }
 
-            return Array.from(batchTextByProvider.entries()).map(([pid, text], idx) => {
-              const inOrder = citationOrderNorm.indexOf(pid);
-              const modelIndex = inOrder >= 0 ? inOrder + 1 : idx + 1;
-              return { providerId: pid, modelIndex, text };
-            });
+            // Canonical ordering for deterministic statement IDs
+            const { canonicalCitationOrder: chewCanon } = await import("../shared/provider-config");
+            const chewCanonOrder = chewCanon(Array.from(batchTextByProvider.keys()));
+            return chewCanonOrder.map((pid, idx) => ({
+              providerId: pid,
+              modelIndex: idx + 1,
+              text: batchTextByProvider.get(pid) || '',
+            })).filter(s => s.text.trim());
           })();
 
           const traversalStateRaw = turnRaw?.singularity?.traversalState ?? null;

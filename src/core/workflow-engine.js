@@ -5,74 +5,7 @@ import { ContextManager } from './execution/ContextManager';
 import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
 import { TurnEmitter } from './execution/turnemitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
-import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';
 import { classifyError } from './error-classifier';
-
-function minifyMappingArtifactForPersistence(artifact) {
-  if (!artifact || typeof artifact !== "object") return null;
-  const semantic = artifact.semantic && typeof artifact.semantic === "object" ? artifact.semantic : {};
-  const traversal = artifact.traversal && typeof artifact.traversal === "object" ? artifact.traversal : {};
-  const meta = artifact.meta && typeof artifact.meta === "object" ? artifact.meta : {};
-  const claims = Array.isArray(semantic.claims)
-    ? semantic.claims
-      .filter((c) => !!c && typeof c === "object" && !Array.isArray(c))
-      .map((c) => {
-        const cc = { ...c };
-        if (cc.sourceStatements !== undefined) {
-          const existingIds = Array.isArray(cc.sourceStatementIds) ? cc.sourceStatementIds : [];
-          if (existingIds.length === 0 && Array.isArray(cc.sourceStatements)) {
-            const ids = cc.sourceStatements
-              .map((s) => s?.id ?? s?.statementId ?? s?.sid ?? null)
-              .filter((x) => x != null && String(x).trim().length > 0)
-              .map((x) => String(x));
-            if (ids.length > 0) cc.sourceStatementIds = ids;
-          }
-          delete cc.sourceStatements;
-        }
-        if (cc.sourceRegions !== undefined) {
-          const existingIds = Array.isArray(cc.sourceRegionIds) ? cc.sourceRegionIds : [];
-          if (existingIds.length === 0 && Array.isArray(cc.sourceRegions)) {
-            const ids = cc.sourceRegions
-              .map((r) => r?.id ?? r?.regionId ?? null)
-              .filter((x) => x != null && String(x).trim().length > 0)
-              .map((x) => String(x));
-            if (ids.length > 0) cc.sourceRegionIds = ids;
-          }
-          delete cc.sourceRegions;
-        }
-        return cc;
-      })
-    : [];
-  return {
-    semantic: {
-      claims,
-      edges: Array.isArray(semantic.edges) ? semantic.edges : [],
-      conditionals: Array.isArray(semantic.conditionals) ? semantic.conditionals : [],
-      narrative: semantic.narrative,
-
-    },
-    traversal: {
-      forcingPoints: Array.isArray(traversal.forcingPoints) ? traversal.forcingPoints : [],
-      ...(Array.isArray(traversal.traversalQuestions) ? { traversalQuestions: traversal.traversalQuestions } : {}),
-      graph: traversal.graph || {
-        claims: [],
-        edges: [],
-        conditionals: [],
-        tensions: [],
-        tiers: [],
-        maxTier: 0,
-        roots: [],
-        cycles: [],
-      },
-    },
-    meta: {
-      modelCount: meta.modelCount,
-      query: meta.query,
-      turn: meta.turn,
-      timestamp: meta.timestamp,
-    },
-  };
-}
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
@@ -108,7 +41,6 @@ export class WorkflowEngine {
         this.cognitiveHandler.orchestrateSingularityPhase(
           this.currentRequest || {},
           ctx,
-          [step],
           results,
           resolved,
           this.currentUserMessage || ctx?.userMessage || "",
@@ -317,12 +249,6 @@ export class WorkflowEngine {
 
       stepResults.set(step.stepId, { status: "completed", result });
 
-      if (step.type?.includes('mapping')) {
-        console.log('🚨 MAPPING RESULT STRUCTURE:', {
-          resultKeys: Object.keys(result || {}),
-          hasMappingArtifact: !!result?.mapping?.artifact,
-        });
-      }
       this._emitStepUpdate(step, context, result, resolvedContext, "completed");
 
       if (step.type === 'prompt' && result?.results) {
@@ -444,26 +370,8 @@ export class WorkflowEngine {
       }
     }
 
-    if (step.type === 'mapping') {
-      const orchestrationResult = await this.cognitiveHandler.orchestrateSingularityPhase(
-        request,
-        context,
-        steps,
-        stepResults,
-        resolvedContext,
-        this.currentUserMessage,
-        this.stepExecutor,
-        this.streamingManager,
-      );
-      if (orchestrationResult === "awaiting_traversal") {
-        return "awaiting_traversal";
-      }
-      if (orchestrationResult) {
-        return "singularity_orchestration_complete";
-      }
-    }
-
-    if (step.type === "singularity" && result === "awaiting_traversal") {
+    // Singularity step handles its own orchestration — halt only for traversal pause
+    if (step.type === 'singularity' && result === "awaiting_traversal") {
       return "awaiting_traversal";
     }
 
@@ -471,16 +379,7 @@ export class WorkflowEngine {
   }
 
   async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
-
-    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
-
-    this._safePostMessage({
-      type: "WORKFLOW_COMPLETE",
-      sessionId: context.sessionId,
-      workflowId: request.workflowId,
-      finalResults: Object.fromEntries(stepResults),
-      haltReason,
-    });
+    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext, haltReason);
   }
 
   // --- HELPERS ---
@@ -540,7 +439,7 @@ export class WorkflowEngine {
     });
   }
 
-  async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
+  async _persistAndFinalize(request, context, steps, stepResults, resolvedContext, haltReason = null) {
     const result = this.persistenceCoordinator.buildPersistenceResultFromStepResults(
       steps,
       stepResults
@@ -562,9 +461,6 @@ export class WorkflowEngine {
       }
       : undefined;
 
-    const cognitiveArtifact = context?.mappingArtifact || null;
-    const persistedMappingArtifact = cognitiveArtifact ? minifyMappingArtifactForPersistence(cognitiveArtifact) : null;
-    const mappingPhase = persistedMappingArtifact ? { artifact: persistedMappingArtifact } : undefined;
     const singularity = context?.singularityData || context?.singularityOutput;
     const singularityPhase = singularity
       ? {
@@ -580,10 +476,8 @@ export class WorkflowEngine {
       type: resolvedContext?.type || "unknown",
       sessionId: context.sessionId,
       userMessage: this.currentUserMessage,
-      storedAnalysis: context?.storedAnalysis,
       runId: context?.runId || request?.context?.runId,
       batch: batchPhase,
-      mapping: mappingPhase,
       singularity: singularityPhase,
     };
     if (resolvedContext?.type === "recompute") {
@@ -624,6 +518,7 @@ export class WorkflowEngine {
       sessionId: context.sessionId,
       workflowId: request.workflowId,
       finalResults: Object.fromEntries(stepResults),
+      ...(haltReason ? { haltReason } : {}),
     });
 
     this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);

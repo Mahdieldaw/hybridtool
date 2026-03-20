@@ -1,30 +1,9 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
-import type { ProviderResponse, UserTurn, ProviderKey } from "../../shared/contract";
+import type { UserTurn, ProviderKey } from "../../shared/contract";
 import type { AiTurnWithUI } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 import { DEFAULT_THREAD } from "../../shared/messaging";
 
-
-/**
- * Normalize a response value to ProviderResponse[]
- * Backend can send either single object or array
- */
-export function normalizeResponseArray(value: any): ProviderResponse[] {
-  if (!value) return [];
-  if (Array.isArray(value)) return value as ProviderResponse[];
-  return [value as ProviderResponse];
-}
-
-/**
- * Safely get the latest response from a provider's response array
- */
-export function getLatestResponse(
-  responses: ProviderResponse[] | ProviderResponse | undefined,
-): ProviderResponse | undefined {
-  if (!responses) return undefined;
-  if (Array.isArray(responses)) return responses[responses.length - 1];
-  return responses as ProviderResponse;
-}
 
 export function createOptimisticAiTurn(
   aiTurnId: string,

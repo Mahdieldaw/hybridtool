@@ -5,7 +5,7 @@
  * 
  * Zero external dependencies. Optimized for browser extensions.
  */
-import { EnrichedClaim, Edge, StructuralAnalysis } from "../../shared/contract";
+import { Claim, Edge } from "../../shared/contract";
 
 // ============================================================================
 // TYPES
@@ -40,25 +40,16 @@ interface MatchedClaim {
   id: string;
   label: string;
   text: string;
-  tier: 'peak' | 'hill' | 'floor';
-  supportRatio: number;
   matchScore: number;
-}
-
-interface RelevantEdge {
-  type: string;
-  fromLabel: string;
-  toLabel: string;
 }
 
 export interface ReactiveBridge {
   matched: MatchedClaim[];
-  edges: RelevantEdge[];
   context: string;
 }
 
-// Partial analysis type for storage (only what we need)
-export type StoredAnalysis = Pick<StructuralAnalysis, 'claimsWithLeverage' | 'edges'>;
+// Claims + edges from the parsed mapper output (no structural analysis needed)
+export type StoredAnalysis = { claims: Claim[]; edges: Edge[] };
 
 // ============================================================================
 // CONSTANTS
@@ -332,7 +323,7 @@ function buildTermRelations(
  * Build searchable index from claims with term relations
  */
 function buildTermIndex(
-  claims: EnrichedClaim[],
+  claims: Claim[],
   edges: Edge[]
 ): TermIndexWithRelations {
   const termCounts = new Map<string, Set<string>>();
@@ -450,27 +441,18 @@ function matchUserMessage(
 // BRIDGE BUILDER
 // ============================================================================
 
-function getTier(supportRatio: number): 'peak' | 'hill' | 'floor' {
-  if (supportRatio > 0.5) return 'peak';
-  if (supportRatio > 0.25) return 'hill';
-  return 'floor';
-}
-
 /**
  * Shared helper to build bridge from matched terms
  */
 function buildBridgeFromIndex(
   claimScores: Map<string, number>,
-  claims: EnrichedClaim[],
-  edges: Edge[]
+  claims: Claim[]
 ): ReactiveBridge | null {
   if (claimScores.size === 0) return null;
 
   const sortedClaims = Array.from(claimScores.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
-
-  const matchedIds = new Set(sortedClaims.map(([id]) => id));
 
   const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
     const claim = claims.find(c => c.id === id);
@@ -479,33 +461,13 @@ function buildBridgeFromIndex(
       id,
       label: claim.label,
       text: claim.text,
-      tier: getTier(claim.supportRatio),
-      supportRatio: claim.supportRatio,
       matchScore: score
     };
   }).filter((c): c is MatchedClaim => c !== null);
 
-  const peakIds = new Set(
-    claims.filter(c => c.supportRatio > 0.5).map(c => c.id)
-  );
+  const context = formatBridge(matched);
 
-  const relevantEdges = edges.filter(e => {
-    const fromMatched = matchedIds.has(e.from);
-    const toMatched = matchedIds.has(e.to);
-    const fromPeak = peakIds.has(e.from);
-    const toPeak = peakIds.has(e.to);
-    return (fromMatched && toMatched) || (fromMatched && toPeak) || (fromPeak && toMatched);
-  }).slice(0, 4);
-
-  const formattedEdges: RelevantEdge[] = relevantEdges.map(e => ({
-    type: e.type,
-    fromLabel: claims.find(c => c.id === e.from)?.label || e.from,
-    toLabel: claims.find(c => c.id === e.to)?.label || e.to
-  }));
-
-  const context = formatBridge(matched, formattedEdges);
-
-  return { matched, edges: formattedEdges, context };
+  return { matched, context };
 }
 
 /**
@@ -515,40 +477,24 @@ export function buildReactiveBridge(
   userMessage: string,
   previousAnalysis: StoredAnalysis
 ): ReactiveBridge | null {
-  const claims = previousAnalysis?.claimsWithLeverage;
+  const claims = previousAnalysis?.claims;
   const edges = previousAnalysis?.edges;
   if (!Array.isArray(claims) || !Array.isArray(edges)) return null;
 
-  // Step 1: Build term index WITH relations
   const termIndex = buildTermIndex(claims, edges);
-
-  // Step 2: Match user message (now uses relations as fallback)
   const claimScores = matchUserMessage(userMessage, termIndex);
 
-  // Step 3-6: Build bridge
-  return buildBridgeFromIndex(claimScores, claims, edges);
+  return buildBridgeFromIndex(claimScores, claims);
 }
 
 /**
- * Format bridge as compact text for injection into prompts
+ * Format bridge as claim texts for injection into prompts
  */
-function formatBridge(matched: MatchedClaim[], edges: RelevantEdge[]): string {
+function formatBridge(matched: MatchedClaim[]): string {
   const lines: string[] = ['[Context from prior turn:]'];
 
   for (const m of matched) {
-    const icon = m.tier === 'peak' ? '▲' : m.tier === 'hill' ? '◆' : '○';
-    const pct = Math.round(m.supportRatio * 100);
-    lines.push(`${icon} "${m.label}" (${pct}%)`);
-  }
-
-  if (edges.length > 0) {
-    lines.push('');
-    for (const e of edges) {
-      const verb = e.type === 'conflicts' ? '↔ conflicts' :
-        e.type === 'supports' ? '→ supports' :
-          e.type === 'tradeoff' ? '⇄ tradeoff' : '—';
-      lines.push(`  ${e.fromLabel} ${verb} ${e.toLabel}`);
-    }
+    lines.push(`- ${m.text}`);
   }
 
   return lines.join('\n');
@@ -568,13 +514,13 @@ export function buildReactiveBridgeCached(
   previousAnalysis: StoredAnalysis,
   turnId: string
 ): ReactiveBridge | null {
-  if (!previousAnalysis || !Array.isArray(previousAnalysis.claimsWithLeverage) || !Array.isArray(previousAnalysis.edges)) {
+  if (!previousAnalysis || !Array.isArray(previousAnalysis.claims) || !Array.isArray(previousAnalysis.edges)) {
     return null;
   }
   // Check cache
   let termIndex = termIndexCache.get(turnId);
   if (!termIndex) {
-    termIndex = buildTermIndex(previousAnalysis.claimsWithLeverage, previousAnalysis.edges);
+    termIndex = buildTermIndex(previousAnalysis.claims, previousAnalysis.edges);
     termIndexCache.set(turnId, termIndex);
 
     // Limit cache size (keep last 5 turns)
@@ -587,10 +533,5 @@ export function buildReactiveBridgeCached(
   // Use cached index for matching
   const claimScores = matchUserMessage(userMessage, termIndex);
 
-  // Build bridge using shared logic
-  return buildBridgeFromIndex(
-    claimScores,
-    previousAnalysis.claimsWithLeverage,
-    previousAnalysis.edges
-  );
+  return buildBridgeFromIndex(claimScores, previousAnalysis.claims);
 }

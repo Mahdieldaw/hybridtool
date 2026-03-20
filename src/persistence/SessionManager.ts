@@ -417,12 +417,6 @@ export class SessionManager {
           lastContextSummary: contextSummary,
           ...(pipelineStatus ? { pipelineStatus } : {}),
         };
-        console.log('🔬 Phase persistence:', {
-          turnId: updatedAi?.id,
-          batch: !!(updatedAi as any)?.batch,
-          mapping: !!(updatedAi as any)?.mapping,
-          singularity: !!(updatedAi as any)?.singularity,
-        });
         await adapter.put("turns", updatedAi);
 
         await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId ?? null);
@@ -537,12 +531,6 @@ export class SessionManager {
       meta: await this._attachRunIdMeta(aiTurnId),
       ...(pipelineStatus ? { pipelineStatus } : {}),
     };
-    console.log('🔬 Phase persistence:', {
-      turnId: aiTurnRecord?.id,
-      batch: !!(aiTurnRecord as any)?.batch,
-      mapping: !!(aiTurnRecord as any)?.mapping,
-      singularity: !!(aiTurnRecord as any)?.singularity,
-    });
     await adapter.put("turns", aiTurnRecord);
 
     // 5) Provider responses

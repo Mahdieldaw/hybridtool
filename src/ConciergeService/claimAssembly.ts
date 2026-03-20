@@ -254,10 +254,6 @@ export async function reconstructProvenance(
 
         const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
         const supportRatio = totalModelCount > 0 ? supporters.length / totalModelCount : 0;
-        const hasConditionalSignal = sourceStatements.some(s => s.signals.conditional);
-        const hasSequenceSignal = sourceStatements.some(s => s.signals.sequence);
-        const hasTensionSignal = sourceStatements.some(s => s.signals.tension);
-
         // Step 10: Compute bulk (weighted evidence mass) per claim
         // bulk(c) = Σ weight(P, c) across all assigned paragraphs
         let bulk = 0;
@@ -285,9 +281,6 @@ export async function reconstructProvenance(
             sourceStatements,
             sourceRegionIds,
             supportRatio,
-            hasConditionalSignal,
-            hasSequenceSignal,
-            hasTensionSignal,
             provenanceBulk: bulk,
         };
     });

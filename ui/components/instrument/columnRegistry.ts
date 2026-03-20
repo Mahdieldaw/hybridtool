@@ -378,6 +378,17 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     source: 'built-in',
     category: 'metadata',
   },
+  {
+    id: 'isTableCell',
+    label: 'table',
+    accessor: r => r.isTableCell,
+    type: 'boolean',
+    sortable: true,
+    groupable: true,
+    description: 'Whether this row originates from a table cell-unit (vs prose/list extraction)',
+    source: 'built-in',
+    category: 'metadata',
+  },
 ];
 
 // ============================================================================

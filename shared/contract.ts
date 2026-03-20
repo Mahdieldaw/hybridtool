@@ -646,9 +646,6 @@ export interface EnrichedClaim extends Claim {
   derivedType?: Claim['type'];
   sourceStatementIds?: string[];
   sourceStatements?: ShadowStatement[];
-  hasSequenceSignal?: boolean;
-  hasTensionSignal?: boolean;
-  hasConditionalSignal?: boolean;
   geometricSignals?: {
     backedByPeak: boolean;
     backedByHill: boolean;
@@ -696,9 +693,6 @@ export interface LinkedClaim {
   sourceStatements: ShadowStatement[];
   sourceRegionIds: string[];  // which regions the source statements live in
   supportRatio: number;       // supporters.length / totalModelCount
-  hasConditionalSignal: boolean; // any source statement has signals.conditional
-  hasSequenceSignal: boolean;
-  hasTensionSignal: boolean;
   provenanceBulk: number;     // Σ paragraph weights for this claim
   density?: number;            // raw claim embedding density (z-scored OLS residual)
   densityLift?: number;       // claim density - mean(assigned statement density)
@@ -845,24 +839,6 @@ export interface BlastSurfaceLayerD {
   overlappingClaims: BlastSurfaceCascadeDetail[];
 }
 
-export interface BlastSurfaceVernalScore {
-  vulnerableCount: number;
-  vulnerableStatementIds: string[];
-  destroyedQueryMean: number;
-  cascadeExposure: number;
-  structuralMass: number;
-  queryTilt: number;
-  compositeScore: number;
-}
-
-export interface BlastSurfaceVernalMeta {
-  sigmaM: number;
-  sigmaQ: number;
-  adaptiveAccelerator: number;
-  lambda: number;
-  structuralStep: number;
-}
-
 /** Risk vector: three orthogonal axes of pruning damage, derived from the canonical fate table. */
 export interface BlastSurfaceRiskVector {
   /** Type 2 count: exclusive non-orphan statements. These are REMOVED on prune. Highest removal risk. */
@@ -924,7 +900,6 @@ export interface BlastSurfaceClaimScore {
   layerB?: ClaimAbsorptionProfile;
   layerC: BlastSurfaceLayerC;
   layerD: BlastSurfaceLayerD;
-  vernal?: BlastSurfaceVernalScore;
   riskVector?: BlastSurfaceRiskVector;
 }
 
@@ -950,7 +925,6 @@ export interface BlastSurfaceResult {
   meta: {
     totalCorpusStatements: number;
     processingTimeMs: number;
-    vernal?: BlastSurfaceVernalMeta;
   };
 }
 
@@ -1169,10 +1143,6 @@ export interface SerializedAssembledClaim {
 
   supporterModels: number[];
   supportRatio: number;
-
-  hasConditionalSignal: boolean;
-  hasSequenceSignal: boolean;
-  hasTensionSignal: boolean;
 
   tier: number;
 }
@@ -2417,21 +2387,12 @@ export type ProviderConfigEntry = {
 
 export type HTOSErrorCode = string;
 
-export type HTOSErrorContext = Record<string, unknown>;
-
 export type RetryPolicy = {
   maxRetries: number;
   baseDelay: number;
   maxDelay: number;
   backoffMultiplier: number;
   jitter: boolean;
-};
-
-export type CircuitBreakerState = {
-  state: "closed" | "open" | "half-open";
-  failures: number;
-  openedAt: number | null;
-  timeout: number;
 };
 
 export type OperationFn<

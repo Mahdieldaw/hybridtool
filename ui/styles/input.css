@@ -704,6 +704,14 @@
 
     @font-face {
         font-family: 'Inter';
+        font-style: italic;
+        font-weight: 400;
+        font-display: swap;
+        src: url('../fonts/Inter-Italic.woff2') format('woff2');
+    }
+
+    @font-face {
+        font-family: 'Inter';
         font-style: normal;
         font-weight: 600;
         font-display: swap;
@@ -1556,29 +1564,6 @@
         }
     }
 
-    /* Lightweight Math Styling */
-    .math-inline {
-        font-style: italic;
-        font-family: 'Times New Roman', 'Georgia', serif;
-        white-space: nowrap;
-    }
-
-    .math-text {
-        font-style: normal;
-        font-family: inherit;
-    }
-
-    .math-sup {
-        font-size: 0.75em;
-        vertical-align: super;
-        line-height: 0;
-    }
-
-    .math-sub {
-        font-size: 0.75em;
-        vertical-align: sub;
-        line-height: 0;
-    }
 
     /* 
      FIX: Global Safety Net for Math Scrollbars

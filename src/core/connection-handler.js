@@ -355,7 +355,7 @@ export class ConnectionHandler {
 
     try {
       await this._ensureBackendReady();
-      const { buildSurveyMapperPrompt, buildRoutedSurveyPrompt, parseSurveyMapperOutput } = await import('../ConciergeService/surveyMapper');
+      const { buildRoutedSurveyPrompt, parseSurveyMapperOutput } = await import('../ConciergeService/surveyMapper');
 
       let prompt;
       if (claimRouting && !claimRouting.skipSurvey) {
@@ -366,14 +366,6 @@ export class ConnectionHandler {
           batchTexts: Array.isArray(batchTexts) ? batchTexts : [],
           edges: Array.isArray(edges) ? edges : [],
         });
-      }
-      if (!prompt && !(claimRouting && claimRouting.skipSurvey)) {
-        prompt = buildSurveyMapperPrompt(
-          userQuery || '',
-          Array.isArray(claims) ? claims : [],
-          Array.isArray(edges) ? edges : [],
-          Array.isArray(batchTexts) ? batchTexts : []
-        );
       }
 
       let resultText = '';

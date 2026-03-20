@@ -118,26 +118,6 @@ export class PersistenceCoordinator {
     );
   }
 
-  async persistStepResult(resolvedContext, context, steps, stepResults, userMessage) {
-    if (resolvedContext?.type !== "recompute") {
-      const persistResult = this.buildPersistenceResultFromStepResults(
-        steps,
-        stepResults,
-      );
-      await this.sessionManager.persist(
-        {
-          type: resolvedContext?.type || "initialize",
-          sessionId: context.sessionId,
-          userMessage: userMessage,
-          canonicalUserTurnId: context?.canonicalUserTurnId,
-          canonicalAiTurnId: context?.canonicalAiTurnId,
-        },
-        resolvedContext,
-        persistResult,
-      );
-    }
-  }
-
   async upsertProviderResponse(sessionId, aiTurnId, providerId, responseType, responseIndex, payload) {
     return this.sessionManager.upsertProviderResponse(
       sessionId,

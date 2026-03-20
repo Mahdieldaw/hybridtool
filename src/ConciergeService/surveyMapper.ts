@@ -54,67 +54,6 @@ function formatBatchTexts(responses: RawModelResponse[]): string {
   return blocks.join('\n\n---\n\n');
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// LEGACY PROMPT BUILDER
-// ─────────────────────────────────────────────────────────────────────────
-
-export function buildSurveyMapperPrompt(
-  userQuery: string,
-  claims: ClaimSummary[],
-  _edges: EdgeSummary[],
-  batchTexts: RawModelResponse[]
-): string {
-  const claimsBlock = formatClaimsForPrompt(claims);
-  const sourcesBlock = formatBatchTexts(batchTexts);
-
-  return `The models below answered a question. These claims were identified as structurally important to the synthesis.
-
-<original_query>${userQuery}</original_query>
-
-<claims>
-${claimsBlock}
-</claims>
-
-<source_responses>
-${sourcesBlock}
-</source_responses>
-
-For each claim, state what it assumes about the user's real-world situation — their resources, constraints, environment, setup, or circumstances. Ground this in what the claim text and source responses actually say or imply. Some claims will assume nothing specific; they apply to anyone regardless of situation. Say so.
-
-Then, for each assumption you identified, evaluate: is this assumption unverified, and would it being false make the claim impossible to act on — not less useful, but impossible?
-
-Here is what a genuine dependency looks like:
-
-A claim says "consolidate your three vendors into one." The assumption: the user works with multiple vendors. If false, consolidation is structurally impossible. A non-circular question: "Do you currently work with more than one vendor for this?" This tests a precondition, not whether consolidation is desirable.
-
-That is the bar. The question tests an observable fact. "No" makes the claim impossible, not suboptimal. The question does not circle back to whether the user wants what the claim recommends.
-
-Output JSON:
-
-\`\`\`json
-{
-  "assessments": [
-    {
-      "claimId": "claim_X",
-      "assumes": "This claim assumes [what about the user's world], based on [what in the claim/source text].",
-      "verdict": "stands | vulnerable",
-      "reasoning": "Stands because [why], or vulnerable because if [assumption] is false, [why the claim is dead]."
-    }
-  ],
-  "gates": [
-    {
-      "id": "gate_1",
-      "question": "Do you [observable real-world condition]?",
-      "reasoning": "If no, this claim cannot be acted on because [explanation].",
-      "affectedClaims": ["claim_X"]
-    }
-  ]
-}
-\`\`\`
-
-Every claim gets an assessment. Only claims with verdict "vulnerable" produce a gate. If a claim assumes nothing specific about the user's world, say so — that is the assessment. If you find yourself writing an assumption that the claim would survive without, the verdict is "stands" and there is no gate.`;
-}
-
 // ─────────────────────────────────────────────────────────────────────
 // ROUTED PROMPT BUILDER
 // ─────────────────────────────────────────────────────────────────────

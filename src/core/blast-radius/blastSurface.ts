@@ -27,9 +27,7 @@ import type {
     BlastSurfaceCascadeDetail,
     BlastSurfaceResult,
     StatementTwinMap,
-    MixedProvenanceResult,
 } from '../../../shared/contract';
-import type { QueryRelevanceStatementScore } from '../../geometry/queryRelevance';
 import { cosineSimilarity } from '../../clustering/distance';
 import nlp from 'compromise';
 
@@ -37,10 +35,7 @@ import nlp from 'compromise';
 
 export interface BlastSurfaceInput {
     claims: Array<{ id: string; label?: string; sourceStatementIds?: string[] }>;
-    mixedProvenance: MixedProvenanceResult;
     statementEmbeddings: Map<string, Float32Array>;
-    queryRelevanceScores?: Map<string, QueryRelevanceStatementScore> | null;
-    queryEmbedding?: Float32Array | null;
     totalCorpusStatements: number;
     /** Statement ID → text. Required for noun-survival degradation cost. */
     statementTexts?: Map<string, string>;
@@ -57,7 +52,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
     const {
         claims,
         statementEmbeddings, totalCorpusStatements,
-        queryRelevanceScores, queryEmbedding,
         statementTexts,
         tableCellAllocations,
     } = input;
@@ -92,8 +86,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
     const twinMap = computeTwinMap({ claims, canonicalSets, statementEmbeddings });
 
     const scores: BlastSurfaceClaimScore[] = [];
-    const vernalVulnerableCountByClaimId = new Map<string, number>();
-    const vernalDestroyedQueryMeanByClaimId = new Map<string, number>();
     for (const claim of claims) {
         const claimId = claim.id;
         const claimLabel = claim.label ?? claimId;
@@ -124,6 +116,8 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         let degradationDamage = 0;
 
         for (const sid of exclusiveIds) {
+            // Table cell-units are supplementary evidence — skip damage scoring
+            if (sid.startsWith('tc_')) continue;
             const twin = twinMap.twins[sid];
             if (twin) {
                 // Type 2: deletion — has a twin outside this claim
@@ -169,32 +163,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         }
 
         const totalDamage = deletionDamage + degradationDamage;
-
-        // Vernal vulnerable = twin-map Type 3 (degradation, no twin)
-        const vernalVulnerableStatementIds = degradationIds;
-        const vernalVulnerableCount = degradationIds.length;
-
-        let destroyedQueryMean = 0;
-        if (vernalVulnerableCount > 0) {
-            let querySum = 0;
-            for (const sid of vernalVulnerableStatementIds) {
-                let raw: number | null = null;
-                if (queryRelevanceScores) {
-                    const v = queryRelevanceScores.get(sid)?.querySimilarity;
-                    if (typeof v === 'number' && Number.isFinite(v)) raw = v;
-                }
-                if (raw === null && queryEmbedding) {
-                    const sEmb = statementEmbeddings.get(sid);
-                    if (sEmb) raw = cosineSimilarity(sEmb, queryEmbedding);
-                }
-                const norm = raw === null ? 0 : clamp01((raw + 1) / 2);
-                querySum += norm;
-            }
-            destroyedQueryMean = querySum / vernalVulnerableCount;
-        }
-
-        vernalVulnerableCountByClaimId.set(claimId, vernalVulnerableCount);
-        vernalDestroyedQueryMeanByClaimId.set(claimId, destroyedQueryMean);
 
         // ── Layer C: Evidence Mass (counts from twin map) ─────────────────
         const type1Count = canonicalSet.size - exclusiveIds.length;
@@ -281,71 +249,8 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             claimLabel,
             layerC,
             layerD,
-            vernal: {
-                vulnerableCount: vernalVulnerableCount,
-                vulnerableStatementIds: vernalVulnerableStatementIds,
-                destroyedQueryMean,
-                cascadeExposure: 0,
-                structuralMass: 0,
-                queryTilt: 0,
-                compositeScore: 0,
-            },
             riskVector,
         });
-    }
-
-    const vernalCascadeExposureByClaimId = new Map<string, number>();
-    const vernalStructuralMassByClaimId = new Map<string, number>();
-
-    for (const s of scores) {
-        const claimId = s.claimId;
-        const cSet = canonicalSets.get(claimId) ?? new Set<string>();
-        let cascadeExposure = 0;
-
-        for (const other of scores) {
-            const otherId = other.claimId;
-            if (otherId === claimId) continue;
-            const otherSet = canonicalSets.get(otherId);
-            if (!otherSet || otherSet.size === 0) continue;
-
-            let sharedCount = 0;
-            const [small, big] = cSet.size <= otherSet.size ? [cSet, otherSet] : [otherSet, cSet];
-            for (const sid of small) {
-                if (big.has(sid)) sharedCount++;
-            }
-            if (sharedCount === 0) continue;
-
-            const overlapFraction = sharedCount / otherSet.size;
-            const vOther = vernalVulnerableCountByClaimId.get(otherId) ?? 0;
-            cascadeExposure += overlapFraction * vOther;
-        }
-
-        const v = vernalVulnerableCountByClaimId.get(claimId) ?? 0;
-        const structuralMass = v + cascadeExposure;
-        vernalCascadeExposureByClaimId.set(claimId, cascadeExposure);
-        vernalStructuralMassByClaimId.set(claimId, structuralMass);
-    }
-
-    const masses = scores.map(s => vernalStructuralMassByClaimId.get(s.claimId) ?? 0);
-    const qs = scores.map(s => vernalDestroyedQueryMeanByClaimId.get(s.claimId) ?? 0);
-    const sigmaM = stddev(masses);
-    const sigmaQ = stddev(qs);
-    const medianM = median(masses);
-    const structuralStep = sigmaM > 0.01 ? sigmaM : Math.max(medianM * 0.1, 0.1);
-    const adaptiveAccelerator = Math.min(1.0, sigmaQ / 0.25);
-    const lambda = structuralStep * adaptiveAccelerator;
-
-    for (const s of scores) {
-        if (!s.vernal) continue;
-        const claimId = s.claimId;
-        const q = vernalDestroyedQueryMeanByClaimId.get(claimId) ?? 0;
-        const cascadeExposure = vernalCascadeExposureByClaimId.get(claimId) ?? 0;
-        const structuralMass = vernalStructuralMassByClaimId.get(claimId) ?? 0;
-        const queryTilt = lambda * q;
-        s.vernal.cascadeExposure = cascadeExposure;
-        s.vernal.structuralMass = structuralMass;
-        s.vernal.queryTilt = queryTilt;
-        s.vernal.compositeScore = structuralMass + queryTilt;
     }
 
     return {
@@ -354,13 +259,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         meta: {
             totalCorpusStatements,
             processingTimeMs: performance.now() - startMs,
-            vernal: {
-                sigmaM,
-                sigmaQ,
-                adaptiveAccelerator,
-                lambda,
-                structuralStep,
-            },
         },
     };
 }
@@ -513,23 +411,6 @@ function clamp01(v: number): number {
     if (v <= 0) return 0;
     if (v >= 1) return 1;
     return v;
-}
-
-function stddev(values: number[]): number {
-    if (!values || values.length === 0) return 0;
-    const mu = values.reduce((a, b) => a + b, 0) / values.length;
-    const variance = values.reduce((s, v) => s + (v - mu) ** 2, 0) / values.length;
-    return Math.sqrt(variance);
-}
-
-function median(values: number[]): number {
-    if (!values || values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    if (sorted.length % 2 === 1) return sorted[mid] ?? 0;
-    const a = sorted[mid - 1] ?? 0;
-    const b = sorted[mid] ?? 0;
-    return (a + b) / 2;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

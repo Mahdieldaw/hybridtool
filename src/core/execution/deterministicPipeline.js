@@ -201,6 +201,65 @@ export async function computeDerivedFields({
           enrichedClaims,
         );
         console.log(`[DeterministicPipeline] TableCellAllocation: ${result.tableCellAllocation.meta.allocatedCount}/${result.tableCellAllocation.meta.totalCellUnits} allocated in ${result.tableCellAllocation.meta.processingTimeMs.toFixed(0)}ms`);
+
+        // ── 8b. Merge cell-units into shadow corpus + claim assignments ──
+        // Every cell-unit becomes a pseudo-statement so it appears in evidence tables.
+        // Allocated cells get added to their claim's sourceStatementIds.
+        // Unallocated cells remain visible but won't belong to any claim.
+        const alloc = result.tableCellAllocation;
+        for (const cu of alloc.cellUnits) {
+          shadowStatements.push({
+            id: cu.id,
+            modelIndex: cu.modelIndex,
+            text: cu.text,
+            cleanText: cu.text,
+            stance: 'assertive',
+            confidence: 1.0,
+            signals: { sequence: false, tension: false, conditional: false },
+            location: { paragraphIndex: -1, sentenceIndex: -1 },
+            fullParagraph: cu.text,
+            isTableCell: true,
+            tableMeta: { rowHeader: cu.rowHeader, columnHeader: cu.columnHeader, value: cu.value },
+          });
+        }
+
+        // Wire allocated cell-units into their claims' canonical sets + mixed provenance
+        const { cosineSimilarity: cellCos } = await import('../../clustering/distance');
+        let cellsAssigned = 0;
+        for (const ec of enrichedClaims) {
+          const cellIds = alloc.tableCellAllocations.get(ec.id)
+            ?? alloc.tableCellAllocations[ec.id]  // handle serialised object form
+            ?? [];
+          if (cellIds.length > 0) {
+            ec.sourceStatementIds = [...(ec.sourceStatementIds || []), ...cellIds];
+            cellsAssigned += cellIds.length;
+
+            // Inject into mixed provenance so UI shows sim_claim for these cells
+            const mpClaim = result.mixedProvenanceResult?.perClaim?.[ec.id];
+            if (mpClaim && Array.isArray(mpClaim.statements)) {
+              const claimEmb = claimEmbeddings?.get(ec.id);
+              for (const cellId of cellIds) {
+                const cellEmb = cellUnitEmbeddings?.get(cellId);
+                let globalSim = 0;
+                if (claimEmb && cellEmb) {
+                  globalSim = cellCos(cellEmb, claimEmb);
+                }
+                mpClaim.statements.push({
+                  statementId: cellId,
+                  globalSim,
+                  kept: true,
+                  fromSupporterModel: true,
+                  paragraphOrigin: 'table',
+                  paragraphId: null,
+                  zone: 'core',
+                  isTableCell: true,
+                });
+                mpClaim.canonicalStatementIds.push(cellId);
+              }
+            }
+          }
+        }
+        console.log(`[DeterministicPipeline] Merged ${alloc.cellUnits.length} cell-units into shadow corpus (${cellsAssigned} assigned to claims, ${alloc.unallocatedCellUnitIds.length} unassigned)`);
       }
     }
   } catch (err) {
@@ -221,10 +280,7 @@ export async function computeDerivedFields({
           label: c.label,
           sourceStatementIds: c.sourceStatementIds,
         })),
-        mixedProvenance: result.mixedProvenanceResult,
         statementEmbeddings: statementEmbeddings || new Map(),
-        queryRelevanceScores: result.queryRelevance?.statementScores ?? null,
-        queryEmbedding: queryEmbedding || null,
         totalCorpusStatements: shadowStatements.length,
         statementTexts: statementTextsMap,
         tableCellAllocations: result.tableCellAllocation?.tableCellAllocations ?? null,
@@ -475,9 +531,6 @@ export function buildTraversalData({
       sourceStatementIds,
       supporterModels: supporters,
       supportRatio: typeof c?.supportRatio === 'number' ? c.supportRatio : 0,
-      hasConditionalSignal: Boolean(c?.hasConditionalSignal),
-      hasSequenceSignal: Boolean(c?.hasSequenceSignal),
-      hasTensionSignal: Boolean(c?.hasTensionSignal),
       tier: tierByClaimId.get(id) ?? 0,
     };
   });
@@ -578,7 +631,6 @@ export function assembleMapperArtifact({
     forcingPoints,
     ...(blastSurfaceResult ? { blastSurface: blastSurfaceResult } : {}),
     ...(surveyGates ? { surveyGates, surveyRationale } : { surveyRationale }),
-    preSemantic: null,
     ...(completeness ? { completeness } : {}),
     shadow: {
       statements: shadowStatements,
@@ -677,6 +729,13 @@ export async function buildArtifactForProvider({
   // ═══ Survey gates (LLM-produced, not re-derivable without LLM) ═══
   surveyGates = undefined,
   surveyRationale = null,
+
+  // ═══ Citation ordering (canonical) ═══
+  citationSourceOrder = null, // Record<number, string> | null
+
+  // ═══ Table cell-unit integration ═══
+  tableSidecar = [],             // TableSidecar (from shadow extraction)
+  cellUnitEmbeddings = null,     // Map<string, Float32Array> | null
 
   // ═══ Context ═══
   queryText = '',
@@ -890,12 +949,13 @@ export async function buildArtifactForProvider({
     competitiveWeights,
     competitiveExcess,
     competitiveThresholds,
+    tableSidecar,
+    cellUnitEmbeddings,
   });
 
   // ── 10. Question selection instrumentation ────────────────────────
   let questionSelectionInstrumentation = null;
   let claimRouting = null;
-  const muPairwise = substrate?.meta?.similarityStats?.mean ?? null;
 
   try {
     const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
@@ -911,10 +971,9 @@ export async function buildArtifactForProvider({
       claimCentroids: claimEmbeddings ?? new Map(),
       queryEmbedding: queryEmbedding ?? null,
       statementEmbeddings: statementEmbeddings ?? null,
-      muPairwise,
     });
 
-    claimRouting = computeClaimRouting(null, null, questionSelectionInstrumentation);
+    claimRouting = computeClaimRouting(questionSelectionInstrumentation);
   } catch (_) {
     questionSelectionInstrumentation = null;
     claimRouting = null;
@@ -1018,6 +1077,10 @@ export async function buildArtifactForProvider({
     ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
   });
 
+  if (citationSourceOrder) {
+    cognitiveArtifact.citationSourceOrder = citationSourceOrder;
+    mapperArtifact.citationSourceOrder = citationSourceOrder;
+  }
   if (questionSelectionInstrumentation) {
     cognitiveArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
   }

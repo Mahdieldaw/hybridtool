@@ -141,17 +141,22 @@ function splitIntoSentences(paragraph: string): string[] {
  * Check if sentence is substantive enough to extract.
  * Operates on cleanText (markdown already stripped).
  */
-function isSubstantive(cleanText: string): boolean {
+function isSubstantive(cleanText: string, rawText?: string): boolean {
     const trimmed = cleanText.trim();
     const words = trimmed.split(/\s+/).filter(w => w.length > 0);
 
     // Lower word threshold (operates on clean text, no markdown inflation)
     if (words.length < 3) return false;
 
-    // Residual markdown structures that survived cleaning
-    if (/^#{1,6}\s/.test(trimmed)) return false;
-    if (/^\*{2}[^*]+\*{2}$/.test(trimmed)) return false;
-    if (/^__[^_]+__$/.test(trimmed)) return false;
+    // Check raw text for markdown structures stripped by cleanTextForProcessing
+    if (rawText) {
+        const rawTrimmed = rawText.trim();
+        if (/^#{1,6}\s/.test(rawTrimmed)) return false;
+        if (/^\*{2}[^*]+\*{2}$/.test(rawTrimmed)) return false;
+        if (/^__[^_]+__$/.test(rawTrimmed)) return false;
+    }
+
+    // Residual markdown structures in clean text
     if (/^\|.*\|$/.test(trimmed) && trimmed.split('|').length > 2) return false;
     if (/^[\|\s\-:]+$/.test(trimmed)) return false;
     if (/^[-*+]\s*$/.test(trimmed)) return false;
@@ -343,7 +348,7 @@ export function extractShadowStatements(
                         const rawItem = block.items[sIdx];
                         const cleanText = cleanTextForProcessing(rawItem);
 
-                        if (!isSubstantive(cleanText)) continue;
+                        if (!isSubstantive(cleanText, rawItem)) continue;
 
                         candidatesProcessed++;
                         const { stance, confidence: rawConfidence } = classifyStance(cleanText);
@@ -391,7 +396,7 @@ export function extractShadowStatements(
                         const rawSentence = sentences[sIdx];
                         const cleanText = cleanTextForProcessing(rawSentence);
 
-                        if (!isSubstantive(cleanText)) continue;
+                        if (!isSubstantive(cleanText, rawSentence)) continue;
 
                         candidatesProcessed++;
                         const { stance, confidence: rawConfidence } = classifyStance(cleanText);
@@ -517,61 +522,3 @@ function buildMetadata(
     };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// UTILITY FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Get statements by stance
- */
-export function filterByStance(
-    statements: ShadowStatement[],
-    stance: Stance
-): ShadowStatement[] {
-    return statements.filter(s => s.stance === stance);
-}
-
-/**
- * Get statements by model
- */
-export function filterByModel(
-    statements: ShadowStatement[],
-    modelIndex: number
-): ShadowStatement[] {
-    return statements.filter(s => s.modelIndex === modelIndex);
-}
-
-/**
- * Get statements with specific signals
- */
-export function filterBySignals(
-    statements: ShadowStatement[],
-    signals: {
-        sequence?: boolean;
-        tension?: boolean;
-        conditional?: boolean;
-    }
-): ShadowStatement[] {
-    return statements.filter(s => {
-        if (signals.sequence !== undefined && s.signals.sequence !== signals.sequence) {
-            return false;
-        }
-        if (signals.tension !== undefined && s.signals.tension !== signals.tension) {
-            return false;
-        }
-        if (signals.conditional !== undefined && s.signals.conditional !== signals.conditional) {
-            return false;
-        }
-        return true;
-    });
-}
-
-/**
- * Get high-confidence statements (threshold configurable)
- */
-export function filterByConfidence(
-    statements: ShadowStatement[],
-    minConfidence: number = 0.7
-): ShadowStatement[] {
-    return statements.filter(s => s.confidence >= minConfidence);
-}
