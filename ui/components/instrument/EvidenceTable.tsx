@@ -141,11 +141,6 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   globalSim: 76,
   zone: 112,
   paragraphOrigin: 120,
-  bs_twin: 56,
-  bs_simTwin: 72,
-  bs_bestSim: 72,
-  bs_t_sim: 64,
-  bs_cascadeEcho: 72,
   tm_twin: 64,
   tm_sim: 72,
   tm_twinId: 120,
@@ -417,8 +412,6 @@ export function EvidenceTable({
         r.inContinuousCore ||
         r.inMixed ||
         r.inDirectTopN ||
-        r.bs_simTwin != null ||
-        r.bs_twin != null ||
         r.tm_twin != null
       );
       if (!anyClaimSignals) return rows;
@@ -427,8 +420,6 @@ export function EvidenceTable({
         r.inContinuousCore ||
         r.inMixed ||
         r.inDirectTopN ||
-        r.bs_simTwin != null ||
-        r.bs_twin != null ||
         r.tm_twin != null
       );
     }

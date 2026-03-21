@@ -1215,7 +1215,6 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
   return (
     <div className="space-y-4">
       <BlastVernalInline artifact={artifact} />
-      <BlastCascadeInline artifact={artifact} selectedEntity={selectedEntity} />
       <RoutingCard artifact={artifact} selectedClaim={selectedEntity?.type === "claim" ? selectedEntity.id : null} />
       {claimRouting && (
         <CardSection title="Claim Routing">
@@ -1331,22 +1330,73 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
   );
 
 
-  type VulnerableStatementRow = { id: string; claimId: string; claimLabel: string; statementId: string; text: string };
-  const vulnerableRows = useMemo<VulnerableStatementRow[]>(() => {
-    const out: VulnerableStatementRow[] = [];
+  // Build claim label lookup for twin host resolution
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of scores) {
+      const id = String(s?.claimId ?? "");
+      if (id) m.set(id, String(s?.claimLabel ?? id));
+    }
+    return m;
+  }, [scores]);
+
+  type ExclusiveStatementRow = {
+    id: string; claimId: string; claimLabel: string;
+    statementId: string; text: string;
+    type: "deletion" | "degradation";
+    // twin info (only for deletion / Type 2)
+    twinId: string | null; twinText: string | null; twinSimilarity: number | null;
+    certainty: "2a" | "2b" | "2c" | null;
+    twinHostClaimId: string | null; twinHostLabel: string | null;
+  };
+  const exclusiveRows = useMemo<ExclusiveStatementRow[]>(() => {
+    const out: ExclusiveStatementRow[] = [];
     for (const s of scores) {
       const claimId = String(s?.claimId ?? "");
       const claimLabel = String(s?.claimLabel ?? claimId);
-      const ids = Array.isArray(s?.riskVector?.degradationStatementIds) ? s.riskVector.degradationStatementIds : [];
-      for (const sidRaw of ids) {
+      const rv = s?.riskVector;
+
+      // Type 2 — deletion (has twin)
+      const delDetails: Array<any> = Array.isArray(rv?.deletionCertainty?.details) ? rv.deletionCertainty.details : [];
+      const delDetailsMap = new Map<string, any>();
+      for (const d of delDetails) delDetailsMap.set(String(d?.statementId ?? ""), d);
+
+      const delIds = Array.isArray(rv?.deletionStatementIds) ? rv.deletionStatementIds : [];
+      for (const sidRaw of delIds) {
         const sid = String(sidRaw ?? "").trim();
         if (!sid) continue;
-        const text = statementTextById.get(sid) ?? "";
-        out.push({ id: `${claimId}::${sid}`, claimId, claimLabel, statementId: sid, text });
+        const detail = delDetailsMap.get(sid);
+        const twinId = detail?.twinId ? String(detail.twinId) : null;
+        const twinHostClaim = detail?.twinHostClaimId ? String(detail.twinHostClaimId) : null;
+        out.push({
+          id: `${claimId}::${sid}`, claimId, claimLabel,
+          statementId: sid, text: statementTextById.get(sid) ?? "",
+          type: "deletion",
+          twinId,
+          twinText: twinId ? (statementTextById.get(twinId) ?? "") : null,
+          twinSimilarity: typeof detail?.twinSimilarity === "number" ? detail.twinSimilarity : null,
+          certainty: detail?.certainty ?? null,
+          twinHostClaimId: twinHostClaim,
+          twinHostLabel: twinHostClaim ? (claimLabelById.get(twinHostClaim) ?? twinHostClaim) : null,
+        });
+      }
+
+      // Type 3 — degradation (no twin)
+      const degIds = Array.isArray(rv?.degradationStatementIds) ? rv.degradationStatementIds : [];
+      for (const sidRaw of degIds) {
+        const sid = String(sidRaw ?? "").trim();
+        if (!sid) continue;
+        out.push({
+          id: `${claimId}::${sid}`, claimId, claimLabel,
+          statementId: sid, text: statementTextById.get(sid) ?? "",
+          type: "degradation",
+          twinId: null, twinText: null, twinSimilarity: null,
+          certainty: null, twinHostClaimId: null, twinHostLabel: null,
+        });
       }
     }
     return out;
-  }, [scores, statementTextById]);
+  }, [scores, statementTextById, claimLabelById]);
 
   const hasAny = rows.some(r => r.riskTotal != null && r.riskTotal > 0);
   if (!bs || scores.length === 0 || !hasAny) return null;
@@ -1390,160 +1440,61 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
         />
       </CardSection>
 
-      {vulnerableRows.length > 0 && (
-        <CardSection title="Irreplaceable Statements (Destroyed Mass)">
+      {exclusiveRows.length > 0 && (
+        <CardSection title="Exclusive Statements (Destroyed Mass)">
           <SortableTable
             columns={[
-              { key: "claimLabel", header: "Claim", cell: (r) => <span className="text-[10px] truncate max-w-[140px] inline-block">{r.claimLabel || r.claimId}</span> },
-              { key: "statementId", header: "Stmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[110px] inline-block">{r.statementId}</span> },
+              { key: "claimLabel", header: "Claim", sortValue: (r) => r.claimLabel || r.claimId, cell: (r) => <span className="text-[10px] truncate max-w-[120px] inline-block">{r.claimLabel || r.claimId}</span> },
+              { key: "type", header: "Type", sortValue: (r) => r.type, cell: (r) => (
+                <span className={clsx("font-mono text-[10px] font-semibold", r.type === "deletion" ? "text-red-400" : "text-amber-400")}>
+                  {r.type === "deletion" ? "Del" : "Deg"}
+                </span>
+              )},
               {
                 key: "text",
-                header: "Text",
+                header: "Statement",
                 cell: (r) => (
-                  <span title={r.text} className="text-[10px] text-text-secondary truncate max-w-[260px] inline-block">
+                  <span title={`[${r.statementId}] ${r.text}`} className="text-[10px] text-text-secondary truncate max-w-[200px] inline-block">
                     {r.text || "(missing text)"}
                   </span>
                 ),
               },
+              {
+                key: "twinText",
+                header: "Twin",
+                cell: (r) => r.twinId ? (
+                  <span title={`[${r.twinId}] ${r.twinText || ""}`} className="text-[10px] text-blue-300 truncate max-w-[200px] inline-block">
+                    {r.twinText || r.twinId}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted italic">none</span>
+                ),
+              },
+              { key: "twinSimilarity", header: "Sim", title: "Twin similarity (cosine). Higher = less information lost on deletion.", sortValue: (r) => r.twinSimilarity ?? -1, cell: (r) => (
+                <span className="font-mono text-[10px] text-blue-400">
+                  {r.twinSimilarity !== null ? r.twinSimilarity.toFixed(2) : "–"}
+                </span>
+              )},
+              { key: "certainty", header: "Cert", title: "2a = twin unclassified (safest). 2b = twin in another claim, shared (medium). 2c = twin exclusive to host (fragile).", sortValue: (r) => r.certainty ?? "", cell: (r) => (
+                <span className={clsx("font-mono text-[10px]", r.certainty === "2a" ? "text-green-400" : r.certainty === "2b" ? "text-yellow-400" : r.certainty === "2c" ? "text-red-400" : "text-text-muted")}>
+                  {r.certainty ?? "–"}
+                </span>
+              )},
+              { key: "twinHostLabel", header: "Twin Host", title: "Claim that owns the twin. Blank = twin is unclassified (not in any claim).", cell: (r) => r.twinHostLabel ? (
+                <span title={r.twinHostClaimId || ""} className="text-[10px] text-text-secondary truncate max-w-[120px] inline-block">{r.twinHostLabel}</span>
+              ) : r.type === "deletion" ? (
+                <span className="text-[10px] text-green-400/70 italic">unclassified</span>
+              ) : (
+                <span className="text-[10px] text-text-muted">–</span>
+              )},
             ]}
-            rows={vulnerableRows}
-            defaultSortKey="claimLabel"
+            rows={exclusiveRows}
+            defaultSortKey="type"
             defaultSortDir="asc"
             maxRows={200}
           />
         </CardSection>
       )}
-    </>
-  );
-}
-
-function BlastCascadeInline({ artifact, selectedEntity }: { artifact: any; selectedEntity: SelectedEntity }) {
-  const bs = artifact?.blastSurface;
-  const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
-  const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
-
-  const statementTextById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
-      const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
-      if (!id) continue;
-      const text = String(s?.text ?? "");
-      if (!m.has(id)) m.set(id, text);
-    }
-    return m;
-  }, [artifact]);
-
-  type CascadeRow = {
-    id: string;
-    statementId: string;
-    text: string;
-    cascadeEcho: number;
-    overlappingClaims: string[];
-  };
-
-  const rows = useMemo<CascadeRow[]>(() => {
-    if (!selectedClaimId || scores.length === 0) return [];
-
-    // Map of claimId -> { v, n }
-    const claimData = new Map<string, { v: number; n: number }>();
-    for (const s of scores) {
-      claimData.set(String(s.claimId), {
-        v: s?.riskVector?.degradationRisk ?? 0,
-        n: s?.layerC?.canonicalCount ?? 0
-      });
-    }
-
-    const selectedScore = scores.find(s => String(s.claimId) === selectedClaimId);
-    if (!selectedScore) return [];
-
-    const canonIds = safeArr<string>(selectedScore.layerC?.canonicalIds);
-    const finalIds = canonIds.length > 0 ? canonIds : (() => {
-      const c = artifact?.semantic?.claims?.find((c: any) => String(c.id) === selectedClaimId);
-      return Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
-    })();
-
-    const out: CascadeRow[] = [];
-    for (const sid of finalIds) {
-      const strId = String(sid);
-      let echo = 0;
-      const overlaps: string[] = [];
-
-      for (const other of scores) {
-        const otherId = String(other.claimId);
-        if (otherId === selectedClaimId) continue;
-
-        const otherCanon = safeArr<string>(other.layerC?.canonicalIds);
-        const inOther = otherCanon.length > 0
-          ? otherCanon.includes(strId)
-          : artifact?.semantic?.claims?.find((c: any) => String(c.id) === otherId)?.sourceStatementIds?.includes(strId);
-
-        if (inOther) {
-          overlaps.push(otherId);
-          const data = claimData.get(otherId);
-          if (data && data.n > 0) {
-            echo += data.v / data.n;
-          }
-        }
-      }
-
-      if (overlaps.length > 0) {
-        out.push({
-          id: `${selectedClaimId}::${strId}`,
-          statementId: strId,
-          text: statementTextById.get(strId) ?? "",
-          cascadeEcho: echo,
-          overlappingClaims: overlaps
-        });
-      }
-    }
-    return out;
-  }, [scores, selectedClaimId, statementTextById, artifact]);
-
-  if (!bs || scores.length === 0 || !selectedClaimId) return null;
-  if (rows.length === 0) return null;
-
-  return (
-    <>
-      <div className="border-t border-white/10 my-3" />
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
-        <span className="text-xs font-semibold text-text-secondary">Cascade Overlaps — Layer D Details</span>
-      </div>
-
-      <CardSection title={`Overlapping Statements — ${rows.length}`}>
-        <SortableTable
-          columns={[
-            { key: "statementId", header: "Stmt", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[110px] inline-block">{r.statementId}</span> },
-            {
-              key: "text",
-              header: "Text",
-              cell: (r) => (
-                <span title={r.text} className="text-[10px] text-text-secondary truncate max-w-[280px] inline-block">
-                  {r.text || "(missing text)"}
-                </span>
-              )
-            },
-            { key: "cascadeEcho", header: "Echo", sortValue: (r) => r.cascadeEcho, cell: (r) => <span className="font-mono text-emerald-400">{fmt(r.cascadeEcho, 3)}</span> },
-            {
-              key: "overlaps",
-              header: "Overlaps",
-              cell: (r) => (
-                <div className="flex flex-wrap gap-1 max-w-[200px]">
-                  {r.overlappingClaims.map(cid => (
-                    <span key={cid} className="text-[9px] bg-white/5 text-text-muted px-1 rounded truncate max-w-[60px]" title={cid}>
-                      {cid}
-                    </span>
-                  ))}
-                </div>
-              )
-            },
-          ]}
-          rows={rows}
-          defaultSortKey="cascadeEcho"
-          defaultSortDir="desc"
-          maxRows={30}
-        />
-      </CardSection>
     </>
   );
 }
@@ -1849,6 +1800,14 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
   const qsi = artifact?.questionSelectionInstrumentation ?? null;
   const claimRouting = artifact?.claimRouting ?? null;
   const surveyGates = useMemo(() => safeArr<any>(artifact?.surveyGates), [artifact]);
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims)) {
+      const id = String(c?.id ?? "").trim();
+      if (id) m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [artifact]);
   const fateRows = useMemo(() => Object.values(fatesObj).map((f: any) => ({
     id: String(f.statementId ?? ""),
     fate: String(f.fate ?? ""),
@@ -2031,7 +1990,7 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                 totalDamage: typeof p?.totalDamage === "number" ? p.totalDamage : null,
                 orphanRatio: typeof p?.orphanRatio === "number" ? p.orphanRatio : null,
                 supportRatio: typeof p?.supportRatio === "number" ? p.supportRatio : null,
-                consensusDiscount: typeof p?.consensusDiscount === "number" ? p.consensusDiscount : null,
+                resolvedDamage: typeof p?.resolvedDamage === "number" ? p.resolvedDamage : null,
                 soleSource: !!p?.soleSource,
                 queryRelevanceRaw: typeof p?.queryRelevanceRaw === "number" ? p.queryRelevanceRaw : null,
                 wouldPenalize: !!p?.wouldPenalize,
@@ -2044,15 +2003,15 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                     { key: "label", header: "Label", cell: (r: any) => <span className="text-[10px] truncate max-w-[160px] inline-block" title={r.label}>{r.label}</span> },
                     { key: "totalDamage", header: "Total Damage", title: "Total damage (DD + GD): sum of deletion damage and degradation damage. Primary ranking signal for question selection.", sortValue: (r: any) => r.totalDamage ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.totalDamage != null ? fmt(r.totalDamage, 4) : "—"}</span> },
                     { key: "orphanRatio", header: "Orphan%", title: "Orphan ratio: fraction of exclusive statements with no twin. Higher = more irreplaceable evidence.", sortValue: (r: any) => r.orphanRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.orphanRatio != null ? `${(r.orphanRatio * 100).toFixed(1)}%` : "—"}</span> },
-                    { key: "supportRatio", header: "Support%", title: "Support ratio: supporters / modelCount. Fraction of models that back this claim. Used for consensus discount.", sortValue: (r: any) => r.supportRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.supportRatio != null ? `${(r.supportRatio * 100).toFixed(0)}%` : "—"}</span> },
+                    { key: "supportRatio", header: "Support%", title: "Support ratio: supporters / modelCount. >50% = consensus (hard gate, cannot be damage outlier).", sortValue: (r: any) => r.supportRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.supportRatio != null ? `${(r.supportRatio * 100).toFixed(0)}%` : "—"}</span> },
                     {
-                      key: "consensusDiscount",
-                      header: "Consensus Disc",
-                      title: "Consensus discount: score *= (1 - supportRatio × discountStrength). Penalizes high-consensus claims — they're already agreed upon, less need to question.",
-                      sortValue: (r: any) => r.consensusDiscount ?? -Infinity,
+                      key: "resolvedDamage",
+                      header: "Resolved Dmg",
+                      title: "Resolved damage: per-claim structural damage after fragility resolution. Deterministic — twin fates resolved from routing topology.",
+                      sortValue: (r: any) => r.resolvedDamage ?? -Infinity,
                       cell: (r: any) => (
-                        <span className={clsx("font-mono", (r.consensusDiscount ?? 0) > 0.25 ? "text-amber-400" : "text-text-muted")}>
-                          {r.consensusDiscount != null ? fmt(r.consensusDiscount, 3) : "—"}
+                        <span className={clsx("font-mono", r.resolvedDamage != null && r.totalDamage != null && r.resolvedDamage !== r.totalDamage ? "text-amber-400" : "text-text-muted")}>
+                          {r.resolvedDamage != null ? fmt(r.resolvedDamage, 4) : "—"}
                         </span>
                       ),
                     },
@@ -2136,7 +2095,8 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                   columns={[
                     { key: "id", header: "Gate", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r?.id ?? "")}</span> },
                     { key: "question", header: "Question", cell: (r: any) => <span className="text-[10px] truncate max-w-[240px] inline-block" title={String(r?.question ?? "")}>{String(r?.question ?? "")}</span> },
-                    { key: "affected", header: "Affected", sortValue: (r: any) => safeArr(r?.affectedClaims).length, cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(safeArr(r?.affectedClaims).length)}</span> },
+                    { key: "reasoning", header: "Rationale", cell: (r: any) => <span className="text-[10px] text-text-muted truncate max-w-[200px] inline-block" title={String(r?.reasoning ?? "")}>{String(r?.reasoning ?? "—")}</span> },
+                    { key: "affected", header: "Affected", title: "Claims affected by this gate.", sortValue: (r: any) => safeArr(r?.affectedClaims).length, cell: (r: any) => <span className="font-mono text-text-muted" title={safeArr(r?.affectedClaims).map((id: string) => `${id}: ${claimLabelById.get(String(id)) ?? "?"}`).join("\n")}>{fmtInt(safeArr(r?.affectedClaims).length)}</span> },
                     { key: "blastRadius", header: "Score", title: "Blast radius score for this survey gate.", sortValue: (r: any) => (typeof r?.blastRadius === "number" ? r.blastRadius : null), cell: (r: any) => <span className="font-mono text-text-muted">{fmt(typeof r?.blastRadius === "number" ? r.blastRadius : null, 3)}</span> },
                   ]}
                   rows={surveyGates}

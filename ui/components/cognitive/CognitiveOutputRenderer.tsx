@@ -213,7 +213,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const structuralAnalysis = useMemo(() => {
         if (!mappingArtifact) return undefined;
         try {
-            return computeStructuralAnalysis(mappingArtifact);
+            return computeStructuralAnalysis({
+                claims: mappingArtifact?.semantic?.claims ?? [],
+                edges: mappingArtifact?.semantic?.edges ?? [],
+                modelCount: mappingArtifact?.meta?.modelCount,
+            });
         } catch (e) {
             return undefined;
         }

@@ -1431,34 +1431,8 @@ export class StepExecutor {
                   const blastSurfaceResult = derived.blastSurfaceResult;
                   const mapperArtifact_claimProvenance = derived.claimProvenance;
 
-                  let questionSelectionInstrumentation = null;
-
-                  try {
-                    const { computeQuestionSelectionInstrumentation } =
-                      await import('../blast-radius/questionSelection');
-                    questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
-                      blastSurfaceResult: blastSurfaceResult ?? null,
-                      edges: unifiedEdges,
-                      enrichedClaims,
-                      queryRelevanceScores: queryRelevance?.statementScores ?? null,
-                      modelCount: citationOrder.length,
-                      claimCentroids: claimEmbeddings ?? new Map(),
-                      queryEmbedding: queryEmbedding ?? null,
-                      statementEmbeddings: statementEmbeddingResult?.embeddings ?? null,
-                    });
-                  } catch (err) {
-                    console.warn('[StepExecutor] Question selection instrumentation failed:', getErrorMessage(err));
-                    questionSelectionInstrumentation = null;
-                  }
-
-                  const { computeClaimRouting } =
-                    await import('../blast-radius/questionSelection');
-                  const claimRouting = computeClaimRouting(
-                    questionSelectionInstrumentation
-                  );
-                  console.log(
-                    `[ClaimRouting] ${claimRouting.conflictClusters.length} conflict cluster(s), ${claimRouting.damageOutliers.length} outlier(s), skip=${claimRouting.skipSurvey}`
-                  );
+                  const questionSelectionInstrumentation = derived.questionSelectionInstrumentation;
+                  const claimRouting = derived.claimRouting;
 
                   let surveyRationale = null;
                   const semanticContinuationMeta = (() => {
@@ -1493,7 +1467,7 @@ export class StepExecutor {
 
                       let surveyPrompt = null;
                       let claimsExpectedInSurvey = claimsForSurvey;
-                      if (!claimRouting.skipSurvey) {
+                      if (claimRouting && !claimRouting.skipSurvey) {
                         const routedSet = new Set(claimRouting.routedClaimIds);
                         const routedClaims = claimsForSurvey.filter((c) => routedSet.has(c.id));
                         claimsExpectedInSurvey = routedClaims;
@@ -1650,13 +1624,6 @@ export class StepExecutor {
                   mapperArtifact.preSemantic = preSemanticInterpretation || null;
                   if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
-                  if (questionSelectionInstrumentation) {
-                    mapperArtifact.questionSelectionInstrumentation = questionSelectionInstrumentation;
-                  }
-                  if (claimRouting) {
-                    mapperArtifact.claimRouting = claimRouting;
-                  }
-
                   let diagnosticsResult = null;
                   try {
                     if (preSemanticInterpretation && mapperArtifact) {
@@ -1664,8 +1631,11 @@ export class StepExecutor {
                       let postSemantic = cachedStructuralAnalysis;
                       if (!postSemantic) {
                         const { computeStructuralAnalysis } = await import('../PromptMethods');
-                        const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
-                        postSemantic = computeStructuralAnalysis(tempCognitive);
+                        postSemantic = computeStructuralAnalysis({
+                          claims: mapperArtifact.claims ?? [],
+                          edges: mapperArtifact.edges ?? [],
+                          modelCount: mapperArtifact.model_count,
+                        });
                       }
                       diagnosticsResult = validateStructuralMapping(
                         preSemanticInterpretation,

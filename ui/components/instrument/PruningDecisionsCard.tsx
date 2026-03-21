@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import clsx from "clsx";
 import { getProviderColor, getProviderConfig } from "../../utils/provider-helpers";
+import { CopyButton } from "../CopyButton";
 
 type DebugPayload = {
   ok: boolean;
@@ -38,24 +39,6 @@ function sendMessage<T = any>(message: any): Promise<T> {
   });
 }
 
-function buildRemovedLineView(rawText: string, prunedText: string): Array<{ kind: "keep" | "removed"; line: string }> {
-  const prunedLines = String(prunedText || "").split("\n");
-  const counts = new Map<string, number>();
-  for (const l of prunedLines) counts.set(l, (counts.get(l) ?? 0) + 1);
-
-  const out: Array<{ kind: "keep" | "removed"; line: string }> = [];
-  for (const l of String(rawText || "").split("\n")) {
-    const n = counts.get(l) ?? 0;
-    if (n > 0) {
-      counts.set(l, n - 1);
-      out.push({ kind: "keep", line: l });
-    } else {
-      out.push({ kind: "removed", line: l });
-    }
-  }
-  return out;
-}
-
 function sectionTitle(title: string) {
   return <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">{title}</div>;
 }
@@ -64,8 +47,17 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<DebugPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"diff" | "raw" | "pruned">("diff");
+  const [viewMode, setViewMode] = useState<"statements" | "raw" | "pruned">("statements");
   const [openProviderId, setOpenProviderId] = useState<string | null>(null);
+
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims)) {
+      const id = String(c?.id ?? "").trim();
+      if (id) m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [artifact]);
 
   const request = useCallback(async () => {
     const id = String(aiTurnId || "").trim();
@@ -161,6 +153,59 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
   const headerProvider = providerId ? getProviderConfig(providerId) : undefined;
   const headerColor = providerId ? getProviderColor(providerId) : "#8b5cf6";
 
+  const { copyText, copyHtml } = useMemo(() => {
+    if (!data?.ok) return { copyText: "", copyHtml: "" };
+    const plain: string[] = [];
+    const html: string[] = ['<div style="font-family:system-ui,sans-serif;font-size:13px;line-height:1.6">'];
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    if (prunedClaimIds.length > 0) {
+      plain.push(`PRUNED CLAIMS (${prunedClaimIds.length}):`);
+      html.push(`<p style="font-weight:600;margin:8px 0 4px">Pruned Claims (${prunedClaimIds.length}):</p><ul style="margin:0 0 8px">`);
+      for (const id of prunedClaimIds) {
+        const label = claimLabelById.get(id) ?? id;
+        plain.push(`  ${id}: ${label}`);
+        html.push(`<li><code style="font-size:11px;color:#888">${esc(id)}</code> ${esc(label)}</li>`);
+      }
+      html.push("</ul>");
+      plain.push("");
+    }
+
+    for (const o of chewedOutputs) {
+      const pid = String(o?.providerId ?? "");
+      const mi = typeof o?.modelIndex === "number" ? o.modelIndex : "?";
+      const prov = getProviderConfig(pid);
+      const heading = `${prov?.name ?? pid} (model ${mi})`;
+      plain.push(`═══ ${heading} ═══`);
+      html.push(`<h3 style="border-bottom:1px solid #ddd;padding-bottom:4px;margin:16px 0 8px">${esc(heading)}</h3>`);
+      for (const p of safeArr(o?.paragraphs)) {
+        const plainLines: string[] = [];
+        const htmlParts: string[] = [];
+        for (const s of safeArr(p?.statements)) {
+          const action = String(s?.action ?? "PROTECTED");
+          const orig = String(s?.originalText ?? "");
+          if (action === "REMOVE") {
+            plainLines.push(`~~${orig}~~`);
+            htmlParts.push(`<del style="background:#fee2e2;color:#b91c1c;text-decoration:line-through">${esc(orig)}</del>`);
+          } else if (action === "SKELETONIZE") {
+            const skel = String(s?.resultText ?? orig);
+            plainLines.push(`[skeleton: ${skel}]`);
+            htmlParts.push(`<mark style="background:#fef3c7;color:#92400e;border-radius:2px;padding:0 2px">${esc(skel)}</mark>`);
+          } else {
+            plainLines.push(orig);
+            htmlParts.push(esc(orig));
+          }
+        }
+        plain.push(plainLines.join(" "));
+        html.push(`<p style="margin:4px 0">${htmlParts.join(" ")}</p>`);
+        plain.push("");
+      }
+      plain.push("");
+    }
+    html.push("</div>");
+    return { copyText: plain.join("\n"), copyHtml: html.join("\n") };
+  }, [data, prunedClaimIds, claimLabelById, chewedOutputs]);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -173,18 +218,23 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
             {headerProvider?.name || providerId || ""}
           </div>
         </div>
-        <button
-          type="button"
-          className={clsx(
-            "px-2.5 py-1 rounded-md text-[11px] border transition-colors",
-            loading ? "opacity-60 cursor-wait" : "hover:bg-white/5",
-            "border-border-subtle text-text-secondary"
+        <div className="flex items-center gap-2">
+          {copyText && (
+            <CopyButton text={copyText} html={copyHtml} label="Copy pruning output" variant="icon" />
           )}
-          onClick={() => void request()}
-          disabled={loading || !aiTurnId}
-        >
-          {loading ? "Loading…" : "Load"}
-        </button>
+          <button
+            type="button"
+            className={clsx(
+              "px-2.5 py-1 rounded-md text-[11px] border transition-colors",
+              loading ? "opacity-60 cursor-wait" : "hover:bg-white/5",
+              "border-border-subtle text-text-secondary"
+            )}
+            onClick={() => void request()}
+            disabled={loading || !aiTurnId}
+          >
+            {loading ? "Loading…" : "Load"}
+          </button>
+        </div>
       </div>
 
       {error && <div className="text-[11px] text-red-400">{error}</div>}
@@ -237,8 +287,16 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
               <div className="text-[11px] text-text-secondary">{String(data?.chewedSubstrate?.summary?.removedStatementCount ?? "—")}</div>
             </div>
             {prunedClaimIds.length > 0 && (
-              <div className="mt-2 text-[10px] font-mono text-text-muted whitespace-pre-wrap break-words">
-                {prunedClaimIds.join(", ")}
+              <div className="mt-2 space-y-0.5">
+                {prunedClaimIds.map((id) => {
+                  const label = claimLabelById.get(id);
+                  return (
+                    <div key={id} className="text-[10px] text-text-muted flex items-baseline gap-1.5">
+                      <span className="font-mono text-rose-400 flex-shrink-0">{id}</span>
+                      {label && <span className="truncate" title={label}>{label}</span>}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -246,7 +304,7 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
           <div className="mt-3">
             {sectionTitle("Model Outputs")}
             <div className="flex items-center gap-2 mt-2">
-              {(["diff", "raw", "pruned"] as const).map((m) => (
+              {(["statements", "raw", "pruned"] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -296,12 +354,12 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
                       {isOpen && (
                         <div className="px-3 pb-3">
                           <div className="grid grid-cols-3 gap-x-3 gap-y-1 mt-1">
-                            <div className="text-[10px] text-text-muted">Original</div>
-                            <div className="text-[10px] text-text-muted">Final</div>
-                            <div className="text-[10px] text-text-muted">Removed</div>
-                            <div className="text-[11px] text-text-secondary">{rawText.length}</div>
-                            <div className="text-[11px] text-text-secondary">{prunedText.length}</div>
-                            <div className="text-[11px] text-text-secondary">{String(chewed?.meta?.removedStatementCount ?? "—")}</div>
+                            <div className="text-[10px] text-text-muted">Original chars</div>
+                            <div className="text-[10px] text-text-muted">Final chars</div>
+                            <div className="text-[10px] text-text-muted">Stmts removed</div>
+                            <div className="text-[11px] text-text-secondary font-mono">{rawText.length.toLocaleString()}</div>
+                            <div className="text-[11px] text-text-secondary font-mono">{prunedText.length.toLocaleString()}</div>
+                            <div className="text-[11px] text-text-secondary font-mono">{String(chewed?.meta?.removedStatementCount ?? "—")}</div>
                           </div>
 
                           {viewMode === "raw" && (
@@ -314,16 +372,41 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
                               {prunedText || "(empty)"}
                             </pre>
                           )}
-                          {viewMode === "diff" && (
-                            <pre className="mt-2 text-[10px] font-mono whitespace-pre-wrap break-words leading-relaxed">
-                              {buildRemovedLineView(rawText, prunedText).map((d, idx) => (
-                                <span key={idx} className={d.kind === "removed" ? "text-red-400" : "text-text-muted"}>
-                                  {d.kind === "removed" ? `- ${d.line}` : `  ${d.line}`}
-                                  {"\n"}
-                                </span>
-                              ))}
-                            </pre>
-                          )}
+                          {viewMode === "statements" && (() => {
+                            const paragraphs = safeArr<any>(chewed?.paragraphs);
+                            if (paragraphs.length === 0) return <div className="mt-2 text-[10px] text-text-muted italic">No per-statement data available.</div>;
+                            const actionColor: Record<string, string> = {
+                              PROTECTED: "text-text-muted",
+                              UNTRIAGED: "text-text-muted",
+                              SKELETONIZE: "text-amber-400",
+                              REMOVE: "text-red-400",
+                            };
+                            const actionPrefix: Record<string, string> = {
+                              PROTECTED: " ",
+                              UNTRIAGED: " ",
+                              SKELETONIZE: "~",
+                              REMOVE: "-",
+                            };
+                            return (
+                              <div className="mt-2 space-y-2">
+                                {paragraphs.map((p: any, pi: number) => (
+                                  <div key={p?.paragraphId ?? pi}>
+                                    {safeArr<any>(p?.statements).map((s: any, si: number) => {
+                                      const action = String(s?.action ?? "PROTECTED");
+                                      const text = action === "SKELETONIZE" ? String(s?.resultText ?? s?.originalText ?? "") : String(s?.originalText ?? "");
+                                      return (
+                                        <div key={s?.statementId ?? si} className={clsx("text-[10px] font-mono whitespace-pre-wrap break-words leading-relaxed", actionColor[action] ?? "text-text-muted")}>
+                                          {action === "REMOVE" && <span className="text-red-400 line-through">{actionPrefix[action]} {text}</span>}
+                                          {action === "SKELETONIZE" && <span className="text-amber-400">{actionPrefix[action]} {text}</span>}
+                                          {action !== "REMOVE" && action !== "SKELETONIZE" && <span>{actionPrefix[action]} {text}</span>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

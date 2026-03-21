@@ -408,11 +408,10 @@ export function ClaimDetailDrawer({
           )}
 
           {/* Boolean flags */}
-          {(claim.isKeystone || claim.isLeverageInversion || claim.isEvidenceGap || claim.isOutlier || claim.isIsolated) && (
+          {(claim.isKeystone || claim.isLeverageInversion || claim.isOutlier || claim.isIsolated) && (
             <div className="flex flex-wrap gap-1.5">
               {claim.isKeystone && <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30">keystone</span>}
               {claim.isLeverageInversion && <span className="px-1.5 py-0.5 rounded text-[9px] bg-red-500/20 text-red-300 border border-red-500/30">leverage inversion</span>}
-              {claim.isEvidenceGap && <span className="px-1.5 py-0.5 rounded text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30">evidence gap</span>}
               {claim.isOutlier && <span className="px-1.5 py-0.5 rounded text-[9px] bg-orange-500/20 text-orange-300 border border-orange-500/30">outlier</span>}
               {claim.isIsolated && <span className="px-1.5 py-0.5 rounded text-[9px] bg-slate-500/20 text-slate-300 border border-slate-500/30">isolated</span>}
             </div>

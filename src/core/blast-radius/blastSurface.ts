@@ -23,8 +23,6 @@ import type {
     BlastSurfaceClaimScore,
     BlastSurfaceRiskVector,
     BlastSurfaceLayerC,
-    BlastSurfaceLayerD,
-    BlastSurfaceCascadeDetail,
     BlastSurfaceResult,
     StatementTwinMap,
 } from '../../../shared/contract';
@@ -69,11 +67,9 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
     }
 
     const canonicalExclusiveIdsByClaim = new Map<string, string[]>();
-    const canonicalExclusivityRatioByClaim = new Map<string, number>();
     for (const [claimId, set] of canonicalSets.entries()) {
         const exclusiveIds = Array.from(set).filter(sid => (canonicalOwnerCounts.get(sid) ?? 0) <= 1);
         canonicalExclusiveIdsByClaim.set(claimId, exclusiveIds);
-        canonicalExclusivityRatioByClaim.set(claimId, set.size > 0 ? exclusiveIds.length / set.size : 0);
     }
 
     // Build allClaimOwnedIds for certainty classification
@@ -118,7 +114,7 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         for (const sid of exclusiveIds) {
             // Table cell-units are supplementary evidence — skip damage scoring
             if (sid.startsWith('tc_')) continue;
-            const twin = twinMap.twins[sid];
+            const twin = twinMap.perClaim[claimId]?.[sid] ?? null;
             if (twin) {
                 // Type 2: deletion — has a twin outside this claim
                 deletionIds.push(sid);
@@ -177,15 +173,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             exclusiveOrphanCount: type3Count,
             allocatedCellUnits: allocatedCellUnitCount,
         };
-
-        // ── Layer D: Cascade Echo ─────────────────────────────────────────
-        const layerD = computeLayerD(
-            claimId,
-            canonicalSet,
-            claims,
-            canonicalSets,
-            canonicalExclusivityRatioByClaim,
-        );
 
         // ── Risk Vector ───────────────────────────────────────────────────
         const cascadeFragilityDetails: Array<{ statementId: string; parentCount: number; fragility: number }> = [];
@@ -248,7 +235,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             claimId,
             claimLabel,
             layerC,
-            layerD,
             riskVector,
         });
     }
@@ -291,13 +277,20 @@ function computeTwinMap(input: {
         if (!allClaimOwnedIds.has(sid)) unclassifiedIds.push(sid);
     }
 
-    const twins: Record<string, { twinStatementId: string; similarity: number } | null> = {};
-    const thresholds: Record<string, number> = {};
+    const perClaim: Record<string, Record<string, { twinStatementId: string; similarity: number } | null>> = {};
+    const thresholdsPerClaim: Record<string, Record<string, number>> = {};
+
+    let totalEntries = 0;
+    let totalWithTwins = 0;
+    const allThresholdValues: number[] = [];
 
     for (const claim of claims) {
         const claimId = claim.id;
         const homeSet = canonicalSets.get(claimId) ?? new Set<string>();
         if (homeSet.size === 0) continue;
+
+        const claimTwins: Record<string, { twinStatementId: string; similarity: number } | null> = {};
+        const claimThresholds: Record<string, number> = {};
 
         // Pre-index home set embeddings for backward pass
         const homeEmbeddings = new Map<string, Float32Array>();
@@ -307,22 +300,23 @@ function computeTwinMap(input: {
         }
 
         // Build cross-claim candidate pool: all canonical in OTHER claims + unclassified
-        // (exclude statements already in this claim's canonical set)
-        const candidateIds: string[] = [];
+        // Deduplicate: a statement in multiple other claims should appear only once.
+        const candidateIdSet = new Set<string>();
         for (const [otherId, otherSet] of canonicalSets.entries()) {
             if (otherId === claimId) continue;
             for (const sid of otherSet) {
-                if (!homeSet.has(sid)) candidateIds.push(sid);
+                if (!homeSet.has(sid)) candidateIdSet.add(sid);
             }
         }
         for (const sid of unclassifiedIds) {
-            if (!homeSet.has(sid)) candidateIds.push(sid);
+            if (!homeSet.has(sid)) candidateIdSet.add(sid);
         }
+        const candidateIds = Array.from(candidateIdSet);
 
         for (const sid of homeSet) {
             const sEmb = statementEmbeddings.get(sid);
             if (!sEmb) {
-                twins[sid] = null;
+                claimTwins[sid] = null;
                 continue;
             }
 
@@ -338,7 +332,7 @@ function computeTwinMap(input: {
             }
 
             if (candidateSims.length === 0) {
-                twins[sid] = null;
+                claimTwins[sid] = null;
                 continue;
             }
 
@@ -346,7 +340,8 @@ function computeTwinMap(input: {
             const muS = candidateSims.reduce((a, b) => a + b, 0) / candidateSims.length;
             const varS = candidateSims.reduce((s, v) => s + (v - muS) ** 2, 0) / candidateSims.length;
             const tauS = clamp01(muS + 2 * Math.sqrt(varS));
-            thresholds[sid] = tauS;
+            claimThresholds[sid] = tauS;
+            allThresholdValues.push(tauS);
 
             // Forward pass: find best candidate T
             let bestSim = -Infinity;
@@ -359,14 +354,14 @@ function computeTwinMap(input: {
             }
 
             if (!bestCandidateId || bestSim <= tauS) {
-                twins[sid] = null;
+                claimTwins[sid] = null;
                 continue;
             }
 
             // Backward pass: is S the best match for T within C's full canonical set?
             const tEmb = statementEmbeddings.get(bestCandidateId);
             if (!tEmb) {
-                twins[sid] = null;
+                claimTwins[sid] = null;
                 continue;
             }
 
@@ -381,26 +376,29 @@ function computeTwinMap(input: {
             }
 
             if (bestBackId === sid) {
-                twins[sid] = { twinStatementId: bestCandidateId, similarity: bestSim };
+                claimTwins[sid] = { twinStatementId: bestCandidateId, similarity: bestSim };
+                totalWithTwins++;
             } else {
-                twins[sid] = null;
+                claimTwins[sid] = null;
             }
+
+            totalEntries++;
         }
+
+        perClaim[claimId] = claimTwins;
+        thresholdsPerClaim[claimId] = claimThresholds;
     }
 
-    const twinValues = Object.values(twins);
-    const statementsWithTwins = twinValues.filter(v => v !== null).length;
-    const thresholdValues = Object.values(thresholds);
-    const meanThreshold = thresholdValues.length > 0
-        ? thresholdValues.reduce((a, b) => a + b, 0) / thresholdValues.length
+    const meanThreshold = allThresholdValues.length > 0
+        ? allThresholdValues.reduce((a, b) => a + b, 0) / allThresholdValues.length
         : 0;
 
     return {
-        twins,
-        thresholds,
+        perClaim,
+        thresholds: thresholdsPerClaim,
         meta: {
-            totalStatements: twinValues.length,
-            statementsWithTwins,
+            totalStatements: totalEntries,
+            statementsWithTwins: totalWithTwins,
             meanThreshold,
             processingTimeMs: performance.now() - twinStart,
         },
@@ -424,7 +422,7 @@ function findHostClaim(statementId: string, canonicalSets: Map<string, Set<strin
     return null;
 }
 
-function computeNounSurvivalRatio(text: string): number {
+export function computeNounSurvivalRatio(text: string): number {
     if (!text || typeof text !== 'string') return 0;
     const trimmed = text.replace(/[*_#|>]/g, '').trim();
     if (trimmed.length === 0) return 0;
@@ -442,59 +440,3 @@ function computeNounSurvivalRatio(text: string): number {
     } catch { return 0; }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LAYER D — CASCADE ECHO
-//
-// If claim C is pruned, how much of other claims' evidence is destabilized?
-//
-// For each other claim D that shares canonical statements with C:
-//   contribution = (sharedCount / D.canonicalCount) × D.exclusivityRatio
-//
-// cascadeExposure = sum of contributions across all overlapping claims.
-//
-// This replaces the old cascadeBreadth which counted downstream claims via
-// semantic mapper edges. This counts evidence exposure via provenance overlap.
-// ═══════════════════════════════════════════════════════════════════════════
-
-function computeLayerD(
-    claimId: string,
-    canonicalSet: Set<string>,
-    claims: Array<{ id: string }>,
-    canonicalSets: Map<string, Set<string>>,
-    canonicalExclusivityRatioByClaim: Map<string, number>,
-): BlastSurfaceLayerD {
-    const overlappingClaims: BlastSurfaceCascadeDetail[] = [];
-    let cascadeExposure = 0;
-
-    for (const otherClaim of claims) {
-        if (otherClaim.id === claimId) continue;
-
-        const otherCanonical = canonicalSets.get(otherClaim.id);
-        if (!otherCanonical || otherCanonical.size === 0) continue;
-
-        // Count statements shared between C's canonical and D's canonical
-        let sharedCount = 0;
-        for (const sid of Array.from(canonicalSet)) {
-            if (otherCanonical.has(sid)) sharedCount++;
-        }
-        if (sharedCount === 0) continue;
-
-        const dExclusivityRatio = canonicalExclusivityRatioByClaim.get(otherClaim.id) ?? 0;
-        const dCanonicalCount = otherCanonical.size;
-        const contribution = (sharedCount / dCanonicalCount) * dExclusivityRatio;
-
-        overlappingClaims.push({
-            claimId: otherClaim.id,
-            sharedCount,
-            dCanonicalCount,
-            dExclusivityRatio,
-            contribution,
-        });
-        cascadeExposure += contribution;
-    }
-
-    return {
-        cascadeExposure,
-        overlappingClaims,
-    };
-}

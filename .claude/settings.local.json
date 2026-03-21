@@ -33,7 +33,8 @@
       "Bash(grep -r \"hardcoded\\\\|TODO.*provider\\\\|FIXME.*provider\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | head -20)",
       "Bash(find:*)",
       "Bash(cd \"C:\\\\Users\\\\Mahdi\\\\Desktop\\\\hybrid\" && npx jest src/core/provider-health-tracker.test.ts --no-coverage 2>&1 | tail -20)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "CLAUDE_CODE_DISABLE_1M_CONTEXT=1"
     ]
   }
 }

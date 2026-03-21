@@ -2,11 +2,13 @@ import type {
   BlastSurfaceResult,
   Edge,
   EnrichedClaim,
+  FragilityResolutionResult,
   QuestionSelectionInstrumentation,
   ValidatedConflict,
 } from '../../../shared/contract';
 import type { QueryRelevanceStatementScore } from '../../geometry/queryRelevance';
 import { cosineSimilarity } from '../../clustering/distance';
+import { computeFragilityResolution } from './fragilityResolution';
 
 export interface QuestionSelectionInput {
   blastSurfaceResult: BlastSurfaceResult | null;
@@ -18,6 +20,10 @@ export interface QuestionSelectionInput {
   queryEmbedding?: Float32Array | null;
   /** Statement embeddings for cross-pool proximity computation */
   statementEmbeddings?: Map<string, Float32Array> | null;
+  /** statementId → set of all claim IDs owning it (prebuilt by pipeline) */
+  statementOwners?: Map<string, Set<string>>;
+  /** statementId → text (prebuilt by pipeline) */
+  statementTexts?: Map<string, string>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -36,6 +42,7 @@ export interface DamageOutlier {
   claimLabel: string;
   claimText: string;
   totalDamage: number;
+  resolvedDamage: number;
   supportRatio: number;
   queryDistance: number | null;
   supporters: number[];
@@ -301,7 +308,7 @@ export function computeQuestionSelectionInstrumentation(
     });
   }
 
-  const discountStrength = 0.5 * Math.min(input.modelCount / 4, 1);
+  // discountStrength removed — consensusDiscount no longer used in scoring
 
   const queryRelValues: number[] = [];
   const queryRelHasAny: boolean[] = [];
@@ -397,11 +404,10 @@ export function computeQuestionSelectionInstrumentation(
         claimId: id,
         claimLabel: String(c.label ?? id),
         totalDamage: totalDamageByClaimId.get(id) ?? null,
+        resolvedDamage: null as number | null, // filled after fragility resolution
         orphanRatio: orphanRatioByClaimId.get(id) ?? null,
         supportRatio: typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0,
         modelCount: input.modelCount,
-        consensusDiscount:
-          (typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0) * discountStrength,
         soleSource,
         queryRelevanceRaw,
         wouldPenalize,
@@ -439,14 +445,48 @@ export function computeQuestionSelectionInstrumentation(
     claimsInRoutedConflict.add(c.edgeTo);
   }
 
-  const damageOutlierClaimIds: string[] = [];
-  if (sigmaDamage > 0) {
-    const threshold = meanDamage + sigmaDamage;
+  // ── Fragility resolution (convergence loop) ────────────────────────────
+  // Build supportRatio map for the candidacy gate (≤ 0.5)
+  const supportRatioMap = new Map<string, number>();
+  for (const c of claims) {
+    const sr = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
+    supportRatioMap.set(String(c.id), sr);
+  }
+
+  let fragilityResolution: FragilityResolutionResult | null = null;
+  let damageOutlierClaimIds: string[] = [];
+
+  if (input.blastSurfaceResult && input.statementOwners && input.statementTexts) {
+    fragilityResolution = computeFragilityResolution({
+      blastSurfaceResult: input.blastSurfaceResult,
+      conflictClaimIds: claimsInRoutedConflict,
+      statementOwners: input.statementOwners,
+      statementTexts: input.statementTexts,
+      supportRatios: supportRatioMap,
+    });
+
+    // Extract damage outliers: finalRoutedSet minus conflict claims
+    damageOutlierClaimIds = fragilityResolution.finalRoutedSet
+      .filter(id => !claimsInRoutedConflict.has(id));
+
+    // Backfill resolvedDamage into claim profiles
+    const resolvedMap = new Map<string, number>();
+    for (const rc of fragilityResolution.claims) {
+      resolvedMap.set(rc.claimId, rc.resolvedDamage);
+    }
     for (const p of claimProfiles) {
-      if (claimsInRoutedConflict.has(p.claimId)) continue; // already routed as conflict
-      if (p.supportRatio > 0.5) continue;                  // consensus claims are not outliers
-      const v = p.totalDamage;
-      if (typeof v === 'number' && Number.isFinite(v) && v > threshold) damageOutlierClaimIds.push(p.claimId);
+      p.resolvedDamage = resolvedMap.get(p.claimId) ?? null;
+    }
+  } else {
+    // Fallback: no blast surface or pipeline data — use raw totalDamage
+    if (sigmaDamage > 0) {
+      const threshold = meanDamage + sigmaDamage;
+      for (const p of claimProfiles) {
+        if (claimsInRoutedConflict.has(p.claimId)) continue;
+        if (p.supportRatio > 0.5) continue;
+        const v = p.totalDamage;
+        if (typeof v === 'number' && Number.isFinite(v) && v > threshold) damageOutlierClaimIds.push(p.claimId);
+      }
     }
   }
 
@@ -518,12 +558,13 @@ export function computeQuestionSelectionInstrumentation(
       claimLabel: String(c.label ?? id),
       claimText: String((c as any).text ?? ''),
       totalDamage: profile.totalDamage ?? 0,
+      resolvedDamage: profile.resolvedDamage ?? profile.totalDamage ?? 0,
       supportRatio: profile.supportRatio,
       queryDistance: qDist,
       supporters: Array.isArray(c.supporters) ? c.supporters : [],
       promptType: 'isolate' as const,
     };
-  }).sort((a, b) => b.totalDamage - a.totalDamage);
+  }).sort((a, b) => b.resolvedDamage - a.resolvedDamage);
 
   // Apply slot ceiling: conflicts get priority, outliers fill remaining slots
   const slotsForOutliers = Math.max(0, theoreticalCeiling - conflictClusters.length);
@@ -570,13 +611,14 @@ export function computeQuestionSelectionInstrumentation(
       skipSurvey,
       routedClaimIds: Array.from(routedClaimIds),
       diagnostics: {
-        damageThreshold: sigmaDamage > 0 ? meanDamage + sigmaDamage : null,
+        damageThreshold: fragilityResolution?.damageThreshold ?? (sigmaDamage > 0 ? meanDamage + sigmaDamage : null),
         damageDistribution: totalDamageValues,
         convergenceRatio,
         totalClaims: claims.length,
         queryDistanceThreshold,
       },
     },
+    fragilityResolution,
     meta: {
       processingTimeMs: performance.now() - startMs,
     },

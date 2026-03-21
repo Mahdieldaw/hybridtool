@@ -1,5 +1,4 @@
 import {
-    CognitiveArtifact,
     Claim,
     Edge,
     EnrichedClaim,
@@ -8,7 +7,6 @@ import {
 } from "../../../shared/contract";
 import {
     getTopNCount,
-    isInTopPercentile,
     isInBottomPercentile,
     isHubLoadBearing
 } from "./utils";
@@ -62,7 +60,7 @@ export const computeCoreRatios = (
     return { concentration, alignment, tension, fragmentation, depth };
 };
 
-export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
+export const computeLandscapeMetrics = (input: { claims: Claim[]; modelCount?: number }): {
     dominantType: Claim["type"];
     typeDistribution: Record<string, number>;
     dominantRole: Claim["role"];
@@ -71,7 +69,7 @@ export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
     modelCount: number;
     convergenceRatio: number;
 } => {
-    const claims = Array.isArray(artifact?.semantic?.claims) ? artifact.semantic.claims : [];
+    const claims = Array.isArray(input?.claims) ? input.claims : [];
 
     const typeDistribution: Record<string, number> = {};
     const roleDistribution: Record<string, number> = {};
@@ -91,7 +89,7 @@ export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
     const dominantType = (Object.entries(typeDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "prescriptive") as Claim["type"];
     const dominantRole = (Object.entries(roleDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "anchor") as Claim["role"];
 
-    const explicitModelCount = artifact?.meta?.modelCount;
+    const explicitModelCount = input?.modelCount;
 
     const modelCount =
         typeof explicitModelCount === "number" && explicitModelCount > 0
@@ -119,7 +117,7 @@ export const computeClaimRatios = (
     edges: Edge[],
     modelCount: number
 ): Omit<EnrichedClaim,
-    'isHighSupport' | 'isLeverageInversion' | 'isKeystone' | 'isEvidenceGap' | 'isOutlier' |
+    'isHighSupport' | 'isLeverageInversion' | 'isKeystone' | 'isOutlier' |
     'isContested' | 'isConditional' | 'isIsolated' | 'chainDepth'
 > => {
     const safeModelCount = Math.max(modelCount, 1);
@@ -172,14 +170,6 @@ export const assignPercentileFlags = (
         connectedIds.add(e.to);
     });
 
-    // cascadeExposure: dependent count relative to supporters — used for isEvidenceGap
-    const allCascadeExposures = claims.map(c => {
-        const cascade = cascadeBySource.get(c.id);
-        return cascade && c.supporters.length > 0
-            ? cascade.dependentIds.length / c.supporters.length
-            : 0;
-    });
-
     const prereqChildren = new Map<string, string[]>();
     for (const c of claims) prereqChildren.set(c.id, []);
     for (const e of edges) {
@@ -209,7 +199,7 @@ export const assignPercentileFlags = (
         }
     }
     const unreachableChainDepth = Number.MAX_SAFE_INTEGER;
-    return claims.map((claim, idx) => {
+    return claims.map((claim) => {
         const isHighSupport = topClaimIds.has(claim.id);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);
 
@@ -218,10 +208,6 @@ export const assignPercentileFlags = (
 
         // isKeystone: outgoing connections + high support + structurally load-bearing hub
         const isKeystone = claim.outDegree >= 2 && isHighSupport && isHubLoadBearing(claim.id, edges);
-
-        // isEvidenceGap: high cascade exposure relative to peers, and low support
-        const cascadeExposure = allCascadeExposures[idx];
-        const isEvidenceGap = isInTopPercentile(cascadeExposure, allCascadeExposures, 0.2) && cascadeExposure > 0 && isLowSupport;
 
         // isOutlier: single-model support with narrow supporter base
         const distinctModelCount = new Set(claim.supporters.map(String)).size;
@@ -240,7 +226,6 @@ export const assignPercentileFlags = (
             isHighSupport,
             isLeverageInversion,
             isKeystone,
-            isEvidenceGap,
             isOutlier,
             isContested: hasConflict,
             isConditional: hasIncomingPrereq,

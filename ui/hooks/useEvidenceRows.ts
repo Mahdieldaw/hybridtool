@@ -25,13 +25,6 @@ export interface EvidenceRow {
   zone: 'core' | 'removed' | null;
   paragraphOrigin: 'competitive-only' | 'claim-centric-only' | 'both' | null;
 
-  // Blast surface (statement-level, exclusive twin diagnostics; claim-relative)
-  bs_twin: boolean | null;
-  bs_simTwin: boolean | null;
-  bs_bestSim: number | null;
-  bs_t_sim: number | null;
-  bs_cascadeEcho: number | null;
-
   // Twin map (global, all claim-owned statements)
   tm_twin: boolean | null;
   tm_sim: number | null;
@@ -114,8 +107,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     return String(id ?? "").trim();
   };
 
-  const safeArr = (v: any): any[] => (Array.isArray(v) ? v : []);
-
   // Global maps — build once per artifact
   const globalMaps = useMemo(() => {
     if (!artifact) return null;
@@ -157,44 +148,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       }
     }
 
-    // Cascade Echo Logic: sum(v_other / n_other) per shared statement
     const bsScores: any[] = Array.isArray(a?.blastSurface?.scores) ? a.blastSurface.scores : [];
-    const claimData = new Map<string, { v: number; n: number }>();
-    for (const s of bsScores) {
-      const v = s?.riskVector?.degradationRisk ?? 0;
-      const n = s?.layerC?.canonicalCount ?? 0;
-      claimData.set(String(s.claimId), { v, n });
-    }
 
-    const stmtToClaims = new Map<string, string[]>();
-    for (const s of bsScores) {
-      const claimId = String(s?.claimId ?? "");
-      const canonIds = safeArr(s?.layerC?.canonicalIds || []);
-      const finalIds = canonIds.length > 0 ? canonIds : (() => {
-        const c = a?.semantic?.claims?.find((c: any) => String(c.id) === claimId);
-        return Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
-      })();
-
-      for (const sid of finalIds) {
-        const strId = String(sid);
-        const existing = stmtToClaims.get(strId) ?? [];
-        existing.push(claimId);
-        stmtToClaims.set(strId, existing);
-      }
-    }
-
-    // Twin map: statementId → { twinStatementId, similarity } | null
-    const twinMapRaw = a?.blastSurface?.twinMap?.twins ?? null;
-    const twinMapByStmt = new Map<string, { twinStatementId: string; similarity: number } | null>();
-    if (twinMapRaw && typeof twinMapRaw === 'object') {
-      for (const [sid, val] of Object.entries(twinMapRaw)) {
-        if (val && typeof val === 'object' && typeof (val as any).twinStatementId === 'string') {
-          twinMapByStmt.set(String(sid), val as { twinStatementId: string; similarity: number });
-        } else {
-          twinMapByStmt.set(String(sid), null);
-        }
-      }
-    }
+    // Per-claim twin map: raw reference for claim-relative lookup
+    const twinMapPerClaim = a?.blastSurface?.twinMap?.perClaim ?? null;
+    const twinThresholdsPerClaim = a?.blastSurface?.twinMap?.thresholds ?? null;
 
     return {
       queryScoreByStmt,
@@ -204,9 +162,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       claimDensityMap,
       citationSourceOrder,
       bsScores,
-      claimData,
-      stmtToClaims,
-      twinMapByStmt,
+      twinMapPerClaim,
+      twinThresholdsPerClaim,
     };
   }, [artifact]);
 
@@ -224,13 +181,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       a?.claimProvenance ??
       a?.derived?.claimProvenance ??
       null;
-    const blastSurface =
-      a?.blastSurface ??
-      a?.blastSurfaceResult ??
-      a?.derived?.blastSurface ??
-      a?.derived?.blastSurfaceResult ??
-      null;
-
     const directTopIds = new Set<string>();
     const claimsArr: any[] = Array.isArray(a?.semantic?.claims)
       ? a.semantic.claims
@@ -264,11 +214,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       for (const id of excl) exclusiveIds.add(String(id));
     }
 
-    // Twin map — canonical source for per-statement twin data
-    const twinMap = blastSurface?.twinMap ?? null;
-    const twinResults: Record<string, any> = twinMap?.twins ?? {};
-    const twinThresholds: Record<string, number> = twinMap?.thresholds ?? {};
-
     const claimDensityRaw = typeof claimObj?.density === 'number' && Number.isFinite(claimObj.density)
       ? claimObj.density as number
       : null;
@@ -281,8 +226,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       mixedByStmt,
       exclusiveIds,
       directTopIds,
-      twinResults,
-      twinThresholds,
       claimDensityRaw,
       densityLiftForClaim
     };
@@ -320,8 +263,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       return typeof q === 'number' && Number.isFinite(q) ? q : null;
     })();
 
-    const normClaimId = selectedClaimId ? String(selectedClaimId).trim() : null;
-
     return statements.map((stmt): EvidenceRow => {
       const stmtId = normalizeStatementId(stmt);
       const modelIndex = typeof stmt.modelIndex === 'number' ? stmt.modelIndex : 0;
@@ -336,41 +277,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
-      // Vernal twin map data for this statement
-      const twinResult = claimMaps?.twinResults[stmtId];
-      const tauSim = claimMaps?.twinThresholds[stmtId] ?? null;
       const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
       const isExclusiveFromFate = (fateEntry?.claimIds.length ?? 0) === 1;
       const isExclusive = selectedClaimId
         ? isExclusiveFromClaim || isExclusiveFromFate
         : false;
-
-      const bestAbsSim = twinResult && typeof twinResult.similarity === 'number' && Number.isFinite(twinResult.similarity)
-        ? twinResult.similarity
-        : null;
-
-      const simTwin = typeof tauSim === 'number' && twinResult !== undefined ? twinResult !== null : null;
-
-      let calculatedEcho = 0;
-      // Calculate statement-level cascade echo
-      // A statement contributes to the current claim's cascade ONLY IF it is a canonical of that claim.
-      if (normClaimId && globalMaps) {
-        const canonicalClaims = globalMaps.stmtToClaims.get(stmtId) ?? [];
-        const isCanonicalOfThis = canonicalClaims.some(cid => String(cid).trim() === normClaimId);
-
-        if (isCanonicalOfThis) {
-          let echo = 0;
-          for (const otherIdRaw of canonicalClaims) {
-            const otherId = String(otherIdRaw).trim();
-            if (otherId === normClaimId) continue;
-            const data = globalMaps.claimData.get(otherId);
-            if (data && data.n > 0) {
-              echo += data.v / data.n;
-            }
-          }
-          calculatedEcho = echo;
-        }
-      }
 
       return {
         statementId: stmtId,
@@ -387,22 +298,46 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         zone: mixed?.zone ?? null,
         paragraphOrigin: mixed?.paragraphOrigin ?? null,
 
-        bs_twin: twinResult !== undefined ? twinResult !== null : null,
-        bs_simTwin: simTwin,
-        bs_bestSim: bestAbsSim,
-        bs_t_sim: typeof tauSim === "number" && Number.isFinite(tauSim) ? tauSim : null,
-        bs_cascadeEcho: calculatedEcho,
-
-        tm_twin: globalMaps?.twinMapByStmt.has(stmtId)
-          ? (globalMaps.twinMapByStmt.get(stmtId) !== null ? true : false)
-          : null,
+        tm_twin: (() => {
+          const pc = globalMaps?.twinMapPerClaim;
+          if (!pc) return null;
+          if (selectedClaimId) {
+            const entry = pc[selectedClaimId]?.[stmtId];
+            return entry === undefined ? null : entry !== null;
+          }
+          // No claim selected: flatten — true if any claim gives this statement a twin
+          for (const claimTwins of Object.values(pc)) {
+            if (claimTwins?.[stmtId] !== undefined) {
+              return claimTwins[stmtId] !== null;
+            }
+          }
+          return null;
+        })(),
         tm_sim: (() => {
-          const entry = globalMaps?.twinMapByStmt.get(stmtId);
-          return entry?.similarity ?? null;
+          const pc = globalMaps?.twinMapPerClaim;
+          if (!pc) return null;
+          if (selectedClaimId) return pc[selectedClaimId]?.[stmtId]?.similarity ?? null;
+          // No claim selected: best similarity across claims
+          let best: number | null = null;
+          for (const claimTwins of Object.values(pc)) {
+            const sim = claimTwins?.[stmtId]?.similarity;
+            if (typeof sim === 'number' && (best === null || sim > best)) best = sim;
+          }
+          return best;
         })(),
         tm_twinId: (() => {
-          const entry = globalMaps?.twinMapByStmt.get(stmtId);
-          return entry?.twinStatementId ?? null;
+          const pc = globalMaps?.twinMapPerClaim;
+          if (!pc) return null;
+          if (selectedClaimId) return pc[selectedClaimId]?.[stmtId]?.twinStatementId ?? null;
+          // No claim selected: twin from best similarity
+          let best: { id: string; sim: number } | null = null;
+          for (const claimTwins of Object.values(pc)) {
+            const entry = claimTwins?.[stmtId];
+            if (entry && (best === null || entry.similarity > best.sim)) {
+              best = { id: entry.twinStatementId, sim: entry.similarity };
+            }
+          }
+          return best?.id ?? null;
         })(),
 
         routeCategory,

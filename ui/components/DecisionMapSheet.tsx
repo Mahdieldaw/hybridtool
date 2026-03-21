@@ -1724,7 +1724,7 @@ export const DecisionMapSheet = React.memo(() => {
                                 label={label}
                                 expanded={expandedRefSections.includes(id)}
                                 onToggle={() => instrumentActions.toggleRefSection(id)}
-                                copyText={id !== 'cross-signal'
+                                copyText={id !== 'cross-signal' && id !== 'traversal-pruning'
                                   ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                   : undefined}
                               >

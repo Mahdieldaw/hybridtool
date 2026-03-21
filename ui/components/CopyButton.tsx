@@ -5,6 +5,7 @@ import clsx from "clsx";
 
 interface CopyButtonProps {
     text?: string;
+    html?: string; // Rich HTML to write alongside plain text
     label?: string; // Aria label
     buttonText?: string; // Visible text next to icon
     variant?: "icon" | "text" | "pill";
@@ -16,6 +17,7 @@ interface CopyButtonProps {
 
 export const CopyButton: React.FC<CopyButtonProps> = ({
     text = "",
+    html,
     label = "Copy to clipboard",
     buttonText,
     variant = "pill",
@@ -45,7 +47,13 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
             }
 
             try {
-                await navigator.clipboard.writeText(text);
+                if (html) {
+                    const htmlBlob = new Blob([html], { type: "text/html" });
+                    const textBlob = new Blob([text], { type: "text/plain" });
+                    await navigator.clipboard.write([new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })]);
+                } else {
+                    await navigator.clipboard.writeText(text);
+                }
                 setCopied(true);
                 setToast({ id: Date.now(), message: 'Copied to clipboard', type: 'info' });
                 

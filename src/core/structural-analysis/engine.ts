@@ -1,7 +1,7 @@
 import {
-    CognitiveArtifact,
     ProblemStructure,
     EnrichedClaim,
+    Edge,
     StructuralAnalysis,
     SettledShapeData,
     ContestedShapeData,
@@ -28,12 +28,16 @@ import {
     buildParallelData,
     buildSparseData
 } from "./builders";
-export const computeStructuralAnalysis = (artifact: CognitiveArtifact): StructuralAnalysis => {
-    const semantic = artifact?.semantic;
+export interface StructuralAnalysisInput {
+    claims: EnrichedClaim[];
+    edges: Edge[];
+    modelCount?: number;
+}
 
-    const rawClaims = Array.isArray(semantic?.claims) ? semantic.claims : [];
-    const edges = Array.isArray(semantic?.edges) ? semantic.edges : [];
-    const landscape = computeLandscapeMetrics(artifact);
+export const computeStructuralAnalysis = (input: StructuralAnalysisInput): StructuralAnalysis => {
+    const rawClaims = Array.isArray(input?.claims) ? input.claims : [];
+    const edges = Array.isArray(input?.edges) ? input.edges : [];
+    const landscape = computeLandscapeMetrics({ claims: rawClaims, modelCount: input?.modelCount });
     const claimIds = rawClaims.map(c => c.id);
     const claimsWithRatios = rawClaims.map((c) =>
         computeClaimRatios(c, edges, landscape.modelCount)

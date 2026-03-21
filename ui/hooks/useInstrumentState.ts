@@ -5,7 +5,7 @@ export type PipelineLayer =
   | 'substrate' | 'mutual-graph' | 'basin-inversion' | 'query-relevance'
   | 'competitive-provenance' | 'carrier-detection'
   | 'model-ordering' | 'blast-radius' | 'alignment' | 'raw-artifacts'
-  | 'provenance-comparison' | 'mixed-provenance';
+  | 'provenance-comparison' | 'mixed-provenance' | 'traversal-pruning';
 
 export type SelectedEntity =
   | { type: 'claim'; id: string; label?: string }

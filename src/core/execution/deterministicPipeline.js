@@ -75,66 +75,91 @@ export async function computeDerivedFields({
     semanticEdges: [],
     derivedSupportEdges: [],
     tableCellAllocation: null,
+    questionSelectionInstrumentation: null,
+    claimRouting: null,
   };
 
-  // ── 1. Query relevance ──────────────────────────────────────────────
-  if (existingQueryRelevance) {
-    result.queryRelevance = existingQueryRelevance;
-  } else {
-    try {
-      if (queryEmbedding && substrate) {
-        const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
-        result.queryRelevance = computeQueryRelevance({
-          queryEmbedding,
-          statements: shadowStatements,
-          statementEmbeddings,
-          paragraphEmbeddings,
-          paragraphs: shadowParagraphs,
-          substrate,
-          regionization: preSemantic?.regionization || null,
-          regionProfiles: preSemantic?.regionProfiles || null,
-        });
+  // ── Group A: Independent steps (no cross-dependencies) ─────────────
+  await Promise.all([
+    // ── 1. Query relevance ────────────────────────────────────────────
+    (async () => {
+      if (existingQueryRelevance) {
+        result.queryRelevance = existingQueryRelevance;
+      } else {
+        try {
+          if (queryEmbedding && substrate) {
+            const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
+            result.queryRelevance = computeQueryRelevance({
+              queryEmbedding,
+              statements: shadowStatements,
+              statementEmbeddings,
+              paragraphEmbeddings,
+              paragraphs: shadowParagraphs,
+              substrate,
+              regionization: preSemantic?.regionization || null,
+              regionProfiles: preSemantic?.regionProfiles || null,
+            });
+          }
+        } catch (err) {
+          console.warn('[DeterministicPipeline] Query relevance failed:', getErrorMessage(err));
+        }
       }
-    } catch (err) {
-      console.warn('[DeterministicPipeline] Query relevance failed:', getErrorMessage(err));
-    }
-  }
+    })(),
+    // ── 2. Claim provenance (ownership / exclusivity / overlap) ───────
+    (async () => {
+      try {
+        const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
+        const ownership = computeStatementOwnership(enrichedClaims);
+        result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
+        result.claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
 
-  // ── 2. Claim provenance (ownership / exclusivity / overlap) ─────────
-  try {
-    const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
-    const ownership = computeStatementOwnership(enrichedClaims);
-    result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
-    result.claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
-
-    result.claimProvenance = {
-      statementOwnership: Object.fromEntries(
-        Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
-      ),
-      claimExclusivity: Object.fromEntries(result.claimProvenanceExclusivity),
-      claimOverlap: result.claimProvenanceOverlap,
-    };
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Claim provenance failed:', getErrorMessage(err));
-  }
-
-  // ── 3. Structural analysis ──────────────────────────────────────────
-  try {
-    if (enrichedClaims.length > 0) {
-      const { computeStructuralAnalysis } = await import('../PromptMethods');
-      const { buildCognitiveArtifact } = await import('../../../shared/cognitive-artifact');
-      const tempCognitive = buildCognitiveArtifact({
-        claims: enrichedClaims,
-        edges: parsedEdges,
-        conditionals: parsedConditionals,
-        narrative: '',
-        model_count: modelCount,
-      }, null);
-      result.cachedStructuralAnalysis = computeStructuralAnalysis(tempCognitive);
-    }
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Structural analysis failed:', getErrorMessage(err));
-  }
+        result.claimProvenance = {
+          statementOwnership: Object.fromEntries(
+            Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
+          ),
+          claimExclusivity: Object.fromEntries(result.claimProvenanceExclusivity),
+          claimOverlap: result.claimProvenanceOverlap,
+        };
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Claim provenance failed:', getErrorMessage(err));
+      }
+    })(),
+    // ── 3. Structural analysis ────────────────────────────────────────
+    (async () => {
+      try {
+        if (enrichedClaims.length > 0) {
+          const { computeStructuralAnalysis } = await import('../PromptMethods');
+          result.cachedStructuralAnalysis = computeStructuralAnalysis({
+            claims: enrichedClaims,
+            edges: parsedEdges,
+            modelCount,
+          });
+        }
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Structural analysis failed:', getErrorMessage(err));
+      }
+    })(),
+    // ── 11. Basin inversion (reads only geoRecord — fully independent) ─
+    (async () => {
+      try {
+        if (geoRecord?.meta?.basinInversion) {
+          result.basinInversion = geoRecord.meta.basinInversion;
+        } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
+          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+          const dims = geoRecord.meta.dimensions || 384;
+          const paraIds = geoRecord.meta.paragraphIndex;
+          const view = new Float32Array(geoRecord.paragraphEmbeddings);
+          const paraVectors = [];
+          for (let i = 0; i < paraIds.length; i++) {
+            paraVectors.push(view.subarray(i * dims, (i + 1) * dims));
+          }
+          result.basinInversion = computeBasinInversion(paraIds, paraVectors);
+        }
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Basin inversion failed:', getErrorMessage(err));
+      }
+    })(),
+  ]);
 
   // ── 6. Mixed-method provenance ──────────────────────────────────────
   try {
@@ -266,14 +291,24 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Table cell allocation failed:', getErrorMessage(err));
   }
 
+  // ── Shared data for downstream components ──────────────────────────
+  const statementTextsMap = new Map();
+  for (const stmt of shadowStatements) {
+    statementTextsMap.set(stmt.id, stmt.text ?? '');
+  }
+  const statementOwners = new Map();
+  for (const claim of enrichedClaims) {
+    if (!claim.sourceStatementIds) continue;
+    for (const sid of claim.sourceStatementIds) {
+      if (!statementOwners.has(sid)) statementOwners.set(sid, new Set());
+      statementOwners.get(sid).add(claim.id);
+    }
+  }
+
   // ── 9. Blast surface (provenance-derived) ───────────────────────────
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
       const { computeBlastSurface } = await import('../blast-radius/blastSurface');
-      const statementTextsMap = new Map();
-      for (const stmt of shadowStatements) {
-        statementTextsMap.set(stmt.id, stmt.text ?? '');
-      }
       result.blastSurfaceResult = computeBlastSurface({
         claims: enrichedClaims.map(c => ({
           id: c.id,
@@ -291,77 +326,7 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Blast surface failed:', getErrorMessage(err));
   }
 
-  // ── 10. Claim↔Geometry alignment ────────────────────────────────────
-  try {
-    const regionProfiles = preSemantic?.regionProfiles || null;
-    const stmtEmbSize = statementEmbeddings?.size ?? 0;
-    if (stmtEmbSize > 0 && regions.length > 0 && enrichedClaims.length > 0 && regionProfiles) {
-      const { buildClaimVectors, computeAlignment } = await import('../../geometry');
-      const dimensions = geoRecord?.meta?.dimensions ||
-        (statementEmbeddings.size > 0
-          ? (statementEmbeddings.values().next().value?.length || 0)
-          : 0);
-      const claimVectors = buildClaimVectors(enrichedClaims, statementEmbeddings, dimensions);
-      if (claimVectors.length > 0) {
-        result.alignmentResult = computeAlignment(claimVectors, regions, regionProfiles, statementEmbeddings);
-      }
-    }
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Alignment failed:', getErrorMessage(err));
-  }
-
-  // ── 11. Basin inversion ─────────────────────────────────────────────
-  try {
-    if (geoRecord?.meta?.basinInversion) {
-      result.basinInversion = geoRecord.meta.basinInversion;
-    } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
-      const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
-      const dims = geoRecord.meta.dimensions || 384;
-      const paraIds = geoRecord.meta.paragraphIndex;
-      const view = new Float32Array(geoRecord.paragraphEmbeddings);
-      const paraVectors = [];
-      for (let i = 0; i < paraIds.length; i++) {
-        paraVectors.push(view.subarray(i * dims, (i + 1) * dims));
-      }
-      result.basinInversion = computeBasinInversion(paraIds, paraVectors);
-    }
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Basin inversion failed:', getErrorMessage(err));
-  }
-
-  // ── 12. Completeness ────────────────────────────────────────────────
-  try {
-    if (substrate && Array.isArray(regions) && regions.length > 0) {
-      const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
-      const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
-      const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
-      const qrMap = result.queryRelevance?.statementScores ?? null;
-      const statementFates = buildStatementFates(shadowStatements, enrichedClaims, qrMap);
-      const unattendedRegions = findUnattendedRegions(substrate, shadowParagraphs, enrichedClaims, regions, shadowStatements);
-      const completenessReport = buildCompletenessReport(statementFates, unattendedRegions, shadowStatements, regions.length);
-      result.completeness = {
-        report: completenessReport,
-        statementFates: Object.fromEntries(statementFates),
-        unattendedRegions,
-      };
-    }
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Completeness failed:', getErrorMessage(err));
-  }
-
-  // ── 13. Shadow delta ────────────────────────────────────────────────
-  try {
-    const { computeShadowDelta, getTopUnreferenced } = await import('../../shadow/ShadowDelta');
-    const referencedIds = new Set(
-      enrichedClaims.flatMap(c => Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : [])
-    );
-    result.shadowDelta = computeShadowDelta({ statements: shadowStatements }, referencedIds, queryText);
-    result.topUnindexed = getTopUnreferenced(result.shadowDelta, 10);
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Shadow delta failed:', getErrorMessage(err));
-  }
-
-  // ── 14. Semantic edge normalization ─────────────────────────────────
+  // ── 14. Semantic edge normalization (synchronous, needed by Group B) ─
   const EDGE_SUPPORTS = 'supports';
   const EDGE_CONFLICTS = 'conflicts';
   const EDGE_PREREQUISITE = 'prerequisite';
@@ -412,6 +377,88 @@ export async function computeDerivedFields({
       }
     }
   }
+
+  // ── Group B: Post-provenance parallel steps ───────────────────────
+  await Promise.all([
+    // ── 10. Claim↔Geometry alignment ──────────────────────────────────
+    (async () => {
+      try {
+        const regionProfiles = preSemantic?.regionProfiles || null;
+        const stmtEmbSize = statementEmbeddings?.size ?? 0;
+        if (stmtEmbSize > 0 && regions.length > 0 && enrichedClaims.length > 0 && regionProfiles) {
+          const { buildClaimVectors, computeAlignment } = await import('../../geometry');
+          const dimensions = geoRecord?.meta?.dimensions ||
+            (statementEmbeddings.size > 0
+              ? (statementEmbeddings.values().next().value?.length || 0)
+              : 0);
+          const claimVectors = buildClaimVectors(enrichedClaims, statementEmbeddings, dimensions);
+          if (claimVectors.length > 0) {
+            result.alignmentResult = computeAlignment(claimVectors, regions, regionProfiles, statementEmbeddings);
+          }
+        }
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Alignment failed:', getErrorMessage(err));
+      }
+    })(),
+    // ── 12. Completeness ──────────────────────────────────────────────
+    (async () => {
+      try {
+        if (substrate && Array.isArray(regions) && regions.length > 0) {
+          const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
+          const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
+          const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
+          const qrMap = result.queryRelevance?.statementScores ?? null;
+          const statementFates = buildStatementFates(shadowStatements, enrichedClaims, qrMap);
+          const unattendedRegions = findUnattendedRegions(substrate, shadowParagraphs, enrichedClaims, regions, shadowStatements);
+          const completenessReport = buildCompletenessReport(statementFates, unattendedRegions, shadowStatements, regions.length);
+          result.completeness = {
+            report: completenessReport,
+            statementFates: Object.fromEntries(statementFates),
+            unattendedRegions,
+          };
+        }
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Completeness failed:', getErrorMessage(err));
+      }
+    })(),
+    // ── 13. Shadow delta ──────────────────────────────────────────────
+    (async () => {
+      try {
+        const { computeShadowDelta, getTopUnreferenced } = await import('../../shadow/ShadowDelta');
+        const referencedIds = new Set(
+          enrichedClaims.flatMap(c => Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : [])
+        );
+        result.shadowDelta = computeShadowDelta({ statements: shadowStatements }, referencedIds, queryText);
+        result.topUnindexed = getTopUnreferenced(result.shadowDelta, 10);
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Shadow delta failed:', getErrorMessage(err));
+      }
+    })(),
+    // ── 15. Question selection + claim routing ────────────────────────
+    (async () => {
+      try {
+        if (result.blastSurfaceResult && enrichedClaims.length > 0) {
+          const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
+            await import('../blast-radius/questionSelection');
+          result.questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
+            blastSurfaceResult: result.blastSurfaceResult,
+            edges: result.semanticEdges,
+            enrichedClaims,
+            queryRelevanceScores: result.queryRelevance?.statementScores ?? null,
+            modelCount,
+            claimCentroids: claimEmbeddings ?? new Map(),
+            queryEmbedding: queryEmbedding ?? null,
+            statementEmbeddings: statementEmbeddings ?? null,
+            statementOwners,
+            statementTexts: statementTextsMap,
+          });
+          result.claimRouting = computeClaimRouting(result.questionSelectionInstrumentation);
+        }
+      } catch (err) {
+        console.warn('[DeterministicPipeline] Question selection failed:', getErrorMessage(err));
+      }
+    })(),
+  ]);
 
   return result;
 }
@@ -615,6 +662,8 @@ export function assembleMapperArtifact({
     shadowDelta,
     topUnindexed,
     tableCellAllocation,
+    questionSelectionInstrumentation,
+    claimRouting,
   } = derived;
 
   return {
@@ -653,6 +702,8 @@ export function assembleMapperArtifact({
     ...(paragraphSemanticDensity ? { paragraphSemanticDensity } : {}),
     ...(claimSemanticDensity ? { claimSemanticDensity } : {}),
     ...(querySemanticDensity != null ? { querySemanticDensity } : {}),
+    ...(questionSelectionInstrumentation ? { questionSelectionInstrumentation } : {}),
+    ...(claimRouting ? { claimRouting } : {}),
   };
 }
 
@@ -957,6 +1008,20 @@ export async function buildArtifactForProvider({
   let questionSelectionInstrumentation = null;
   let claimRouting = null;
 
+  // Build pipeline-level shared data for downstream components
+  const statementOwners = new Map();
+  for (const claim of enrichedClaims) {
+    if (!claim.sourceStatementIds) continue;
+    for (const sid of claim.sourceStatementIds) {
+      if (!statementOwners.has(sid)) statementOwners.set(sid, new Set());
+      statementOwners.get(sid).add(claim.id);
+    }
+  }
+  const statementTextsMap = new Map();
+  for (const stmt of shadowStatements) {
+    statementTextsMap.set(stmt.id, stmt.text ?? '');
+  }
+
   try {
     const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
       await import('../blast-radius/questionSelection');
@@ -971,6 +1036,8 @@ export async function buildArtifactForProvider({
       claimCentroids: claimEmbeddings ?? new Map(),
       queryEmbedding: queryEmbedding ?? null,
       statementEmbeddings: statementEmbeddings ?? null,
+      statementOwners,
+      statementTexts: statementTextsMap,
     });
 
     claimRouting = computeClaimRouting(questionSelectionInstrumentation);

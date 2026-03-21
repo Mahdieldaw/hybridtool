@@ -665,7 +665,6 @@ export interface EnrichedClaim extends Claim {
   isHighSupport: boolean;
   isLeverageInversion: boolean;
   isKeystone: boolean;
-  isEvidenceGap: boolean;
   isOutlier: boolean;
   isContested: boolean;
   isConditional: boolean;
@@ -825,20 +824,6 @@ export interface BlastSurfaceLayerC {
   allocatedCellUnits?: number;
 }
 
-export interface BlastSurfaceCascadeDetail {
-  claimId: string;
-  sharedCount: number;
-  dCanonicalCount: number;
-  dExclusivityRatio: number;
-  contribution: number;         // (sharedCount / dCanonicalCount) × dExclusivityRatio
-}
-
-/** Layer D: If this claim is pruned, how much of other claims' evidence is destabilized? */
-export interface BlastSurfaceLayerD {
-  cascadeExposure: number;
-  overlappingClaims: BlastSurfaceCascadeDetail[];
-}
-
 /** Risk vector: three orthogonal axes of pruning damage, derived from the canonical fate table. */
 export interface BlastSurfaceRiskVector {
   /** Type 2 count: exclusive non-orphan statements. These are REMOVED on prune. Highest removal risk. */
@@ -899,7 +884,6 @@ export interface BlastSurfaceClaimScore {
   claimLabel: string;
   layerB?: ClaimAbsorptionProfile;
   layerC: BlastSurfaceLayerC;
-  layerD: BlastSurfaceLayerD;
   riskVector?: BlastSurfaceRiskVector;
 }
 
@@ -909,8 +893,10 @@ export interface StatementTwinResult {
 }
 
 export interface StatementTwinMap {
-  twins: Record<string, StatementTwinResult | null>;
-  thresholds: Record<string, number>;
+  /** Per-claim twins: claimId → { statementId → twin result | null } */
+  perClaim: Record<string, Record<string, StatementTwinResult | null>>;
+  /** Per-claim thresholds: claimId → { statementId → τ_sim } */
+  thresholds: Record<string, Record<string, number>>;
   meta: {
     totalStatements: number;
     statementsWithTwins: number;
@@ -926,6 +912,38 @@ export interface BlastSurfaceResult {
     totalCorpusStatements: number;
     processingTimeMs: number;
   };
+}
+
+// ── Fragility Resolution (phased, deterministic given routed set) ──────────
+
+/** Per-statement resolved damage after routing topology resolves twin fates */
+export interface ResolvedStatementDamage {
+  statementId: string;
+  originalType: '2a' | '2b' | '2c' | '3';
+  resolvedType: '2a' | 'effective-2a' | 'effective-3' | '3';
+  damage: number;
+  reason: string;
+}
+
+/** Per-claim resolved damage after fragility resolution convergence */
+export interface ResolvedClaimDamage {
+  claimId: string;
+  /** Σ resolved per-statement damage */
+  resolvedDamage: number;
+  /** Original totalDamage from blast surface (for comparison) */
+  rawTotalDamage: number;
+  statements: ResolvedStatementDamage[];
+}
+
+/** Result of the fragility resolution convergence loop */
+export interface FragilityResolutionResult {
+  claims: ResolvedClaimDamage[];
+  iterations: number;
+  iterationLog: Array<{ iteration: number; newOutlierIds: string[] }>;
+  finalRoutedSet: string[];
+  /** Final μ+σ threshold */
+  damageThreshold: number;
+  processingTimeMs: number;
 }
 
 export interface ValidatedConflict {
@@ -944,10 +962,10 @@ export interface QuestionSelectionClaimProfile {
   claimId: string;
   claimLabel: string;
   totalDamage: number | null;
+  resolvedDamage: number | null;
   orphanRatio: number | null;
   supportRatio: number;
   modelCount: number;
-  consensusDiscount: number;
   soleSource: boolean;
   queryRelevanceRaw: number;
   wouldPenalize: boolean;
@@ -980,6 +998,8 @@ export interface QuestionSelectionInstrumentation {
   ceiling: QuestionSelectionCeiling;
   /** Single-authority routing — computed here, extracted by computeClaimRouting */
   routing: ClaimRoutingResult;
+  /** Fragility resolution convergence result (replaces raw damage for routing) */
+  fragilityResolution?: FragilityResolutionResult | null;
   meta: {
     processingTimeMs: number;
   };
@@ -995,6 +1015,7 @@ export interface ClaimRoutingResult {
     claimLabel: string;
     claimText: string;
     totalDamage: number;
+    resolvedDamage: number;
     supportRatio: number;
     queryDistance: number | null;
     supporters: number[];
