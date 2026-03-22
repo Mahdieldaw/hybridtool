@@ -262,6 +262,7 @@ export async function computeDerivedFields({
             // Inject into mixed provenance so UI shows sim_claim for these cells
             const mpClaim = result.mixedProvenanceResult?.perClaim?.[ec.id];
             if (mpClaim && Array.isArray(mpClaim.statements)) {
+              if (!Array.isArray(mpClaim.canonicalStatementIds)) mpClaim.canonicalStatementIds = [];
               const claimEmb = claimEmbeddings?.get(ec.id);
               for (const cellId of cellIds) {
                 const cellEmb = cellUnitEmbeddings?.get(cellId);
@@ -434,23 +435,58 @@ export async function computeDerivedFields({
         console.warn('[DeterministicPipeline] Shadow delta failed:', getErrorMessage(err));
       }
     })(),
-    // ── 15. Question selection + claim routing ────────────────────────
+    // ── 15. Conflict validation → fragility resolution → question selection ──
     (async () => {
       try {
         if (result.blastSurfaceResult && enrichedClaims.length > 0) {
+          const { computeConflictValidation } =
+            await import('../blast-radius/conflictValidation');
+          const { computeFragilityResolution } =
+            await import('../blast-radius/fragilityResolution');
           const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
             await import('../blast-radius/questionSelection');
+
+          // Phase 1: conflict validation (pure geometry)
+          const validatedConflicts = computeConflictValidation({
+            enrichedClaims,
+            edges: result.semanticEdges,
+            statementEmbeddings: statementEmbeddings ?? null,
+          });
+
+          // Phase 2: fragility resolution (orchestrator-owned)
+          const routingConflictEdges = validatedConflicts.filter(c => c.validated && c.mapperLabeledConflict);
+          const claimsInRoutedConflict = new Set();
+          for (const c of routingConflictEdges) {
+            claimsInRoutedConflict.add(c.edgeFrom);
+            claimsInRoutedConflict.add(c.edgeTo);
+          }
+          const supportRatioMap = new Map();
+          for (const c of enrichedClaims) {
+            const sr = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
+            supportRatioMap.set(String(c.id), sr);
+          }
+
+          let fragilityResult = null;
+          if (statementOwners && statementTextsMap) {
+            fragilityResult = computeFragilityResolution({
+              blastSurfaceResult: result.blastSurfaceResult,
+              conflictClaimIds: claimsInRoutedConflict,
+              statementOwners,
+              statementTexts: statementTextsMap,
+              supportRatios: supportRatioMap,
+            });
+          }
+
+          // Phase 3: question selection + routing (consumes pre-computed results)
           result.questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
             blastSurfaceResult: result.blastSurfaceResult,
-            edges: result.semanticEdges,
             enrichedClaims,
             queryRelevanceScores: result.queryRelevance?.statementScores ?? null,
             modelCount,
             claimCentroids: claimEmbeddings ?? new Map(),
             queryEmbedding: queryEmbedding ?? null,
-            statementEmbeddings: statementEmbeddings ?? null,
-            statementOwners,
-            statementTexts: statementTextsMap,
+            validatedConflicts,
+            fragilityResolution: fragilityResult,
           });
           result.claimRouting = computeClaimRouting(result.questionSelectionInstrumentation);
         }
@@ -1023,21 +1059,58 @@ export async function buildArtifactForProvider({
   }
 
   try {
+    const { computeConflictValidation } =
+      await import('../blast-radius/conflictValidation');
+    const { computeFragilityResolution } =
+      await import('../blast-radius/fragilityResolution');
     const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
       await import('../blast-radius/questionSelection');
 
+    const edges = Array.isArray(derived?.semanticEdges) ? derived.semanticEdges : [];
+
+    // Phase 1: conflict validation (pure geometry)
+    const validatedConflicts = computeConflictValidation({
+      enrichedClaims,
+      edges,
+      statementEmbeddings: statementEmbeddings ?? null,
+    });
+
+    // Phase 2: fragility resolution (orchestrator-owned)
+    const routingConflictEdges = validatedConflicts.filter(c => c.validated && c.mapperLabeledConflict);
+    const claimsInRoutedConflict = new Set();
+    for (const c of routingConflictEdges) {
+      claimsInRoutedConflict.add(c.edgeFrom);
+      claimsInRoutedConflict.add(c.edgeTo);
+    }
+    const supportRatioMap = new Map();
+    for (const c of enrichedClaims) {
+      const sr = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
+      supportRatioMap.set(String(c.id), sr);
+    }
+
+    const blastSurfaceResult = derived?.blastSurfaceResult ?? null;
+    let fragilityResult = null;
+    if (blastSurfaceResult && statementOwners.size > 0 && statementTextsMap.size > 0) {
+      fragilityResult = computeFragilityResolution({
+        blastSurfaceResult,
+        conflictClaimIds: claimsInRoutedConflict,
+        statementOwners,
+        statementTexts: statementTextsMap,
+        supportRatios: supportRatioMap,
+      });
+    }
+
+    // Phase 3: question selection + routing
     questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
-      blastSurfaceResult: derived?.blastSurfaceResult ?? null,
-      edges: Array.isArray(derived?.semanticEdges) ? derived.semanticEdges : [],
+      blastSurfaceResult,
       enrichedClaims,
       queryRelevanceScores: derived?.queryRelevance?.statementScores
         ?? queryRelevance?.statementScores ?? null,
       modelCount,
       claimCentroids: claimEmbeddings ?? new Map(),
       queryEmbedding: queryEmbedding ?? null,
-      statementEmbeddings: statementEmbeddings ?? null,
-      statementOwners,
-      statementTexts: statementTextsMap,
+      validatedConflicts,
+      fragilityResolution: fragilityResult,
     });
 
     claimRouting = computeClaimRouting(questionSelectionInstrumentation);

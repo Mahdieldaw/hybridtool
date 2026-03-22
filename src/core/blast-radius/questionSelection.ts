@@ -1,6 +1,5 @@
 import type {
   BlastSurfaceResult,
-  Edge,
   EnrichedClaim,
   FragilityResolutionResult,
   QuestionSelectionInstrumentation,
@@ -8,22 +7,18 @@ import type {
 } from '../../../shared/contract';
 import type { QueryRelevanceStatementScore } from '../../geometry/queryRelevance';
 import { cosineSimilarity } from '../../clustering/distance';
-import { computeFragilityResolution } from './fragilityResolution';
 
 export interface QuestionSelectionInput {
   blastSurfaceResult: BlastSurfaceResult | null;
-  edges: Edge[];
   enrichedClaims: EnrichedClaim[];
   queryRelevanceScores: Map<string, QueryRelevanceStatementScore> | null;
   modelCount: number;
   claimCentroids: Map<string, Float32Array>;
   queryEmbedding?: Float32Array | null;
-  /** Statement embeddings for cross-pool proximity computation */
-  statementEmbeddings?: Map<string, Float32Array> | null;
-  /** statementId → set of all claim IDs owning it (prebuilt by pipeline) */
-  statementOwners?: Map<string, Set<string>>;
-  /** statementId → text (prebuilt by pipeline) */
-  statementTexts?: Map<string, string>;
+  /** Pre-computed validated conflicts from conflictValidation.ts */
+  validatedConflicts: ValidatedConflict[];
+  /** Pre-computed fragility resolution result (null if blast surface unavailable) */
+  fragilityResolution: FragilityResolutionResult | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -85,73 +80,6 @@ function sigma(nums: number[], mu: number): number {
   return Math.sqrt(s / nums.length);
 }
 
-// ─── Conflict validation helpers ─────────────────────────────────────────
-
-/** Builds canonical and exclusive statement ID sets for all claims. */
-function buildClaimStatementSets(claims: EnrichedClaim[]): {
-  canonicalSets: Map<string, Set<string>>;
-  exclusiveIds: Map<string, string[]>;
-} {
-  const canonicalSets = new Map<string, Set<string>>();
-  const ownerCount = new Map<string, number>();
-  for (const c of claims) {
-    const set = new Set<string>(Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : []);
-    canonicalSets.set(String(c.id), set);
-    for (const sid of set) ownerCount.set(sid, (ownerCount.get(sid) ?? 0) + 1);
-  }
-  const exclusiveIds = new Map<string, string[]>();
-  for (const [claimId, set] of canonicalSets.entries()) {
-    exclusiveIds.set(claimId, Array.from(set).filter(sid => (ownerCount.get(sid) ?? 0) <= 1));
-  }
-  return { canonicalSets, exclusiveIds };
-}
-
-/**
- * Cross-pool proximity on statement embeddings.
- * For each exclusive statement in A, find max cosine similarity to any statement in B's
- * full canonical set. Average → meanAtoB. Mirror for B→A. Return min(meanAtoB, meanBtoA).
- */
-function computeCrossPoolProximityStatements(
-  exclusiveStmtsA: string[],
-  canonicalB: Set<string>,
-  exclusiveStmtsB: string[],
-  canonicalA: Set<string>,
-  embeddings: Map<string, Float32Array>
-): number | null {
-  const embsExclA = exclusiveStmtsA.map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-  const embsExclB = exclusiveStmtsB.map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-  const allEmbsA = Array.from(canonicalA).map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-  const allEmbsB = Array.from(canonicalB).map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-
-  if (embsExclA.length === 0 || embsExclB.length === 0 || allEmbsA.length === 0 || allEmbsB.length === 0) return null;
-
-  // A→B: for each exclusive-A statement, max sim to any statement in B's full pool
-  let sumAtoB = 0;
-  for (const ea of embsExclA) {
-    let maxSim = -Infinity;
-    for (const eb of allEmbsB) {
-      const s = cosineSimilarity(ea, eb);
-      if (s > maxSim) maxSim = s;
-    }
-    sumAtoB += maxSim;
-  }
-  const meanAtoB = sumAtoB / embsExclA.length;
-
-  // B→A: for each exclusive-B statement, max sim to any statement in A's full pool
-  let sumBtoA = 0;
-  for (const eb of embsExclB) {
-    let maxSim = -Infinity;
-    for (const ea of allEmbsA) {
-      const s = cosineSimilarity(eb, ea);
-      if (s > maxSim) maxSim = s;
-    }
-    sumBtoA += maxSim;
-  }
-  const meanBtoA = sumBtoA / embsExclB.length;
-
-  return Math.min(meanAtoB, meanBtoA);
-}
-
 function computeQueryRelevanceRaw(
   claim: EnrichedClaim,
   queryRelevanceScores: Map<string, QueryRelevanceStatementScore> | null
@@ -209,7 +137,6 @@ export function computeQuestionSelectionInstrumentation(
   const startMs = performance.now();
 
   const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
-  const edges = Array.isArray(input.edges) ? input.edges : [];
 
   const blastScoresByClaimId = new Map<string, any>();
   const bsScores = input.blastSurfaceResult?.scores ?? [];
@@ -218,97 +145,8 @@ export function computeQuestionSelectionInstrumentation(
     blastScoresByClaimId.set(String(s.claimId), s);
   }
 
-  const stmtEmbeddings = input.statementEmbeddings ?? null;
-
-  // Build canonical/exclusive sets from enriched claims
-  const { canonicalSets } = buildClaimStatementSets(claims);
-
-  // Build mapper conflict edge set for quick lookup
-  const mapperConflictSet = new Set<string>();
-  for (const e of edges) {
-    if (e?.type !== 'conflicts') continue;
-    const a = String(e.from), b = String(e.to);
-    mapperConflictSet.add(`${a}\0${b}`);
-    mapperConflictSet.add(`${b}\0${a}`);
-  }
-
-  // All-pairs conflict validation — two-pass so the threshold is the mean of the
-  // actual cross-pool proximity values being tested, not the top-K similarity mean.
-
-  // Pass 1: compute proximity for every eligible pair; collect all finite values.
-  type PairResult = {
-    aId: string; bId: string;
-    exclA: string[]; exclB: string[];
-    crossPoolProx: number | null;
-    failReason: string | null;
-    mapperLabeledConflict: boolean;
-  };
-  const pairResults: PairResult[] = [];
-  const proximityValues: number[] = [];
-
-  for (let i = 0; i < claims.length; i++) {
-    for (let j = i + 1; j < claims.length; j++) {
-      const aId = String(claims[i].id);
-      const bId = String(claims[j].id);
-      const canonA = canonicalSets.get(aId) ?? new Set<string>();
-      const canonB = canonicalSets.get(bId) ?? new Set<string>();
-      const exclA = Array.from(canonA).filter(sid => !canonB.has(sid));
-      const exclB = Array.from(canonB).filter(sid => !canonA.has(sid));
-      const mapperLabeledConflict = mapperConflictSet.has(`${aId}\0${bId}`);
-
-      let crossPoolProx: number | null = null;
-      let failReason: string | null = null;
-
-      if (exclA.length < 2 || exclB.length < 2) {
-        failReason = `insufficient exclusive statements (A:${exclA.length}, B:${exclB.length}, need ≥2 each)`;
-      } else if (!stmtEmbeddings) {
-        failReason = 'no statement embeddings available';
-      } else {
-        crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddings);
-        if (crossPoolProx === null) {
-          failReason = 'embeddings missing for exclusive statements';
-        } else {
-          proximityValues.push(crossPoolProx);
-        }
-      }
-
-      pairResults.push({ aId, bId, exclA, exclB, crossPoolProx, failReason, mapperLabeledConflict });
-    }
-  }
-
-  // Derive threshold from the distribution of actual proximity values computed above.
-  const muProximity = proximityValues.length > 0
-    ? proximityValues.reduce((a, b) => a + b, 0) / proximityValues.length
-    : null;
-
-  // Pass 2: apply threshold and assemble ValidatedConflict records.
-  const validatedConflicts: ValidatedConflict[] = [];
-  for (const pr of pairResults) {
-    let validated = false;
-    let failReason = pr.failReason;
-
-    if (pr.crossPoolProx !== null) {
-      if (muProximity === null) {
-        failReason = 'muProximity not available';
-      } else {
-        validated = pr.crossPoolProx > muProximity;
-      }
-    }
-
-    validatedConflicts.push({
-      edgeFrom: pr.aId,
-      edgeTo: pr.bId,
-      crossPoolProximity: pr.crossPoolProx,
-      muPairwise: muProximity,
-      exclusiveA: pr.exclA.length,
-      exclusiveB: pr.exclB.length,
-      mapperLabeledConflict: pr.mapperLabeledConflict,
-      validated,
-      failReason: failReason ?? null,
-    });
-  }
-
-  // discountStrength removed — consensusDiscount no longer used in scoring
+  const validatedConflicts = input.validatedConflicts;
+  const fragilityResolution = input.fragilityResolution;
 
   const queryRelValues: number[] = [];
   const queryRelHasAny: boolean[] = [];
@@ -445,26 +283,10 @@ export function computeQuestionSelectionInstrumentation(
     claimsInRoutedConflict.add(c.edgeTo);
   }
 
-  // ── Fragility resolution (convergence loop) ────────────────────────────
-  // Build supportRatio map for the candidacy gate (≤ 0.5)
-  const supportRatioMap = new Map<string, number>();
-  for (const c of claims) {
-    const sr = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
-    supportRatioMap.set(String(c.id), sr);
-  }
-
-  let fragilityResolution: FragilityResolutionResult | null = null;
+  // ── Damage outlier extraction from pre-computed fragility resolution ────
   let damageOutlierClaimIds: string[] = [];
 
-  if (input.blastSurfaceResult && input.statementOwners && input.statementTexts) {
-    fragilityResolution = computeFragilityResolution({
-      blastSurfaceResult: input.blastSurfaceResult,
-      conflictClaimIds: claimsInRoutedConflict,
-      statementOwners: input.statementOwners,
-      statementTexts: input.statementTexts,
-      supportRatios: supportRatioMap,
-    });
-
+  if (fragilityResolution) {
     // Extract damage outliers: finalRoutedSet minus conflict claims
     damageOutlierClaimIds = fragilityResolution.finalRoutedSet
       .filter(id => !claimsInRoutedConflict.has(id));
@@ -478,7 +300,7 @@ export function computeQuestionSelectionInstrumentation(
       p.resolvedDamage = resolvedMap.get(p.claimId) ?? null;
     }
   } else {
-    // Fallback: no blast surface or pipeline data — use raw totalDamage
+    // Fallback: no fragility resolution — use raw totalDamage
     if (sigmaDamage > 0) {
       const threshold = meanDamage + sigmaDamage;
       for (const p of claimProfiles) {

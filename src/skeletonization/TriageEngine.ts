@@ -44,16 +44,27 @@ export async function triageStatements(
     }
   }
 
-  // 4. Load twin map from blast surface
+  // 4. Load twin map from blast surface (per-claim → flatten, best similarity wins)
   const twinMapRaw = (input.blastSurface as any)?.twinMap;
   if (!twinMapRaw) {
     console.warn('[TriageEngine] blastSurface.twinMap is missing — stranded statements will be SKELETONIZED');
   }
 
   const twinMap = new Map<string, { twinStatementId: string; similarity: number } | null>();
-  if (twinMapRaw?.twins && typeof twinMapRaw.twins === 'object') {
-    for (const [sid, result] of Object.entries(twinMapRaw.twins)) {
-      twinMap.set(sid, result as { twinStatementId: string; similarity: number } | null);
+  const perClaim = twinMapRaw?.perClaim;
+  if (perClaim && typeof perClaim === 'object') {
+    for (const claimTwins of Object.values(perClaim) as Array<Record<string, any>>) {
+      if (!claimTwins || typeof claimTwins !== 'object') continue;
+      for (const [sid, result] of Object.entries(claimTwins)) {
+        if (!result) {
+          if (!twinMap.has(sid)) twinMap.set(sid, null);
+          continue;
+        }
+        const existing = twinMap.get(sid);
+        if (!existing || result.similarity > existing.similarity) {
+          twinMap.set(sid, result as { twinStatementId: string; similarity: number });
+        }
+      }
     }
   }
 
