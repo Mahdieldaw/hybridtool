@@ -107,7 +107,7 @@ export function computeFragilityResolution(
 
 /**
  * Single-pass resolution of all claims against the current routed set.
- * Pure function — no mutation of inputs.
+ * Does not mutate claims or routed set; writes to nounRatioCache for performance.
  */
 function resolveFragility(
   blastSurfaceResult: BlastSurfaceResult,

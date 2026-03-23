@@ -10,15 +10,48 @@ export interface StatementFate {
   triggerClaimId?: string;
 }
 
+export interface DirectionProbe {
+  survivingClaimId: string;
+  twinStatementId: string | null;
+  twinSimilarity: number | null;
+  pointsIntoPrunedSet: boolean | null; // null = no twin found
+}
+
+export interface MixedStatementDetail {
+  statementId: string;
+  survivingParents: string[];
+  prunedParents: string[];
+  action: 'PROTECTED' | 'REMOVE' | 'SKELETONIZE';
+  reason: string;
+  probes: DirectionProbe[];
+  /** The surviving claim that "saved" this statement (if PROTECTED) */
+  protectorClaimId: string | null;
+}
+
+export interface MixedInstrumentation {
+  mixedCount: number;
+  mixedProtectedCount: number;
+  mixedRemovedCount: number;
+  mixedSkeletonizedCount: number;
+  details: MixedStatementDetail[];
+  /** Keyed by pruned claimId → array of mixed statements involving that pruned claim */
+  byPrunedClaim: Record<string, MixedStatementDetail[]>;
+}
+
 export interface TriageResult {
   protectedStatementIds: Set<string>;
   statementFates: Map<string, StatementFate>;
+  mixedInstrumentation: MixedInstrumentation;
   meta: {
     totalStatements: number;
     protectedCount: number;
     untriagedCount?: number;
     skeletonizedCount: number;
     removedCount: number;
+    mixedCount: number;
+    mixedProtectedCount: number;
+    mixedRemovedCount: number;
+    mixedSkeletonizedCount: number;
     processingTimeMs: number;
   };
 }
@@ -62,6 +95,8 @@ export interface ChewedSubstrate {
     untriagedStatementCount?: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
+    /** Actual mixed-parent resolution results from triage (post-prune) */
+    mixedInstrumentation?: MixedInstrumentation;
     tableCellUnits?: {
       protectedCount: number;
       removedCount: number;

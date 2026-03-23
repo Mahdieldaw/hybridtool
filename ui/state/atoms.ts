@@ -433,19 +433,6 @@ export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null)
 export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
 
-// Survey test overlay — ephemeral, not persisted
-export type SurveyTestState = {
-  turnId: string;
-  loading: boolean;
-  result?: {
-    gates: any[];
-    rationale: string | null;
-    errors: string[];
-    rawText: string;
-    error?: string;
-  };
-};
-export const surveyTestAtom = atom<SurveyTestState | null>(null);
 
 
 // =============================================================================

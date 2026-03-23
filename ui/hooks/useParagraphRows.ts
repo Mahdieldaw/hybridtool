@@ -39,6 +39,10 @@ export interface ParagraphRow {
   compWeight: number | null;
   compExcess: number | null;
   compThreshold: number | null;
+
+  // Claim density (paragraph-level evidence concentration)
+  paraCoverage: number | null;    // fraction of this paragraph's statements owned by selected claim
+  passageLength: number | null;   // length of containing passage (1 = isolated)
 }
 
 // ============================================================================
@@ -48,14 +52,14 @@ export interface ParagraphRow {
 export function useParagraphRows(artifact: any, selectedClaimId: string | null): ParagraphRow[] {
   const citationSourceOrder = useMemo(() => {
     if (!artifact) return null;
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
     return a?.citationSourceOrder ?? a?.meta?.citationSourceOrder ?? null;
   }, [artifact]);
 
   // Build geometry node map once per artifact
   const nodeMap = useMemo(() => {
     if (!artifact) return null;
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
     const nodes: any[] = Array.isArray(a?.geometry?.substrate?.nodes) ? a.geometry.substrate.nodes : [];
     const map = new Map<string, any>();
     for (const node of nodes) {
@@ -68,7 +72,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
   // Build density maps once per artifact
   const densityMaps = useMemo(() => {
     if (!artifact) return null;
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
 
     // Paragraph density: paragraphId -> z-score
     const paraDensity = new Map<string, number>();
@@ -102,7 +106,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
   // Build mixed provenance paragraph map per claim
   const mixedParaMap = useMemo(() => {
     if (!artifact || !selectedClaimId) return null;
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
     const mixedProvenance =
       a?.mixedProvenance ??
       a?.mixedProvenanceResult ??
@@ -121,9 +125,35 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
     return map;
   }, [artifact, selectedClaimId]);
 
+  // Build claim density lookup per claim
+  const claimDensityParaMaps = useMemo(() => {
+    if (!artifact || !selectedClaimId) return null;
+    const a = artifact;
+    const cdProfile = a?.claimDensity?.profiles?.[selectedClaimId] ?? null;
+    if (!cdProfile) return null;
+
+    const coverageByPara = new Map<string, number>();
+    for (const pc of (cdProfile.paragraphCoverage ?? [])) {
+      coverageByPara.set(String(pc.paragraphId), pc.coverage);
+    }
+
+    const passageLenByPara = new Map<string, number>();
+    for (const passage of (cdProfile.passages ?? [])) {
+      for (const pc of (cdProfile.paragraphCoverage ?? [])) {
+        if (pc.modelIndex === passage.modelIndex &&
+            pc.paragraphIndex >= passage.startParagraphIndex &&
+            pc.paragraphIndex <= passage.endParagraphIndex) {
+          passageLenByPara.set(String(pc.paragraphId), passage.length);
+        }
+      }
+    }
+
+    return { coverageByPara, passageLenByPara };
+  }, [artifact, selectedClaimId]);
+
   return useMemo(() => {
     if (!artifact) return [];
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
 
     // Try shadow.paragraphs first (live artifact), fall back to reconstructing from nodes + statements
     let paragraphs: any[] = Array.isArray(a?.shadow?.paragraphs) ? a.shadow.paragraphs : [];
@@ -200,7 +230,10 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         compWeight: fin(mixed?.compWeight),
         compExcess: fin(mixed?.compExcess),
         compThreshold: fin(mixed?.compThreshold),
+
+        paraCoverage: claimDensityParaMaps?.coverageByPara.get(paraId) ?? null,
+        passageLength: claimDensityParaMaps?.passageLenByPara.get(paraId) ?? null,
       };
     });
-  }, [artifact, nodeMap, mixedParaMap, densityMaps, selectedClaimId, citationSourceOrder]);
+  }, [artifact, nodeMap, mixedParaMap, densityMaps, claimDensityParaMaps, selectedClaimId, citationSourceOrder]);
 }

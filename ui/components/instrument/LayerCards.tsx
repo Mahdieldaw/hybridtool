@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import clsx from "clsx";
-import { getProviderAbbreviation, resolveProviderIdFromCitationOrder } from "../../utils/provider-helpers";
+import { getProviderAbbreviation, getProviderColor, getProviderConfig, resolveProviderIdFromCitationOrder } from "../../utils/provider-helpers";
+import { CopyButton } from "../CopyButton";
 export { PruningDecisionsCard } from "./PruningDecisionsCard";
 
 // ============================================================================
@@ -1198,6 +1199,7 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
   const br = artifact?.blastRadiusFilter ?? null;
   const axes: any[] = useMemo(() => (Array.isArray(br?.axes) ? br.axes : []), [br]);
   const claimRouting = artifact?.claimRouting ?? null;
+  const qsi = artifact?.questionSelectionInstrumentation ?? null;
   const routingClusters: any[] = useMemo(() => safeArr(claimRouting?.conflictClusters), [claimRouting]);
   const routingIsolates: any[] = useMemo(() => safeArr(claimRouting?.damageOutliers), [claimRouting]);
   const routingPassthrough: any[] = useMemo(() => safeArr(claimRouting?.passthrough), [claimRouting]);
@@ -1215,6 +1217,7 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
   return (
     <div className="space-y-4">
       <BlastVernalInline artifact={artifact} />
+      <MixedResolutionInline artifact={artifact} />
       <RoutingCard artifact={artifact} selectedClaim={selectedEntity?.type === "claim" ? selectedEntity.id : null} />
       {claimRouting && (
         <CardSection title="Claim Routing">
@@ -1254,6 +1257,42 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
 
         </CardSection>
       )}
+      {qsi && (() => {
+        const profileRows = safeArr<any>(qsi?.claimProfiles).map((p: any) => ({
+          id: String(p?.claimId ?? ""),
+          claimId: String(p?.claimId ?? ""),
+          label: String(p?.claimLabel ?? ""),
+          totalDamage: typeof p?.totalDamage === "number" ? p.totalDamage : null,
+          orphanRatio: typeof p?.orphanRatio === "number" ? p.orphanRatio : null,
+          supportRatio: typeof p?.supportRatio === "number" ? p.supportRatio : null,
+          resolvedDamage: typeof p?.resolvedDamage === "number" ? p.resolvedDamage : null,
+          soleSource: !!p?.soleSource,
+          queryRelevanceRaw: typeof p?.queryRelevanceRaw === "number" ? p.queryRelevanceRaw : null,
+          wouldPenalize: !!p?.wouldPenalize,
+          damageBand: typeof p?.damageBand === "number" ? p.damageBand : 0,
+        }));
+        return profileRows.length > 0 ? (
+          <CardSection title="Question Selection Profile">
+            <SortableTable
+              columns={[
+                { key: "claimId", header: "Claim", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.claimId}</span> },
+                { key: "label", header: "Label", cell: (r: any) => <span className="text-[10px] truncate max-w-[160px] inline-block" title={r.label}>{r.label}</span> },
+                { key: "totalDamage", header: "Total Damage", title: "Total damage (DD + GD): sum of deletion damage and degradation damage.", sortValue: (r: any) => r.totalDamage ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.totalDamage != null ? fmt(r.totalDamage, 4) : "—"}</span> },
+                { key: "orphanRatio", header: "Orphan%", title: "Orphan ratio: fraction of exclusive statements with no twin.", sortValue: (r: any) => r.orphanRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.orphanRatio != null ? `${(r.orphanRatio * 100).toFixed(1)}%` : "—"}</span> },
+                { key: "supportRatio", header: "Support%", title: "Support ratio: supporters / modelCount.", sortValue: (r: any) => r.supportRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.supportRatio != null ? `${(r.supportRatio * 100).toFixed(0)}%` : "—"}</span> },
+                { key: "resolvedDamage", header: "Resolved", title: "Resolved damage after fragility resolution.", sortValue: (r: any) => r.resolvedDamage ?? -Infinity, cell: (r: any) => <span className={clsx("font-mono", r.resolvedDamage != null && r.totalDamage != null && r.resolvedDamage !== r.totalDamage ? "text-amber-400" : "text-text-muted")}>{r.resolvedDamage != null ? fmt(r.resolvedDamage, 4) : "—"}</span> },
+                { key: "soleSource", header: "Sole?", title: "Sole source: claim backed by only 1 model.", sortValue: (r: any) => (r.soleSource ? 1 : 0), cell: (r: any) => <span className={clsx("font-mono text-[10px]", r.soleSource ? "text-amber-400" : "text-text-muted")}>{r.soleSource ? "YES" : "no"}</span> },
+                { key: "wouldPenalize", header: "Penalize?", title: "Claim exceeds damage threshold and is a candidate for survey.", sortValue: (r: any) => (r.wouldPenalize ? 1 : 0), cell: (r: any) => <span className={clsx("font-mono text-[10px]", r.wouldPenalize ? "text-rose-400" : "text-text-muted")}>{r.wouldPenalize ? "YES" : "no"}</span> },
+                { key: "damageBand", header: "Band", title: "Damage band: 0 = above μ+σ (routed to survey), 1+ = below.", sortValue: (r: any) => r.damageBand, cell: (r: any) => <span className={clsx("font-mono text-[10px]", r.damageBand === 0 ? "text-text-secondary" : "text-text-muted")}>{fmtInt(r.damageBand)}</span> },
+              ]}
+              rows={profileRows}
+              defaultSortKey="totalDamage"
+              defaultSortDir="desc"
+              maxRows={12}
+            />
+          </CardSection>
+        ) : null;
+      })()}
       {axes.length > 0 && (
         <CardSection title={`Survey Axes (${axes.length})`}>
           <div className="space-y-1">
@@ -1274,16 +1313,6 @@ export function BlastRadiusCard({ artifact, selectedEntity }: { artifact: any; s
 function BlastVernalInline({ artifact }: { artifact: any }) {
   const bs = artifact?.blastSurface;
   const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
-  const statementTextById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
-      const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
-      if (!id) continue;
-      const text = String(s?.text ?? "");
-      if (!m.has(id)) m.set(id, text);
-    }
-    return m;
-  }, [artifact]);
 
   type VernalRow = {
     id: string; label: string;
@@ -1330,74 +1359,6 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
   );
 
 
-  // Build claim label lookup for twin host resolution
-  const claimLabelById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const s of scores) {
-      const id = String(s?.claimId ?? "");
-      if (id) m.set(id, String(s?.claimLabel ?? id));
-    }
-    return m;
-  }, [scores]);
-
-  type ExclusiveStatementRow = {
-    id: string; claimId: string; claimLabel: string;
-    statementId: string; text: string;
-    type: "deletion" | "degradation";
-    // twin info (only for deletion / Type 2)
-    twinId: string | null; twinText: string | null; twinSimilarity: number | null;
-    certainty: "2a" | "2b" | "2c" | null;
-    twinHostClaimId: string | null; twinHostLabel: string | null;
-  };
-  const exclusiveRows = useMemo<ExclusiveStatementRow[]>(() => {
-    const out: ExclusiveStatementRow[] = [];
-    for (const s of scores) {
-      const claimId = String(s?.claimId ?? "");
-      const claimLabel = String(s?.claimLabel ?? claimId);
-      const rv = s?.riskVector;
-
-      // Type 2 — deletion (has twin)
-      const delDetails: Array<any> = Array.isArray(rv?.deletionCertainty?.details) ? rv.deletionCertainty.details : [];
-      const delDetailsMap = new Map<string, any>();
-      for (const d of delDetails) delDetailsMap.set(String(d?.statementId ?? ""), d);
-
-      const delIds = Array.isArray(rv?.deletionStatementIds) ? rv.deletionStatementIds : [];
-      for (const sidRaw of delIds) {
-        const sid = String(sidRaw ?? "").trim();
-        if (!sid) continue;
-        const detail = delDetailsMap.get(sid);
-        const twinId = detail?.twinId ? String(detail.twinId) : null;
-        const twinHostClaim = detail?.twinHostClaimId ? String(detail.twinHostClaimId) : null;
-        out.push({
-          id: `${claimId}::${sid}`, claimId, claimLabel,
-          statementId: sid, text: statementTextById.get(sid) ?? "",
-          type: "deletion",
-          twinId,
-          twinText: twinId ? (statementTextById.get(twinId) ?? "") : null,
-          twinSimilarity: typeof detail?.twinSimilarity === "number" ? detail.twinSimilarity : null,
-          certainty: detail?.certainty ?? null,
-          twinHostClaimId: twinHostClaim,
-          twinHostLabel: twinHostClaim ? (claimLabelById.get(twinHostClaim) ?? twinHostClaim) : null,
-        });
-      }
-
-      // Type 3 — degradation (no twin)
-      const degIds = Array.isArray(rv?.degradationStatementIds) ? rv.degradationStatementIds : [];
-      for (const sidRaw of degIds) {
-        const sid = String(sidRaw ?? "").trim();
-        if (!sid) continue;
-        out.push({
-          id: `${claimId}::${sid}`, claimId, claimLabel,
-          statementId: sid, text: statementTextById.get(sid) ?? "",
-          type: "degradation",
-          twinId: null, twinText: null, twinSimilarity: null,
-          certainty: null, twinHostClaimId: null, twinHostLabel: null,
-        });
-      }
-    }
-    return out;
-  }, [scores, statementTextById, claimLabelById]);
-
   const hasAny = rows.some(r => r.riskTotal != null && r.riskTotal > 0);
   if (!bs || scores.length === 0 || !hasAny) return null;
 
@@ -1439,63 +1400,469 @@ function BlastVernalInline({ artifact }: { artifact: any }) {
           maxRows={12}
         />
       </CardSection>
+    </>
+  );
+}
 
-      {exclusiveRows.length > 0 && (
-        <CardSection title="Exclusive Statements (Destroyed Mass)">
-          <SortableTable
-            columns={[
-              { key: "claimLabel", header: "Claim", sortValue: (r) => r.claimLabel || r.claimId, cell: (r) => <span className="text-[10px] truncate max-w-[120px] inline-block">{r.claimLabel || r.claimId}</span> },
-              { key: "type", header: "Type", sortValue: (r) => r.type, cell: (r) => (
-                <span className={clsx("font-mono text-[10px] font-semibold", r.type === "deletion" ? "text-red-400" : "text-amber-400")}>
-                  {r.type === "deletion" ? "Del" : "Deg"}
+// ============================================================================
+// MIXED-PARENT RESOLUTION — speculative direction test from blast surface
+// ============================================================================
+
+function MixedResolutionInline({ artifact }: { artifact: any }) {
+  const bs = artifact?.blastSurface;
+  const scores: any[] = useMemo(() => safeArr(bs?.scores), [bs]);
+
+  // Claim label lookup
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims)) {
+      const id = String(c?.id ?? "").trim();
+      if (id) m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [artifact]);
+
+  // Statement text lookup
+  const stmtTextById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+      const id = String(s?.id ?? s?.statementId ?? "").trim();
+      if (id) m.set(id, String(s?.text ?? ""));
+    }
+    return m;
+  }, [artifact]);
+
+  // Filter to claims that have mixed resolution data with mixedCount > 0
+  const claimsWithMixed = useMemo(() =>
+    scores.filter((s: any) => s?.mixedResolution && s.mixedResolution.mixedCount > 0),
+    [scores]
+  );
+
+  if (claimsWithMixed.length === 0) return null;
+
+  // Aggregate stats
+  const agg = useMemo(() => {
+    let totalMixed = 0, totalProt = 0, totalRem = 0, totalSkel = 0;
+    for (const s of claimsWithMixed) {
+      const mr = s.mixedResolution;
+      totalMixed += mr.mixedCount;
+      totalProt += mr.mixedProtectedCount;
+      totalRem += mr.mixedRemovedCount ?? 0;
+      totalSkel += mr.mixedSkeletonizedCount;
+    }
+    return { totalMixed, totalProt, totalRem, totalSkel };
+  }, [claimsWithMixed]);
+
+  const protRate = agg.totalMixed > 0 ? agg.totalProt / agg.totalMixed : 0;
+  const totalStatements = scores.reduce((n: number, s: any) => n + (s?.layerC?.canonicalCount ?? 0), 0);
+  const mixedRatio = totalStatements > 0 ? agg.totalMixed / totalStatements : 0;
+
+  return (
+    <>
+      <div className="border-t border-white/10 my-3" />
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded">L1</span>
+        <span className="text-xs font-semibold text-text-secondary">Mixed-Parent Resolution (Direction Test)</span>
+      </div>
+
+      <CardSection title="Summary">
+        <InterpretiveCallout
+          text={`${fmtInt(agg.totalMixed)} shared statements across ${fmtInt(claimsWithMixed.length)} claims would enter direction test on prune. Protection rate: ${fmtPct(protRate)} — ${fmtInt(agg.totalProt)} protected, ${fmtInt(agg.totalRem)} removed, ${fmtInt(agg.totalSkel)} skeletonized.`}
+          variant={protRate >= 0.6 ? "ok" : protRate >= 0.3 ? "warn" : "error"}
+        />
+        <div className="grid grid-cols-2 gap-x-4 mt-2">
+          <StatRow label="Mixed Total" value={fmtInt(agg.totalMixed)} title="Total shared statements across all claims that would enter the direction test if their parent were pruned." />
+          <StatRow label="Mixed Ratio" value={fmtPct(mixedRatio)} title="Fraction of all canonical statements that are shared (multi-parent) — the population affected by direction test." />
+          <StatRow label="→ Protected" value={fmtInt(agg.totalProt)} color="text-emerald-400" title="Direction test found an independent surviving root (twin points outside pruned canonical set)." />
+          <StatRow label="→ Removed" value={fmtInt(agg.totalRem)} color={agg.totalRem > 0 ? "text-sky-400" : "text-text-muted"} title="Direction test failed but pruned claim's twin survives in living corpus — idea has a living carrier." />
+          <StatRow label="→ Skeletonized" value={fmtInt(agg.totalSkel)} color={agg.totalSkel > 0 ? "text-amber-400" : "text-text-muted"} title="Direction test failed and no surviving twin via pruned claims — no living carrier." />
+          <StatRow label="Protection Rate" value={fmtPct(protRate)} color={protRate >= 0.6 ? "text-emerald-400" : protRate >= 0.3 ? "text-amber-400" : "text-rose-400"} title="mixedProtected / mixedTotal. High = genuine independent roots. Low = surviving parents were bystanders." />
+          <StatRow label="Claims with Shared" value={fmtInt(claimsWithMixed.length)} title="Number of claims that have shared (non-exclusive) statements entering direction test." />
+        </div>
+
+        {/* Stacked micro-bar: protected / removed / skeletonized */}
+        {agg.totalMixed > 0 && (
+          <div className="flex w-full h-3 rounded overflow-hidden mt-2 mb-1">
+            {agg.totalProt > 0 && (
+              <div style={{ width: `${(agg.totalProt / agg.totalMixed) * 100}%` }} className="bg-emerald-500/70" title={`Protected: ${agg.totalProt}`} />
+            )}
+            {agg.totalRem > 0 && (
+              <div style={{ width: `${(agg.totalRem / agg.totalMixed) * 100}%` }} className="bg-sky-500/70" title={`Removed: ${agg.totalRem}`} />
+            )}
+            {agg.totalSkel > 0 && (
+              <div style={{ width: `${(agg.totalSkel / agg.totalMixed) * 100}%` }} className="bg-amber-500/70" title={`Skeletonized: ${agg.totalSkel}`} />
+            )}
+          </div>
+        )}
+      </CardSection>
+
+      {/* Per-claim sections */}
+      {claimsWithMixed.map((s: any) => {
+        const mr = s.mixedResolution;
+        const cLabel = claimLabelById.get(s.claimId) ?? s.claimId;
+        const details: any[] = mr.details ?? [];
+
+        return (
+          <CardSection key={s.claimId} title={`${cLabel}`} badge={{ text: `${fmtInt(mr.mixedCount)} mixed · ${fmtInt(mr.mixedProtectedCount)}P · ${fmtInt(mr.mixedRemovedCount ?? 0)}R · ${fmtInt(mr.mixedSkeletonizedCount)}S` }}>
+            <div className="grid grid-cols-4 gap-x-4 mb-2">
+              <StatRow label="Shared Stmts" value={fmtInt(mr.mixedCount)} title="Shared statements that would enter direction test if this claim were pruned." />
+              <StatRow label="→ Protected" value={fmtInt(mr.mixedProtectedCount)} color="text-emerald-400" title="Statements with at least one surviving parent whose twin points outside this claim." />
+              <StatRow label="→ Removed" value={fmtInt(mr.mixedRemovedCount ?? 0)} color={(mr.mixedRemovedCount ?? 0) > 0 ? "text-sky-400" : "text-text-muted"} title="Direction test failed but pruned claim's twin survives — idea has a living carrier." />
+              <StatRow label="→ Skeletonized" value={fmtInt(mr.mixedSkeletonizedCount)} color={mr.mixedSkeletonizedCount > 0 ? "text-amber-400" : "text-text-muted"} title="Direction test failed and no surviving twin — no living carrier." />
+            </div>
+
+            {/* Mini protection bar */}
+            {mr.mixedCount > 0 && (
+              <div className="flex w-full h-2 rounded overflow-hidden mb-2">
+                {mr.mixedProtectedCount > 0 && (
+                  <div style={{ width: `${(mr.mixedProtectedCount / mr.mixedCount) * 100}%` }} className="bg-emerald-500/60" />
+                )}
+                {(mr.mixedRemovedCount ?? 0) > 0 && (
+                  <div style={{ width: `${((mr.mixedRemovedCount ?? 0) / mr.mixedCount) * 100}%` }} className="bg-sky-500/60" />
+                )}
+                {mr.mixedSkeletonizedCount > 0 && (
+                  <div style={{ width: `${(mr.mixedSkeletonizedCount / mr.mixedCount) * 100}%` }} className="bg-amber-500/60" />
+                )}
+              </div>
+            )}
+
+            <SortableTable
+              columns={[
+                {
+                  key: "statementId", header: "Statement",
+                  cell: (r: any) => (
+                    <span className="text-[10px] text-text-secondary truncate max-w-[180px] inline-block" title={`[${r.statementId}] ${r.text}`}>
+                      {r.text || r.statementId}
+                    </span>
+                  ),
+                },
+                {
+                  key: "action", header: "Verdict",
+                  sortValue: (r: any) => r.action === "PROTECTED" ? 2 : r.action === "REMOVE" ? 1 : 0,
+                  cell: (r: any) => (
+                    <span className={clsx("font-mono text-[10px] font-semibold", r.action === "PROTECTED" ? "text-emerald-400" : r.action === "REMOVE" ? "text-sky-400" : "text-amber-400")}>
+                      {r.action === "PROTECTED" ? "PROT" : r.action === "REMOVE" ? "REM" : "SKEL"}
+                    </span>
+                  ),
+                },
+                {
+                  key: "survivingCount", header: "Surv",
+                  title: "Number of other claims that also own this statement (surviving parents if this claim were pruned).",
+                  sortValue: (r: any) => r.survivingParents?.length ?? 0,
+                  cell: (r: any) => (
+                    <span className="font-mono text-[10px] text-text-muted" title={r.survivingParents?.map((id: string) => claimLabelById.get(id) ?? id).join(", ")}>
+                      {r.survivingParents?.length ?? 0}
+                    </span>
+                  ),
+                },
+                {
+                  key: "protector", header: "Protector",
+                  title: "The surviving claim whose twin pointed outside the pruned set — the claim that would 'save' this statement.",
+                  cell: (r: any) => r.protectorClaimId ? (
+                    <span className="text-[10px] text-emerald-400/80 truncate max-w-[100px] inline-block" title={r.protectorClaimId}>
+                      {claimLabelById.get(r.protectorClaimId) ?? r.protectorClaimId}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-text-muted">—</span>
+                  ),
+                },
+                {
+                  key: "probeCount", header: "Probes",
+                  title: "Number of surviving parents probed by the direction test.",
+                  sortValue: (r: any) => r.probes?.length ?? 0,
+                  cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{r.probes?.length ?? 0}</span>,
+                },
+                {
+                  key: "bestSim", header: "Best τ",
+                  title: "Highest twin similarity found across all direction probes for this statement.",
+                  sortValue: (r: any) => {
+                    const sims = (r.probes ?? []).map((p: any) => p.twinSimilarity).filter((v: any) => typeof v === "number");
+                    return sims.length > 0 ? Math.max(...sims) : -1;
+                  },
+                  cell: (r: any) => {
+                    const sims = (r.probes ?? []).map((p: any) => p.twinSimilarity).filter((v: any) => typeof v === "number");
+                    const best = sims.length > 0 ? Math.max(...sims) : null;
+                    return <span className="font-mono text-[10px] text-blue-400">{best != null ? best.toFixed(3) : "—"}</span>;
+                  },
+                },
+                {
+                  key: "probeDetail", header: "Probe Detail",
+                  title: "Per-surviving-parent direction probe: claim → twin similarity, into pruned set or outside?",
+                  cell: (r: any) => {
+                    const probes: any[] = r.probes ?? [];
+                    if (probes.length === 0) return <span className="text-[10px] text-text-muted">—</span>;
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        {probes.map((p: any, i: number) => {
+                          const cLabel2 = claimLabelById.get(p.survivingClaimId) ?? p.survivingClaimId;
+                          if (p.twinStatementId == null) {
+                            return <span key={i} className="text-[9px] text-text-muted italic truncate max-w-[200px]" title={`${p.survivingClaimId}: no twin`}>{cLabel2}: no twin</span>;
+                          }
+                          const twinText = stmtTextById.get(p.twinStatementId) ?? p.twinStatementId;
+                          const arrow = p.pointsIntoPrunedSet ? "→pruned" : "→outside";
+                          const color = p.pointsIntoPrunedSet ? "text-rose-400/70" : "text-emerald-400/70";
+                          return (
+                            <span key={i} className={clsx("text-[9px] truncate max-w-[220px]", color)} title={`${p.survivingClaimId} twin → ${p.twinStatementId} (sim: ${p.twinSimilarity?.toFixed(3) ?? "?"}) [${twinText}] ${arrow}`}>
+                              {cLabel2} → τ{p.twinSimilarity?.toFixed(2) ?? "?"} {arrow}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  },
+                },
+              ]}
+              rows={details.map((d: any) => ({
+                ...d,
+                text: stmtTextById.get(d.statementId) ?? "",
+              }))}
+              defaultSortKey="action"
+              defaultSortDir="asc"
+              maxRows={50}
+            />
+          </CardSection>
+        );
+      })}
+    </>
+  );
+}
+
+// ============================================================================
+// CLAIM STATEMENTS CARD — canonical roster: every claim with every statement
+// ============================================================================
+
+export function ClaimStatementsCard({ artifact }: { artifact: any }) {
+  const claims = useMemo(() => safeArr<any>(artifact?.semantic?.claims), [artifact]);
+  const ownershipObj = safeObj(artifact?.claimProvenance?.statementOwnership);
+  const exclusivityObj = safeObj(artifact?.claimProvenance?.claimExclusivity);
+  const fatesObj: Record<string, any> = artifact?.completeness?.statementFates ?? {};
+  const blastScores = useMemo(() => safeArr<any>(artifact?.blastSurface?.scores), [artifact]);
+
+  // Statement text + model lookup
+  const statementById = useMemo(() => {
+    const m = new Map<string, { text: string; modelIndex: number | null }>();
+    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+      const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
+      if (!id) continue;
+      m.set(id, {
+        text: String(s?.text ?? ""),
+        modelIndex: typeof s?.modelIndex === "number" ? s.modelIndex : null,
+      });
+    }
+    return m;
+  }, [artifact]);
+
+  // Claim label lookup
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of claims) {
+      const id = String(c?.id ?? "").trim();
+      if (id) m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [claims]);
+
+  // Twin info keyed by statementId from blast surface risk vectors
+  const twinByStatementId = useMemo(() => {
+    const m = new Map<string, { twinId: string; twinText: string; twinSimilarity: number | null; certainty: string | null; twinHostClaimId: string | null }>();
+    for (const s of blastScores) {
+      const rv = s?.riskVector;
+      const details: any[] = Array.isArray(rv?.deletionCertainty?.details) ? rv.deletionCertainty.details : [];
+      for (const d of details) {
+        const sid = String(d?.statementId ?? "").trim();
+        if (!sid) continue;
+        const twinId = d?.twinId ? String(d.twinId) : "";
+        m.set(sid, {
+          twinId,
+          twinText: twinId ? (statementById.get(twinId)?.text ?? "") : "",
+          twinSimilarity: typeof d?.twinSimilarity === "number" ? d.twinSimilarity : null,
+          certainty: d?.certainty ?? null,
+          twinHostClaimId: d?.twinHostClaimId ? String(d.twinHostClaimId) : null,
+        });
+      }
+    }
+    return m;
+  }, [blastScores, statementById]);
+
+  // Build flat rows: one per (claim, statement) pair
+  type RosterRow = {
+    id: string;
+    claimId: string;
+    claimLabel: string;
+    statementId: string;
+    text: string;
+    modelIndex: number | null;
+    exclusive: boolean;
+    sharedCount: number;
+    sharedWith: string[];
+    fate: string;
+    twinId: string | null;
+    twinText: string | null;
+    twinSimilarity: number | null;
+    certainty: string | null;
+    twinHostClaimId: string | null;
+    twinHostLabel: string | null;
+  };
+
+  const rosterRows = useMemo<RosterRow[]>(() => {
+    const out: RosterRow[] = [];
+    for (const claim of claims) {
+      const cid = String(claim?.id ?? "");
+      const clabel = String(claim?.label ?? cid);
+      const stmtIds: string[] = Array.isArray(claim?.sourceStatementIds) ? claim.sourceStatementIds.map(String) : [];
+      const exData = exclusivityObj[cid];
+      const exclusiveSet = new Set<string>(Array.isArray(exData?.exclusiveIds) ? exData.exclusiveIds.map(String) : []);
+
+      for (const sid of stmtIds) {
+        const stmtInfo = statementById.get(sid);
+        const owners = ownershipObj[sid];
+        const ownerArr: string[] = Array.isArray(owners) ? owners.map(String) : [];
+        const otherOwners = ownerArr.filter((o) => o !== cid);
+        const isExclusive = exclusiveSet.has(sid);
+        const fateEntry = fatesObj[sid];
+        const twin = twinByStatementId.get(sid);
+
+        out.push({
+          id: `${cid}::${sid}`,
+          claimId: cid,
+          claimLabel: clabel,
+          statementId: sid,
+          text: stmtInfo?.text ?? "",
+          modelIndex: stmtInfo?.modelIndex ?? null,
+          exclusive: isExclusive,
+          sharedCount: otherOwners.length,
+          sharedWith: otherOwners,
+          fate: String(fateEntry?.fate ?? fateEntry?.status ?? "—"),
+          twinId: twin?.twinId ?? null,
+          twinText: twin?.twinText ?? null,
+          twinSimilarity: twin?.twinSimilarity ?? null,
+          certainty: twin?.certainty ?? null,
+          twinHostClaimId: twin?.twinHostClaimId ?? null,
+          twinHostLabel: twin?.twinHostClaimId ? (claimLabelById.get(twin.twinHostClaimId) ?? twin.twinHostClaimId) : null,
+        });
+      }
+    }
+    return out;
+  }, [claims, exclusivityObj, statementById, ownershipObj, fatesObj, twinByStatementId, claimLabelById]);
+
+  // Summary stats
+  const summary = useMemo(() => {
+    const totalStmts = rosterRows.length;
+    const exclusiveCount = rosterRows.filter((r) => r.exclusive).length;
+    const sharedCount = totalStmts - exclusiveCount;
+    // Unique statements (a statement may appear in multiple claims)
+    const uniqueStmts = new Set(rosterRows.map((r) => r.statementId)).size;
+    return { totalStmts, exclusiveCount, sharedCount, uniqueStmts, claimCount: claims.length };
+  }, [rosterRows, claims.length]);
+
+  const fateColors: Record<string, string> = {
+    primary: "text-emerald-400",
+    supporting: "text-blue-400",
+    unaddressed: "text-amber-400",
+    orphan: "text-orange-400",
+    noise: "text-text-muted",
+  };
+
+  if (claims.length === 0) {
+    return <div className="text-xs text-text-muted italic py-4">No claims available in artifact.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L2</span>
+        <span className="text-[9px] text-text-muted">claim → statement assignment</span>
+      </div>
+
+      <InterpretiveCallout
+        text={`${fmtInt(summary.claimCount)} claims own ${fmtInt(summary.uniqueStmts)} unique statements (${fmtInt(summary.totalStmts)} assignments). ${summary.totalStmts > 0 ? ((summary.exclusiveCount / summary.totalStmts) * 100).toFixed(0) : '—'}% exclusive.`}
+        variant={summary.totalStmts > 0 && summary.exclusiveCount / summary.totalStmts > 0.3 ? 'ok' : 'warn'}
+      />
+
+      <CardSection title="Summary">
+        <div className="grid grid-cols-2 gap-x-4">
+          <StatRow label="Claims" value={fmtInt(summary.claimCount)} />
+          <StatRow label="Unique Statements" value={fmtInt(summary.uniqueStmts)} />
+          <StatRow label="Exclusive Assignments" value={fmtInt(summary.exclusiveCount)} color="text-emerald-400" />
+          <StatRow label="Shared Assignments" value={fmtInt(summary.sharedCount)} color="text-amber-400" />
+        </div>
+      </CardSection>
+
+      <CardSection title="Claim Statement Roster">
+        <SortableTable
+          columns={[
+            {
+              key: "claimLabel", header: "Claim",
+              sortValue: (r: RosterRow) => r.claimLabel,
+              cell: (r: RosterRow) => <span className="text-[10px] truncate max-w-[100px] inline-block" title={`${r.claimLabel} (${r.claimId})`}>{r.claimLabel}</span>,
+            },
+            {
+              key: "text", header: "Statement",
+              cell: (r: RosterRow) => <span className="text-[10px] text-text-secondary truncate max-w-[200px] inline-block" title={`[${r.statementId}] ${r.text}`}>{r.text || r.statementId}</span>,
+            },
+            {
+              key: "exclusive", header: "Excl",
+              sortValue: (r: RosterRow) => r.exclusive ? 1 : 0,
+              cell: (r: RosterRow) => <span className={clsx("font-mono text-[10px]", r.exclusive ? "text-emerald-400" : "text-amber-400")}>{r.exclusive ? "yes" : "no"}</span>,
+            },
+            {
+              key: "sharedCount", header: "Shared",
+              title: "Number of OTHER claims that also own this statement.",
+              sortValue: (r: RosterRow) => r.sharedCount,
+              cell: (r: RosterRow) => (
+                <span className="font-mono text-[10px] text-text-muted" title={r.sharedWith.map((id) => claimLabelById.get(id) ?? id).join(", ")}>
+                  {r.sharedCount > 0 ? `+${r.sharedCount}` : "—"}
                 </span>
-              )},
-              {
-                key: "text",
-                header: "Statement",
-                cell: (r) => (
-                  <span title={`[${r.statementId}] ${r.text}`} className="text-[10px] text-text-secondary truncate max-w-[200px] inline-block">
-                    {r.text || "(missing text)"}
-                  </span>
-                ),
-              },
-              {
-                key: "twinText",
-                header: "Twin",
-                cell: (r) => r.twinId ? (
-                  <span title={`[${r.twinId}] ${r.twinText || ""}`} className="text-[10px] text-blue-300 truncate max-w-[200px] inline-block">
-                    {r.twinText || r.twinId}
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-text-muted italic">none</span>
-                ),
-              },
-              { key: "twinSimilarity", header: "Sim", title: "Twin similarity (cosine). Higher = less information lost on deletion.", sortValue: (r) => r.twinSimilarity ?? -1, cell: (r) => (
-                <span className="font-mono text-[10px] text-blue-400">
-                  {r.twinSimilarity !== null ? r.twinSimilarity.toFixed(2) : "–"}
-                </span>
-              )},
-              { key: "certainty", header: "Cert", title: "2a = twin unclassified (safest). 2b = twin in another claim, shared (medium). 2c = twin exclusive to host (fragile).", sortValue: (r) => r.certainty ?? "", cell: (r) => (
+              ),
+            },
+            {
+              key: "fate", header: "Fate",
+              sortValue: (r: RosterRow) => r.fate,
+              cell: (r: RosterRow) => <span className={clsx("font-mono text-[10px]", fateColors[r.fate] ?? "text-text-muted")}>{r.fate}</span>,
+            },
+            {
+              key: "twinText", header: "Twin",
+              cell: (r: RosterRow) => r.twinId ? (
+                <span className="text-[10px] text-blue-300 truncate max-w-[140px] inline-block" title={`[${r.twinId}] ${r.twinText ?? ""}`}>{r.twinText || r.twinId}</span>
+              ) : (
+                <span className="text-[10px] text-text-muted">—</span>
+              ),
+            },
+            {
+              key: "twinSimilarity", header: "τ",
+              title: "Twin similarity (cosine). Higher = less info lost on deletion.",
+              sortValue: (r: RosterRow) => r.twinSimilarity ?? -1,
+              cell: (r: RosterRow) => <span className="font-mono text-[10px] text-blue-400">{r.twinSimilarity != null ? r.twinSimilarity.toFixed(2) : "—"}</span>,
+            },
+            {
+              key: "certainty", header: "Cert",
+              title: "2a = twin unclassified (safest). 2b = twin shared (medium). 2c = twin exclusive to host (fragile).",
+              sortValue: (r: RosterRow) => r.certainty ?? "",
+              cell: (r: RosterRow) => (
                 <span className={clsx("font-mono text-[10px]", r.certainty === "2a" ? "text-green-400" : r.certainty === "2b" ? "text-yellow-400" : r.certainty === "2c" ? "text-red-400" : "text-text-muted")}>
-                  {r.certainty ?? "–"}
+                  {r.certainty ?? "—"}
                 </span>
-              )},
-              { key: "twinHostLabel", header: "Twin Host", title: "Claim that owns the twin. Blank = twin is unclassified (not in any claim).", cell: (r) => r.twinHostLabel ? (
-                <span title={r.twinHostClaimId || ""} className="text-[10px] text-text-secondary truncate max-w-[120px] inline-block">{r.twinHostLabel}</span>
-              ) : r.type === "deletion" ? (
+              ),
+            },
+            {
+              key: "twinHostLabel", header: "Twin Host",
+              title: "Claim that owns the twin statement.",
+              cell: (r: RosterRow) => r.twinHostLabel ? (
+                <span className="text-[10px] text-text-secondary truncate max-w-[90px] inline-block" title={r.twinHostClaimId ?? ""}>{r.twinHostLabel}</span>
+              ) : r.twinId ? (
                 <span className="text-[10px] text-green-400/70 italic">unclassified</span>
               ) : (
-                <span className="text-[10px] text-text-muted">–</span>
-              )},
-            ]}
-            rows={exclusiveRows}
-            defaultSortKey="type"
-            defaultSortDir="asc"
-            maxRows={200}
-          />
-        </CardSection>
-      )}
-    </>
+                <span className="text-[10px] text-text-muted">—</span>
+              ),
+            },
+          ]}
+          rows={rosterRows}
+          defaultSortKey="claimLabel"
+          defaultSortDir="asc"
+          maxRows={200}
+        />
+      </CardSection>
+    </div>
   );
 }
 
@@ -1506,293 +1873,6 @@ function safeArr<T = any>(v: any): T[] {
 function safeObj(v: any): Record<string, any> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as any) : {};
 }
-
-function mapSize(v: any): number | null {
-  if (!v) return null;
-  if (v instanceof Map) return v.size;
-  if (typeof v === "object" && !Array.isArray(v)) return Object.keys(v).length;
-  return null;
-}
-
-function dominantRegionId(regionIds: any): string | null {
-  const ids = Array.isArray(regionIds) ? regionIds : [];
-  if (ids.length === 0) return null;
-  const counts = new Map<string, number>();
-  for (const r of ids) {
-    const id = String(r ?? "").trim();
-    if (!id) continue;
-    counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
-  let best: string | null = null;
-  let bestCount = -1;
-  for (const [id, c] of counts) {
-    if (c > bestCount) {
-      bestCount = c;
-      best = id;
-    }
-  }
-  return best;
-}
-
-export function CompetitiveProvenanceCard({
-  artifact,
-  selectedEntity,
-}: {
-  artifact: any;
-  selectedEntity: SelectedEntity;
-}) {
-  const claims = useMemo(() => safeArr<any>(artifact?.semantic?.claims), [artifact]);
-  const claimProvenance = artifact?.claimProvenance ?? null;
-  const ownershipObj = safeObj(claimProvenance?.statementOwnership);
-  const exclusivityObj = safeObj(claimProvenance?.claimExclusivity);
-  const overlapArr = safeArr<any>(claimProvenance?.claimOverlap);
-
-  // Phase 1 statement-level competitive allocation
-  const statementAllocation = artifact?.statementAllocation ?? null;
-  const saPerClaim = safeObj(statementAllocation?.perClaim);
-  const saEntropy = statementAllocation?.entropy ?? null;
-  const dualCoordinateActive: boolean = statementAllocation?.dualCoordinateActive ?? false;
-
-  const statementOwnerRows = useMemo(() => {
-    return Object.entries(ownershipObj).map(([sid, owners]) => {
-      const arr = Array.isArray(owners) ? owners.map(String) : [];
-      return { id: String(sid), owners: arr, ownerCount: arr.length };
-    });
-  }, [ownershipObj]);
-
-  const entropy = useMemo(() => {
-    let one = 0;
-    let two = 0;
-    let threePlus = 0;
-    for (const r of statementOwnerRows) {
-      if (r.ownerCount <= 0) continue;
-      if (r.ownerCount === 1) one++;
-      else if (r.ownerCount === 2) two++;
-      else threePlus++;
-    }
-    const total = one + two + threePlus;
-    return { one, two, threePlus, total };
-  }, [statementOwnerRows]);
-
-  type ClaimRow = {
-    id: string;
-    label: string;
-    bulk: number | null;
-    exclusivityRatio: number | null;
-    poolSize: number | null;
-    stmtCount: number;
-    regionCount: number;
-    dominantRegion: string | null;
-  };
-
-  const claimRows = useMemo<ClaimRow[]>(() => {
-    return claims.map((c: any) => {
-      const id = String(c?.id ?? "");
-      const label = String(c?.label ?? id);
-      const bulk = typeof c?.provenanceBulk === "number" && Number.isFinite(c.provenanceBulk) ? c.provenanceBulk : null;
-      const ex = exclusivityObj[id];
-      const exclusivityRatio = typeof ex?.exclusivityRatio === "number" && Number.isFinite(ex.exclusivityRatio) ? ex.exclusivityRatio : null;
-      const poolSize = mapSize(c?.provenanceWeights);
-      const stmtCount = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds.length : 0;
-      const regionIds = Array.isArray(c?.sourceRegionIds) ? c.sourceRegionIds : [];
-      const regionCount = regionIds.length;
-      const dom = dominantRegionId(regionIds);
-      return { id, label, bulk, exclusivityRatio, poolSize, stmtCount, regionCount, dominantRegion: dom };
-    });
-  }, [claims, exclusivityObj]);
-
-  const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
-  const selectedClaim = selectedClaimId ? claims.find((c: any) => String(c?.id ?? "") === selectedClaimId) : null;
-  const selectedEx = selectedClaimId ? exclusivityObj[selectedClaimId] : null;
-
-  const selectedStatementRows = useMemo(() => {
-    if (!selectedClaimId || !selectedClaim) return [];
-    const stmtIds = Array.isArray((selectedClaim as any)?.sourceStatementIds) ? (selectedClaim as any).sourceStatementIds : [];
-    return stmtIds.map((sid: any) => {
-      const id = String(sid);
-      const owners = ownershipObj[id];
-      const ownerArr = Array.isArray(owners) ? owners.map(String) : [];
-      const exclusive = Array.isArray(selectedEx?.exclusiveIds) ? selectedEx.exclusiveIds.includes(id) : false;
-      return { id, ownerCount: ownerArr.length, owners: ownerArr, exclusive };
-    });
-  }, [selectedClaimId, selectedClaim, ownershipObj, selectedEx]);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1/L2</span>
-          <span className="text-[9px] text-text-muted">competitive provenance</span>
-        </div>
-      </div>
-
-      <InterpretiveCallout
-        text={(() => {
-          const totalEntropy = saEntropy?.total ?? entropy.total;
-          const exclusiveCount = saEntropy?.one ?? entropy.one;
-          const pctExclusive = totalEntropy > 0 ? ((exclusiveCount / totalEntropy) * 100).toFixed(0) : '—';
-          return `${pctExclusive}% exclusive allocation. ${fmtInt(claims.length)} claims competing over ${fmtInt(totalEntropy)} statements.`;
-        })()}
-        variant={(() => {
-          const totalEntropy = saEntropy?.total ?? entropy.total;
-          const exclusiveCount = saEntropy?.one ?? entropy.one;
-          const pctExclusive = totalEntropy > 0 ? exclusiveCount / totalEntropy : 0;
-          return pctExclusive > 0.5 ? 'ok' : pctExclusive > 0.2 ? 'warn' : 'error';
-        })()}
-      />
-
-      <CardSection title="Entropy Distribution">
-        {saEntropy && (
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded">unified geo §1</span>
-            <span className="text-[9px] text-text-muted">statement-level competitive allocation</span>
-            {dualCoordinateActive && <span className="text-[9px] text-text-muted">(dual coord: claim-text emb)</span>}
-          </div>
-        )}
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label: "1 claim", count: saEntropy?.one ?? entropy.one, total: saEntropy?.total ?? entropy.total, color: "text-emerald-400" },
-            { label: "2 claims", count: saEntropy?.two ?? entropy.two, total: saEntropy?.total ?? entropy.total, color: "text-amber-400" },
-            { label: "3+ claims", count: saEntropy?.threePlus ?? entropy.threePlus, total: saEntropy?.total ?? entropy.total, color: "text-rose-400" },
-          ].map(({ label, count, total, color }) => (
-            <div key={label} className="bg-white/3 rounded-lg p-2 text-center">
-              <div className="text-[9px] text-text-muted uppercase">{label}</div>
-              <div className={clsx("text-sm font-mono font-semibold", color)}>{fmtInt(count)}</div>
-              <div className="text-[9px] text-text-muted">{total > 0 ? ((count / total) * 100).toFixed(1) : "—"}%</div>
-            </div>
-          ))}
-        </div>
-      </CardSection>
-
-      <CardSection title="Per-Claim Provenance">
-        {/* Bulk bars — visual comparison before the table */}
-        {claimRows.length > 0 && (() => {
-          const maxBulk = Math.max(0, ...claimRows.map((r) => r.bulk ?? 0));
-          return (
-            <div className="space-y-0.5 mb-3">
-              {[...claimRows].sort((a, b) => (b.bulk ?? 0) - (a.bulk ?? 0)).map((r) => (
-                <HorizontalBar
-                  key={r.id}
-                  label={r.label.length > 16 ? r.label.slice(0, 16) + '…' : r.label}
-                  value={r.bulk ?? 0}
-                  max={maxBulk}
-                  color={selectedClaimId === r.id ? "rgba(99,102,241,0.8)" : "rgba(96,165,250,0.6)"}
-                />
-              ))}
-            </div>
-          );
-        })()}
-        <SortableTable
-          columns={[
-            { key: "label", header: "Claim", cell: (r: ClaimRow) => <span className={clsx("text-[10px] truncate max-w-[160px] inline-block", selectedClaimId === r.id && "text-brand-400")}>{r.label || r.id}</span> },
-            { key: "bulk", header: "Bulk", sortValue: (r: ClaimRow) => r.bulk, cell: (r: ClaimRow) => <span className="font-mono">{fmt(r.bulk, 2)}</span> },
-            { key: "exclusivityRatio", header: "Excl%", sortValue: (r: ClaimRow) => r.exclusivityRatio, cell: (r: ClaimRow) => <span className={clsx("font-mono", (r.exclusivityRatio ?? 0) < 0.2 && "text-rose-400")}>{r.exclusivityRatio != null ? `${(r.exclusivityRatio * 100).toFixed(0)}%` : "—"}</span> },
-            { key: "poolSize", header: "Pool", sortValue: (r: ClaimRow) => r.poolSize, cell: (r: ClaimRow) => <span className="font-mono text-text-muted">{fmtInt(r.poolSize)}</span> },
-            { key: "stmtCount", header: "Stmts", sortValue: (r: ClaimRow) => r.stmtCount, cell: (r: ClaimRow) => <span className="font-mono text-text-muted">{fmtInt(r.stmtCount)}</span> },
-            { key: "regionCount", header: "Regions", sortValue: (r: ClaimRow) => r.regionCount, cell: (r: ClaimRow) => <span className="font-mono text-text-muted">{fmtInt(r.regionCount)}</span> },
-          ]}
-          rows={claimRows}
-          defaultSortKey="bulk"
-          defaultSortDir="desc"
-          maxRows={10}
-        />
-      </CardSection>
-
-      {selectedClaimId && (
-        <CardSection title={`Claim View`}>
-          <div className="grid grid-cols-2 gap-x-4">
-            <div>
-              <StatRow label="Claim" value={String(selectedClaim?.label ?? selectedClaimId)} />
-              <StatRow label="Bulk" value={fmt((selectedClaim as any)?.provenanceBulk ?? null, 3)} />
-              <StatRow label="Pool Size" value={fmtInt(mapSize((selectedClaim as any)?.provenanceWeights))} />
-            </div>
-            <div>
-              <StatRow label="Exclusivity" value={selectedEx?.exclusivityRatio != null ? `${(selectedEx.exclusivityRatio * 100).toFixed(1)}%` : "—"} />
-              <StatRow label="Exclusive Stmts" value={fmtInt(Array.isArray(selectedEx?.exclusiveIds) ? selectedEx.exclusiveIds.length : null)} />
-              <StatRow label="Shared Stmts" value={fmtInt(Array.isArray(selectedEx?.sharedIds) ? selectedEx.sharedIds.length : null)} />
-            </div>
-          </div>
-        </CardSection>
-      )}
-
-
-      <CardSection title={selectedClaimId ? "Statement Allocation (claim scope)" : "Statement Allocation (field scope)"}>
-        {selectedClaimId ? (() => {
-          const saClaimData = saPerClaim[selectedClaimId] ?? null;
-          const provRows: any[] = Array.isArray(saClaimData?.directStatementProvenance)
-            ? saClaimData.directStatementProvenance
-            : [];
-          if (provRows.length > 0) {
-            return (
-              <>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1 py-0.5 rounded">§1 weights</span>
-                  <span className="text-[9px] text-text-muted">pool={fmtInt(saClaimData?.poolSize)} bulk={fmt(saClaimData?.provenanceBulk, 2)} μ_excess={fmt(saClaimData?.meanExcess, 3)}</span>
-                </div>
-                <SortableTable
-                  columns={[
-                    { key: "statementId", header: "Statement", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[100px] inline-block">{String(r.statementId)}</span> },
-                    { key: "weight", header: "w(S,C)", sortValue: (r: any) => r.weight, cell: (r: any) => <span className="font-mono text-emerald-400">{fmt(r.weight, 3)}</span> },
-                    { key: "similarity", header: "sim", sortValue: (r: any) => r.similarity, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.similarity, 3)}</span> },
-                    { key: "excess", header: "excess", sortValue: (r: any) => r.excess, cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.excess, 3)}</span> },
-                  ]}
-                  rows={provRows}
-                  defaultSortKey="weight"
-                  defaultSortDir="desc"
-                  maxRows={12}
-                />
-              </>
-            );
-          }
-          return (
-            <SortableTable
-              columns={[
-                { key: "id", header: "Statement", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[120px] inline-block">{r.id}</span> },
-                { key: "ownerCount", header: "Claims", sortValue: (r: any) => r.ownerCount, cell: (r: any) => <span className={clsx("font-mono", r.ownerCount === 1 ? "text-emerald-400" : r.ownerCount === 2 ? "text-amber-400" : "text-rose-400")}>{fmtInt(r.ownerCount)}</span> },
-                { key: "exclusive", header: "Exclusive", sortValue: (r: any) => (r.exclusive ? 1 : 0), cell: (r: any) => <span className={clsx("font-mono", r.exclusive ? "text-emerald-400" : "text-text-muted")}>{r.exclusive ? "yes" : "no"}</span> },
-              ]}
-              rows={selectedStatementRows}
-              defaultSortKey="ownerCount"
-              defaultSortDir="asc"
-              maxRows={12}
-            />
-          );
-        })() : (
-          <SortableTable
-            columns={[
-              { key: "id", header: "Statement", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[120px] inline-block">{r.id}</span> },
-              { key: "ownerCount", header: "Claims", sortValue: (r: any) => r.ownerCount, cell: (r: any) => <span className={clsx("font-mono", r.ownerCount === 1 ? "text-emerald-400" : r.ownerCount === 2 ? "text-amber-400" : "text-rose-400")}>{fmtInt(r.ownerCount)}</span> },
-              { key: "owners", header: "Owners", cell: (r: any) => <span className="text-[10px] text-text-muted truncate max-w-[180px] inline-block">{r.owners.slice(0, 3).join(", ")}{r.owners.length > 3 ? ` +${r.owners.length - 3}` : ""}</span> },
-            ]}
-            rows={statementOwnerRows}
-            defaultSortKey="ownerCount"
-            defaultSortDir="desc"
-            maxRows={12}
-          />
-        )}
-      </CardSection>
-
-      {
-        overlapArr.length > 0 && (
-          <CardSection title="Claim Overlap (Jaccard)">
-            <SortableTable
-              columns={[
-                { key: "claimA", header: "A", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r.claimA)}</span> },
-                { key: "claimB", header: "B", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{String(r.claimB)}</span> },
-                { key: "jaccard", header: "J", sortValue: (r: any) => r.jaccard, cell: (r: any) => <span className="font-mono">{fmt(r.jaccard, 3)}</span> },
-              ]}
-              rows={overlapArr}
-              defaultSortKey="jaccard"
-              defaultSortDir="desc"
-              maxRows={10}
-            />
-          </CardSection>
-        )
-      }
-    </div >
-  );
-}
-
 
 export function CarrierDetectionCard({ artifact }: { artifact: any }) {
   const substrateSummary = artifact?.substrateSummary ?? artifact?.chewedSubstrateSummary ?? null;
@@ -1914,22 +1994,6 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
         </CardSection>
       )}
 
-      <CardSection title="Statement Fate Table">
-        <SortableTable
-          columns={[
-            { key: "id", header: "ID", title: "Shadow statement identifier.", cell: (r: any) => <span className="font-mono text-[9px] text-text-muted truncate max-w-[70px] inline-block">{r.id}</span> },
-            { key: "fate", header: "Fate", title: "Statement fate: primary (anchor of a claim), supporting (reinforces), unaddressed (no claim), orphan (stranded), noise (low signal).", sortValue: (r: any) => r.fate, cell: (r: any) => <span style={{ color: fateColors[r.fate] ?? "#9ca3af" }} className="font-mono text-[10px]">{r.fate}</span> },
-            { key: "claimCount", header: "Claims", title: "Number of claims that own this statement.", sortValue: (r: any) => r.claimIds.length, cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.claimIds.length)}</span> },
-            { key: "querySimilarity", header: "QSim", title: "Query similarity: cosine similarity between this statement's embedding and the query embedding.", sortValue: (r: any) => r.querySimilarity, cell: (r: any) => <span className="font-mono text-text-muted">{r.querySimilarity != null ? fmt(r.querySimilarity, 3) : "—"}</span> },
-            { key: "reason", header: "Reason", title: "Classification reason for this statement's fate assignment.", cell: (r: any) => <span className="text-[9px] text-text-muted truncate max-w-[160px] inline-block" title={r.reason}>{r.reason}</span> },
-          ]}
-          rows={fateRows}
-          defaultSortKey="fate"
-          defaultSortDir="asc"
-          maxRows={15}
-        />
-      </CardSection>
-
       {qsi ? (
         <>
           <CardSection title="Conflict Validation (F1)">
@@ -1977,84 +2041,6 @@ export function CarrierDetectionCard({ artifact }: { artifact: any }) {
                     maxRows={20}
                   />
                 </div>
-              );
-            })()}
-          </CardSection>
-
-          <CardSection title="Question Selection Profile (F2–F4)">
-            {(() => {
-              const rows = safeArr<any>(qsi?.claimProfiles).map((p: any) => ({
-                id: String(p?.claimId ?? ""),
-                claimId: String(p?.claimId ?? ""),
-                label: String(p?.claimLabel ?? ""),
-                totalDamage: typeof p?.totalDamage === "number" ? p.totalDamage : null,
-                orphanRatio: typeof p?.orphanRatio === "number" ? p.orphanRatio : null,
-                supportRatio: typeof p?.supportRatio === "number" ? p.supportRatio : null,
-                resolvedDamage: typeof p?.resolvedDamage === "number" ? p.resolvedDamage : null,
-                soleSource: !!p?.soleSource,
-                queryRelevanceRaw: typeof p?.queryRelevanceRaw === "number" ? p.queryRelevanceRaw : null,
-                wouldPenalize: !!p?.wouldPenalize,
-                damageBand: typeof p?.damageBand === "number" ? p.damageBand : 0,
-              }));
-              return (
-                <SortableTable
-                  columns={[
-                    { key: "claimId", header: "Claim", cell: (r: any) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[90px] inline-block">{r.claimId}</span> },
-                    { key: "label", header: "Label", cell: (r: any) => <span className="text-[10px] truncate max-w-[160px] inline-block" title={r.label}>{r.label}</span> },
-                    { key: "totalDamage", header: "Total Damage", title: "Total damage (DD + GD): sum of deletion damage and degradation damage. Primary ranking signal for question selection.", sortValue: (r: any) => r.totalDamage ?? -Infinity, cell: (r: any) => <span className="font-mono">{r.totalDamage != null ? fmt(r.totalDamage, 4) : "—"}</span> },
-                    { key: "orphanRatio", header: "Orphan%", title: "Orphan ratio: fraction of exclusive statements with no twin. Higher = more irreplaceable evidence.", sortValue: (r: any) => r.orphanRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.orphanRatio != null ? `${(r.orphanRatio * 100).toFixed(1)}%` : "—"}</span> },
-                    { key: "supportRatio", header: "Support%", title: "Support ratio: supporters / modelCount. >50% = consensus (hard gate, cannot be damage outlier).", sortValue: (r: any) => r.supportRatio ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.supportRatio != null ? `${(r.supportRatio * 100).toFixed(0)}%` : "—"}</span> },
-                    {
-                      key: "resolvedDamage",
-                      header: "Resolved Dmg",
-                      title: "Resolved damage: per-claim structural damage after fragility resolution. Deterministic — twin fates resolved from routing topology.",
-                      sortValue: (r: any) => r.resolvedDamage ?? -Infinity,
-                      cell: (r: any) => (
-                        <span className={clsx("font-mono", r.resolvedDamage != null && r.totalDamage != null && r.resolvedDamage !== r.totalDamage ? "text-amber-400" : "text-text-muted")}>
-                          {r.resolvedDamage != null ? fmt(r.resolvedDamage, 4) : "—"}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "soleSource",
-                      header: "Sole?",
-                      title: "Sole source: claim backed by only 1 model. Triggers ×0.50 off-topic discount when queryRelevance < 0.30.",
-                      sortValue: (r: any) => (r.soleSource ? 1 : 0),
-                      cell: (r: any) => (
-                        <span className={clsx("font-mono text-[10px]", r.soleSource ? "text-amber-400" : "text-text-muted")}>
-                          {r.soleSource ? "YES" : "no"}
-                        </span>
-                      ),
-                    },
-                    { key: "queryRelevanceRaw", header: "QRel Raw", title: "Raw query relevance: mean cosine similarity between this claim's statements and the query embedding.", sortValue: (r: any) => r.queryRelevanceRaw ?? -Infinity, cell: (r: any) => <span className="font-mono text-text-muted">{r.queryRelevanceRaw != null ? fmt(r.queryRelevanceRaw, 3) : "—"}</span> },
-                    {
-                      key: "wouldPenalize",
-                      header: "Would Penalize",
-                      title: "Would penalize: claim exceeds the damage threshold (μ + σ) and is a candidate for survey questioning.",
-                      sortValue: (r: any) => (r.wouldPenalize ? 1 : 0),
-                      cell: (r: any) => (
-                        <span className={clsx("font-mono text-[10px]", r.wouldPenalize ? "text-rose-400" : "text-text-muted")}>
-                          {r.wouldPenalize ? "YES" : "no"}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "damageBand",
-                      header: "Band",
-                      title: "Damage band: quantized damage level (0 = above μ+σ, 1 = μ to μ+σ, 2+ = below μ). Band 0 claims are routed to survey.",
-                      sortValue: (r: any) => r.damageBand,
-                      cell: (r: any) => (
-                        <span className={clsx("font-mono text-[10px]", r.damageBand === 0 ? "text-text-secondary" : "text-text-muted")}>
-                          {fmtInt(r.damageBand)}
-                        </span>
-                      ),
-                    },
-                  ]}
-                  rows={rows}
-                  defaultSortKey="totalDamage"
-                  defaultSortDir="desc"
-                  maxRows={12}
-                />
               );
             })()}
           </CardSection>
@@ -2691,5 +2677,593 @@ export function MixedProvenanceCard({ artifact }: { artifact: any }) {
         })}
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// CLAIM DENSITY CARD
+// ============================================================================
+
+export function ClaimDensityCard({ artifact }: { artifact: any }) {
+  const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
+
+  const claimDensity = artifact?.claimDensity ?? null;
+  const profiles: Record<string, any> = claimDensity?.profiles ?? {};
+
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims)) {
+      const id = String(c?.id ?? "").trim();
+      if (!id) continue;
+      m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [artifact]);
+
+  const rows = useMemo(() => {
+    return Object.values(profiles).map((p: any) => ({
+      id: String(p.claimId ?? ""),
+      label: claimLabelById.get(String(p.claimId ?? "")) ?? String(p.claimId ?? ""),
+      paragraphCount: p.paragraphCount ?? 0,
+      majorityParagraphCount: p.majorityParagraphCount ?? 0,
+      passageCount: p.passageCount ?? 0,
+      maxPassageLength: p.maxPassageLength ?? 0,
+      modelSpread: p.modelSpread ?? 0,
+      modelsWithPassages: p.modelsWithPassages ?? 0,
+      totalClaimStatements: p.totalClaimStatements ?? 0,
+      meanCoverage: p.meanCoverage ?? 0,
+    }));
+  }, [profiles, claimLabelById]);
+
+  const selectedProfile = selectedClaimId ? profiles[selectedClaimId] : null;
+
+  // Per-model mini-summary for detail expansion
+  const modelSummary = useMemo(() => {
+    if (!selectedProfile) return [];
+    const paraCoverage: any[] = safeArr(selectedProfile.paragraphCoverage);
+    const passages: any[] = safeArr(selectedProfile.passages);
+
+    const byModel = new Map<number, { paraCount: number; passageCount: number; hasPassage: boolean }>();
+    for (const pc of paraCoverage) {
+      const mi = pc.modelIndex as number;
+      if (!byModel.has(mi)) byModel.set(mi, { paraCount: 0, passageCount: 0, hasPassage: false });
+      byModel.get(mi)!.paraCount++;
+    }
+    for (const p of passages) {
+      const mi = p.modelIndex as number;
+      if (!byModel.has(mi)) byModel.set(mi, { paraCount: 0, passageCount: 0, hasPassage: false });
+      const entry = byModel.get(mi)!;
+      entry.passageCount++;
+      if ((p.length ?? 0) >= 2) entry.hasPassage = true;
+    }
+
+    return Array.from(byModel.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([mi, data]) => ({
+        id: `model-${mi}`,
+        model: fmtModel(artifact, mi),
+        modelIndex: mi,
+        paraCount: data.paraCount,
+        passageCount: data.passageCount,
+        hasPassage: data.hasPassage,
+        kind: data.hasPassage ? "passages" : "scattered",
+      }));
+  }, [selectedProfile, artifact]);
+
+  if (Object.keys(profiles).length === 0) return null;
+
+  return (
+    <CardSection title="Claim Density" badge={{ text: `${rows.length} claims` }}>
+      <SortableTable
+        columns={[
+          {
+            key: "label", header: "Claim",
+            title: "Claim identifier",
+            sortValue: (r: any) => r.label,
+            cell: (r: any) => (
+              <button
+                type="button"
+                className={clsx(
+                  "text-left text-[10px] truncate max-w-[120px] hover:text-text-primary transition-colors",
+                  selectedClaimId === r.id ? "text-sky-400 font-semibold" : "text-text-secondary"
+                )}
+                onClick={() => setSelectedClaimId(selectedClaimId === r.id ? null : r.id)}
+                title={r.label}
+              >
+                {r.label}
+              </button>
+            ),
+          },
+          {
+            key: "paragraphCount", header: "paras",
+            title: "Total paragraphs containing any statement from this claim",
+            sortValue: (r: any) => r.paragraphCount,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.paragraphCount)}</span>,
+          },
+          {
+            key: "majorityParagraphCount", header: "maj",
+            title: "Paragraphs where this claim owns >50% of statements",
+            sortValue: (r: any) => r.majorityParagraphCount,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.majorityParagraphCount)}</span>,
+          },
+          {
+            key: "passageCount", header: "pass#",
+            title: "Number of contiguous paragraph runs across all models",
+            sortValue: (r: any) => r.passageCount,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.passageCount)}</span>,
+          },
+          {
+            key: "maxPassageLength", header: "maxLen",
+            title: "Longest contiguous run in paragraphs",
+            sortValue: (r: any) => r.maxPassageLength,
+            cell: (r: any) => (
+              <span className={clsx("font-mono", r.maxPassageLength >= 3 ? "text-amber-400" : r.maxPassageLength >= 2 ? "text-sky-400" : "text-text-muted")}>
+                {fmtInt(r.maxPassageLength)}
+              </span>
+            ),
+          },
+          {
+            key: "modelSpread", header: "spread",
+            title: "Distinct models containing this claim",
+            sortValue: (r: any) => r.modelSpread,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.modelSpread)}</span>,
+          },
+          {
+            key: "modelsWithPassages", header: "mPass",
+            title: "Distinct models containing a passage of length >= 2",
+            sortValue: (r: any) => r.modelsWithPassages,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.modelsWithPassages)}</span>,
+          },
+          {
+            key: "totalClaimStatements", header: "stmts",
+            title: "Total statements owned across all paragraphs",
+            sortValue: (r: any) => r.totalClaimStatements,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.totalClaimStatements)}</span>,
+          },
+          {
+            key: "meanCoverage", header: "\u03BCCovg",
+            title: "Mean per-paragraph coverage fraction",
+            sortValue: (r: any) => r.meanCoverage,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.meanCoverage, 2)}</span>,
+          },
+        ]}
+        rows={rows}
+        defaultSortKey="maxPassageLength"
+        defaultSortDir="desc"
+        maxRows={15}
+      />
+
+      {selectedProfile && (
+        <div className="mt-3 space-y-3 border-t border-white/10 pt-3">
+          {/* Passage breakdown */}
+          <div>
+            <div className="text-[9px] font-semibold text-text-muted uppercase tracking-wider mb-1">Passages</div>
+            {safeArr(selectedProfile.passages).length === 0 ? (
+              <div className="text-[9px] text-text-muted italic">No passages (all paragraphs isolated)</div>
+            ) : (
+              <SortableTable
+                columns={[
+                  {
+                    key: "model", header: "Model",
+                    title: "Which model this passage lives in",
+                    sortValue: (r: any) => r.modelIndex,
+                    cell: (r: any) => <span className="font-mono text-text-muted">{fmtModel(artifact, r.modelIndex)}</span>,
+                  },
+                  {
+                    key: "range", header: "Range",
+                    title: "Passage boundaries (start\u2013end paragraph indices)",
+                    cell: (r: any) => <span className="font-mono text-text-secondary">{r.startParagraphIndex}\u2013{r.endParagraphIndex}</span>,
+                  },
+                  {
+                    key: "length", header: "Len",
+                    title: "Paragraph count in this passage",
+                    sortValue: (r: any) => r.length,
+                    cell: (r: any) => (
+                      <span className={clsx("font-mono", r.length >= 3 ? "text-amber-400" : r.length >= 2 ? "text-sky-400" : "text-text-muted")}>
+                        {fmtInt(r.length)}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "avgCoverage", header: "avgCovg",
+                    title: "Mean ownership within this passage\u2019s paragraphs",
+                    sortValue: (r: any) => r.avgCoverage,
+                    cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.avgCoverage, 2)}</span>,
+                  },
+                ]}
+                rows={safeArr(selectedProfile.passages).map((p: any, i: number) => ({
+                  id: `passage-${i}`,
+                  modelIndex: p.modelIndex,
+                  startParagraphIndex: p.startParagraphIndex,
+                  endParagraphIndex: p.endParagraphIndex,
+                  length: p.length,
+                  avgCoverage: p.avgCoverage,
+                }))}
+                defaultSortKey="length"
+                defaultSortDir="desc"
+              />
+            )}
+          </div>
+
+          {/* Per-model mini-summary */}
+          <div>
+            <div className="text-[9px] font-semibold text-text-muted uppercase tracking-wider mb-1">Per-Model Summary</div>
+            <SortableTable
+              columns={[
+                {
+                  key: "model", header: "Model",
+                  title: "Model index",
+                  sortValue: (r: any) => r.modelIndex,
+                  cell: (r: any) => <span className="font-mono text-text-muted">{r.model}</span>,
+                },
+                {
+                  key: "paraCount", header: "Paras",
+                  title: "Number of paragraphs in this model containing claim statements",
+                  sortValue: (r: any) => r.paraCount,
+                  cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.paraCount)}</span>,
+                },
+                {
+                  key: "passageCount", header: "Passages",
+                  title: "Number of contiguous runs in this model",
+                  sortValue: (r: any) => r.passageCount,
+                  cell: (r: any) => <span className="font-mono text-text-muted">{fmtInt(r.passageCount)}</span>,
+                },
+                {
+                  key: "kind", header: "Type",
+                  title: "Whether this model has contiguous passages (length >= 2) or only scattered paragraphs",
+                  sortValue: (r: any) => r.hasPassage ? 1 : 0,
+                  cell: (r: any) => (
+                    <span className={clsx(
+                      "text-[9px] px-1 py-0.5 rounded border font-mono",
+                      r.hasPassage
+                        ? "border-sky-500/40 text-sky-400 bg-sky-500/10"
+                        : "border-white/10 text-text-muted bg-white/3"
+                    )}>
+                      {r.kind}
+                    </span>
+                  ),
+                },
+              ]}
+              rows={modelSummary}
+              defaultSortKey="paraCount"
+              defaultSortDir="desc"
+            />
+          </div>
+        </div>
+      )}
+    </CardSection>
+  );
+}
+
+// ============================================================================
+// PASSAGE OWNERSHIP CARD — per-model text view with claim highlighting
+// ============================================================================
+
+export function PassageOwnershipCard({ artifact }: { artifact: any }) {
+  const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
+  const [openModelIndex, setOpenModelIndex] = useState<number | null>(null);
+
+  // ── Claims list from density profiles ──────────────────────────────────
+  const claims = useMemo(() => {
+    const profiles: Record<string, any> = artifact?.claimDensity?.profiles ?? {};
+    const allClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims);
+    const labelById = new Map<string, string>();
+    for (const c of allClaims) {
+      const id = String(c?.id ?? "").trim();
+      if (id) labelById.set(id, String(c?.label ?? id));
+    }
+    return Object.keys(profiles)
+      .map((id) => ({ id, label: labelById.get(id) ?? id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [artifact]);
+
+  // ── Set of statement IDs owned by the selected claim ───────────────────
+  const ownedStatementIds = useMemo(() => {
+    if (!selectedClaimId) return new Set<string>();
+    const allClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims);
+    const claim = allClaims.find((c: any) => String(c?.id ?? "") === selectedClaimId);
+    const ids = safeArr<string>(claim?.sourceStatementIds).map(String);
+    return new Set(ids);
+  }, [selectedClaimId, artifact]);
+
+  // ── Coverage & passage lookup for selected claim ───────────────────────
+  const { coverageByKey, passageRanges } = useMemo(() => {
+    const profile = selectedClaimId
+      ? (artifact?.claimDensity?.profiles ?? {})[selectedClaimId]
+      : null;
+    const covMap = new Map<string, number>(); // "modelIndex:paragraphIndex" → coverage
+    for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
+      const key = `${entry.modelIndex}:${entry.paragraphIndex}`;
+      covMap.set(key, entry.coverage ?? 0);
+    }
+    const passages = safeArr<any>(profile?.passages);
+    return { coverageByKey: covMap, passageRanges: passages };
+  }, [selectedClaimId, artifact]);
+
+  // ── Is a paragraph within a passage? ───────────────────────────────────
+  const isInPassage = (mi: number, pi: number): boolean => {
+    return passageRanges.some(
+      (p: any) =>
+        p.modelIndex === mi &&
+        pi >= p.startParagraphIndex &&
+        pi <= p.endParagraphIndex
+    );
+  };
+
+  // ── Group shadow paragraphs by modelIndex ──────────────────────────────
+  const modelGroups = useMemo(() => {
+    const paragraphs = safeArr<any>(artifact?.shadow?.paragraphs);
+    const byModel = new Map<number, any[]>();
+    for (const p of paragraphs) {
+      const mi = p.modelIndex as number;
+      if (!byModel.has(mi)) byModel.set(mi, []);
+      byModel.get(mi)!.push(p);
+    }
+    // Sort paragraphs within each model by index
+    for (const arr of byModel.values()) {
+      arr.sort((a: any, b: any) => (a.paragraphIndex ?? 0) - (b.paragraphIndex ?? 0));
+    }
+    return Array.from(byModel.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([mi, paras]) => {
+        const order = artifact?.citationSourceOrder ?? artifact?.meta?.citationSourceOrder ?? undefined;
+        const pid = resolveProviderIdFromCitationOrder(mi, order);
+        return {
+          modelIndex: mi,
+          providerId: pid,
+          name: pid ? (getProviderConfig(pid)?.name ?? getProviderAbbreviation(pid)) : `Model #${mi}`,
+          color: pid ? getProviderColor(pid) : "#94a3b8",
+          paragraphs: paras,
+        };
+      });
+  }, [artifact]);
+
+  // ── Per-model hit summary (owned stmts / coverage paras) ──────────────
+  const modelHitCounts = useMemo(() => {
+    if (!selectedClaimId) return new Map<number, { stmts: number; paras: number }>();
+    const m = new Map<number, { stmts: number; paras: number }>();
+    for (const g of modelGroups) {
+      let stmts = 0;
+      let paras = 0;
+      for (const p of g.paragraphs) {
+        const pi = p.paragraphIndex as number;
+        const hasCoverage = coverageByKey.has(`${g.modelIndex}:${pi}`);
+        if (hasCoverage) paras++;
+        for (const s of safeArr<any>(p.statements)) {
+          if (ownedStatementIds.has(String(s?.id ?? ""))) stmts++;
+        }
+      }
+      m.set(g.modelIndex, { stmts, paras });
+    }
+    return m;
+  }, [selectedClaimId, modelGroups, coverageByKey, ownedStatementIds]);
+
+  // ── Helper: build copy text/html for a single claim ─────────────────────
+  const buildClaimCopy = useCallback((claimId: string) => {
+    const allClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims);
+    const claim = allClaims.find((c: any) => String(c?.id ?? "") === claimId);
+    const ownedIds = new Set(safeArr<string>(claim?.sourceStatementIds).map(String));
+
+    const profile = (artifact?.claimDensity?.profiles ?? {})[claimId];
+    const covMap = new Map<string, number>();
+    for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
+      covMap.set(`${entry.modelIndex}:${entry.paragraphIndex}`, entry.coverage ?? 0);
+    }
+    const passages = safeArr<any>(profile?.passages);
+    const inPass = (mi: number, pi: number) =>
+      passages.some((p: any) => p.modelIndex === mi && pi >= p.startParagraphIndex && pi <= p.endParagraphIndex);
+
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const claimLabel = claims.find((c) => c.id === claimId)?.label ?? claimId;
+    const plain: string[] = [];
+    const html: string[] = [];
+
+    plain.push(`PASSAGE OWNERSHIP: ${claimLabel} (${claimId})`);
+    html.push(`<h2 style="margin:0 0 8px">Passage Ownership: ${esc(claimLabel)}</h2>`);
+
+    for (const g of modelGroups) {
+      let stmtCount = 0;
+      let paraCount = 0;
+      for (const p of g.paragraphs) {
+        if (covMap.has(`${g.modelIndex}:${p.paragraphIndex}`)) paraCount++;
+        for (const s of safeArr<any>(p.statements)) {
+          if (ownedIds.has(String(s?.id ?? ""))) stmtCount++;
+        }
+      }
+      const hitsDesc = stmtCount > 0
+        ? `${stmtCount} stmt${stmtCount !== 1 ? "s" : ""}, ${paraCount} para${paraCount !== 1 ? "s" : ""}`
+        : "no hits";
+
+      plain.push("");
+      plain.push(`═══ ${g.name} (${hitsDesc}) ═══`);
+      html.push(`<h3 style="border-bottom:1px solid #ddd;padding-bottom:4px;margin:16px 0 8px">${esc(g.name)} <span style="font-weight:normal;color:#888;font-size:12px">(${esc(hitsDesc)})</span></h3>`);
+
+      for (const para of g.paragraphs) {
+        const paraIdx = para.paragraphIndex as number;
+        const covKey = `${g.modelIndex}:${paraIdx}`;
+        const hasCoverage = covMap.has(covKey);
+        const isPassage = inPass(g.modelIndex, paraIdx);
+        const coverage = covMap.get(covKey) ?? 0;
+        const stmts = safeArr<any>(para.statements);
+        const hasOwned = stmts.some((s: any) => ownedIds.has(String(s?.id ?? "")));
+        if (!hasCoverage && !hasOwned) continue;
+
+        plain.push(`  ${isPassage ? `[PASSAGE ¶${paraIdx} ${fmtPct(coverage)}]` : `[¶${paraIdx} ${fmtPct(coverage)}]`}`);
+        const borderStyle = isPassage
+          ? "border-left:3px solid #f59e0b;background:#fef3c7;padding:4px 8px;margin:4px 0;border-radius:3px"
+          : hasCoverage
+            ? "border-left:3px solid #94a3b8;background:#f8fafc;padding:4px 8px;margin:4px 0;border-radius:3px"
+            : "padding:4px 8px;margin:4px 0";
+        const passageTag = isPassage ? `<span style="font-size:10px;color:#d97706;font-weight:600">PASSAGE</span> ` : "";
+        html.push(`<div style="${borderStyle}">`);
+        html.push(`<div style="font-size:10px;color:#888;margin-bottom:2px">${passageTag}¶${paraIdx} — ${fmtPct(coverage)} coverage</div>`);
+
+        for (const s of stmts) {
+          const text = String(s?.text ?? "");
+          if (ownedIds.has(String(s?.id ?? ""))) {
+            plain.push(`    >> ${text}`);
+            html.push(`<mark style="background:#bae6fd;color:#0c4a6e;border-radius:2px;padding:0 2px">${esc(text)}</mark> `);
+          } else {
+            plain.push(`       ${text}`);
+            html.push(`<span style="color:#888">${esc(text)}</span> `);
+          }
+        }
+        html.push("</div>");
+      }
+    }
+    return { plain, html };
+  }, [artifact, claims, modelGroups]);
+
+  // ── Copy text/html: single claim when selected, all claims otherwise ───
+  const { copyText, copyHtml } = useMemo(() => {
+    if (claims.length === 0) return { copyText: "", copyHtml: "" };
+
+    const claimIds = selectedClaimId ? [selectedClaimId] : claims.map((c) => c.id);
+    const allPlain: string[] = [];
+    const allHtml: string[] = ['<div style="font-family:system-ui,sans-serif;font-size:13px;line-height:1.6">'];
+
+    for (let i = 0; i < claimIds.length; i++) {
+      const { plain, html } = buildClaimCopy(claimIds[i]);
+      if (i > 0) {
+        allPlain.push("", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "");
+        allHtml.push('<hr style="border:none;border-top:2px solid #ddd;margin:24px 0" />');
+      }
+      allPlain.push(...plain);
+      allHtml.push(...html);
+    }
+
+    allHtml.push("</div>");
+    return { copyText: allPlain.join("\n"), copyHtml: allHtml.join("\n") };
+  }, [selectedClaimId, claims, buildClaimCopy]);
+
+  if (claims.length === 0) return null;
+
+  return (
+    <CardSection title="Passage Ownership" badge={{ text: `${claims.length} claims` }}>
+      {/* ── Claim selector + copy button ───────────────────────────── */}
+      <div className="flex items-center gap-2 mb-2">
+        <select
+          className="flex-1 min-w-0 text-[11px] bg-surface-raised border border-border-subtle rounded-md px-2 py-1.5 text-text-primary focus:outline-none focus:border-brand-500"
+          value={selectedClaimId ?? ""}
+          onChange={(e) => {
+            const v = e.target.value || null;
+            setSelectedClaimId(v);
+            setOpenModelIndex(null);
+          }}
+        >
+          <option value="">Select a claim…</option>
+          {claims.map((c) => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
+        <CopyButton
+          text={copyText}
+          html={copyHtml}
+          label={selectedClaimId ? "Copy passage ownership" : "Copy all claims"}
+          variant="icon"
+        />
+      </div>
+
+      {selectedClaimId && (
+        <div className="space-y-2">
+          {/* ── Legend ──────────────────────────────────────────────── */}
+          <div className="flex items-center gap-4 text-[9px] text-text-muted">
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-sky-500/20 border border-sky-500/40" /> owned statement
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm border-l-2 border-l-amber-400 bg-amber-500/5" /> passage paragraph
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm border-l-2 border-l-white/20 bg-white/3" /> covered paragraph
+            </span>
+          </div>
+
+          {/* ── Model accordions ───────────────────────────────────── */}
+          {modelGroups.map((g) => {
+            const isOpen = openModelIndex === g.modelIndex;
+            const hits = modelHitCounts.get(g.modelIndex);
+            return (
+              <div key={g.modelIndex} className="rounded-md border border-white/10 overflow-hidden">
+                {/* header */}
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 flex items-center justify-between hover:bg-white/5 transition-colors"
+                  onClick={() => setOpenModelIndex(isOpen ? null : g.modelIndex)}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                    <span className="text-[11px] text-text-primary truncate">{g.name}</span>
+                    {hits && hits.stmts > 0 && (
+                      <span className="text-[9px] text-sky-400 font-mono">
+                        {hits.stmts} stmt{hits.stmts !== 1 ? "s" : ""} · {hits.paras} para{hits.paras !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {hits && hits.stmts === 0 && (
+                      <span className="text-[9px] text-text-muted font-mono italic">no hits</span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-text-muted">{isOpen ? "▲" : "▼"}</span>
+                </button>
+
+                {/* body */}
+                {isOpen && (
+                  <div className="px-3 pb-3 space-y-1">
+                    {g.paragraphs.map((para: any, pi: number) => {
+                      const paraIdx = para.paragraphIndex as number;
+                      const covKey = `${g.modelIndex}:${paraIdx}`;
+                      const hasCoverage = coverageByKey.has(covKey);
+                      const inPassage = isInPassage(g.modelIndex, paraIdx);
+                      const coverage = coverageByKey.get(covKey) ?? 0;
+
+                      return (
+                        <div
+                          key={para.id ?? pi}
+                          className={clsx(
+                            "rounded-sm py-1 px-2 transition-colors",
+                            inPassage
+                              ? "border-l-2 border-l-amber-400 bg-amber-500/5"
+                              : hasCoverage
+                                ? "border-l-2 border-l-white/20 bg-white/3"
+                                : "border-l-2 border-l-transparent"
+                          )}
+                        >
+                          {/* paragraph header with coverage */}
+                          {hasCoverage && (
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="text-[8px] text-text-muted font-mono">¶{paraIdx}</span>
+                              <span className="text-[8px] text-text-muted font-mono">{fmtPct(coverage)}</span>
+                              {inPassage && <span className="text-[8px] text-amber-400 font-mono">passage</span>}
+                            </div>
+                          )}
+                          {/* statements */}
+                          {safeArr<any>(para.statements).map((s: any, si: number) => {
+                            const stmtId = String(s?.id ?? "");
+                            const owned = ownedStatementIds.has(stmtId);
+                            return (
+                              <div
+                                key={stmtId || si}
+                                className={clsx(
+                                  "text-[10px] font-mono whitespace-pre-wrap break-words leading-relaxed",
+                                  owned
+                                    ? "bg-sky-500/15 text-sky-200 rounded-sm px-1 -mx-1 border border-sky-500/30"
+                                    : "text-text-muted"
+                                )}
+                              >
+                                {String(s?.text ?? "")}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </CardSection>
   );
 }

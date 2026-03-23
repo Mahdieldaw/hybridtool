@@ -18,6 +18,9 @@ import {
   BasinInversionCard,
   BlastRadiusCard,
   CarrierDetectionCard,
+  ClaimDensityCard,
+  ClaimStatementsCard,
+  PassageOwnershipCard,
   PruningDecisionsCard,
   ModelOrderingCard,
   AlignmentCard,
@@ -628,6 +631,37 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
     }
     case 'mixed-provenance':
       return ser(artifact?.mixedProvenance ?? null);
+    case 'claim-statements': {
+      const claims = safeArr(artifact?.semantic?.claims);
+      const stmtText = new Map<string, string>();
+      for (const s of safeArr(artifact?.shadow?.statements)) {
+        stmtText.set(String(s.id ?? s.statementId ?? s.sid ?? ''), String(s.text ?? ''));
+      }
+      const ownership = artifact?.claimProvenance?.statementOwnership ?? {};
+      const exclusivity = artifact?.claimProvenance?.claimExclusivity ?? {};
+      const fates = artifact?.completeness?.statementFates ?? {};
+      return ser(claims.map((c: any) => {
+        const cid = String(c.id ?? '');
+        const exData = exclusivity[cid];
+        const exclusiveSet = new Set<string>(Array.isArray(exData?.exclusiveIds) ? exData.exclusiveIds.map(String) : []);
+        const stmtIds: string[] = Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds.map(String) : [];
+        return {
+          claimId: cid,
+          label: String(c.label ?? cid),
+          statements: stmtIds.map((sid) => {
+            const owners: string[] = Array.isArray(ownership[sid]) ? ownership[sid].map(String) : [];
+            const fate = fates[sid];
+            return {
+              statementId: sid,
+              text: stmtText.get(sid) ?? '',
+              exclusive: exclusiveSet.has(sid),
+              sharedWith: owners.filter((o: string) => o !== cid),
+              fate: String(fate?.fate ?? ''),
+            };
+          }),
+        };
+      }));
+    }
     case 'carrier-detection':
       return ser(artifact?.completeness?.statementFates);
     case 'model-ordering':
@@ -680,6 +714,8 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
     }
     case 'alignment':
       return ser(artifact?.alignment ?? artifact?.geometry?.alignment);
+    case 'claim-density':
+      return ser(artifact?.claimDensity ?? null);
     case 'raw-artifacts':
       return ser(artifact);
     default:
@@ -1702,8 +1738,11 @@ export const DecisionMapSheet = React.memo(() => {
                               { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
                               {
                                 id: 'traversal-pruning',
                                 label: 'Traversal Pruning',
@@ -1724,7 +1763,7 @@ export const DecisionMapSheet = React.memo(() => {
                                 label={label}
                                 expanded={expandedRefSections.includes(id)}
                                 onToggle={() => instrumentActions.toggleRefSection(id)}
-                                copyText={id !== 'cross-signal' && id !== 'traversal-pruning'
+                                copyText={id !== 'cross-signal' && id !== 'traversal-pruning' && id !== 'passage-ownership'
                                   ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                   : undefined}
                               >
@@ -1828,8 +1867,11 @@ export const DecisionMapSheet = React.memo(() => {
                                 { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
+                                { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
+                                { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
                                 {
                                   id: 'traversal-pruning',
                                   label: 'Traversal Pruning',
@@ -1850,7 +1892,7 @@ export const DecisionMapSheet = React.memo(() => {
                                   label={label}
                                   expanded={expandedRefSections.includes(id)}
                                   onToggle={() => instrumentActions.toggleRefSection(id)}
-                                  copyText={id !== 'cross-signal'
+                                  copyText={id !== 'cross-signal' && id !== 'traversal-pruning'
                                     ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                     : undefined}
                                 >

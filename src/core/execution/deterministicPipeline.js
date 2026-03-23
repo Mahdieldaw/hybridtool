@@ -77,6 +77,7 @@ export async function computeDerivedFields({
     tableCellAllocation: null,
     questionSelectionInstrumentation: null,
     claimRouting: null,
+    claimDensityResult: null,
   };
 
   // ── Group A: Independent steps (no cross-dependencies) ─────────────
@@ -105,25 +106,9 @@ export async function computeDerivedFields({
         }
       }
     })(),
-    // ── 2. Claim provenance (ownership / exclusivity / overlap) ───────
-    (async () => {
-      try {
-        const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
-        const ownership = computeStatementOwnership(enrichedClaims);
-        result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
-        result.claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
-
-        result.claimProvenance = {
-          statementOwnership: Object.fromEntries(
-            Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
-          ),
-          claimExclusivity: Object.fromEntries(result.claimProvenanceExclusivity),
-          claimOverlap: result.claimProvenanceOverlap,
-        };
-      } catch (err) {
-        console.warn('[DeterministicPipeline] Claim provenance failed:', getErrorMessage(err));
-      }
-    })(),
+    // ── 2. Claim provenance — MOVED to sequential section (after mixed provenance
+    //    upgrades sourceStatementIds and table cell allocation appends cell-units).
+    //    Must see the FINAL sourceStatementIds to agree with blast surface. ──
     // ── 3. Structural analysis ────────────────────────────────────────
     (async () => {
       try {
@@ -306,20 +291,64 @@ export async function computeDerivedFields({
     }
   }
 
+  // ── Claim density (paragraph-level evidence concentration) ──────────
+  // Runs AFTER mixed provenance + table cell allocation so sourceStatementIds
+  // are final. Pure L1: set membership + integer arithmetic on paragraph indices.
+  try {
+    const { computeClaimDensity } = await import('../claimDensity');
+    result.claimDensityResult = computeClaimDensity(enrichedClaims, shadowParagraphs, modelCount);
+    console.log(`[DeterministicPipeline] ClaimDensity: ${Object.keys(result.claimDensityResult.profiles).length} profiles in ${result.claimDensityResult.meta.processingTimeMs.toFixed(0)}ms`);
+  } catch (err) {
+    console.warn('[DeterministicPipeline] Claim density failed:', getErrorMessage(err));
+  }
+
+  // ── 2b. Claim provenance (ownership / exclusivity / overlap) ────────
+  // Runs AFTER mixed provenance (step 7 replaces sourceStatementIds with
+  // canonical sets) and table cell allocation (step 8 appends tc_* IDs).
+  // This ensures ownership counts match what blast surface will see.
+  try {
+    const { computeStatementOwnership, computeClaimExclusivity, computeClaimOverlap } = await import('../../ConciergeService/claimProvenance');
+    const ownership = computeStatementOwnership(enrichedClaims);
+    result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
+    result.claimProvenanceOverlap = computeClaimOverlap(enrichedClaims);
+
+    result.claimProvenance = {
+      statementOwnership: Object.fromEntries(
+        Array.from(ownership.entries()).map(([k, v]) => [k, Array.from(v)])
+      ),
+      claimExclusivity: Object.fromEntries(result.claimProvenanceExclusivity),
+      claimOverlap: result.claimProvenanceOverlap,
+    };
+  } catch (err) {
+    console.warn('[DeterministicPipeline] Claim provenance failed:', getErrorMessage(err));
+  }
+
   // ── 9. Blast surface (provenance-derived) ───────────────────────────
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
       const { computeBlastSurface } = await import('../blast-radius/blastSurface');
+      // Build conflict claim IDs from raw edges for speculative fate test
+      const conflictClaimIds = new Set();
+      for (const e of (parsedEdges || [])) {
+        const t = String(e?.type || '').trim().toLowerCase();
+        if (t === 'conflicts' || t === 'conflict') {
+          if (e.from) conflictClaimIds.add(e.from);
+          if (e.to) conflictClaimIds.add(e.to);
+        }
+      }
+
       result.blastSurfaceResult = computeBlastSurface({
         claims: enrichedClaims.map(c => ({
           id: c.id,
           label: c.label,
           sourceStatementIds: c.sourceStatementIds,
+          supportRatio: typeof c.supportRatio === 'number' ? c.supportRatio : 0,
         })),
         statementEmbeddings: statementEmbeddings || new Map(),
         totalCorpusStatements: shadowStatements.length,
         statementTexts: statementTextsMap,
         tableCellAllocations: result.tableCellAllocation?.tableCellAllocations ?? null,
+        conflictClaimIds,
       });
       console.log(`[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`);
     }
@@ -700,6 +729,7 @@ export function assembleMapperArtifact({
     tableCellAllocation,
     questionSelectionInstrumentation,
     claimRouting,
+    claimDensityResult,
   } = derived;
 
   return {
@@ -740,6 +770,7 @@ export function assembleMapperArtifact({
     ...(querySemanticDensity != null ? { querySemanticDensity } : {}),
     ...(questionSelectionInstrumentation ? { questionSelectionInstrumentation } : {}),
     ...(claimRouting ? { claimRouting } : {}),
+    ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
   };
 }
 

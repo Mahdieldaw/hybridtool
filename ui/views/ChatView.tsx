@@ -8,8 +8,7 @@ import {
   isSplitOpenAtom,
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
-  chatInputHeightAtom,
-  powerUserModeAtom,
+  chatInputHeightAtom
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -20,7 +19,7 @@ import WelcomeScreen from "../components/WelcomeScreen";
 import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { safeLazy } from "../utils/safeLazy";
-import { SurveyTestOverlay } from "../components/debug/SurveyTestOverlay";
+
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
 const CouncilOrbsVertical = safeLazy(() => import("../components/CouncilOrbsVertical").then(m => ({ default: m.CouncilOrbsVertical })));
@@ -45,7 +44,6 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-  const powerUserMode = useAtomValue(powerUserModeAtom);
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -250,7 +248,7 @@ export default function ChatView() {
       <Suspense fallback={null}>
         <DecisionMapSheet />
       </Suspense>
-      {powerUserMode && <SurveyTestOverlay />}
+
 
       <div
         className={clsx(

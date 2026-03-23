@@ -879,12 +879,40 @@ export interface BlastSurfaceRiskVector {
   };
 }
 
+export interface MixedDirectionProbe {
+  survivingClaimId: string;
+  twinStatementId: string | null;
+  twinSimilarity: number | null;
+  /** null = no twin found for this surviving parent */
+  pointsIntoPrunedSet: boolean | null;
+}
+
+export interface MixedStatementResolution {
+  statementId: string;
+  survivingParents: string[];
+  action: 'PROTECTED' | 'REMOVE' | 'SKELETONIZE';
+  probes: MixedDirectionProbe[];
+  /** The surviving claim whose twin pointed outside — null if SKELETONIZE */
+  protectorClaimId: string | null;
+}
+
+export interface MixedResolution {
+  /** Statements shared with ≥1 other claim — would enter direction test if THIS claim were pruned */
+  mixedCount: number;
+  mixedProtectedCount: number;
+  mixedRemovedCount: number;
+  mixedSkeletonizedCount: number;
+  details: MixedStatementResolution[];
+}
+
 export interface BlastSurfaceClaimScore {
   claimId: string;
   claimLabel: string;
   layerB?: ClaimAbsorptionProfile;
   layerC: BlastSurfaceLayerC;
   riskVector?: BlastSurfaceRiskVector;
+  /** Speculative mixed-parent direction test: "if this claim were pruned, what happens to its shared statements?" */
+  mixedResolution?: MixedResolution;
 }
 
 export interface StatementTwinResult {
@@ -1031,6 +1059,62 @@ export interface ClaimRoutingResult {
     convergenceRatio: number;
     totalClaims: number;
     queryDistanceThreshold: number | null;
+  };
+}
+
+// ── Claim density (paragraph-level evidence concentration) ──────────
+
+export interface ParagraphCoverageEntry {
+  paragraphId: string;
+  modelIndex: number;
+  paragraphIndex: number;
+  totalStatements: number;
+  claimStatements: number;
+  /** claimStatements / totalStatements */
+  coverage: number;
+}
+
+export interface PassageEntry {
+  modelIndex: number;
+  startParagraphIndex: number;
+  /** inclusive */
+  endParagraphIndex: number;
+  /** Number of paragraphs in this contiguous run */
+  length: number;
+  /** Mean coverage across paragraphs in this passage */
+  avgCoverage: number;
+}
+
+export interface ClaimDensityProfile {
+  claimId: string;
+  /** Total paragraphs containing any statement from this claim */
+  paragraphCount: number;
+  /** Number of contiguous paragraph runs across all models */
+  passageCount: number;
+  /** Longest contiguous run in paragraphs */
+  maxPassageLength: number;
+  /** Paragraphs where coverage > 0.5 */
+  majorityParagraphCount: number;
+  /** Distinct models containing this claim */
+  modelSpread: number;
+  /** Distinct models containing a passage of length >= 2 */
+  modelsWithPassages: number;
+  /** Total statements owned across all paragraphs (excludes table cells) */
+  totalClaimStatements: number;
+  /** Mean of per-paragraph coverage */
+  meanCoverage: number;
+  /** Per-paragraph detail */
+  paragraphCoverage: ParagraphCoverageEntry[];
+  /** Per-passage detail */
+  passages: PassageEntry[];
+}
+
+export interface ClaimDensityResult {
+  profiles: Record<string, ClaimDensityProfile>;
+  meta: {
+    totalParagraphs: number;
+    totalModels: number;
+    processingTimeMs: number;
   };
 }
 

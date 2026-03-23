@@ -29,6 +29,7 @@ export interface EvidenceRow {
   tm_twin: boolean | null;
   tm_sim: number | null;
   tm_twinId: string | null;
+  tm_twinText: string | null;
 
   // Routing (claim-level; constant for all rows under selected claim)
   routeCategory: 'conflict' | 'isolate' | 'passthrough' | null;
@@ -51,6 +52,11 @@ export interface EvidenceRow {
   inContinuousCore: boolean;
   inMixed: boolean;
   inDirectTopN: boolean;
+
+  // Claim density (paragraph-level evidence concentration)
+  paraCoverage: number | null;    // fraction of this paragraph's statements owned by selected claim
+  inPassage: boolean;             // part of a contiguous multi-paragraph passage (length >= 2)
+  passageLength: number | null;   // length of containing passage (1 = isolated paragraph)
 
   // Table cell-unit metadata
   isTableCell: boolean;
@@ -110,7 +116,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
   // Global maps — build once per artifact
   const globalMaps = useMemo(() => {
     if (!artifact) return null;
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
     const citationSourceOrder = a?.citationSourceOrder ?? a?.meta?.citationSourceOrder ?? null;
     const completeness = a?.completeness ?? a?.derived?.completeness ?? null;
 
@@ -154,6 +160,15 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const twinMapPerClaim = a?.blastSurface?.twinMap?.perClaim ?? null;
     const twinThresholdsPerClaim = a?.blastSurface?.twinMap?.thresholds ?? null;
 
+    // Statement ID → text lookup for twin text resolution
+    const stmtTextMap = new Map<string, string>();
+    const allStmts: any[] = normalizeShadowStatements(a?.shadow?.statements);
+    for (const stmt of allStmts) {
+      const id = normalizeStatementId(stmt);
+      const text = String(stmt.text ?? stmt.statement ?? stmt.content ?? '');
+      if (id && text) stmtTextMap.set(id, text);
+    }
+
     return {
       queryScoreByStmt,
       fateByStmt,
@@ -164,13 +179,14 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       bsScores,
       twinMapPerClaim,
       twinThresholdsPerClaim,
+      stmtTextMap,
     };
   }, [artifact]);
 
   // Claim-relative maps — rebuild when selectedClaimId changes
   const claimMaps = useMemo(() => {
     if (!artifact || !selectedClaimId) return null;
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
     const mixedProvenance =
       a?.mixedProvenance ??
       a?.mixedProvenanceResult ??
@@ -222,18 +238,44 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       ? claimObj.densityLift as number
       : null;
 
+    // Claim density: paragraph coverage + passage membership for this claim
+    const cdProfile = a?.claimDensity?.profiles?.[selectedClaimId] ?? null;
+    const paraCoverageByPara = new Map<string, number>();
+    const passageLenByPara = new Map<string, number>();
+    const inPassageParas = new Set<string>();
+    if (cdProfile) {
+      for (const pc of (cdProfile.paragraphCoverage ?? [])) {
+        paraCoverageByPara.set(String(pc.paragraphId), pc.coverage);
+      }
+      for (const passage of (cdProfile.passages ?? [])) {
+        const isMulti = passage.length >= 2;
+        // Find paragraph IDs in this passage range for this model
+        for (const pc of (cdProfile.paragraphCoverage ?? [])) {
+          if (pc.modelIndex === passage.modelIndex &&
+              pc.paragraphIndex >= passage.startParagraphIndex &&
+              pc.paragraphIndex <= passage.endParagraphIndex) {
+            passageLenByPara.set(String(pc.paragraphId), passage.length);
+            if (isMulti) inPassageParas.add(String(pc.paragraphId));
+          }
+        }
+      }
+    }
+
     return {
       mixedByStmt,
       exclusiveIds,
       directTopIds,
       claimDensityRaw,
-      densityLiftForClaim
+      densityLiftForClaim,
+      paraCoverageByPara,
+      passageLenByPara,
+      inPassageParas,
     };
   }, [artifact, selectedClaimId]);
 
   return useMemo(() => {
     if (!artifact) return [];
-    const a = artifact?.artifact && typeof artifact.artifact === "object" ? artifact.artifact : artifact;
+    const a = artifact;
     const statements: any[] = normalizeShadowStatements(a?.shadow?.statements);
 
     const routing = a?.claimRouting ?? null;
@@ -277,10 +319,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
-      const isExclusiveFromClaim = claimMaps?.exclusiveIds.has(stmtId) ?? false;
-      const isExclusiveFromFate = (fateEntry?.claimIds.length ?? 0) === 1;
+      // Exclusivity: single source of truth — claimProvenance.claimExclusivity.
+      // A statement is exclusive if no other claim lists it in sourceStatementIds.
       const isExclusive = selectedClaimId
-        ? isExclusiveFromClaim || isExclusiveFromFate
+        ? (claimMaps?.exclusiveIds.has(stmtId) ?? false)
         : false;
 
       return {
@@ -299,45 +341,31 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         paragraphOrigin: mixed?.paragraphOrigin ?? null,
 
         tm_twin: (() => {
+          if (!selectedClaimId) return null;
           const pc = globalMaps?.twinMapPerClaim;
           if (!pc) return null;
-          if (selectedClaimId) {
-            const entry = pc[selectedClaimId]?.[stmtId];
-            return entry === undefined ? null : entry !== null;
-          }
-          // No claim selected: flatten — true if any claim gives this statement a twin
-          for (const claimTwins of Object.values(pc)) {
-            if (claimTwins?.[stmtId] !== undefined) {
-              return claimTwins[stmtId] !== null;
-            }
-          }
-          return null;
+          const entry = pc[selectedClaimId]?.[stmtId];
+          return entry === undefined ? null : entry !== null;
         })(),
         tm_sim: (() => {
+          if (!selectedClaimId) return null;
           const pc = globalMaps?.twinMapPerClaim;
           if (!pc) return null;
-          if (selectedClaimId) return pc[selectedClaimId]?.[stmtId]?.similarity ?? null;
-          // No claim selected: best similarity across claims
-          let best: number | null = null;
-          for (const claimTwins of Object.values(pc)) {
-            const sim = claimTwins?.[stmtId]?.similarity;
-            if (typeof sim === 'number' && (best === null || sim > best)) best = sim;
-          }
-          return best;
+          return pc[selectedClaimId]?.[stmtId]?.similarity ?? null;
         })(),
         tm_twinId: (() => {
+          if (!selectedClaimId) return null;
           const pc = globalMaps?.twinMapPerClaim;
           if (!pc) return null;
-          if (selectedClaimId) return pc[selectedClaimId]?.[stmtId]?.twinStatementId ?? null;
-          // No claim selected: twin from best similarity
-          let best: { id: string; sim: number } | null = null;
-          for (const claimTwins of Object.values(pc)) {
-            const entry = claimTwins?.[stmtId];
-            if (entry && (best === null || entry.similarity > best.sim)) {
-              best = { id: entry.twinStatementId, sim: entry.similarity };
-            }
-          }
-          return best?.id ?? null;
+          return pc[selectedClaimId]?.[stmtId]?.twinStatementId ?? null;
+        })(),
+        tm_twinText: (() => {
+          if (!selectedClaimId) return null;
+          const pc = globalMaps?.twinMapPerClaim;
+          if (!pc) return null;
+          const twinId = pc[selectedClaimId]?.[stmtId]?.twinStatementId;
+          if (!twinId) return null;
+          return globalMaps?.stmtTextMap.get(twinId) ?? null;
         })(),
 
         routeCategory,
@@ -361,6 +389,19 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         inContinuousCore: mixed?.zone === 'core',
         inMixed: mixed != null,
         inDirectTopN: selectedClaimId ? (claimMaps?.directTopIds.has(stmtId) ?? false) : false,
+
+        paraCoverage: (() => {
+          const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
+          return claimMaps?.paraCoverageByPara.get(pid) ?? null;
+        })(),
+        inPassage: (() => {
+          const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
+          return claimMaps?.inPassageParas.has(pid) ?? false;
+        })(),
+        passageLength: (() => {
+          const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
+          return claimMaps?.passageLenByPara.get(pid) ?? null;
+        })(),
 
         isTableCell: !!stmt.isTableCell,
         tableMeta: stmt.tableMeta ?? null,

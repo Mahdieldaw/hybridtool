@@ -89,12 +89,20 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
   const triageResult: TriageResult = {
     protectedStatementIds,
     statementFates,
+    mixedInstrumentation: triageResultPartial.mixedInstrumentation ?? {
+      mixedCount: 0, mixedProtectedCount: 0, mixedRemovedCount: 0, mixedSkeletonizedCount: 0,
+      details: [], byPrunedClaim: {},
+    },
     meta: {
       totalStatements: normalizedInput.statements.length,
       protectedCount: counts.protectedCount,
       untriagedCount: counts.untriagedCount,
       skeletonizedCount: counts.skeletonizedCount,
       removedCount: counts.removedCount,
+      mixedCount: triageResultPartial.meta.mixedCount ?? 0,
+      mixedProtectedCount: triageResultPartial.meta.mixedProtectedCount ?? 0,
+      mixedRemovedCount: triageResultPartial.meta.mixedRemovedCount ?? 0,
+      mixedSkeletonizedCount: triageResultPartial.meta.mixedSkeletonizedCount ?? 0,
       processingTimeMs: triageResultPartial.meta.processingTimeMs,
     },
   };

@@ -210,6 +210,17 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     source: 'built-in',
     category: 'blast',
   },
+  {
+    id: 'tm_twinText',
+    label: 'tm:twinText',
+    accessor: r => r.tm_twinText,
+    type: 'text',
+    sortable: false,
+    groupable: false,
+    description: 'Twin map: text of the reciprocal twin statement (null if no twin)',
+    source: 'built-in',
+    category: 'blast',
+  },
 
   {
     id: 'routeCategory',
@@ -281,6 +292,43 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     sortable: true,
     groupable: false,
     description: 'Query embedding density (projected through statement regression model). Single reference value — compare against statement density to gauge relative specificity.',
+    source: 'built-in',
+    category: 'density',
+  },
+
+  // ── Claim density (paragraph-level evidence concentration) ─────────────────
+  {
+    id: 'paraCoverage',
+    label: 'paraCovg',
+    accessor: r => r.paraCoverage,
+    type: 'number',
+    format: fmtNum(2),
+    sortable: true,
+    groupable: false,
+    description: 'Fraction of this paragraph\'s statements owned by the selected claim',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'inPassage',
+    label: 'passage?',
+    accessor: r => r.inPassage,
+    type: 'boolean',
+    sortable: true,
+    groupable: true,
+    description: 'Part of a contiguous multi-paragraph passage (length >= 2) for the selected claim',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'passageLength',
+    label: 'passLen',
+    accessor: r => r.passageLength,
+    type: 'number',
+    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    sortable: true,
+    groupable: false,
+    description: 'Length of the contiguous passage this paragraph belongs to (1 = isolated paragraph)',
     source: 'built-in',
     category: 'density',
   },
@@ -388,7 +436,7 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'blast-twins',
     label: 'Blast Twins (L1 excl)',
-    columns: ['statementId', 'text', 'model', 'tm_twin', 'tm_sim', 'tm_twinId', 'isExclusive'],
+    columns: ['statementId', 'text', 'model', 'tm_twin', 'tm_sim', 'tm_twinId', 'tm_twinText', 'isExclusive'],
     sortBy: 'tm_sim',
     sortDir: 'desc',
     groupBy: null,
@@ -397,7 +445,7 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'triage-twins',
     label: 'Triage Twin Map',
-    columns: ['statementId', 'text', 'model', 'tm_twin', 'tm_sim', 'tm_twinId', 'isExclusive'],
+    columns: ['statementId', 'text', 'model', 'tm_twin', 'tm_sim', 'tm_twinId', 'tm_twinText', 'isExclusive'],
     sortBy: 'tm_sim',
     sortDir: 'desc',
     groupBy: 'tm_twin',
@@ -410,6 +458,14 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
     sortBy: 'queryDistance',
     sortDir: 'asc',
     groupBy: 'routeCategory',
+  },
+  {
+    id: 'claim-density',
+    label: 'Claim Density',
+    columns: ['statementId', 'text', 'model', 'paragraphId', 'paraCoverage', 'inPassage', 'passageLength'],
+    sortBy: 'paraCoverage',
+    sortDir: 'desc',
+    groupBy: 'inPassage',
   },
 ];
 
@@ -670,6 +726,32 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     source: 'built-in',
     category: 'mixed',
   },
+
+  // ── Claim density (paragraph-level evidence concentration) ─────────────────
+  {
+    id: 'paraCoverage',
+    label: 'paraCovg',
+    accessor: (r: ParagraphRow) => r.paraCoverage,
+    type: 'number',
+    format: fmtNum(2),
+    sortable: true,
+    groupable: false,
+    description: 'Fraction of this paragraph\'s statements owned by the selected claim',
+    source: 'built-in',
+    category: 'density',
+  },
+  {
+    id: 'passageLength',
+    label: 'passLen',
+    accessor: (r: ParagraphRow) => r.passageLength,
+    type: 'number',
+    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    sortable: true,
+    groupable: false,
+    description: 'Length of the contiguous passage this paragraph belongs to (1 = isolated paragraph)',
+    source: 'built-in',
+    category: 'density',
+  },
 ];
 
 export const PARAGRAPH_COLUMN_MAP: Map<string, ColumnDef> = new Map(
@@ -712,6 +794,14 @@ export const PARAGRAPH_VIEWS: ViewConfig[] = [
     sortBy: 'semanticDensity',
     sortDir: 'desc',
     groupBy: null,
+  },
+  {
+    id: 'para-claim-density',
+    label: 'Claim Density',
+    columns: ['paragraphId', 'text', 'model', 'statementCount', 'paraCoverage', 'passageLength'],
+    sortBy: 'paraCoverage',
+    sortDir: 'desc',
+    groupBy: 'model',
   },
 ];
 

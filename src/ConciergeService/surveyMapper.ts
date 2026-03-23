@@ -25,17 +25,6 @@ type EdgeSummary = {
   type: string;
 };
 
-function formatClaimsForPrompt(claims: ClaimSummary[]): string {
-  return claims
-    .map((c) => {
-      const supporters = Array.isArray(c.supporters) && c.supporters.length > 0
-        ? ` [Models: ${c.supporters.join(', ')}]`
-        : '';
-      return `[${c.id}] ${c.label}${supporters}\n${c.text || ''}`.trim();
-    })
-    .join('\n\n');
-}
-
 function formatBatchTexts(responses: RawModelResponse[]): string {
   const byModel = new Map<number, string[]>();
   for (const r of responses) {

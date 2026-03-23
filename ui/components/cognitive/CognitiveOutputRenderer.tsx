@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { AiTurn } from '../../../shared/contract';
 import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
@@ -6,9 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectAtom } from 'jotai/utils';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, surveyTestAtom, mappingProviderAtom, turnsMapAtom } from '../../state/atoms';
-import api from '../../services/extension-api';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -78,45 +76,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
     const effectiveSessionId = currentSessionId || aiTurn.sessionId;
-    const surveyTest = useAtomValue(surveyTestAtom);
-    const setSurveyTest = useSetAtom(surveyTestAtom);
-    const mappingProvider = useAtomValue(mappingProviderAtom);
-
-    const userTurn = useAtomValue(
-        useMemo(
-            () => selectAtom(turnsMapAtom, (map) => map.get(aiTurn.userTurnId)),
-            [aiTurn.userTurnId],
-        ),
-    ) as any;
-
-    const handleTestSurvey = useCallback(() => {
-        const claims = (mappingArtifact as any)?.claims ?? [];
-        const edges = (mappingArtifact as any)?.edges ?? [];
-        const batchResponses = aiTurn.batch?.responses ?? {};
-        const batchTexts = Object.entries(batchResponses).map(([, resp]: [string, any], i) => ({
-            modelIndex: resp?.modelIndex ?? i + 1,
-            content: resp?.text ?? '',
-        })).filter(r => r.content);
-        const provider = mappingProvider || Object.keys(batchResponses)[0] || null;
-
-        if (!provider) return;
-
-        setSurveyTest({ turnId: aiTurn.id, loading: true });
-        api.sendPortMessage({
-            type: 'RUN_SURVEY_TEST',
-            payload: {
-                turnId: aiTurn.id,
-                claims,
-                edges,
-                batchTexts,
-                userQuery: typeof userTurn?.text === 'string' ? userTurn.text : '',
-                provider,
-                claimRouting: (mappingArtifact as any)?.claimRouting ?? null,
-            },
-        }).catch(() => {
-            setSurveyTest((prev: any) => prev ? { ...prev, loading: false, result: { gates: [], rationale: null, errors: ['Failed to send message'], rawText: '' } } : prev);
-        });
-    }, [aiTurn, mappingArtifact, mappingProvider, setSurveyTest, userTurn]);
 
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
@@ -291,17 +250,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     >
                         <span>Debug</span>
                     </button>
-                    {mappingArtifact && (
-                        <button
-                            type="button"
-                            onClick={handleTestSurvey}
-                            disabled={surveyTest?.loading}
-                            className={`px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2 ${surveyTest?.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            aria-label="Run survey mapper test for this turn"
-                        >
-                            <span>{surveyTest?.loading ? 'Survey...' : 'Survey'}</span>
-                        </button>
-                    )}
                 </div>
 
                 {canShowTraversal && canShowResponse && (

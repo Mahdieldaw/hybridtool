@@ -25,6 +25,9 @@ import type {
     BlastSurfaceLayerC,
     BlastSurfaceResult,
     StatementTwinMap,
+    MixedResolution,
+    MixedStatementResolution,
+    MixedDirectionProbe,
 } from '../../../shared/contract';
 import { cosineSimilarity } from '../../clustering/distance';
 import nlp from 'compromise';
@@ -32,13 +35,15 @@ import nlp from 'compromise';
 // ── Input ─────────────────────────────────────────────────────────────────
 
 export interface BlastSurfaceInput {
-    claims: Array<{ id: string; label?: string; sourceStatementIds?: string[] }>;
+    claims: Array<{ id: string; label?: string; sourceStatementIds?: string[]; supportRatio?: number }>;
     statementEmbeddings: Map<string, Float32Array>;
     totalCorpusStatements: number;
     /** Statement ID → text. Required for noun-survival degradation cost. */
     statementTexts?: Map<string, string>;
     /** claimId → cellUnitId[]. From table cell allocation. */
     tableCellAllocations?: Map<string, string[]> | null;
+    /** Claim IDs involved in conflict edges (from mapper). Used to narrow speculative fate test. */
+    conflictClaimIds?: Set<string> | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -80,6 +85,16 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
 
     // Compute twin map BEFORE per-claim loop (front-line classification)
     const twinMap = computeTwinMap({ claims, canonicalSets, statementEmbeddings });
+
+    // Build "safe claims" set for speculative fate test: non-conflict + >50% support.
+    // These claims are guaranteed survivors — their statements won't be pruned.
+    const conflictClaimIds = input.conflictClaimIds ?? new Set<string>();
+    const safeClaimIds = new Set<string>();
+    for (const claim of claims) {
+        if (!conflictClaimIds.has(claim.id) && (claim.supportRatio ?? 0) > 0.5) {
+            safeClaimIds.add(claim.id);
+        }
+    }
 
     const scores: BlastSurfaceClaimScore[] = [];
     for (const claim of claims) {
@@ -231,11 +246,21 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             },
         };
 
+        // ── Speculative Mixed-Parent Resolution ─────────────────────────
+        // "If this claim were pruned, what happens to its shared statements?"
+        // Shared statements have this claim as a pruned parent and remaining
+        // owners as surviving parents. Run direction test using twin map.
+        const mixedResolution = speculativeMixedResolution(
+            claimId, canonicalSets, canonicalOwnerCounts, twinMap.perClaim,
+            allClaimOwnedIds, safeClaimIds,
+        );
+
         scores.push({
             claimId,
             claimLabel,
             layerC,
             riskVector,
+            mixedResolution,
         });
     }
 
@@ -246,6 +271,145 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
             totalCorpusStatements,
             processingTimeMs: performance.now() - startMs,
         },
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPECULATIVE MIXED-PARENT RESOLUTION
+//
+// For a hypothetically pruned claim, find its shared (non-exclusive) statements
+// and run the direction test: for each surviving parent, does its twin for this
+// statement point into the pruned claim's canonical set (bystander) or outside
+// (genuine independent root → PROTECTED)?
+//
+// This mirrors TriageEngine.directionTest but runs speculatively at blast
+// surface time, before any actual pruning.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function speculativeMixedResolution(
+    prunedClaimId: string,
+    canonicalSets: Map<string, Set<string>>,
+    canonicalOwnerCounts: Map<string, number>,
+    perClaim: Record<string, Record<string, { twinStatementId: string; similarity: number } | null>>,
+    allClaimOwnedIds: Set<string>,
+    safeClaimIds: Set<string>,
+): MixedResolution {
+    const prunedSet = canonicalSets.get(prunedClaimId) ?? new Set<string>();
+
+    // Shared statements: owned by this claim AND at least one other
+    const sharedSids: string[] = [];
+    for (const sid of prunedSet) {
+        if ((canonicalOwnerCounts.get(sid) ?? 0) >= 2) sharedSids.push(sid);
+    }
+
+    if (sharedSids.length === 0) {
+        return { mixedCount: 0, mixedProtectedCount: 0, mixedRemovedCount: 0, mixedSkeletonizedCount: 0, details: [] };
+    }
+
+    // Find surviving parents for each shared statement (all owners except prunedClaimId)
+    const ownersBySid = new Map<string, string[]>();
+    for (const sid of sharedSids) {
+        const owners: string[] = [];
+        for (const [claimId, set] of canonicalSets) {
+            if (claimId !== prunedClaimId && set.has(sid)) owners.push(claimId);
+        }
+        ownersBySid.set(sid, owners);
+    }
+
+    const details: MixedStatementResolution[] = [];
+    let protCount = 0;
+    let remCount = 0;
+    let skelCount = 0;
+
+    for (const sid of sharedSids) {
+        const survivingParents = ownersBySid.get(sid) ?? [];
+        if (survivingParents.length === 0) continue; // shouldn't happen
+
+        const probes: MixedDirectionProbe[] = [];
+        let resolved = false;
+        let protectorClaimId: string | null = null;
+
+        for (const q of survivingParents) {
+            const twinEntry = perClaim[q]?.[sid] ?? null;
+            if (!twinEntry) {
+                probes.push({
+                    survivingClaimId: q,
+                    twinStatementId: null,
+                    twinSimilarity: null,
+                    pointsIntoPrunedSet: null,
+                });
+                continue;
+            }
+
+            const pointsInto = prunedSet.has(twinEntry.twinStatementId);
+            probes.push({
+                survivingClaimId: q,
+                twinStatementId: twinEntry.twinStatementId,
+                twinSimilarity: twinEntry.similarity,
+                pointsIntoPrunedSet: pointsInto,
+            });
+
+            if (!pointsInto && !resolved) {
+                // Twin points AWAY from pruned claim → genuine independent root
+                resolved = true;
+                protectorClaimId = q;
+            }
+        }
+
+        let action: 'PROTECTED' | 'REMOVE' | 'SKELETONIZE';
+        if (resolved) {
+            action = 'PROTECTED';
+            protCount++;
+        } else {
+            // Fate test: mirrors fragilityResolution's 2b pattern.
+            // Check if pruned claim's twin lives in a safe claim (non-conflict,
+            // >50% support) or is unclassified. For multi-owner twins, at least
+            // one safe owner is enough (same logic as 2b "twin has safe parent").
+            const fateTwin = perClaim[prunedClaimId]?.[sid] ?? null;
+            if (fateTwin) {
+                const twinId = fateTwin.twinStatementId;
+                if (!allClaimOwnedIds.has(twinId)) {
+                    // Unclassified — always survives (same as 2a)
+                    action = 'REMOVE';
+                    remCount++;
+                } else {
+                    // Find all owners and check if at least one is safe
+                    let hasSafeOwner = false;
+                    for (const [claimId, set] of canonicalSets) {
+                        if (set.has(twinId) && safeClaimIds.has(claimId)) {
+                            hasSafeOwner = true;
+                            break;
+                        }
+                    }
+                    if (hasSafeOwner) {
+                        action = 'REMOVE';
+                        remCount++;
+                    } else {
+                        action = 'SKELETONIZE';
+                        skelCount++;
+                    }
+                }
+            } else {
+                action = 'SKELETONIZE';
+                skelCount++;
+            }
+        }
+
+        details.push({
+            statementId: sid,
+            survivingParents,
+            action,
+            probes,
+            protectorClaimId,
+        });
+    }
+
+    return {
+        mixedCount: details.length,
+        mixedProtectedCount: protCount,
+        mixedRemovedCount: remCount,
+        mixedSkeletonizedCount: skelCount,
+        details,
     };
 }
 

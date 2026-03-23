@@ -90,6 +90,10 @@ function Cell({ col, row, changed, width }: {
   const isCat = col.type === 'category';
   const isBool = col.type === 'boolean';
   const isNum = col.type === 'number';
+  const isText = col.type === 'text';
+
+  // Show full text on hover for truncated text cells
+  const tooltip = isText && typeof baseVal === 'string' && baseVal.length > 30 ? baseVal : undefined;
 
   return (
     <div
@@ -100,6 +104,7 @@ function Cell({ col, row, changed, width }: {
         isNum && "text-right justify-end"
       )}
       style={col.id !== 'text' ? { width: width ?? defaultColWidth(col.id) } : undefined}
+      title={tooltip}
     >
       {isCat && baseVal != null ? (
         <span className={clsx("text-[11px] font-mono", getCategoryColor(col.id, String(baseVal)))}>
@@ -144,6 +149,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   tm_twin: 64,
   tm_sim: 72,
   tm_twinId: 120,
+  tm_twinText: 200,
   semanticDensity: 72,
   densityDelta: 76,
   densityLift: 80,

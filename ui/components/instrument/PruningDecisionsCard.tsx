@@ -299,6 +299,125 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
                 })}
               </div>
             )}
+
+            {/* Mixed-Parent Direction Test Results */}
+            {(() => {
+              const mi = data?.chewedSubstrate?.summary?.mixedInstrumentation;
+              if (!mi || mi.mixedCount === 0) return null;
+
+              const protRate = mi.mixedCount > 0 ? mi.mixedProtectedCount / mi.mixedCount : 0;
+              const mixedRemovedCount = mi.mixedRemovedCount ?? 0;
+              const byPruned: Record<string, any[]> = mi.byPrunedClaim ?? {};
+
+              // Statement text lookup for probe detail
+              const stmtTextById = new Map<string, string>();
+              for (const o of safeArr<any>(data?.chewedSubstrate?.outputs)) {
+                for (const p of safeArr<any>(o?.paragraphs)) {
+                  for (const s of safeArr<any>(p?.statements)) {
+                    const sid = String(s?.statementId ?? "").trim();
+                    if (sid) stmtTextById.set(sid, String(s?.originalText ?? ""));
+                  }
+                }
+              }
+
+              return (
+                <div className="mt-3">
+                  {sectionTitle("Mixed-Parent Resolution")}
+                  <div className="text-[10px] text-text-muted mt-1 mb-2">
+                    Statements with both surviving and pruned parents — direction test determined fate.
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    <div className="text-[11px] text-text-muted">Mixed Total</div>
+                    <div className="text-[11px] text-text-secondary font-mono">{mi.mixedCount}</div>
+                    <div className="text-[11px] text-text-muted">→ Protected</div>
+                    <div className="text-[11px] text-emerald-400 font-mono">{mi.mixedProtectedCount}</div>
+                    <div className="text-[11px] text-text-muted">→ Removed</div>
+                    <div className={clsx("text-[11px] font-mono", mixedRemovedCount > 0 ? "text-sky-400" : "text-text-secondary")}>{mixedRemovedCount}</div>
+                    <div className="text-[11px] text-text-muted">→ Skeletonized</div>
+                    <div className={clsx("text-[11px] font-mono", mi.mixedSkeletonizedCount > 0 ? "text-amber-400" : "text-text-secondary")}>{mi.mixedSkeletonizedCount}</div>
+                    <div className="text-[11px] text-text-muted">Protection Rate</div>
+                    <div className={clsx("text-[11px] font-mono", protRate >= 0.6 ? "text-emerald-400" : protRate >= 0.3 ? "text-amber-400" : "text-rose-400")}>
+                      {(protRate * 100).toFixed(1)}%
+                    </div>
+                  </div>
+
+                  {/* Micro protection bar */}
+                  <div className="flex w-full h-2 rounded overflow-hidden mt-2">
+                    {mi.mixedProtectedCount > 0 && (
+                      <div style={{ width: `${(mi.mixedProtectedCount / mi.mixedCount) * 100}%` }} className="bg-emerald-500/60" title={`Protected: ${mi.mixedProtectedCount}`} />
+                    )}
+                    {mixedRemovedCount > 0 && (
+                      <div style={{ width: `${(mixedRemovedCount / mi.mixedCount) * 100}%` }} className="bg-sky-500/60" title={`Removed: ${mixedRemovedCount}`} />
+                    )}
+                    {mi.mixedSkeletonizedCount > 0 && (
+                      <div style={{ width: `${(mi.mixedSkeletonizedCount / mi.mixedCount) * 100}%` }} className="bg-amber-500/60" title={`Skeletonized: ${mi.mixedSkeletonizedCount}`} />
+                    )}
+                  </div>
+
+                  {/* Per-pruned-claim breakdown */}
+                  {prunedClaimIds.map((prunedId) => {
+                    const details: any[] = byPruned[prunedId] ?? [];
+                    if (details.length === 0) return null;
+                    const pLabel = claimLabelById.get(prunedId) ?? prunedId;
+                    const secProt = details.filter((d: any) => d.action === "PROTECTED").length;
+                    const secRem = details.filter((d: any) => d.action === "REMOVE").length;
+                    const secSkel = details.filter((d: any) => d.action === "SKELETONIZE").length;
+
+                    return (
+                      <div key={prunedId} className="mt-2 border-t border-white/5 pt-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-semibold text-rose-400 truncate max-w-[180px]" title={prunedId}>{pLabel}</span>
+                          <span className="text-[9px] text-text-muted font-mono">
+                            {details.length}m {secProt}P {secRem}R {secSkel}S
+                          </span>
+                        </div>
+                        <div className="space-y-0.5">
+                          {details.map((d: any) => {
+                            const text = stmtTextById.get(d.statementId) ?? d.statementId;
+                            const probes: any[] = d.probes ?? [];
+                            const bestSim = probes
+                              .map((p: any) => p.twinSimilarity)
+                              .filter((v: any) => typeof v === "number");
+                            const best = bestSim.length > 0 ? Math.max(...bestSim) : null;
+
+                            return (
+                              <div key={d.statementId} className="flex items-start gap-2 text-[10px]">
+                                <span className={clsx(
+                                  "font-mono font-semibold flex-shrink-0 w-8",
+                                  d.action === "PROTECTED" ? "text-emerald-400" : d.action === "REMOVE" ? "text-sky-400" : "text-amber-400"
+                                )}>
+                                  {d.action === "PROTECTED" ? "PROT" : d.action === "REMOVE" ? "REM" : "SKEL"}
+                                </span>
+                                <span className="text-text-secondary truncate flex-1" title={`[${d.statementId}] ${text}`}>
+                                  {text}
+                                </span>
+                                {d.protectorClaimId && (
+                                  <span className="text-[9px] text-emerald-400/70 flex-shrink-0 truncate max-w-[80px]" title={`Protector: ${d.protectorClaimId}`}>
+                                    {claimLabelById.get(d.protectorClaimId) ?? d.protectorClaimId}
+                                  </span>
+                                )}
+                                {best != null && (
+                                  <span className="text-[9px] text-blue-400/70 font-mono flex-shrink-0">
+                                    τ{best.toFixed(2)}
+                                  </span>
+                                )}
+                                <span className="text-[9px] text-text-muted flex-shrink-0">
+                                  {probes.map((p: any) => {
+                                    if (p.pointsIntoPrunedSet === null) return "·";
+                                    return p.pointsIntoPrunedSet ? "←" : "→";
+                                  }).join("")}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="mt-3">

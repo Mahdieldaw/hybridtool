@@ -1,8 +1,5 @@
-import { parseSemanticMapperOutput, createEmptyMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
-import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
-// dehydrateArtifact removed — Tier 3 artifacts are ephemeral (never persisted)
 
 export class CognitivePipelineHandler {
   constructor(port, persistenceCoordinator, sessionManager) {
@@ -766,21 +763,8 @@ export class CognitivePipelineHandler {
           }
         }
 
-        // Final legacy fallback (parse-into-shell)
-        if (!mappingArtifact && mappingResponses?.[0]) {
-          const parsed = parseSemanticMapperOutput(String(latestMappingText));
-          if (parsed.success && parsed.output) {
-            const shell = createEmptyMapperArtifact();
-            shell.claims = parsed.output.claims;
-            shell.edges = parsed.output.edges;
-            shell.narrative = parsed.narrative || '';
-            shell.query = originalPrompt;
-            mappingArtifact = buildCognitiveArtifact(shell, null);
-          }
-        }
-
         if (!mappingArtifact) {
-          throw new Error(`Mapping artifact missing for turn ${aiTurnId}.`);
+          throw new Error(`Mapping artifact missing for turn ${aiTurnId}. buildArtifactForProvider likely failed — check embeddings persistence.`);
         }
         let chewedSubstrate = null;
         if (payload?.isTraversalContinuation && payload?.traversalState) {

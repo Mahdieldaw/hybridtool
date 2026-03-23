@@ -296,10 +296,6 @@ export class ConnectionHandler {
             }
             break;
 
-          case "RUN_SURVEY_TEST":
-            await this._handleSurveyTest(message);
-            break;
-
           default:
             console.warn(
               `[ConnectionHandler] Unknown message type: ${message.type}`,
@@ -341,72 +337,7 @@ export class ConnectionHandler {
     }
   }
 
-  /**
-   * Handle RUN_SURVEY_TEST: one-shot survey mapper call for debug overlay.
-   * Runs the survey mapper against the claims/edges/batch texts of a given turn
-   * and posts SURVEY_TEST_RESULT back to the port. Nothing is persisted.
-   */
-  async _handleSurveyTest(message) {
-    const { turnId, claims, edges, batchTexts, userQuery, provider, claimRouting } = message.payload || {};
-    if (!turnId || !provider) {
-      this.port.postMessage({ type: 'SURVEY_TEST_RESULT', turnId, error: 'Missing turnId or provider' });
-      return;
-    }
 
-    try {
-      await this._ensureBackendReady();
-      const { buildRoutedSurveyPrompt, parseSurveyMapperOutput } = await import('../ConciergeService/surveyMapper');
-
-      let prompt;
-      if (claimRouting && !claimRouting.skipSurvey) {
-        prompt = buildRoutedSurveyPrompt({
-          userQuery: userQuery || '',
-          routing: claimRouting,
-          allClaims: Array.isArray(claims) ? claims : [],
-          batchTexts: Array.isArray(batchTexts) ? batchTexts : [],
-          edges: Array.isArray(edges) ? edges : [],
-        });
-      }
-
-      let resultText = '';
-      await new Promise((resolve, reject) => {
-        this.services.orchestrator.executeParallelFanout(
-          prompt,
-          [provider],
-          {
-            sessionId: 'survey-test',
-            useThinking: false,
-            onPartial: () => {},
-            onAllComplete: (results) => {
-              const r = results?.get?.(provider) ?? results?.[provider];
-              resultText = r?.text || '';
-              resolve();
-            },
-            onError: (err) => reject(err),
-          }
-        );
-      });
-
-      const parsed = parseSurveyMapperOutput(resultText);
-      this.port.postMessage({
-        type: 'SURVEY_TEST_RESULT',
-        turnId,
-        gates: parsed.gates,
-        rationale: parsed.rationale,
-        errors: parsed.errors,
-        rawText: resultText,
-      });
-    } catch (err) {
-      this.port.postMessage({
-        type: 'SURVEY_TEST_RESULT',
-        turnId,
-        error: String(err?.message || err),
-        gates: [],
-        rationale: null,
-        rawText: '',
-      });
-    }
-  }
 
   /**
    * Handle EXECUTE_WORKFLOW message
