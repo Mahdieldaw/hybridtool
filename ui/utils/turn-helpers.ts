@@ -95,6 +95,7 @@ export function applyStreamingTurnUpdate(
         output: nextText,
         traversalState: existing?.traversalState,
         timestamp: Date.now(),
+        status,
       };
       aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
     } else if (responseType === "mapping") {

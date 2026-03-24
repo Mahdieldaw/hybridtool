@@ -57,9 +57,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         }
     }, [mappingArtifact, effectivePid, aiTurn.pipelineStatus, rebuildArtifact]);
 
-    // Derived transition state
-    const isTransitioning = singularityState.isLoading;
-
     // Helper for recomputing singularity
     const triggerAndSwitch = async (options: any = {}) => {
         setViewOverride('response');
@@ -80,6 +77,9 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
     }, [singularityState.output]);
+
+    // Derived transition state: treat as loading when view was forced to response but text hasn't arrived yet
+    const isTransitioning = singularityState.isLoading || (viewOverride === 'response' && !hasSingularityText);
 
     // Build "Copy All" text: Singularity → Mapper → Batch (same format as batch copy)
     const copyAllText = useMemo(() => {
@@ -222,9 +222,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const canShowResponse = hasSingularityText || singularityState.isLoading || singularityState.isError;
 
     const currentView: 'loading' | 'traverse' | 'response' = useMemo(() => {
+        // User-explicit overrides take priority over automatic state
+        // Allow 'response' override even before text arrives (shows loading spinner in SingularityOutputView)
+        if (viewOverride === 'response') return 'response';
         if (viewOverride === 'traverse' && canShowTraversal) return 'traverse';
+        // Automatic: show traversal when pipeline is paused, response when text arrives
         if (isAwaitingTraversal && canShowTraversal) return 'traverse';
-        if (viewOverride === 'response' && canShowResponse) return 'response';
         if (canShowResponse) return 'response';
         return 'loading';
     }, [isAwaitingTraversal, canShowTraversal, viewOverride, canShowResponse]);

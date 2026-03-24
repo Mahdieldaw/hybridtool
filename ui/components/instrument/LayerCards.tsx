@@ -3338,10 +3338,10 @@ export function PassageRoutingCard({ artifact }: { artifact: any }) {
     >
       {/* Gate diagnostics */}
       <div className="flex flex-wrap gap-3 mb-3 text-xs text-text-muted">
-        <span>μ(conc)={gate?.muConcentration?.toFixed(3) ?? "–"}</span>
-        <span>σ(conc)={gate?.sigmaConcentration?.toFixed(3) ?? "–"}</span>
-        <span>threshold={gate?.concentrationThreshold?.toFixed(3) ?? "–"}</span>
-        <span>precondition pass={gate?.preconditionPassCount ?? 0}</span>
+        <span title="Mean concentration ratio across all claim profiles. Higher means passages are tightly focused on single claims.">μ(conc)={gate?.muConcentration?.toFixed(3) ?? "–"}</span>
+        <span title="Standard deviation of concentration ratios. Low σ means uniform concentration across claims.">σ(conc)={gate?.sigmaConcentration?.toFixed(3) ?? "–"}</span>
+        <span title="Concentration threshold used to classify claims as load-bearing (μ − 1σ, floored at 0.5).">threshold={gate?.concentrationThreshold?.toFixed(3) ?? "–"}</span>
+        <span title="Number of claims that passed the precondition filter before load-bearing classification.">precondition pass={gate?.preconditionPassCount ?? 0}</span>
       </div>
 
       {/* Landscape summary */}
@@ -3365,24 +3365,24 @@ export function PassageRoutingCard({ artifact }: { artifact: any }) {
       {/* Main table */}
       <SortableTable
         columns={[
-          { key: "label", header: "Claim", cell: (r: any) => (
+          { key: "label", header: "Claim", title: "Claim label from the semantic layer.", cell: (r: any) => (
             <span className="truncate max-w-[200px] block" title={r.label}>{r.label}</span>
           )},
-          { key: "position", header: "Position", cell: (r: any) => (
+          { key: "position", header: "Position", title: "Landscape position: North Star (high-level goal), East Star (lateral insight), Mechanism (causal driver), or Floor (baseline/common).", cell: (r: any) => (
             <span className={LANDSCAPE_COLORS[r.position] ?? "text-text-muted"}>
               {LANDSCAPE_LABELS[r.position] ?? r.position}
             </span>
           ), sortValue: (r: any) => r.position },
-          { key: "concentration", header: "Conc%", cell: (r: any) => (
+          { key: "concentration", header: "Conc%", title: "Concentration ratio: fraction of this claim's supporting passages that are exclusive to it (not shared with other claims). 100% = all passages are dedicated.", cell: (r: any) => (
             <span>{(r.concentration * 100).toFixed(0)}%</span>
           ), sortValue: (r: any) => r.concentration },
-          { key: "density", header: "Dens%", cell: (r: any) => (
+          { key: "density", header: "Dens%", title: "Density ratio: fraction of model-aligned judgements (MAJ) that contain multi-sentence passages (length ≥ 2). Higher density = richer argumentation.", cell: (r: any) => (
             <span>{(r.density * 100).toFixed(0)}%</span>
           ), sortValue: (r: any) => r.density },
-          { key: "totalMAJ", header: "MAJ", cell: (r: any) => r.totalMAJ, sortValue: (r: any) => r.totalMAJ },
-          { key: "maxPassageLength", header: "MAXLEN", cell: (r: any) => r.maxPassageLength, sortValue: (r: any) => r.maxPassageLength },
-          { key: "structContrib", header: "SC#", cell: (r: any) => r.structContrib, sortValue: (r: any) => r.structContrib },
-          { key: "loadBearing", header: "LB", cell: (r: any) => (
+          { key: "totalMAJ", header: "MAJ", title: "Total model-aligned judgements: number of model responses that support this claim.", cell: (r: any) => r.totalMAJ, sortValue: (r: any) => r.totalMAJ },
+          { key: "maxPassageLength", header: "MAXLEN", title: "Maximum passage length: longest contiguous passage (in sentences) found across all supporting model responses.", cell: (r: any) => r.maxPassageLength, sortValue: (r: any) => r.maxPassageLength },
+          { key: "structContrib", header: "SC#", title: "Structural contributors: number of structural factors (e.g. cascade risk, leverage, articulation) that contributed to this claim's routing.", cell: (r: any) => r.structContrib, sortValue: (r: any) => r.structContrib },
+          { key: "loadBearing", header: "LB", title: "Load-bearing: whether this claim passed the concentration threshold and preconditions to be routed through the passage layer.", cell: (r: any) => (
             <span className={r.loadBearing ? "text-green-400" : "text-text-muted"}>
               {r.loadBearing ? "Y" : "–"}
             </span>

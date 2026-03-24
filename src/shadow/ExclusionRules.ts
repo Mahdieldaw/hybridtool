@@ -276,15 +276,23 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
  * Hard matches → excluded outright.
  * Soft matches → compound 0.7x confidence multiplier per hit.
  */
-export function isExcluded(text: string, stance: Stance): ExclusionResult {
+export function isExcluded(text: string, stance: Stance, opts?: { isListItem?: boolean }): ExclusionResult {
     const applicableRules = EXCLUSION_RULES.filter(r =>
         r.appliesTo.includes(stance)
     );
+
+    const isListItem = opts?.isListItem === true;
 
     let confidenceMultiplier = 1.0;
 
     for (const rule of applicableRules) {
         if (rule.pattern.test(text)) {
+            // List items that end in '?' are structural (rhetorical questions
+            // used as headings), not real questions — demote to soft exclusion
+            if (isListItem && rule.id === 'question_mark') {
+                confidenceMultiplier *= 0.7;
+                continue;
+            }
             if (rule.severity === 'hard') {
                 return { excluded: true, confidenceMultiplier: 0 };
             }

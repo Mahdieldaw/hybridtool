@@ -91,7 +91,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
 
   const handleSubmitToConcierge = () => submitTraversalToConcierge(
     { sessionId, aiTurnId, originalQuery, claimStatuses: state.claimStatuses, singularityProvider: singularityProvider || undefined },
-    { onSubmitting: setIsSubmitting, onError: setSubmissionError, onComplete: () => onComplete?.() }
+    { onSubmitting: setIsSubmitting, onError: setSubmissionError, onComplete: () => onComplete?.(), onStreamingStarted: () => onComplete?.() }
   );
 
   const liveIds = new Set((liveForcingPoints || []).map((fp: any) => fp?.id).filter(Boolean));

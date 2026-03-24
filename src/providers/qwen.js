@@ -173,7 +173,7 @@ export class QwenSessionApi {
    * @param {(payload: any) => void} onChunk
    */
   async ask(prompt, options = {}, onChunk = () => { }) {
-    const { sessionId, parentMsgId, model = "tongyi-qwen3-max-model", signal } = options;
+    const { sessionId, parentMsgId, model = "Qwen3.5-Plus", signal } = options;
     // Ensure Qwen always replies in the user's language
     prompt = prompt + "\n\nReply in the same language as the user's message above. Do not reply in Chinese unless the user wrote in Chinese.";
     const csrfToken = await this._fetchCsrfToken();

@@ -13,6 +13,7 @@ export interface TraversalSubmissionCallbacks {
   onSubmitting: (isSubmitting: boolean) => void;
   onError: (error: string | null) => void;
   onComplete: () => void;
+  onStreamingStarted?: () => void;
 }
 
 export async function submitTraversalToConcierge(
@@ -20,7 +21,7 @@ export async function submitTraversalToConcierge(
   callbacks: TraversalSubmissionCallbacks
 ): Promise<void> {
   const { sessionId, aiTurnId, originalQuery, claimStatuses, singularityProvider } = params;
-  const { onSubmitting, onError, onComplete } = callbacks;
+  const { onSubmitting, onError, onComplete, onStreamingStarted } = callbacks;
 
   onSubmitting(true);
   onError(null);
@@ -68,10 +69,18 @@ export async function submitTraversalToConcierge(
       await new Promise<void>((resolve, reject) => {
         let acked = false;
         let isDone = false;
+        let streamingNotified = false;
         const attemptStartedAt = Date.now();
         let lastActivityAt = attemptStartedAt;
         const ACK_TIMEOUT_MS = 20000;
         const IDLE_TIMEOUT_MS = 180000;
+
+        const notifyStreamingStarted = () => {
+          if (!streamingNotified) {
+            streamingNotified = true;
+            try { onStreamingStarted?.(); } catch (_) { }
+          }
+        };
 
         const finish = (fn: () => void) => {
           if (isDone) return;
@@ -115,6 +124,7 @@ export async function submitTraversalToConcierge(
               const ts = parseStepTimestamp(stepId);
               if (ts && ts + 2000 >= attemptStartedAt) {
                 bumpActivity();
+                notifyStreamingStarted();
               }
             }
             return;
@@ -122,6 +132,7 @@ export async function submitTraversalToConcierge(
 
           if (msg.type === 'CONTINUATION_ACK' && msg.aiTurnId === aiTurnId) {
             bumpActivity();
+            notifyStreamingStarted();
             return;
           }
 

@@ -2003,6 +2003,7 @@ export interface SingularityPhase {
   traversalState?: any;
   timestamp: number;
   chewedSubstrateSummary?: ChewedSubstrateSummary | null;
+  status?: string;
 }
 
 // Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.

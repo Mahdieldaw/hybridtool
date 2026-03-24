@@ -362,7 +362,7 @@ export function extractShadowStatements(
 
                         candidatesProcessed++;
                         const { stance, confidence: rawConfidence } = classifyStance(cleanText);
-                        const exclusion = isExcluded(cleanText, stance);
+                        const exclusion = isExcluded(cleanText, stance, { isListItem: true });
                         if (exclusion.excluded) {
                             candidatesExcluded++;
                             continue;
