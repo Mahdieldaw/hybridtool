@@ -21,6 +21,7 @@ import {
   ClaimDensityCard,
   ClaimStatementsCard,
   PassageOwnershipCard,
+  PassageRoutingCard,
   PruningDecisionsCard,
   ModelOrderingCard,
   AlignmentCard,
@@ -1742,6 +1743,7 @@ export const DecisionMapSheet = React.memo(() => {
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'passage-routing', label: 'Passage Routing', content: <PassageRoutingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
                               {
                                 id: 'traversal-pruning',
@@ -1871,6 +1873,7 @@ export const DecisionMapSheet = React.memo(() => {
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'passage-routing', label: 'Passage Routing', content: <PassageRoutingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
                                 {
                                   id: 'traversal-pruning',
@@ -1892,7 +1895,7 @@ export const DecisionMapSheet = React.memo(() => {
                                   label={label}
                                   expanded={expandedRefSections.includes(id)}
                                   onToggle={() => instrumentActions.toggleRefSection(id)}
-                                  copyText={id !== 'cross-signal' && id !== 'traversal-pruning'
+                                  copyText={id !== 'cross-signal' && id !== 'traversal-pruning' && id !== 'passage-ownership'
                                     ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                     : undefined}
                                 >

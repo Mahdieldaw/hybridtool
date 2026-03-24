@@ -3267,3 +3267,131 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     </CardSection>
   );
 }
+
+// ============================================================================
+// PASSAGE ROUTING CARD — landscape positions, load-bearing gate, routing
+// ============================================================================
+
+const LANDSCAPE_COLORS: Record<string, string> = {
+  northStar: "text-yellow-400",
+  eastStar: "text-blue-400",
+  mechanism: "text-green-400",
+  floor: "text-text-muted",
+};
+
+const LANDSCAPE_LABELS: Record<string, string> = {
+  northStar: "North Star",
+  eastStar: "East Star",
+  mechanism: "Mechanism",
+  floor: "Floor",
+};
+
+export function PassageRoutingCard({ artifact }: { artifact: any }) {
+  const passageRouting = artifact?.passageRouting ?? null;
+  const claimProfiles: Record<string, any> = passageRouting?.claimProfiles ?? {};
+  const gate = passageRouting?.gate ?? null;
+  const routing = passageRouting?.routing ?? null;
+
+  const claimLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims)) {
+      const id = String(c?.id ?? "").trim();
+      if (!id) continue;
+      m.set(id, String(c?.label ?? id));
+    }
+    return m;
+  }, [artifact]);
+
+  const rows = useMemo(() => {
+    return Object.values(claimProfiles).map((p: any) => ({
+      id: String(p.claimId ?? ""),
+      label: claimLabelById.get(String(p.claimId ?? "")) ?? String(p.claimId ?? ""),
+      position: String(p.landscapePosition ?? "floor"),
+      concentration: typeof p.concentrationRatio === "number" ? p.concentrationRatio : 0,
+      density: typeof p.densityRatio === "number" ? p.densityRatio : 0,
+      totalMAJ: p.totalMAJ ?? 0,
+      maxPassageLength: p.maxPassageLength ?? 0,
+      loadBearing: !!p.isLoadBearing,
+      structContrib: p.structuralContributors?.length ?? 0,
+    }));
+  }, [claimProfiles, claimLabelById]);
+
+  // Summary counts
+  const positionCounts = useMemo(() => {
+    const counts: Record<string, number> = { northStar: 0, eastStar: 0, mechanism: 0, floor: 0 };
+    for (const r of rows) counts[r.position] = (counts[r.position] ?? 0) + 1;
+    return counts;
+  }, [rows]);
+
+  if (!passageRouting) {
+    return (
+      <CardSection title="Passage Routing" badge={{ text: "no data" }}>
+        <p className="text-text-muted text-xs">Passage routing not computed for this query.</p>
+      </CardSection>
+    );
+  }
+
+  return (
+    <CardSection
+      title="Passage Routing"
+      badge={{ text: `${gate?.loadBearingCount ?? 0} load-bearing / ${rows.length} total` }}
+    >
+      {/* Gate diagnostics */}
+      <div className="flex flex-wrap gap-3 mb-3 text-xs text-text-muted">
+        <span>μ(conc)={gate?.muConcentration?.toFixed(3) ?? "–"}</span>
+        <span>σ(conc)={gate?.sigmaConcentration?.toFixed(3) ?? "–"}</span>
+        <span>threshold={gate?.concentrationThreshold?.toFixed(3) ?? "–"}</span>
+        <span>precondition pass={gate?.preconditionPassCount ?? 0}</span>
+      </div>
+
+      {/* Landscape summary */}
+      <div className="flex gap-4 mb-3 text-xs">
+        {(["northStar", "eastStar", "mechanism", "floor"] as const).map((pos) => (
+          <span key={pos} className={LANDSCAPE_COLORS[pos]}>
+            {LANDSCAPE_LABELS[pos]}: {positionCounts[pos] ?? 0}
+          </span>
+        ))}
+      </div>
+
+      {/* Routing status */}
+      {routing && (
+        <div className="text-xs text-text-muted mb-3">
+          {routing.skipSurvey
+            ? "skipSurvey=true — no structural tension detected"
+            : `${routing.conflictClusters?.length ?? 0} conflict cluster(s), ${routing.loadBearingClaims?.length ?? 0} passage-routed claim(s)`}
+        </div>
+      )}
+
+      {/* Main table */}
+      <SortableTable
+        columns={[
+          { key: "label", header: "Claim", cell: (r: any) => (
+            <span className="truncate max-w-[200px] block" title={r.label}>{r.label}</span>
+          )},
+          { key: "position", header: "Position", cell: (r: any) => (
+            <span className={LANDSCAPE_COLORS[r.position] ?? "text-text-muted"}>
+              {LANDSCAPE_LABELS[r.position] ?? r.position}
+            </span>
+          ), sortValue: (r: any) => r.position },
+          { key: "concentration", header: "Conc%", cell: (r: any) => (
+            <span>{(r.concentration * 100).toFixed(0)}%</span>
+          ), sortValue: (r: any) => r.concentration },
+          { key: "density", header: "Dens%", cell: (r: any) => (
+            <span>{(r.density * 100).toFixed(0)}%</span>
+          ), sortValue: (r: any) => r.density },
+          { key: "totalMAJ", header: "MAJ", cell: (r: any) => r.totalMAJ, sortValue: (r: any) => r.totalMAJ },
+          { key: "maxPassageLength", header: "MAXLEN", cell: (r: any) => r.maxPassageLength, sortValue: (r: any) => r.maxPassageLength },
+          { key: "structContrib", header: "SC#", cell: (r: any) => r.structContrib, sortValue: (r: any) => r.structContrib },
+          { key: "loadBearing", header: "LB", cell: (r: any) => (
+            <span className={r.loadBearing ? "text-green-400" : "text-text-muted"}>
+              {r.loadBearing ? "Y" : "–"}
+            </span>
+          ), sortValue: (r: any) => r.loadBearing ? 1 : 0 },
+        ]}
+        rows={rows}
+        defaultSortKey="concentration"
+        defaultSortDir="desc"
+      />
+    </CardSection>
+  );
+}

@@ -77,6 +77,7 @@ export async function computeDerivedFields({
     tableCellAllocation: null,
     questionSelectionInstrumentation: null,
     claimRouting: null,
+    passageRoutingResult: null,
     claimDensityResult: null,
   };
 
@@ -464,25 +465,45 @@ export async function computeDerivedFields({
         console.warn('[DeterministicPipeline] Shadow delta failed:', getErrorMessage(err));
       }
     })(),
-    // ── 15. Conflict validation → fragility resolution → question selection ──
+    // ── 15. Routing pipeline ──────────────────────────────────────────
     (async () => {
       try {
-        if (result.blastSurfaceResult && enrichedClaims.length > 0) {
-          const { computeConflictValidation } =
-            await import('../blast-radius/conflictValidation');
+        if (enrichedClaims.length === 0) return;
+
+        // Phase 1: conflict validation (pure geometry, blast-surface-independent)
+        const { computeConflictValidation } =
+          await import('../blast-radius/conflictValidation');
+        const validatedConflicts = computeConflictValidation({
+          enrichedClaims,
+          edges: result.semanticEdges,
+          statementEmbeddings: statementEmbeddings ?? null,
+          claimEmbeddings: claimEmbeddings ?? null,
+          queryEmbedding: queryEmbedding ?? null,
+        });
+
+        // Phase 2: PASSAGE ROUTING (active layer — evidence concentration)
+        if (result.claimDensityResult) {
+          const { computePassageRouting, buildClaimRoutingFromPassage } =
+            await import('../passageRouting');
+          result.passageRoutingResult = computePassageRouting({
+            claimDensityResult: result.claimDensityResult,
+            enrichedClaims,
+            validatedConflicts,
+            modelCount,
+          });
+          result.claimRouting = buildClaimRoutingFromPassage(
+            result.passageRoutingResult
+          );
+          console.log(`[DeterministicPipeline] PassageRouting: ${result.passageRoutingResult.gate.loadBearingCount} load-bearing, ${result.passageRoutingResult.routing.diagnostics.floorCount} floor in ${result.passageRoutingResult.meta.processingTimeMs.toFixed(0)}ms`);
+        }
+
+        // Phase 3: blast surface routing (INSTRUMENTATION ONLY — no longer drives claimRouting)
+        if (result.blastSurfaceResult) {
           const { computeFragilityResolution } =
             await import('../blast-radius/fragilityResolution');
-          const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
+          const { computeQuestionSelectionInstrumentation } =
             await import('../blast-radius/questionSelection');
 
-          // Phase 1: conflict validation (pure geometry)
-          const validatedConflicts = computeConflictValidation({
-            enrichedClaims,
-            edges: result.semanticEdges,
-            statementEmbeddings: statementEmbeddings ?? null,
-          });
-
-          // Phase 2: fragility resolution (orchestrator-owned)
           const routingConflictEdges = validatedConflicts.filter(c => c.validated && c.mapperLabeledConflict);
           const claimsInRoutedConflict = new Set();
           for (const c of routingConflictEdges) {
@@ -506,7 +527,6 @@ export async function computeDerivedFields({
             });
           }
 
-          // Phase 3: question selection + routing (consumes pre-computed results)
           result.questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
             blastSurfaceResult: result.blastSurfaceResult,
             enrichedClaims,
@@ -517,10 +537,17 @@ export async function computeDerivedFields({
             validatedConflicts,
             fragilityResolution: fragilityResult,
           });
+          // NOTE: do NOT overwrite result.claimRouting — blast surface is instrumentation only
+        }
+
+        // Fallback: if passage routing didn't produce claimRouting, fall back to blast surface
+        if (!result.claimRouting && result.questionSelectionInstrumentation) {
+          const { computeClaimRouting } =
+            await import('../blast-radius/questionSelection');
           result.claimRouting = computeClaimRouting(result.questionSelectionInstrumentation);
         }
       } catch (err) {
-        console.warn('[DeterministicPipeline] Question selection failed:', getErrorMessage(err));
+        console.warn('[DeterministicPipeline] Routing pipeline failed:', getErrorMessage(err));
       }
     })(),
   ]);
@@ -530,102 +557,19 @@ export async function computeDerivedFields({
 
 /**
  * Build traversal graph + forcing points from enriched claims.
- *
- * @param {object} opts
- * @param {boolean} opts.conflictTiering — true = full legacy conflict tiering, false = all tier 0
  */
 export function buildTraversalData({
   enrichedClaims,
   edges,
   conditionals,
-  conflictTiering = false,
 }) {
-  const claimOrder = new Map();
-  for (let i = 0; i < enrichedClaims.length; i++) {
-    const id = enrichedClaims[i]?.id;
-    if (id) claimOrder.set(id, i);
-  }
+  const allClaimIds = enrichedClaims.map(c => c.id);
 
-  // Conflict components (legacy path)
-  const conflictClaimIdSet = new Set();
-  const conflictAdj = new Map();
-  const conflictComponents = [];
-
-  if (conflictTiering) {
-    for (const e of (edges || [])) {
-      if (!e || e.type !== 'conflicts') continue;
-      const from = String(e.from || '').trim();
-      const to = String(e.to || '').trim();
-      if (!from || !to) continue;
-      conflictClaimIdSet.add(from);
-      conflictClaimIdSet.add(to);
-      if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
-      if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
-      conflictAdj.get(from).add(to);
-      conflictAdj.get(to).add(from);
-    }
-
-    const visited = new Set();
-    for (const id of Array.from(conflictClaimIdSet)) {
-      if (visited.has(id)) continue;
-      const stack = [id];
-      const component = [];
-      visited.add(id);
-      while (stack.length > 0) {
-        const cur = stack.pop();
-        component.push(cur);
-        const neighbors = conflictAdj.get(cur);
-        if (!neighbors) continue;
-        for (const n of Array.from(neighbors)) {
-          if (visited.has(n)) continue;
-          visited.add(n);
-          stack.push(n);
-        }
-      }
-      component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
-      conflictComponents.push(component);
-    }
-    conflictComponents.sort((a, b) => {
-      const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
-      const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
-      return amin - bmin;
-    });
-  }
-
-  const foundationClaimIds = enrichedClaims
-    .filter(c => !conflictClaimIdSet.has(c.id))
-    .map(c => c.id);
-
-  const tiers = [
-    { tierIndex: 0, claimIds: foundationClaimIds },
-    ...conflictComponents.map((claimIds, i) => ({ tierIndex: i + 1, claimIds })),
-  ];
+  const tiers = [{ tierIndex: 0, claimIds: allClaimIds }];
 
   const tierByClaimId = new Map();
-  for (const t of tiers) {
-    for (const id of (t.claimIds || [])) {
-      if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex);
-    }
-  }
-
-  const claimLabelById = new Map(enrichedClaims.map(c => [c.id, c.label]));
-  const conflictsById = new Map();
-
-  if (conflictTiering) {
-    for (const e of (edges || [])) {
-      if (!e || String(e.type || '').trim() !== 'conflicts') continue;
-      const from = String(e.from || '').trim();
-      const to = String(e.to || '').trim();
-      if (!from || !to) continue;
-      if (!conflictsById.has(from)) conflictsById.set(from, []);
-      const fromLabel = claimLabelById.get(from) || from;
-      const toLabel = claimLabelById.get(to) || to;
-      conflictsById.get(from).push({
-        claimId: to,
-        question: String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
-        sourceStatementIds: [],
-      });
-    }
+  for (const id of allClaimIds) {
+    tierByClaimId.set(id, 0);
   }
 
   const serializedClaims = enrichedClaims.map(c => {
@@ -639,7 +583,7 @@ export function buildTraversalData({
       stance: 'NEUTRAL',
       gates: { conditionals: [] },
       enables: [],
-      conflicts: conflictsById.has(id) ? conflictsById.get(id) : [],
+      conflicts: [],
       sourceStatementIds,
       supporterModels: supporters,
       supportRatio: typeof c?.supportRatio === 'number' ? c.supportRatio : 0,
@@ -687,6 +631,63 @@ export async function extractForcingPointsFromGraph(traversalGraph) {
 }
 
 /**
+ * Build the UI-facing substrate graph from raw geometry.
+ * Shared by both StepExecutor (live) and buildArtifactForProvider (regen).
+ *
+ * @param {{ substrate: object, regions: object[] }} opts
+ * @returns {object|null}
+ */
+export function buildSubstrateGraph({ substrate, regions = [] }) {
+  if (!substrate || !substrate.layout2d?.coordinates) return null;
+
+  const coords = substrate.layout2d.coordinates;
+
+  const regionsByNode = new Map();
+  for (const r of regions) {
+    for (const nodeId of r?.nodeIds || []) {
+      if (nodeId && !regionsByNode.has(nodeId)) regionsByNode.set(nodeId, r.id);
+    }
+  }
+
+  const componentsByNode = new Map();
+  for (const c of substrate?.topology?.components || []) {
+    for (const nodeId of c?.nodeIds || []) {
+      if (nodeId && !componentsByNode.has(nodeId)) componentsByNode.set(nodeId, c.id);
+    }
+  }
+
+  return {
+    nodes: (substrate.nodes || []).map(n => {
+      const p = n.paragraphId;
+      const xy = coords[p] || [0, 0];
+      return {
+        ...n,
+        x: xy[0],
+        y: xy[1],
+        regionId: regionsByNode.get(p) ?? null,
+        componentId: componentsByNode.get(p) ?? null,
+      };
+    }),
+    edges: (substrate.graphs?.knn?.edges || []).map(e => ({
+      source: e.source, target: e.target, similarity: e.similarity,
+    })),
+    mutualEdges: (substrate.graphs?.mutual?.edges || []).map(e => ({
+      source: e.source, target: e.target, similarity: e.similarity,
+    })),
+    strongEdges: (substrate.graphs?.strong?.edges || []).map(e => ({
+      source: e.source, target: e.target, similarity: e.similarity,
+    })),
+    softThreshold: substrate.graphs?.strong?.softThreshold ?? 0,
+    similarityStats: substrate.meta?.similarityStats ?? null,
+    ...(substrate.meta?.extendedSimilarityStats
+      ? { extendedSimilarityStats: substrate.meta.extendedSimilarityStats } : {}),
+    ...(Array.isArray(substrate.meta?.allPairwiseSimilarities)
+      ? { allPairwiseSimilarities: substrate.meta.allPairwiseSimilarities.slice(0, 20000) }
+      : {}),
+  };
+}
+
+/**
  * Assemble the mapper artifact from derived fields + traversal.
  */
 let artifactIdCounter = 0;
@@ -729,6 +730,7 @@ export function assembleMapperArtifact({
     tableCellAllocation,
     questionSelectionInstrumentation,
     claimRouting,
+    passageRoutingResult,
     claimDensityResult,
   } = derived;
 
@@ -770,61 +772,30 @@ export function assembleMapperArtifact({
     ...(querySemanticDensity != null ? { querySemanticDensity } : {}),
     ...(questionSelectionInstrumentation ? { questionSelectionInstrumentation } : {}),
     ...(claimRouting ? { claimRouting } : {}),
+    ...(passageRoutingResult ? { passageRouting: passageRoutingResult } : {}),
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
   };
 }
 
 /**
- * PHASE 0 KEYSTONE: buildArtifactForProvider
+ * Pre-survey pipeline: parse → shadow → geometry → embeddings → provenance →
+ * derived fields → question selection / claim routing.
  *
- * The ONE code path for building a complete CognitiveArtifact from Tier 1 + Tier 2
- * inputs. Used by REGENERATE_EMBEDDINGS, traversal continuation, and (future)
- * BUILD_ARTIFACT lazy-load. All DB I/O must be done by the caller.
+ * Returns all intermediates needed for the survey decision and for
+ * assembleFromPreSurvey. No traversal, no artifact assembly, no cognitive
+ * artifact construction — those belong to the post-survey phase.
  *
- * Caller responsibilities (I/O):
- *   - Load turn record, provider responses, embedding records from IndexedDB
- *   - Generate geometry embeddings if missing (statement + paragraph)
- *   - Unpack geometry embeddings into Maps
- *   - Persist returned claimEmbeddings if desired
- *
- * This function handles (computation):
- *   - Parsing mapping text → claims, edges, conditionals
- *   - Merging survey gate conditionals
- *   - Shadow reconstruction from batchSources (if not pre-computed)
- *   - Building substrate, preSemantic, regions
- *   - Enriching statements with geometry
- *   - Query relevance computation
- *   - Claim embedding generation (the only model call — skipped if cached)
- *   - Provenance reconstruction
- *   - All derived field computation (blast surface, completeness, etc.)
- *   - Question selection instrumentation + claim routing
- *   - Traversal graph + forcing points
- *   - Mapper artifact assembly
- *   - Full CognitiveArtifact construction
- *
- * @param {object} inputs
- * @returns {Promise<{
- *   cognitiveArtifact: object,
- *   mapperArtifact: object,
- *   enrichedClaims: object[],
- *   parsedClaims: object[],
- *   parsedEdges: object[],
- *   parsedConditionals: object[],
- *   parsedNarrative: string,
- *   claimEmbeddings: Map<string, Float32Array>,
- *   claimDensityScores: Map<string, number> | null,
- *   shadowStatements: object[],
- *   shadowParagraphs: object[],
- *   substrate: object,
- *   preSemantic: object | null,
- *   queryRelevance: object | null,
- *   questionSelectionInstrumentation: object | null,
- *   claimRouting: object | null,
- * }>}
+ * Both StepExecutor (live) and buildArtifactForProvider (regen) call this.
+ * StepExecutor passes empty surveyGates (survey hasn't run yet); the regen
+ * path passes persisted gates so derived support edges see them.
  */
-export async function buildArtifactForProvider({
-  // ═══ Mapping text (required) ═══
-  mappingText,
+export async function computePreSurveyPipeline({
+  // ═══ Mapping text (required unless parsedMappingResult provided) ═══
+  mappingText = null,
+
+  // ═══ Pre-parsed mapping result (skip re-parse if provided) ═══
+  // Shape: { claims: [], edges: [], narrative?: string }
+  parsedMappingResult = null,
 
   // ═══ Shadow data ═══
   // Provide pre-computed arrays OR batchSources for reconstruction.
@@ -844,9 +815,18 @@ export async function buildArtifactForProvider({
   claimEmbeddings: inputClaimEmbeddings = null,
   claimDensityScores: inputClaimDensityScores = null, // Map<string, number> | null
 
-  // ═══ Survey gates (LLM-produced, not re-derivable without LLM) ═══
+  // ═══ Statement density (Map or Object — StepExecutor has Map, regen has Object via geoRecord) ═══
+  statementDensityScores = null,
+
+  // ═══ Pre-built geometry (skip-if-provided, avoids redundant substrate build) ═══
+  preBuiltSubstrate = null,
+  preBuiltPreSemantic = null,
+  preBuiltQueryRelevance = null,
+  preBuiltBasinInversion = null,
+
+  // ═══ Survey gates (for derived support edge computation only) ═══
+  // Regen path passes persisted gates; live path passes nothing.
   surveyGates = undefined,
-  surveyRationale = null,
 
   // ═══ Citation ordering (canonical) ═══
   citationSourceOrder = null, // Record<number, string> | null
@@ -862,43 +842,50 @@ export async function buildArtifactForProvider({
 }) {
   const t0 = Date.now();
 
-  // ── 1. Parse mapping text ─────────────────────────────────────────
-  const { parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+  // ── 1. Parse mapping text (skip if caller already parsed) ────────
+  let parsedClaims, parsedEdges, parsedNarrative;
 
-  const parseResult = parseSemanticMapperOutput(mappingText);
-  if (!parseResult?.success || !parseResult?.output) {
-    throw new Error('Failed to parse mapping response text into claims/edges');
+  if (parsedMappingResult) {
+    // StepExecutor already parsed — reuse directly
+    parsedClaims = Array.isArray(parsedMappingResult.claims)
+      ? parsedMappingResult.claims : [];
+    parsedEdges = Array.isArray(parsedMappingResult.edges)
+      ? parsedMappingResult.edges : [];
+    parsedNarrative = String(parsedMappingResult.narrative || '').trim();
+  } else {
+    // Regen path — parse from raw text
+    if (!mappingText) {
+      throw new Error('Either mappingText or parsedMappingResult is required');
+    }
+    const { parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+    const parseResult = parseSemanticMapperOutput(mappingText);
+    if (!parseResult?.success || !parseResult?.output) {
+      throw new Error('Failed to parse mapping response text into claims/edges');
+    }
+    parsedClaims = Array.isArray(parseResult.output.claims)
+      ? parseResult.output.claims : [];
+    parsedEdges = Array.isArray(parseResult.output.edges)
+      ? parseResult.output.edges : [];
+    parsedNarrative = String(
+      parseResult.output?.narrative || parseResult.narrative || ''
+    ).trim();
   }
-
-  const parsedClaims = Array.isArray(parseResult.output.claims)
-    ? parseResult.output.claims : [];
-  const parsedEdges = Array.isArray(parseResult.output.edges)
-    ? parseResult.output.edges : [];
-  const parsedNarrative = String(
-    parseResult.output?.narrative || parseResult.narrative || ''
-  ).trim();
 
   if (parsedClaims.length === 0) {
     throw new Error('Parsed 0 claims from mapping text');
   }
 
-  // ── 2. Build conditionals from survey gates ─────────────────────
+  // ── 2. Build conditionals from survey gates (if available) ────────
   // Conditionals come exclusively from the survey mapper (SurveyGate[]).
   // The semantic mapper never produces conditionals.
-  const parsedConditionals = (Array.isArray(surveyGates) ? surveyGates : [])
-    .filter(g => g && g.id && Array.isArray(g.affectedClaims) && g.affectedClaims.length > 0)
-    .map(g => ({
-      id: g.id,
-      question: String(g.question || '').trim(),
-      affectedClaims: g.affectedClaims.map(c => String(c).trim()).filter(Boolean),
-      classification: 'conditional_gate',
-    }));
+  // In the live path, gates aren't available yet — conditionals will be [].
+  const parsedConditionals = buildConditionalsFromGates(surveyGates);
 
   if (parsedConditionals.length > 0) {
-    console.log(`[buildArtifactForProvider] Built ${parsedConditionals.length} conditional(s) from survey gates`);
+    console.log(`[computePreSurveyPipeline] Built ${parsedConditionals.length} conditional(s) from survey gates`);
   }
 
-  console.log(`[buildArtifactForProvider] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges`);
+  console.log(`[computePreSurveyPipeline] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges`);
 
   // ── 3. Shadow reconstruction ──────────────────────────────────────
   let shadowStatements = inputShadowStatements;
@@ -932,57 +919,74 @@ export async function buildArtifactForProvider({
     throw new Error('Paragraph embeddings are required');
   }
 
-  const { buildGeometricSubstrate } = await import('../../geometry/substrate');
-  const { buildPreSemanticInterpretation, computePerModelQueryRelevance } =
-    await import('../../geometry/interpretation');
-  const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
-  const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
+  let substrate, preSemantic, queryRelevance, regions;
 
-  const paraVectors = Array.from(paragraphEmbeddings.values());
-  const paraIds = Array.from(paragraphEmbeddings.keys());
-  const basinInversionResult = geoRecord?.meta?.basinInversion
-    || computeBasinInversion(paraIds, paraVectors);
+  if (preBuiltSubstrate) {
+    // StepExecutor already computed geometry — reuse it
+    substrate = preBuiltSubstrate;
+    preSemantic = preBuiltPreSemantic;
+    queryRelevance = preBuiltQueryRelevance;
 
-  const substrate = buildGeometricSubstrate(
-    shadowParagraphs,
-    paragraphEmbeddings,
-    geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
-    undefined,
-    basinInversionResult,
-  );
+    regions = preSemantic?.regionization?.regions || [];
+    try {
+      const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
+      enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions);
+    } catch (_) { /* non-fatal */ }
+  } else {
+    // Regen path — build geometry from scratch
+    const { buildGeometricSubstrate } = await import('../../geometry/substrate');
+    const { buildPreSemanticInterpretation, computePerModelQueryRelevance } =
+      await import('../../geometry/interpretation');
+    const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+    const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
 
-  const queryBoost = queryEmbedding
-    ? computePerModelQueryRelevance(queryEmbedding, statementEmbeddings, shadowParagraphs)
-    : null;
+    const paraVectors = Array.from(paragraphEmbeddings.values());
+    const paraIds = Array.from(paragraphEmbeddings.keys());
+    const basinInversionResult = preBuiltBasinInversion
+      || geoRecord?.meta?.basinInversion
+      || computeBasinInversion(paraIds, paraVectors);
 
-  const preSemantic = buildPreSemanticInterpretation(
-    substrate, shadowParagraphs, paragraphEmbeddings, queryBoost, basinInversionResult,
-  );
+    substrate = buildGeometricSubstrate(
+      shadowParagraphs,
+      paragraphEmbeddings,
+      geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
+      undefined,
+      basinInversionResult,
+    );
 
-  const regions = preSemantic?.regionization?.regions || [];
+    const queryBoost = queryEmbedding
+      ? computePerModelQueryRelevance(queryEmbedding, statementEmbeddings, shadowParagraphs)
+      : null;
 
-  try {
-    enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions);
-  } catch (_) { /* non-fatal */ }
+    preSemantic = buildPreSemanticInterpretation(
+      substrate, shadowParagraphs, paragraphEmbeddings, queryBoost, basinInversionResult,
+    );
 
-  // ── 5. Query relevance ────────────────────────────────────────────
-  let queryRelevance = null;
-  try {
-    if (queryEmbedding) {
-      const { computeQueryRelevance: _computeQR } = await import('../../geometry/queryRelevance');
-      queryRelevance = _computeQR({
-        queryEmbedding,
-        statements: shadowStatements,
-        statementEmbeddings,
-        paragraphEmbeddings,
-        paragraphs: shadowParagraphs,
-        substrate,
-        regionization: preSemantic?.regionization || null,
-        regionProfiles: preSemantic?.regionProfiles || null,
-      });
+    regions = preSemantic?.regionization?.regions || [];
+
+    try {
+      enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions);
+    } catch (_) { /* non-fatal */ }
+
+    // ── 5. Query relevance ────────────────────────────────────────────
+    queryRelevance = null;
+    try {
+      if (queryEmbedding) {
+        const { computeQueryRelevance: _computeQR } = await import('../../geometry/queryRelevance');
+        queryRelevance = _computeQR({
+          queryEmbedding,
+          statements: shadowStatements,
+          statementEmbeddings,
+          paragraphEmbeddings,
+          paragraphs: shadowParagraphs,
+          substrate,
+          regionization: preSemantic?.regionization || null,
+          regionProfiles: preSemantic?.regionProfiles || null,
+        });
+      }
+    } catch (err) {
+      console.warn('[computePreSurveyPipeline] Query relevance failed:', err?.message || String(err));
     }
-  } catch (err) {
-    console.warn('[buildArtifactForProvider] Query relevance failed:', err?.message || String(err));
   }
 
   // ── 6. Claim embeddings ───────────────────────────────────────────
@@ -1031,15 +1035,18 @@ export async function buildArtifactForProvider({
   const competitiveThresholds = provenanceResult.competitiveThresholds ?? null;
 
   // ── 8. Density lift ───────────────────────────────────────────────
-  if (claimDensityScores && geoRecord?.meta?.semanticDensityScores) {
-    const stmtDensityObj = geoRecord.meta.semanticDensityScores;
+  const stmtDensitySource = statementDensityScores
+    ?? geoRecord?.meta?.semanticDensityScores ?? null;
+  if (claimDensityScores && stmtDensitySource) {
     for (const claim of enrichedClaims) {
       const claimScore = claimDensityScores.get(claim.id);
       if (claimScore == null) continue;
       claim.density = claimScore;
       if (!claim.sourceStatementIds?.length) continue;
       const assigned = claim.sourceStatementIds
-        .map(sid => stmtDensityObj[sid]).filter(v => v != null);
+        .map(sid => stmtDensitySource instanceof Map
+          ? stmtDensitySource.get(sid) : stmtDensitySource[sid])
+        .filter(v => v != null);
       if (assigned.length === 0) continue;
       claim.densityLift = claimScore - assigned.reduce((a, b) => a + b, 0) / assigned.length;
     }
@@ -1071,114 +1078,125 @@ export async function buildArtifactForProvider({
     cellUnitEmbeddings,
   });
 
-  // ── 10. Question selection instrumentation ────────────────────────
-  let questionSelectionInstrumentation = null;
-  let claimRouting = null;
-
-  // Build pipeline-level shared data for downstream components
-  const statementOwners = new Map();
-  for (const claim of enrichedClaims) {
-    if (!claim.sourceStatementIds) continue;
-    for (const sid of claim.sourceStatementIds) {
-      if (!statementOwners.has(sid)) statementOwners.set(sid, new Set());
-      statementOwners.get(sid).add(claim.id);
-    }
-  }
-  const statementTextsMap = new Map();
-  for (const stmt of shadowStatements) {
-    statementTextsMap.set(stmt.id, stmt.text ?? '');
+  // ── 9b. Forward pre-built basin inversion if computeDerivedFields couldn't compute it ──
+  // In the live path, StepExecutor computes basin inversion before geometry and passes it
+  // as preBuiltBasinInversion, but computeDerivedFields only reads from geoRecord (which
+  // StepExecutor doesn't pass). Patch it through so the mapper artifact + cognitive artifact
+  // can include it.
+  if (!derived.basinInversion && preBuiltBasinInversion) {
+    derived.basinInversion = preBuiltBasinInversion;
   }
 
-  try {
-    const { computeConflictValidation } =
-      await import('../blast-radius/conflictValidation');
-    const { computeFragilityResolution } =
-      await import('../blast-radius/fragilityResolution');
-    const { computeQuestionSelectionInstrumentation, computeClaimRouting } =
-      await import('../blast-radius/questionSelection');
+  // ── 10. Question selection + claim routing (from derived) ─────────
+  // computeDerivedFields already runs conflict validation → fragility
+  // resolution → question selection → claim routing internally.
+  const questionSelectionInstrumentation = derived.questionSelectionInstrumentation ?? null;
+  const claimRouting = derived.claimRouting ?? null;
 
-    const edges = Array.isArray(derived?.semanticEdges) ? derived.semanticEdges : [];
+  const elapsed = Date.now() - t0;
+  console.log(`[computePreSurveyPipeline] Complete: ${enrichedClaims.length} claims, ${parsedEdges.length} edges in ${elapsed}ms`);
 
-    // Phase 1: conflict validation (pure geometry)
-    const validatedConflicts = computeConflictValidation({
-      enrichedClaims,
-      edges,
-      statementEmbeddings: statementEmbeddings ?? null,
-    });
+  return {
+    parsedClaims,
+    parsedEdges,
+    parsedNarrative,
+    parsedConditionals,
+    enrichedClaims,
+    claimEmbeddings,
+    claimDensityScores,
+    shadowStatements,
+    shadowParagraphs,
+    substrate,
+    preSemantic,
+    queryRelevance,
+    regions,
+    derived,
+    questionSelectionInstrumentation,
+    claimRouting,
+    mapperClaimsForProvenance,
+    citationSourceOrder,
+  };
+}
 
-    // Phase 2: fragility resolution (orchestrator-owned)
-    const routingConflictEdges = validatedConflicts.filter(c => c.validated && c.mapperLabeledConflict);
-    const claimsInRoutedConflict = new Set();
-    for (const c of routingConflictEdges) {
-      claimsInRoutedConflict.add(c.edgeFrom);
-      claimsInRoutedConflict.add(c.edgeTo);
-    }
-    const supportRatioMap = new Map();
-    for (const c of enrichedClaims) {
-      const sr = typeof c.supportRatio === 'number' && Number.isFinite(c.supportRatio) ? c.supportRatio : 0;
-      supportRatioMap.set(String(c.id), sr);
-    }
+/**
+ * Build conditionals array from survey gate objects.
+ * Shared by computePreSurveyPipeline (regen path) and assembleFromPreSurvey.
+ */
+function buildConditionalsFromGates(surveyGates) {
+  return (Array.isArray(surveyGates) ? surveyGates : [])
+    .filter(g => g && g.id && Array.isArray(g.affectedClaims) && g.affectedClaims.length > 0)
+    .map(g => ({
+      id: g.id,
+      question: String(g.question || '').trim(),
+      affectedClaims: g.affectedClaims.map(c => String(c).trim()).filter(Boolean),
+      classification: 'conditional_gate',
+      ...(g.prunesOn === 'yes' || g.prunesOn === 'no' ? { prunesOn: g.prunesOn } : {}),
+    }));
+}
 
-    const blastSurfaceResult = derived?.blastSurfaceResult ?? null;
-    let fragilityResult = null;
-    if (blastSurfaceResult && statementOwners.size > 0 && statementTextsMap.size > 0) {
-      fragilityResult = computeFragilityResolution({
-        blastSurfaceResult,
-        conflictClaimIds: claimsInRoutedConflict,
-        statementOwners,
-        statementTexts: statementTextsMap,
-        supportRatios: supportRatioMap,
-      });
-    }
+/**
+ * Post-survey assembly: conditionals → traversal → mapper artifact → cognitive artifact.
+ *
+ * Takes the pre-survey intermediates + optional survey gates produced by
+ * the LLM (live path) or loaded from persistence (regen path).
+ *
+ * @param {object} preSurvey — return value of computePreSurveyPipeline
+ * @param {object} opts
+ */
+export async function assembleFromPreSurvey(preSurvey, {
+  surveyGates = undefined,
+  surveyRationale = null,
+  queryText = '',
+  modelCount = 1,
+  turn = undefined,
+  // Density scores for assembleMapperArtifact (serialized Object form)
+  statementSemanticDensity = undefined,
+  paragraphSemanticDensity = undefined,
+  claimSemanticDensity = undefined,
+  querySemanticDensity = undefined,
+} = {}) {
+  const {
+    parsedEdges, parsedNarrative, enrichedClaims, derived,
+    shadowStatements, shadowParagraphs, substrate, preSemantic,
+    queryRelevance, regions, claimEmbeddings, claimDensityScores,
+    questionSelectionInstrumentation, claimRouting, citationSourceOrder,
+  } = preSurvey;
 
-    // Phase 3: question selection + routing
-    questionSelectionInstrumentation = computeQuestionSelectionInstrumentation({
-      blastSurfaceResult,
-      enrichedClaims,
-      queryRelevanceScores: derived?.queryRelevance?.statementScores
-        ?? queryRelevance?.statementScores ?? null,
-      modelCount,
-      claimCentroids: claimEmbeddings ?? new Map(),
-      queryEmbedding: queryEmbedding ?? null,
-      validatedConflicts,
-      fragilityResolution: fragilityResult,
-    });
+  // ── 11. Build conditionals from survey gates ──────────────────────
+  // If the caller produced gates (live LLM or persisted), use them.
+  // Fall back to whatever computePreSurveyPipeline already built.
+  const conditionals = (Array.isArray(surveyGates) && surveyGates.length > 0)
+    ? buildConditionalsFromGates(surveyGates)
+    : (preSurvey.parsedConditionals || []);
 
-    claimRouting = computeClaimRouting(questionSelectionInstrumentation);
-  } catch (_) {
-    questionSelectionInstrumentation = null;
-    claimRouting = null;
-  }
-
-  // ── 11. Traversal ─────────────────────────────────────────────────
+  // ── 12. Traversal ─────────────────────────────────────────────────
   const { traversalGraph } = buildTraversalData({
     enrichedClaims,
     edges: parsedEdges,
-    conditionals: parsedConditionals,
-    conflictTiering: false,
+    conditionals,
   });
 
   const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
 
-  // ── 12. Assemble mapper artifact ──────────────────────────────────
+  // ── 13. Assemble mapper artifact ──────────────────────────────────
   const mapperArtifact = assembleMapperArtifact({
     derived,
     enrichedClaims,
     traversalGraph,
     forcingPoints,
     parsedNarrative,
-    parsedConditionals,
+    parsedConditionals: conditionals,
     queryText,
     modelCount,
     shadowStatements,
     surveyGates: Array.isArray(surveyGates) && surveyGates.length > 0
       ? surveyGates : undefined,
     surveyRationale,
-    statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
-    paragraphSemanticDensity: geoRecord?.meta?.paragraphSemanticDensityScores ?? undefined,
-    claimSemanticDensity: claimDensityScores?.size > 0
-      ? Object.fromEntries(claimDensityScores) : undefined,
-    querySemanticDensity: geoRecord?.meta?.querySemanticDensity ?? undefined,
+    statementSemanticDensity,
+    paragraphSemanticDensity,
+    claimSemanticDensity: claimSemanticDensity ?? (claimDensityScores?.size > 0
+      ? Object.fromEntries(claimDensityScores) : undefined),
+    querySemanticDensity,
     turn,
   });
 
@@ -1190,60 +1208,17 @@ export async function buildArtifactForProvider({
     mapperArtifact.claimRouting = claimRouting;
   }
 
-  // ── 13. Build cognitive artifact ──────────────────────────────────
+  // ── 14. Build cognitive artifact ──────────────────────────────────
   const { buildCognitiveArtifact } = await import('../../../shared/cognitive-artifact');
 
-  const coords = substrate?.layout2d?.coordinates || {};
-  const regionsByNode = new Map();
-  for (const r of regions) {
-    for (const nodeId of r?.nodeIds || []) {
-      if (nodeId && !regionsByNode.has(nodeId)) regionsByNode.set(nodeId, r.id);
-    }
-  }
-
-  const componentsByNode = new Map();
-  for (const c of substrate?.topology?.components || []) {
-    for (const nodeId of c?.nodeIds || []) {
-      if (nodeId && !componentsByNode.has(nodeId)) componentsByNode.set(nodeId, c.id);
-    }
-  }
-
-  const substrateGraph = {
-    nodes: (substrate?.nodes || []).map(n => {
-      const p = n.paragraphId;
-      const xy = coords[p] || [0, 0];
-      return {
-        ...n,
-        x: xy[0],
-        y: xy[1],
-        regionId: regionsByNode.get(p) ?? null,
-        componentId: componentsByNode.get(p) ?? null,
-      };
-    }),
-    edges: (substrate?.graphs?.knn?.edges || []).map(e => ({
-      source: e.source, target: e.target, similarity: e.similarity,
-    })),
-    mutualEdges: (substrate?.graphs?.mutual?.edges || []).map(e => ({
-      source: e.source, target: e.target, similarity: e.similarity,
-    })),
-    strongEdges: (substrate?.graphs?.strong?.edges || []).map(e => ({
-      source: e.source, target: e.target, similarity: e.similarity,
-    })),
-    softThreshold: substrate?.graphs?.strong?.softThreshold ?? 0,
-    similarityStats: substrate?.meta?.similarityStats,
-    ...(substrate?.meta?.extendedSimilarityStats
-      ? { extendedSimilarityStats: substrate.meta.extendedSimilarityStats } : {}),
-    ...(Array.isArray(substrate?.meta?.allPairwiseSimilarities)
-      ? { allPairwiseSimilarities: substrate.meta.allPairwiseSimilarities.slice(0, 20000) }
-      : {}),
-  };
+  const substrateGraph = buildSubstrateGraph({ substrate, regions });
 
   const shadowDelta = derived.shadowDelta;
 
   const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
     shadow: { extraction: { statements: shadowStatements }, delta: shadowDelta || null },
     paragraphProjection: { paragraphs: shadowParagraphs },
-    substrate: { graph: substrateGraph, shape: null },
+    substrate: { graph: substrateGraph, shape: substrate?.shape ?? null },
     preSemantic: preSemantic || null,
     ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
   });
@@ -1259,26 +1234,88 @@ export async function buildArtifactForProvider({
     cognitiveArtifact.claimRouting = claimRouting;
   }
 
-  const elapsed = Date.now() - t0;
-  console.log(`[buildArtifactForProvider] Complete: ${enrichedClaims.length} claims, ${(mapperArtifact.edges?.length || 0)} edges in ${elapsed}ms`);
-
-  // ── Return all artifacts + intermediates for caller persistence ───
   return {
     cognitiveArtifact,
     mapperArtifact,
     enrichedClaims,
-    parsedClaims,
-    parsedEdges,
-    parsedConditionals,
-    parsedNarrative,
     claimEmbeddings,
     claimDensityScores,
-    shadowStatements,
-    shadowParagraphs,
-    substrate,
-    preSemantic,
-    queryRelevance,
     questionSelectionInstrumentation,
     claimRouting,
+    cachedStructuralAnalysis: derived.cachedStructuralAnalysis ?? null,
+  };
+}
+
+/**
+ * PHASE 0 KEYSTONE: buildArtifactForProvider
+ *
+ * Thin wrapper: computePreSurveyPipeline → assembleFromPreSurvey.
+ * Callers that need the survey boundary (StepExecutor) call the two
+ * functions directly. Callers that already have gates (sw-entry.js,
+ * traversal continuation) call this unchanged.
+ */
+export async function buildArtifactForProvider({
+  mappingText,
+  shadowStatements: inputShadowStatements = null,
+  shadowParagraphs: inputShadowParagraphs = null,
+  batchSources = [],
+  statementEmbeddings,
+  paragraphEmbeddings,
+  queryEmbedding = null,
+  geoRecord = null,
+  claimEmbeddings: inputClaimEmbeddings = null,
+  claimDensityScores: inputClaimDensityScores = null,
+  surveyGates = undefined,
+  surveyRationale = null,
+  citationSourceOrder = null,
+  tableSidecar = [],
+  cellUnitEmbeddings = null,
+  queryText = '',
+  modelCount = 1,
+  turn = undefined,
+}) {
+  const preSurvey = await computePreSurveyPipeline({
+    mappingText,
+    shadowStatements: inputShadowStatements,
+    shadowParagraphs: inputShadowParagraphs,
+    batchSources,
+    statementEmbeddings,
+    paragraphEmbeddings,
+    queryEmbedding,
+    geoRecord,
+    claimEmbeddings: inputClaimEmbeddings,
+    claimDensityScores: inputClaimDensityScores,
+    surveyGates,
+    citationSourceOrder,
+    tableSidecar,
+    cellUnitEmbeddings,
+    queryText,
+    modelCount,
+    turn,
+  });
+
+  const result = await assembleFromPreSurvey(preSurvey, {
+    surveyGates,
+    surveyRationale,
+    queryText,
+    modelCount,
+    turn,
+    statementSemanticDensity: geoRecord?.meta?.semanticDensityScores ?? undefined,
+    paragraphSemanticDensity: geoRecord?.meta?.paragraphSemanticDensityScores ?? undefined,
+    querySemanticDensity: geoRecord?.meta?.querySemanticDensity ?? undefined,
+  });
+
+  // Preserve the original return shape for backward compatibility
+  return {
+    ...result,
+    parsedClaims: preSurvey.parsedClaims,
+    parsedEdges: preSurvey.parsedEdges,
+    parsedConditionals: preSurvey.parsedConditionals,
+    parsedNarrative: preSurvey.parsedNarrative,
+    shadowStatements: preSurvey.shadowStatements,
+    shadowParagraphs: preSurvey.shadowParagraphs,
+    substrate: preSurvey.substrate,
+    preSemantic: preSurvey.preSemantic,
+    queryRelevance: preSurvey.queryRelevance,
   };
 }

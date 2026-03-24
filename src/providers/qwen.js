@@ -174,6 +174,8 @@ export class QwenSessionApi {
    */
   async ask(prompt, options = {}, onChunk = () => { }) {
     const { sessionId, parentMsgId, model = "tongyi-qwen3-max-model", signal } = options;
+    // Ensure Qwen always replies in the user's language
+    prompt = prompt + "\n\nReply in the same language as the user's message above. Do not reply in Chinese unless the user wrote in Chinese.";
     const csrfToken = await this._fetchCsrfToken();
 
     // Ensure DNR rules headers (origin/referer) are in place for qwen endpoints

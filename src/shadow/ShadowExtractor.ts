@@ -127,9 +127,9 @@ function splitIntoSentences(paragraph: string): string[] {
         .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|vs|etc|e\.g|i\.e)\./gi, '$1|||')
         .replace(/\b(\d+)\./g, '$1|||');
 
-    // Split on sentence boundaries (including end-of-string)
+    // Split on sentence boundaries: ASCII (.!?) and CJK (。！？)
     const sentences = protectedText
-        .split(/(?<=[.!?])(?:\s+|$)/)
+        .split(/(?<=[.!?。！？])(?:\s+|$)/)
         .map(s => s.replace(/\|\|\|/g, '.'))
         .map(s => s.trim())
         .filter(s => s.length > 0);
@@ -141,12 +141,22 @@ function splitIntoSentences(paragraph: string): string[] {
  * Check if sentence is substantive enough to extract.
  * Operates on cleanText (markdown already stripped).
  */
+/** Count CJK ideographs as individual words (they carry ~1 word of meaning each) */
+function countWords(text: string): number {
+    // Match CJK Unified Ideographs, Extension A, CJK Compatibility, Hangul, Katakana, Hiragana
+    const cjkChars = text.match(/[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/g);
+    const cjkCount = cjkChars ? cjkChars.length : 0;
+    // Strip CJK characters, then count remaining whitespace-delimited words
+    const nonCjk = text.replace(/[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/g, ' ').trim();
+    const latinWords = nonCjk.split(/\s+/).filter(w => w.length > 0);
+    return cjkCount + latinWords.length;
+}
+
 function isSubstantive(cleanText: string, rawText?: string): boolean {
     const trimmed = cleanText.trim();
-    const words = trimmed.split(/\s+/).filter(w => w.length > 0);
 
-    // Lower word threshold (operates on clean text, no markdown inflation)
-    if (words.length < 3) return false;
+    // CJK-aware word count: each ideograph ≈ 1 word
+    if (countWords(trimmed) < 3) return false;
 
     // Check raw text for markdown structures stripped by cleanTextForProcessing
     if (rawText) {

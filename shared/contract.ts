@@ -984,6 +984,14 @@ export interface ValidatedConflict {
   mapperLabeledConflict: boolean;
   validated: boolean;
   failReason: string | null;
+  /** Triangle residual: expected - actual inter-claim similarity.
+   *  Positive = claims diverge more than query relevance predicts = conflict signal.
+   *  Null when claimEmbeddings or queryEmbedding unavailable. */
+  triangleResidual?: number | null;
+  /** Mean of all finite triangle residuals in this validation run. */
+  muTriangle?: number | null;
+  /** [sim(A,Q), sim(B,Q)] — query similarities for instrumentation. */
+  querySimPair?: [number, number] | null;
 }
 
 export interface QuestionSelectionClaimProfile {
@@ -1116,6 +1124,83 @@ export interface ClaimDensityResult {
     totalModels: number;
     processingTimeMs: number;
   };
+}
+
+// ── Passage routing (evidence-concentration-based routing) ──────────────
+
+export type LandscapePosition = 'northStar' | 'eastStar' | 'mechanism' | 'floor';
+
+export interface PassageClaimProfile {
+  claimId: string;
+  /** Sum of majority paragraphs across all structural contributors */
+  totalMAJ: number;
+  /** Model index of the structural contributor with the most MAJ paragraphs */
+  dominantModel: number | null;
+  /** MAJ paragraph count of the dominant model */
+  dominantMAJ: number;
+  /** MAJ(dominant) / MAJ(total) — how replaceable is the dominant model? */
+  concentrationRatio: number;
+  /** MAXLEN(dominant) / MAJ(dominant) — contiguity within the dominant model */
+  densityRatio: number;
+  /** Longest passage across all models (from density profile) */
+  maxPassageLength: number;
+  /** Two-axis landscape position */
+  landscapePosition: LandscapePosition;
+  /** Passes at least one gate (concentration outlier OR MAXLEN ≥ 2) */
+  isLoadBearing: boolean;
+  /** Model indices contributing ≥ 1 majority paragraph */
+  structuralContributors: number[];
+  /** Model indices contributing only minority statements */
+  incidentalMentions: number[];
+}
+
+export interface PassageRoutedClaim {
+  claimId: string;
+  claimLabel: string;
+  claimText: string;
+  landscapePosition: LandscapePosition;
+  concentrationRatio: number;
+  densityRatio: number;
+  dominantModel: number | null;
+  structuralContributors: number[];
+  supporters: number[];
+}
+
+export interface PassageClaimRouting {
+  conflictClusters: Array<{
+    claimIds: string[];
+    edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
+  }>;
+  /** Load-bearing claims routed for survey — no ceiling cap */
+  loadBearingClaims: PassageRoutedClaim[];
+  /** Claims that pass through without survey questions */
+  passthrough: string[];
+  /** If true, skip the survey mapper entirely */
+  skipSurvey: boolean;
+  /** All routed claim IDs (conflicts + load-bearing) */
+  routedClaimIds: string[];
+  diagnostics: {
+    concentrationDistribution: number[];
+    densityRatioDistribution: number[];
+    totalClaims: number;
+    floorCount: number;
+  };
+}
+
+export interface PassageRoutingResult {
+  claimProfiles: Record<string, PassageClaimProfile>;
+  gate: {
+    muConcentration: number;
+    sigmaConcentration: number;
+    /** μ + σ — distributional threshold for concentration outlier */
+    concentrationThreshold: number;
+    /** Claims with MAJ ≥ 1 (precondition pass) */
+    preconditionPassCount: number;
+    /** Claims passing at least one gate */
+    loadBearingCount: number;
+  };
+  routing: PassageClaimRouting;
+  meta: { processingTimeMs: number };
 }
 
 export interface ConflictPair {

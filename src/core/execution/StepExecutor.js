@@ -1,8 +1,8 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { parseSemanticMapperOutput, createEmptyMapperArtifact } from '../../../shared/parsing-utils';
-import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
+import { parseSemanticMapperOutput } from '../../../shared/parsing-utils';
+
 import { classifyError } from '../error-classifier';
 import {
   errorHandler,
@@ -469,7 +469,7 @@ export class StepExecutor {
     const shadowModule = await import('../../shadow');
     const { extractShadowStatements } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
-    const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
+    // claimAssembly import removed — computePreSurveyPipeline handles it internally
     const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
     const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
 
@@ -510,7 +510,7 @@ export class StepExecutor {
     let queryEmbedding = null;
     let queryRelevance = null;
     let substrateSummary = null;
-    let substrateGraph = null;
+
     let substrateDegenerate = null;
     let substrateDegenerateReason = null;
     let preSemanticInterpretation = null;
@@ -940,103 +940,6 @@ export class StepExecutor {
         }
 
         try {
-          if (!substrateDegenerate && geometryParagraphEmbeddings && paragraphResult?.paragraphs?.length > 0) {
-            const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
-            const aligned = paragraphResult.paragraphs
-              .map(p => {
-                const id = p.id || p.paragraphId || String(p.index ?? '');
-                const vec = geometryParagraphEmbeddings.get(id);
-                return vec ? { id, vec } : null;
-              })
-              .filter(Boolean);
-            if (aligned.length > 0) {
-              const paraIds = aligned.map(a => a.id);
-              const paraVectors = aligned.map(a => a.vec);
-              basinInversionResult = computeBasinInversion(paraIds, paraVectors);
-            }
-          }
-        } catch (err) {
-          console.warn('[StepExecutor] Basin inversion failed:', getErrorMessage(err));
-        }
-
-        try {
-          if (substrate && !substrateDegenerate && substrate.layout2d && substrate.layout2d.coordinates) {
-            const coords = substrate.layout2d.coordinates || {};
-            const regions = preSemanticInterpretation?.regionization?.regions || [];
-
-            const paragraphToRegion = new Map();
-            for (const region of regions) {
-              for (const nodeId of region.nodeIds || []) {
-                paragraphToRegion.set(nodeId, region.id);
-              }
-            }
-
-            const paragraphToComponent = new Map();
-            for (const comp of substrate.topology.components || []) {
-              for (const nodeId of comp.nodeIds || []) {
-                paragraphToComponent.set(nodeId, comp.id);
-              }
-            }
-
-            substrateGraph = {
-              nodes: (substrate.nodes || []).map((node) => ({
-                paragraphId: node.paragraphId,
-                modelIndex: node.modelIndex,
-                dominantStance: node.dominantStance,
-                contested: node.contested,
-                statementIds: Array.isArray(node.statementIds) ? [...node.statementIds] : [],
-                top1Sim: node.top1Sim,
-                avgTopKSim: node.avgTopKSim,
-                mutualDegree: node.mutualDegree,
-                strongDegree: node.strongDegree,
-                isolationScore: node.isolationScore,
-                componentId: paragraphToComponent.get(node.paragraphId) || null,
-                regionId: paragraphToRegion.get(node.paragraphId) || null,
-                x: coords[node.paragraphId]?.[0] ?? 0,
-                y: coords[node.paragraphId]?.[1] ?? 0,
-              })),
-              edges: (substrate.graphs?.knn?.edges || []).map((e) => ({
-                source: e.source,
-                target: e.target,
-                similarity: e.similarity,
-                rank: e.rank,
-              })),
-              mutualEdges: (substrate.graphs?.mutual?.edges || []).map((e) => ({
-                source: e.source,
-                target: e.target,
-                similarity: e.similarity,
-                rank: e.rank,
-              })),
-              strongEdges: (substrate.graphs?.strong?.edges || []).map((e) => ({
-                source: e.source,
-                target: e.target,
-                similarity: e.similarity,
-                rank: e.rank,
-              })),
-              softThreshold: substrate.graphs?.strong?.softThreshold,
-              similarityStats: substrate.meta?.similarityStats || null,
-              extendedSimilarityStats: substrate.meta?.extendedSimilarityStats || null,
-              allPairwiseSimilarities: (() => {
-                const sims = substrate.meta?.allPairwiseSimilarities;
-                if (!Array.isArray(sims)) return null;
-                const cap = 20000;
-                if (sims.length <= cap) return sims;
-                const step = Math.ceil(sims.length / cap);
-                const sampled = [];
-                for (let i = 0; i < sims.length && sampled.length < cap; i += step) {
-                  sampled.push(sims[i]);
-                }
-                return sampled;
-              })(),
-            };
-          } else {
-            substrateGraph = null;
-          }
-        } catch (_) {
-          substrateGraph = null;
-        }
-
-        try {
           const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
             ? preSemanticInterpretation.regionization.regions
             : [];
@@ -1281,6 +1184,7 @@ export class StepExecutor {
             }
 
             let mapperArtifact = null;
+            let cognitiveArtifact = null;
             const rawText = finalResult?.text || "";
             let structuralValidation = null;
 
@@ -1293,147 +1197,73 @@ export class StepExecutor {
                 try {
                   await geometryPromise;
                 } catch (_) { }
-                // 5. Assembly & Traversal (Mechanical)
-                const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
-                  ? preSemanticInterpretation.regionization.regions
-                  : [];
-                const regionProfiles = Array.isArray(preSemanticInterpretation?.regionProfiles)
-                  ? preSemanticInterpretation.regionProfiles
-                  : [];
-
-                const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-                // Survey gates are the sole source of conditionals — semantic mapper never produces them.
-                let surveyGateConditionals = [];
-                let rawGates = [];
-                let gateQuestionByClaimPair = new Map();
-
-                let enrichedClaims = [];
-
-                const mapperClaimsForProvenance = (parseResult.output.claims || []).map((c) => ({
-                  id: c.id,
-                  label: c.label,
-                  text: c.text,
-                  supporters: Array.isArray(c.supporters) ? c.supporters : [],
-                }));
-
-                // Generate claim embeddings ONCE — reused by provenance + elbow diagnostics
-                let claimEmbeddings = null;
-                let claimDensityScores = null;
-                try {
-                  const { generateClaimEmbeddings } = await import('../../ConciergeService/claimAssembly');
-                  const claimEmbResult = await generateClaimEmbeddings(
-                    mapperClaimsForProvenance,
-                    statementEmbeddingResult?.densityRegressionModel
-                  );
-                  claimEmbeddings = claimEmbResult.embeddings;
-                  claimDensityScores = claimEmbResult.semanticDensityScores || null;
-                } catch (claimEmbErr) {
-                  console.warn('[StepExecutor] Claim embedding generation failed:', getErrorMessage(claimEmbErr));
-                }
-
-                // Persist claim embeddings keyed by provider (mapper-layer, not geometry-layer)
-                try {
-                  if (claimEmbeddings && claimEmbeddings.size > 0 && options.sessionManager && context.canonicalAiTurnId) {
-                    const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
-                    let dims = 0;
-                    for (const v of claimEmbeddings.values()) {
-                      const n = v?.length;
-                      if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
-                        dims = n;
-                        break;
-                      }
-                    }
-                    if (dims > 0) {
-                      const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
-                      options.sessionManager.persistClaimEmbeddings(
-                        context.canonicalAiTurnId,
-                        payload.mappingProvider,
-                        {
-                          claimEmbeddings: packedClaims.buffer,
-                          meta: {
-                            dimensions: dims,
-                            claimCount: packedClaims.index.length,
-                            claimIndex: packedClaims.index,
-                            timestamp: Date.now(),
-                          },
-                        },
-                      ).catch((err) => console.warn('[StepExecutor] Claim embedding persistence failed:', err));
-                    } else {
-                      console.warn(`[StepExecutor] Claim embedding persistence skipped: invalid dimensions (aiTurnId=${context.canonicalAiTurnId}, provider=${payload.mappingProvider})`);
-                    }
-                  }
-                } catch (err) {
-                  console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
-                }
 
                 try {
-                  const provenanceResult = await reconstructProvenance(
-                    mapperClaimsForProvenance,
-                    shadowResult.statements,
-                    paragraphResult.paragraphs,
-                    embeddingResult?.embeddings || new Map(),
-                    regions,
-                    citationOrder.length,
-                    statementEmbeddingResult?.embeddings || null,
-                    claimEmbeddings,
-                  );
-                  enrichedClaims = provenanceResult.claims;
-                  // Competitive allocation maps — kept local to avoid cross-request leakage
-                  const competitiveWeights = provenanceResult.competitiveWeights;
-                  const competitiveExcess = provenanceResult.competitiveExcess;
-                  const competitiveThresholds = provenanceResult.competitiveThresholds;
-
-                  // Compute claim density + densityLift
-                  if (claimDensityScores && statementEmbeddingResult?.semanticDensityScores) {
-                    const stmtDensity = statementEmbeddingResult.semanticDensityScores;
-                    for (const claim of enrichedClaims) {
-                      const claimScore = claimDensityScores.get(claim.id);
-                      if (claimScore == null) continue;
-                      claim.density = claimScore;
-                      if (!claim.sourceStatementIds?.length) continue;
-                      const assigned = claim.sourceStatementIds
-                        .map(sid => stmtDensity.get(sid)).filter(v => v != null);
-                      if (assigned.length === 0) continue;
-                      claim.densityLift = claimScore - assigned.reduce((a, b) => a + b, 0) / assigned.length;
-                    }
-                  }
-
-                  // ── DETERMINISTIC PIPELINE (shared with regenerate flow) ──
-                  const { computeDerivedFields, buildTraversalData, extractForcingPointsFromGraph, assembleMapperArtifact } =
+                  // ── PRE-SURVEY PIPELINE (shared with regenerate flow) ──
+                  const { computePreSurveyPipeline, assembleFromPreSurvey } =
                     await import('./deterministicPipeline');
 
-                  const derived = await computeDerivedFields({
-                    enrichedClaims,
-                    mapperClaimsForProvenance,
-                    parsedEdges: unifiedEdges,
-                    parsedConditionals: surveyGateConditionals,
+                  const preSurvey = await computePreSurveyPipeline({
+                    parsedMappingResult: {
+                      ...parseResult.output,
+                      narrative: parseResult.narrative || '',
+                    },
                     shadowStatements: shadowResult.statements,
                     shadowParagraphs: paragraphResult.paragraphs,
                     statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
                     paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
-                    claimEmbeddings: claimEmbeddings || new Map(),
                     queryEmbedding,
-                    substrate,
-                    preSemantic: preSemanticInterpretation,
-                    regions,
-                    geoRecord: null,
-                    existingQueryRelevance: queryRelevance,
-                    modelCount: citationOrder.length,
+                    statementDensityScores: statementEmbeddingResult?.semanticDensityScores || null,
+                    preBuiltSubstrate: substrate,
+                    preBuiltPreSemantic: preSemanticInterpretation,
+                    preBuiltQueryRelevance: queryRelevance,
+                    preBuiltBasinInversion: basinInversionResult,
                     queryText: payload.originalPrompt,
-                    competitiveWeights: competitiveWeights || null,
-                    competitiveExcess: competitiveExcess || null,
-                    competitiveThresholds: competitiveThresholds || null,
+                    modelCount: citationOrder.length,
+                    turn: context.turn || 0,
                     tableSidecar: shadowResult.tableSidecar || [],
                     cellUnitEmbeddings: cellUnitEmbeddings || null,
                   });
 
-                  const cachedStructuralAnalysis = derived.cachedStructuralAnalysis;
-                  const blastSurfaceResult = derived.blastSurfaceResult;
-                  const mapperArtifact_claimProvenance = derived.claimProvenance;
+                  const { enrichedClaims, claimRouting, claimEmbeddings, claimDensityScores } = preSurvey;
 
-                  const questionSelectionInstrumentation = derived.questionSelectionInstrumentation;
-                  const claimRouting = derived.claimRouting;
+                  // ── PERSIST CLAIM EMBEDDINGS (StepExecutor-only) ──────────
+                  try {
+                    if (claimEmbeddings && claimEmbeddings.size > 0 && options.sessionManager && context.canonicalAiTurnId) {
+                      const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
+                      let dims = 0;
+                      for (const v of claimEmbeddings.values()) {
+                        const n = v?.length;
+                        if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
+                          dims = n;
+                          break;
+                        }
+                      }
+                      if (dims > 0) {
+                        const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
+                        options.sessionManager.persistClaimEmbeddings(
+                          context.canonicalAiTurnId,
+                          payload.mappingProvider,
+                          {
+                            claimEmbeddings: packedClaims.buffer,
+                            meta: {
+                              dimensions: dims,
+                              claimCount: packedClaims.index.length,
+                              claimIndex: packedClaims.index,
+                              timestamp: Date.now(),
+                            },
+                          },
+                        ).catch((err) => console.warn('[StepExecutor] Claim embedding persistence failed:', err));
+                      } else {
+                        console.warn(`[StepExecutor] Claim embedding persistence skipped: invalid dimensions (aiTurnId=${context.canonicalAiTurnId}, provider=${payload.mappingProvider})`);
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
+                  }
 
+                  // ── SURVEY MAPPER LLM (StepExecutor-only) ─────────────────
+                  let rawGates = [];
                   let surveyRationale = null;
                   const semanticContinuationMeta = (() => {
                     try {
@@ -1444,12 +1274,8 @@ export class StepExecutor {
                     } catch (_) { }
                     return null;
                   })();
-                  const useSurveyMapper = true;
-                  const shouldRunSurvey = useSurveyMapper
-                    && enrichedClaims.length > 0
-                    ;
 
-                  if (shouldRunSurvey) {
+                  if (enrichedClaims.length > 0) {
                     try {
                       const {
                         buildRoutedSurveyPrompt,
@@ -1471,6 +1297,7 @@ export class StepExecutor {
                         const routedSet = new Set(claimRouting.routedClaimIds);
                         const routedClaims = claimsForSurvey.filter((c) => routedSet.has(c.id));
                         claimsExpectedInSurvey = routedClaims;
+                        const passageRoutedClaims = preSurvey.derived.passageRoutingResult?.routing?.loadBearingClaims ?? [];
                         surveyPrompt = buildRoutedSurveyPrompt({
                           userQuery: payload.originalPrompt,
                           routing: claimRouting,
@@ -1479,7 +1306,8 @@ export class StepExecutor {
                             modelIndex: s.modelIndex,
                             content: s.text,
                           })),
-                          edges: unifiedEdges,
+                          edges: preSurvey.parsedEdges,
+                          passageRoutedClaims,
                         });
                       }
 
@@ -1501,9 +1329,6 @@ export class StepExecutor {
                               onAllComplete: async (results) => {
                                 const r = results?.get?.(payload.mappingProvider);
                                 surveyText = r?.text || '';
-                                // Persist the survey mapper's context — it's the last exchange
-                                // in this provider's thread for the turn, so the next turn's
-                                // batch continuation must start from here, not the semantic mapper's cursor
                                 if (r?.meta && Object.keys(r.meta).length > 0) {
                                   await options.persistenceCoordinator.persistProviderContexts(
                                     context.sessionId,
@@ -1523,7 +1348,6 @@ export class StepExecutor {
                           rawGates = parsed.gates;
                           surveyRationale = parsed.rationale;
 
-                          // Coverage check: did the model assess every claim it was asked about?
                           const expectedIds = claimsExpectedInSurvey.map((c) => c.id);
                           const coverage = validateAssessmentCoverage(expectedIds, parsed.assessments);
                           if (coverage.errors.length > 0) {
@@ -1534,24 +1358,6 @@ export class StepExecutor {
                             console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
                           }
                           console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced, ${parsed.assessments.length}/${expectedIds.length} claims assessed`);
-
-                          gateQuestionByClaimPair = new Map();
-
-                          for (const gate of rawGates) {
-                            if (!gate || !gate.id) continue;
-                            const affected = Array.isArray(gate.affectedClaims)
-                              ? gate.affectedClaims.map((c) => String(c).trim()).filter(Boolean)
-                              : [];
-                            if (affected.length === 0) continue;
-
-                            surveyGateConditionals.push({
-                              id: gate.id,
-                              question: String(gate.question || '').trim(),
-                              affectedClaims: affected,
-                              classification: 'conditional_gate',
-                            });
-
-                          }
                         }
                       }
                     } catch (err) {
@@ -1560,6 +1366,8 @@ export class StepExecutor {
                       surveyRationale = null;
                     }
                   }
+
+                  // ── PERSIST SURVEY GATES (StepExecutor-only) ──────────────
                   if (rawGates.length > 0 && options.sessionManager?.adapter && context.canonicalAiTurnId) {
                     try {
                       const existingMappingResps = await options.sessionManager.adapter.getResponsesByTurnId(context.canonicalAiTurnId);
@@ -1582,33 +1390,13 @@ export class StepExecutor {
                     }
                   }
 
-                  // Survey gates add conditionals but no new claims/edges/statements.
-                  // Structural analysis only reads claims + edges (not conditionals),
-                  // and mixed provenance / table allocation / blast surface are unchanged.
-                  // No recomputation needed after survey mapper.
-
-                  // ── TRAVERSAL + ARTIFACT ASSEMBLY (uses shared pipeline) ──
-                  const { traversalGraph } = buildTraversalData({
-                    enrichedClaims,
-                    edges: unifiedEdges,
-                    conditionals: surveyGateConditionals,
-                    conflictTiering: true,
-                  });
-                  const forcingPoints = await extractForcingPointsFromGraph(traversalGraph);
-
-                  mapperArtifact = assembleMapperArtifact({
-                    derived,
-                    enrichedClaims,
-                    traversalGraph,
-                    forcingPoints,
-                    parsedNarrative: String(parseResult.narrative || '').trim(),
-                    parsedConditionals: surveyGateConditionals,
-                    queryText: payload.originalPrompt,
-                    modelCount: citationOrder.length,
-                    shadowStatements: shadowResult.statements,
-                    turn: context.turn || 0,
+                  // ── POST-SURVEY ASSEMBLY ───────────────────────────────────
+                  const assemblyResult = await assembleFromPreSurvey(preSurvey, {
                     surveyGates: rawGates.length > 0 ? rawGates : undefined,
                     surveyRationale,
+                    queryText: payload.originalPrompt,
+                    modelCount: citationOrder.length,
+                    turn: context.turn || 0,
                     statementSemanticDensity: statementEmbeddingResult?.semanticDensityScores?.size > 0
                       ? Object.fromEntries(statementEmbeddingResult.semanticDensityScores)
                       : undefined,
@@ -1620,10 +1408,16 @@ export class StepExecutor {
                       : undefined,
                     querySemanticDensity: queryDensityScore,
                   });
-                  // Add StepExecutor-specific fields
-                  mapperArtifact.preSemantic = preSemanticInterpretation || null;
+
+                  mapperArtifact = assemblyResult.mapperArtifact;
+                  cognitiveArtifact = assemblyResult.cognitiveArtifact;
+                  const { cachedStructuralAnalysis } = assemblyResult;
+
+                  // ── POST-ASSEMBLY MUTATIONS (StepExecutor-only) ────────────
                   if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
+
+                  // Diagnostics
                   let diagnosticsResult = null;
                   try {
                     if (preSemanticInterpretation && mapperArtifact) {
@@ -1666,14 +1460,14 @@ export class StepExecutor {
                       console.error('[StepExecutor] Diagnostics stamp failed', err);
                     }
 
+                    const mapperArtifact_claimProvenance = preSurvey.derived.claimProvenance;
                     if (mapperArtifact_claimProvenance) {
                       mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
                     }
                   }
 
-                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(derived.semanticEdges?.length || 0) + (derived.derivedSupportEdges?.length || 0)} edges`);
+                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(mapperArtifact.edges?.length || 0)} edges`);
                 } catch (err) {
-                  // processLogger.error or console.error with context
                   console.error('[StepExecutor] Mapper artifact build failed:', err);
                   console.debug('Context:', {
                     originalPrompt: payload.originalPrompt,
@@ -1681,17 +1475,11 @@ export class StepExecutor {
                     citationCount: citationOrder.length,
                     error: getErrorMessage(err)
                   });
-                  throw err; // Rethrow to handle consistently upstream
+                  throw err;
                 }
-
-
-                // mapperArtifact was built from V2->V1 adapter above (v1Artifact) and has
-                // been augmented with traversalGraph, forcingPoints and shadow data.
-                // Remove legacy fallback that referenced undefined `legacyClaims`/`legacyEdges`.
 
               } else {
                 console.warn("[StepExecutor] Semantic Mapper parsing failed:", parseResult.errors);
-                // Fallback? Or just fail? For now, we proceed with raw text but no artifact.
               }
 
               // Process raw text for clean display
@@ -1728,6 +1516,9 @@ export class StepExecutor {
             if (mapperArtifact && typeof mapperArtifact === 'object') {
               mapperArtifact.citationSourceOrder = citationSourceOrder;
             }
+            if (cognitiveArtifact && typeof cognitiveArtifact === 'object') {
+              cognitiveArtifact.citationSourceOrder = citationSourceOrder;
+            }
 
             const providerThreadMeta = (() => {
               try {
@@ -1746,20 +1537,6 @@ export class StepExecutor {
                 semanticMapperPrompt: mappingPrompt,
               },
             };
-
-            const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
-              shadow: {
-                extraction: shadowResult || null,
-              },
-              paragraphProjection: paragraphResult || null,
-              substrate: {
-                graph: substrateGraph,
-                shape: substrate?.shape,
-              },
-              preSemantic: preSemanticInterpretation || null,
-              ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
-              ...(basinInversionResult ? { basinInversion: basinInversionResult } : {}),
-            });
 
             try {
               if (finalResultWithMeta?.meta) {
@@ -2130,18 +1907,6 @@ export class StepExecutor {
 
     // Resolve the cognitive artifact from payload
     let mappingArtifact = payload.mappingArtifact || null;
-
-    // Fallback: parse from raw mapping text and convert to cognitive shape
-    if (!mappingArtifact && payload.mappingText) {
-      const parsed = parseSemanticMapperOutput(payload.mappingText);
-      if (parsed.success && parsed.output) {
-        const shell = createEmptyMapperArtifact();
-        shell.claims = parsed.output.claims;
-        shell.edges = parsed.output.edges;
-        shell.narrative = parsed.narrative || '';
-        mappingArtifact = buildCognitiveArtifact(shell, null);
-      }
-    }
 
     if (!mappingArtifact) {
       throw new Error("Singularity mode requires a mapping artifact.");

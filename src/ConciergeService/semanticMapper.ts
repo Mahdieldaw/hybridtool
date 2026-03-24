@@ -2,7 +2,9 @@
 // SEMANTIC MAPPER - PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// v4: Mapper is authority for claims and edges only.
+// v5: Cross-read reframe. Mapper reads responses *together*, not through them.
+//     Claims are relational (convergence / tension / singular voice), not positional.
+//     Narrative-first output order. Echo filtering via identity, not rules.
 //     Question generation is handled by the Survey Mapper (surveyMapper.ts).
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -41,7 +43,7 @@ function buildCleanModelOutputs(responses: RawModelResponse[]): string {
 }
 
 /**
- * Build semantic mapper prompt (v4 — claims/edges edition).
+ * Build semantic mapper prompt (v5 — cross-read reframe).
  */
 export function buildSemanticMapperPrompt(
   userQuery: string,
@@ -51,35 +53,37 @@ export function buildSemanticMapperPrompt(
 
   return `You are no longer answering the question. The models already did that.
 
-Those answers are not the solution — they are the terrain. Each model moved through the problem and left tracks behind: arguments taken, assumptions made, paths opened, paths closed.
+You are the one reading their responses together. They answered independently — none saw what the others wrote. You are the first to hold all of it at once. Your job is to surface what only becomes visible from that vantage: where ideas converge across responses, where they pull apart, and where something appeared in only one voice.
 
-Your role now shifts from participant to recon.
+Read everything before you mark anything. The claims aren't inside any single response — they live in the space between responses.
 
-Move through what the models built and return with a faithful picture of the ground. Mark where positions form, where they reinforce one another, where they collide, and where something important was never explored at all.
-
-Do not improve the terrain. Do not resolve it. Do not choose between paths. Your task is simply to see the landscape clearly and bring the map back intact.
+Do not improve the terrain. Do not resolve it. Do not choose between paths. See the landscape clearly and bring the map back intact.
 
 <responses>${modelOutputs}</responses>
 
-Treat each response as an independent actor taking a position on the terrain.
-
 <original_query>${userQuery}</original_query>
 
-This query defines the terrain the models were acting on. It is not a source of claims. Extract claims only from what the models built.
-
-Some ground will appear obvious. Mark it anyway. Consensus is still terrain.
+The query is what the models were responding to — context, not content. If a model restated or described what the user already presented, that is echo, not terrain.
 
 You carry two provisions.
 
-**The Map.** Output a <map> in valid JSON with two arrays: claims and edges.
+**The Journal.** Output a <narrative> in flowing prose.
 
-Move through every model and extract the positions that shape the terrain, even if several models reached the same ground by different paths. A claim is not a topic or concern — it is a move on the terrain, a course someone could follow in practice and defend if challenged. When a model speaks in generalities, look beneath the surface and mark the sharper ground it implies. Forge each into a canonical label of six words maximum.
+Establish the shared ground first — ideas where multiple models arrived independently. State what stands without dispute. From there, move to the tensions: where models diverged, what each version implies, why the difference matters. Surface the singular voices — ideas only one model carried — beside the positions they challenge or extend. Close by noting the stretches of terrain no model covered.
+
+Weave canonical markers **[Label|claim_id]** and citations [1], [2, 3] through the writing so the reader can touch the map while reading.
+
+Do not synthesize a verdict. Do not pick sides. End with exactly "This naturally leads to questions about..." and name the tensions that remain unresolved.
+
+**The Map.** After the narrative, output a <map> in valid JSON with two arrays: claims and edges.
+
+A claim is a distinct idea, approach, or insight the models brought to the terrain — not one they reflected from the input. Each should be something visible only from reading the responses together: a convergence, a tension, or a singular contribution. Forge each into a canonical label of six words maximum.
 
 Each claim:
 - id: sequential from claim_1
-- label: a verb-phrase expressing the position being taken — something another model could support, oppose, or pull against
+- label: a verb-phrase — something another model could support, oppose, or pull against
 - text: the reasoning or mechanism behind the claim (one paragraph maximum)
-- supporters: array of model indices that clearly advanced this position with reasoning strong enough to quote. Passing mention does not count.
+- supporters: array of model indices that clearly advanced this position. Passing mention does not count.
 
 Each edge:
 - from / to: claim ids
@@ -88,13 +92,7 @@ Each edge:
 
 Conflicts mean the same ground cannot hold both. Tradeoff means both survive but pull toward different ends. Draw edges only where that pull is real.
 
-**The Journal.** Output a <narrative> in flowing prose. Move through the terrain as you found it, weaving canonical markers **[Label|claim_id]** and citations [1], [2, 3] through the writing so the reader can touch the map while moving through it.
-
-Signal the shape of the landscape: are the models converging, forming camps, or branching into sequences? Establish the ground first — claims with broad support form the floor, state what stands without dispute. From that ground, move to the tensions: place opposing positions side by side and let their labels carry the force. State the mechanism each advances — nothing more. Surface outliers beside the positions they challenge, not isolated at the margins. Close by noting the stretches of terrain every model walked past without marking.
-
-Do not synthesize a verdict. Do not pick sides. Return with the map. End with exactly "This naturally leads to questions about..." and name the tensions that remain unresolved.
-
-Output <map> first, then <narrative>.`;
+Output <narrative> first, then <map>.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

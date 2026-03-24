@@ -53,6 +53,8 @@ export interface ClaimRouting {
   passthrough: string[];
   /** If true, skip the survey mapper entirely (high convergence, no structural tension) */
   skipSurvey: boolean;
+  /** All routed claim IDs (conflicts + outliers/load-bearing) */
+  routedClaimIds?: string[];
   /** Diagnostic: why the routing made the decisions it did */
   diagnostics: {
     damageThreshold: number | null;

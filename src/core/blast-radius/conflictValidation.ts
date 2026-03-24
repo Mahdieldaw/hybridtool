@@ -80,12 +80,38 @@ function computeCrossPoolProximityStatements(
   return Math.min(meanAtoB, meanBtoA);
 }
 
+/**
+ * Triangle residual on claim centroids.
+ * residual = (sim(A,Q) * sim(B,Q)) - sim(A,B)
+ * Positive residual → claims diverge more than shared query relevance predicts.
+ */
+function computeTriangleResidual(
+  claimIdA: string,
+  claimIdB: string,
+  claimEmbeddings: Map<string, Float32Array>,
+  queryEmbedding: Float32Array,
+): { residual: number; simAQ: number; simBQ: number } | null {
+  const embA = claimEmbeddings.get(claimIdA);
+  const embB = claimEmbeddings.get(claimIdB);
+  if (!embA || !embB) return null;
+
+  const simAQ = cosineSimilarity(embA, queryEmbedding);
+  const simBQ = cosineSimilarity(embB, queryEmbedding);
+  const simAB = cosineSimilarity(embA, embB);
+
+  return { residual: simAQ * simBQ - simAB, simAQ, simBQ };
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────
 
 export interface ConflictValidationInput {
   enrichedClaims: EnrichedClaim[];
   edges: Edge[];
   statementEmbeddings?: Map<string, Float32Array> | null;
+  /** Claim centroid embeddings (claim ID → Float32Array). For triangle residual metric. */
+  claimEmbeddings?: Map<string, Float32Array> | null;
+  /** Query embedding. For triangle residual metric. */
+  queryEmbedding?: Float32Array | null;
 }
 
 /**
@@ -100,6 +126,8 @@ export function computeConflictValidation(
   const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
   const edges = Array.isArray(input.edges) ? input.edges : [];
   const stmtEmbeddings = input.statementEmbeddings ?? null;
+  const claimEmbs = input.claimEmbeddings ?? null;
+  const queryEmb = input.queryEmbedding ?? null;
 
   const { canonicalSets } = buildClaimStatementSets(claims);
 
@@ -112,16 +140,18 @@ export function computeConflictValidation(
     mapperConflictSet.add(`${b}\0${a}`);
   }
 
-  // Pass 1: compute proximity for every eligible pair; collect all finite values.
+  // Pass 1: compute proximity and triangle residual for every eligible pair.
   type PairResult = {
     aId: string; bId: string;
     exclA: string[]; exclB: string[];
     crossPoolProx: number | null;
     failReason: string | null;
     mapperLabeledConflict: boolean;
+    triangleResult: { residual: number; simAQ: number; simBQ: number } | null;
   };
   const pairResults: PairResult[] = [];
   const proximityValues: number[] = [];
+  const residualValues: number[] = [];
 
   for (let i = 0; i < claims.length; i++) {
     for (let j = i + 1; j < claims.length; j++) {
@@ -149,13 +179,22 @@ export function computeConflictValidation(
         }
       }
 
-      pairResults.push({ aId, bId, exclA, exclB, crossPoolProx, failReason, mapperLabeledConflict });
+      // Triangle residual (claim centroids + query)
+      const triangleResult = claimEmbs && queryEmb
+        ? computeTriangleResidual(aId, bId, claimEmbs, queryEmb)
+        : null;
+      if (triangleResult) residualValues.push(triangleResult.residual);
+
+      pairResults.push({ aId, bId, exclA, exclB, crossPoolProx, failReason, mapperLabeledConflict, triangleResult });
     }
   }
 
-  // Derive threshold from the distribution of actual proximity values computed above.
+  // Derive thresholds from distributions.
   const muProximity = proximityValues.length > 0
     ? proximityValues.reduce((a, b) => a + b, 0) / proximityValues.length
+    : null;
+  const muResidual = residualValues.length > 0
+    ? residualValues.reduce((a, b) => a + b, 0) / residualValues.length
     : null;
 
   // Pass 2: apply threshold and assemble ValidatedConflict records.
@@ -182,6 +221,9 @@ export function computeConflictValidation(
       mapperLabeledConflict: pr.mapperLabeledConflict,
       validated,
       failReason: failReason ?? null,
+      triangleResidual: pr.triangleResult?.residual ?? null,
+      muTriangle: muResidual,
+      querySimPair: pr.triangleResult ? [pr.triangleResult.simAQ, pr.triangleResult.simBQ] : null,
     });
   }
 

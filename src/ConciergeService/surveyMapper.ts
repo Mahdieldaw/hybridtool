@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { extractJsonFromContent } from '../../shared/parsing-utils';
-import type { SurveyGate } from '../../shared/contract';
+import type { SurveyGate, PassageRoutedClaim, LandscapePosition } from '../../shared/contract';
 import type { ClaimRouting, ConflictCluster, DamageOutlier } from '../core/blast-radius/questionSelection';
 
 type RawModelResponse = {
@@ -53,6 +53,8 @@ export interface RoutedSurveyPromptInput {
   allClaims: ClaimSummary[];
   batchTexts: RawModelResponse[];
   edges: EdgeSummary[];
+  /** Passage-routed load-bearing claims (replaces damage outliers when present) */
+  passageRoutedClaims?: PassageRoutedClaim[];
 }
 
 function buildForkSection(
@@ -117,28 +119,64 @@ If sentence 1 cannot be completed truthfully—because the claim functions secur
 </isolate>`;
 }
 
+const LANDSCAPE_LABELS: Record<LandscapePosition, string> = {
+  northStar: 'North Star — sole-source sustained argument',
+  eastStar: 'East Star — sole-source distributed threading',
+  mechanism: 'Mechanism — multi-model passage-backed',
+  floor: 'Floor',
+};
+
+function buildPassageSection(claim: PassageRoutedClaim): string {
+  const positionLabel = LANDSCAPE_LABELS[claim.landscapePosition] || claim.landscapePosition;
+
+  const contribDesc = claim.structuralContributors.length === 1
+    ? `Model ${claim.structuralContributors[0]} is the sole structural contributor`
+    : `${claim.structuralContributors.length} models contributed structural passages`;
+
+  return `<passage claim_id="${claim.claimId}" position="${claim.landscapePosition}">
+This claim has concentrated, passage-backed evidence (${positionLabel}). ${contribDesc} (concentration=${(claim.concentrationRatio * 100).toFixed(0)}%, density=${(claim.densityRatio * 100).toFixed(0)}%).
+
+<claim>
+[${claim.claimId}] ${claim.claimLabel}
+${claim.claimText}
+</claim>
+
+**The Constructive Failure Test:**
+This claim has organized, passage-backed coverage from a narrow model base. Attempt to complete these two sentences truthfully, based strictly on what the claim demands:
+1. "This path would fail the user who [describe the specific wasted effort or dead end], because the concentrated evidence silently requires that they [state the strict, unmentioned condition]."
+2. "The user can verify safety by answering: '[Yes/No question about an observable fact]?'"
+
+If sentence 1 cannot be completed truthfully—because the claim functions securely regardless of the user's specific circumstances—mark it "stands" and stop. Do not force a failure mode that does not exist. Proving a claim is universally stable is your primary directive here.
+</passage>`;
+}
+
 export function buildRoutedSurveyPrompt(
   input: RoutedSurveyPromptInput
 ): string | null {
-  const { userQuery, routing, allClaims, batchTexts, edges } = input;
+  const { userQuery, routing, allClaims, batchTexts, edges, passageRoutedClaims } = input;
 
   if (routing.skipSurvey) return null;
 
   const hasForks = routing.conflictClusters.length > 0;
-  const hasOutliers = routing.damageOutliers.length > 0;
+  const hasPassageClaims = Array.isArray(passageRoutedClaims) && passageRoutedClaims.length > 0;
+  const hasOutliers = !hasPassageClaims && routing.damageOutliers.length > 0;
 
-  if (!hasForks && !hasOutliers) return null;
+  if (!hasForks && !hasPassageClaims && !hasOutliers) return null;
 
   const sourcesBlock = formatBatchTexts(batchTexts);
 
   const sections: string[] = [];
 
   // THE PREAMBLE
+  const nonForkDesc = hasPassageClaims
+    ? 'concentrated passage-backed positions with narrow model coverage'
+    : 'isolated positions built by single models';
+
   sections.push(`You are the actuator.
 
 The models answered. The geometry mapped. You determine whether the fractures in the map reach the user's ground.
 
-Multiple independent minds have surveyed this problem. Their raw output was projected into a geometric space, revealing the underlying structure of their logic. The consensus has been cleared away. What remains before you are the structural faults: forks where paths cleanly split, and isolated positions built by single models.
+Multiple independent minds have surveyed this problem. Their raw output was projected into a geometric space, revealing the underlying structure of their logic. The consensus has been cleared away. What remains before you are the structural faults: forks where paths cleanly split, and ${nonForkDesc}.
 
 The validity and quality of these claims is established terrain. Your task is narrower: determine which claims require a specific user reality to function, and for those that do, produce the question that measures it.
 
@@ -157,7 +195,14 @@ ${sourcesBlock}
     );
   }
 
-  if (hasOutliers) {
+  if (hasPassageClaims) {
+    const passageSections = passageRoutedClaims!.map((claim) =>
+      buildPassageSection(claim)
+    );
+    sections.push(
+      `\n## PASSAGE EVIDENCE VERIFICATION\n\n${passageSections.join('\n\n')}`
+    );
+  } else if (hasOutliers) {
     const outlierSections = routing.damageOutliers.map((outlier) =>
       buildIsolateSection(outlier)
     );
@@ -259,15 +304,59 @@ function validateGate(gate: unknown, errors: string[]): boolean {
   return true;
 }
 
+/**
+ * Normalise a raw assessment object so downstream code always sees `claimId`.
+ * Handles common LLM drift: `id`, `claim_id`, `ClaimId`, `claimID`, etc.
+ * If a value looks like a claim reference (claim_3, claim3, claim-3) it's accepted.
+ */
+function normalizeAssessment(raw: Record<string, unknown>): void {
+  // Already has a usable claimId — nothing to do
+  if (typeof raw.claimId === 'string' && raw.claimId.trim()) return;
+
+  const CLAIM_PATTERN = /^claim[\s_-]?\d+$/i;
+
+  // Priority-ordered fallback keys the LLM might use instead of "claimId"
+  const candidates: string[] = ['id', 'claim_id', 'ClaimId', 'claimID', 'Claim_Id', 'claim'];
+  for (const key of candidates) {
+    const val = raw[key];
+    if (typeof val === 'string' && val.trim() && CLAIM_PATTERN.test(val.trim())) {
+      raw.claimId = val.trim().replace(/^(claim)\s+/i, '$1_');
+      return;
+    }
+  }
+
+  // Last resort: scan every string value for a claim-like token
+  for (const val of Object.values(raw)) {
+    if (typeof val === 'string' && CLAIM_PATTERN.test(val.trim())) {
+      raw.claimId = val.trim().replace(/^(claim)\s+/i, '$1_');
+      return;
+    }
+  }
+}
+
 function validateAssessment(assessment: unknown, errors: string[]): boolean {
   if (!assessment || typeof assessment !== 'object') {
     errors.push('Assessment is not an object');
     return false;
   }
   const a = assessment as Record<string, unknown>;
+
+  // Coerce field-name variants before checking
+  normalizeAssessment(a);
+
   if (!a.claimId || typeof a.claimId !== 'string' || !a.claimId.trim()) {
     errors.push('Assessment missing claimId');
     return false;
+  }
+  // Normalise formatting: "claim3" / "claim-3" / "claim 3" → "claim_3"
+  a.claimId = String(a.claimId).trim().replace(/^(claim)[\s-]?(\d+)$/i, 'claim_$2');
+
+  // Normalise verdict: case-insensitive
+  if (typeof a.verdict === 'string') {
+    const v = a.verdict.trim().toLowerCase();
+    if (v === 'stands' || v === 'vulnerable') {
+      a.verdict = v;
+    }
   }
   if (a.verdict !== 'stands' && a.verdict !== 'vulnerable') {
     errors.push(`Assessment ${a.claimId}: verdict '${String(a.verdict)}' is not 'stands' or 'vulnerable' — dropping`);
