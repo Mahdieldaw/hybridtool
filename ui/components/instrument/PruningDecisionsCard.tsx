@@ -3,6 +3,28 @@ import clsx from "clsx";
 import { getProviderColor, getProviderConfig } from "../../utils/provider-helpers";
 import { CopyButton } from "../CopyButton";
 
+// ── Passage pruning display helpers ─────────────────────────────────────
+
+const FATE_COLOR: Record<string, string> = {
+  REMOVE: "text-rose-400",
+  KEEP: "text-emerald-400",
+  SKELETONIZE: "text-amber-400",
+  DROP: "text-zinc-500",
+};
+
+const FATE_BG: Record<string, string> = {
+  REMOVE: "bg-rose-500/60",
+  KEEP: "bg-emerald-500/60",
+  SKELETONIZE: "bg-amber-500/60",
+  DROP: "bg-zinc-500/40",
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  "pruned-owned": "pruned",
+  "living-owned": "living",
+  "unclassified": "unclass.",
+};
+
 type DebugPayload = {
   ok: boolean;
   reason?: string;
@@ -239,6 +261,54 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
 
       {error && <div className="text-[11px] text-red-400">{error}</div>}
 
+      {/* ── Survey Mapper Output (from artifact, always visible) ──── */}
+      {(() => {
+        const gates = safeArr<any>(artifact?.surveyGates);
+        const routing = artifact?.passageRouting?.routing ?? null;
+        const claimRouting = artifact?.claimRouting ?? null;
+        return (
+          <div>
+            {sectionTitle("Survey Mapper Output")}
+            <div className="mt-1">
+              {gates.length > 0 ? (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] text-text-muted">{gates.length} gate(s)</div>
+                  {gates.map((g: any) => (
+                    <div key={g.id} className="rounded-md border border-white/10 bg-black/10 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-mono text-text-muted">{g.id}</span>
+                        {typeof g.blastRadius === "number" && (
+                          <span className="text-[10px] font-mono text-text-muted" title="Blast radius score">
+                            BR {g.blastRadius.toFixed(3)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-text-primary mt-1">{g.question}</div>
+                      {g.reasoning && (
+                        <div className="text-[10px] text-text-muted mt-0.5 truncate" title={g.reasoning}>{g.reasoning}</div>
+                      )}
+                      {safeArr(g.affectedClaims).length > 0 && (
+                        <div className="text-[10px] text-text-muted mt-0.5">
+                          Affects: {safeArr<string>(g.affectedClaims).map(id => claimLabelById.get(id) ?? id).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[11px] text-text-muted italic">
+                  {claimRouting?.skipSurvey
+                    ? `Survey skipped — ${safeArr(claimRouting?.conflictClusters).length} conflict cluster(s), ${safeArr(claimRouting?.routedClaimIds).length} routed claim(s)`
+                    : routing?.skipSurvey
+                      ? "Survey skipped — no structural tension detected"
+                      : "No survey gates generated."}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {data && data.ok === false && (
         <div className="text-[11px] text-text-muted">
           {String(data.reason || "Not available for this turn")}
@@ -419,6 +489,127 @@ export function PruningDecisionsCard({ aiTurnId, providerId, artifact }: { aiTur
               );
             })()}
           </div>
+
+          {/* ── Passage Pruning Dispositions (new engine) ────────────── */}
+          {(() => {
+            const ppr = data?.chewedSubstrate?.passagePruningResult;
+            if (!ppr) return null;
+            const summary = ppr.summary ?? { total: 0, removeCount: 0, keepCount: 0, skeletonizeCount: 0, dropCount: 0, anomalyCount: 0 };
+            const dispositions = safeArr<any>(ppr.dispositions);
+            const anomalies = safeArr<any>(ppr.anomalies);
+            const pqEntries = safeArr<any>(ppr.provenanceQuality);
+            const suspectCount = pqEntries.filter((e: any) => e.closerToPruned).length;
+
+            return (
+              <div className="mt-3">
+                {sectionTitle("Passage Pruning (Provenance-Based)")}
+                <div className="text-[10px] text-text-muted mt-1 mb-2">
+                  4-rule mechanical resolution using provenance refinement + twin map.
+                </div>
+
+                {/* Summary stats */}
+                <div className="grid grid-cols-5 gap-x-3 gap-y-1">
+                  <div className="text-[10px] text-text-muted">Total</div>
+                  <div className="text-[10px] text-text-muted">Remove</div>
+                  <div className="text-[10px] text-text-muted">Keep</div>
+                  <div className="text-[10px] text-text-muted">Skel</div>
+                  <div className="text-[10px] text-text-muted">Drop</div>
+                  <div className="text-[11px] text-text-secondary font-mono">{summary.total}</div>
+                  <div className="text-[11px] text-rose-400 font-mono">{summary.removeCount}</div>
+                  <div className="text-[11px] text-emerald-400 font-mono">{summary.keepCount}</div>
+                  <div className="text-[11px] text-amber-400 font-mono">{summary.skeletonizeCount}</div>
+                  <div className="text-[11px] text-zinc-500 font-mono">{summary.dropCount}</div>
+                </div>
+
+                {/* Micro stacked bar */}
+                {summary.total > 0 && (
+                  <div className="flex w-full h-2 rounded overflow-hidden mt-2">
+                    {summary.removeCount > 0 && <div style={{ width: `${(summary.removeCount / summary.total) * 100}%` }} className={FATE_BG.REMOVE} title={`Remove: ${summary.removeCount}`} />}
+                    {summary.keepCount > 0 && <div style={{ width: `${(summary.keepCount / summary.total) * 100}%` }} className={FATE_BG.KEEP} title={`Keep: ${summary.keepCount}`} />}
+                    {summary.skeletonizeCount > 0 && <div style={{ width: `${(summary.skeletonizeCount / summary.total) * 100}%` }} className={FATE_BG.SKELETONIZE} title={`Skeletonize: ${summary.skeletonizeCount}`} />}
+                    {summary.dropCount > 0 && <div style={{ width: `${(summary.dropCount / summary.total) * 100}%` }} className={FATE_BG.DROP} title={`Drop: ${summary.dropCount}`} />}
+                  </div>
+                )}
+
+                {/* Disposition table */}
+                {dispositions.length > 0 && (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-[11px] border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/10">
+                          <th className="text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">R</th>
+                          <th className="text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Fate</th>
+                          <th className="text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Cat</th>
+                          <th className="text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Statement</th>
+                          <th className="text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Substep</th>
+                          <th className="text-left py-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Twin</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dispositions.slice(0, 50).map((d: any, i: number) => (
+                          <tr key={d.statementId ?? `d-${i}`} className="border-b border-white/5 hover:bg-white/3">
+                            <td className="py-1 px-2 text-text-muted font-mono">{d.rule}</td>
+                            <td className={clsx("py-1 px-2 font-mono font-semibold", FATE_COLOR[d.fate] ?? "text-text-secondary")}>{d.fate}</td>
+                            <td className="py-1 px-2 text-text-muted">{CATEGORY_LABEL[d.category] ?? d.category}</td>
+                            <td className="py-1 px-2 text-text-secondary max-w-[200px] truncate" title={d.statementText}>{d.statementText}</td>
+                            <td className="py-1 px-2 text-text-muted text-[10px]">{d.substep}</td>
+                            <td className="py-1 px-2 text-blue-400/70 font-mono text-[10px]">{typeof d.twinSimilarity === "number" ? d.twinSimilarity.toFixed(3) : ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {dispositions.length > 50 && (
+                      <div className="text-[10px] text-text-muted mt-1">Showing 50 of {dispositions.length} dispositions</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Conservation anomalies */}
+                {anomalies.length > 0 && (
+                  <div className="mt-3">
+                    {sectionTitle(`Conservation Anomalies (${anomalies.length})`)}
+                    <div className="text-[10px] text-text-muted mt-1 mb-1">Living claims that lose ALL canonical statements.</div>
+                    <div className="space-y-1.5">
+                      {anomalies.map((a: any, i: number) => (
+                        <div key={a.livingClaimId ?? `a-${i}`} className="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2">
+                          <div className="text-[11px] text-rose-400 font-semibold truncate" title={a.livingClaimId}>
+                            {claimLabelById.get(a.livingClaimId) ?? a.livingClaimId}
+                          </div>
+                          <div className="text-[10px] text-text-muted mt-0.5">
+                            {a.totalCanonicalStatements} canonical, {a.removedStatements} removed
+                          </div>
+                          {safeArr<any>(a.centroidSimilarities).map((cs: any) => (
+                            <div key={cs.prunedClaimId} className="text-[10px] text-text-muted">
+                              vs {claimLabelById.get(cs.prunedClaimId) ?? cs.prunedClaimId}: cos={typeof cs.cosSim === "number" ? cs.cosSim.toFixed(3) : "—"}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Provenance quality suspects */}
+                {suspectCount > 0 && (
+                  <div className="mt-3">
+                    {sectionTitle(`Provenance Quality Suspects (${suspectCount})`)}
+                    <div className="text-[10px] text-text-muted mt-1 mb-1">Rule 2 KEEPs closer to pruned claim centroid than living claim.</div>
+                    <div className="space-y-0.5">
+                      {pqEntries.filter((e: any) => e.closerToPruned).slice(0, 20).map((e: any, i: number) => (
+                        <div key={e.statementId ?? `pq-${i}`} className="flex items-start gap-2 text-[10px]">
+                          <span className="text-amber-400 font-mono flex-shrink-0">SUSPECT</span>
+                          <span className="text-text-secondary truncate flex-1" title={e.statementText}>{e.statementText}</span>
+                          <span className="text-text-muted flex-shrink-0 font-mono">
+                            {e.refinedAllegianceMethod ?? "—"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="mt-3">
             {sectionTitle("Model Outputs")}

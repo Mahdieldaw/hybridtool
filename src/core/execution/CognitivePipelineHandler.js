@@ -883,6 +883,8 @@ export class CognitivePipelineHandler {
                 blastSurface: mappingArtifact?.blastSurface || null,
                 tableSidecar: mappingArtifact?.shadow?.tableSidecar || [],
                 tableCellAllocation: mappingArtifact?.tableCellAllocation || null,
+                claimDensityProfiles: mappingArtifact?.claimDensity?.profiles || null,
+                provenanceRefinement: mappingArtifact?.provenanceRefinement || null,
               });
 
               console.log('🍖 Chewed substrate built:', {

@@ -887,10 +887,16 @@ export class SessionManager {
       const createdAtKeep = existing?.createdAt || now;
 
       // Phase 2: Extract survey gates/rationale from artifact (new home)
+      // Fall back to existing record's gates — StepExecutor may have persisted
+      // them directly before this bulk save runs.
       const outputAny = output as any;
       const artifactObj = outputAny?.artifact;
-      const surveyGates = Array.isArray(artifactObj?.surveyGates) ? artifactObj.surveyGates : undefined;
-      const surveyRationale = artifactObj?.surveyRationale ?? undefined;
+      const surveyGates = Array.isArray(artifactObj?.surveyGates) ? artifactObj.surveyGates
+        : Array.isArray((existing as any)?.surveyGates) ? (existing as any).surveyGates
+        : undefined;
+      const surveyRationale = artifactObj?.surveyRationale
+        ?? (existing as any)?.surveyRationale
+        ?? undefined;
 
       recordsToSave.push({
         id: respId,

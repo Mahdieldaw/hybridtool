@@ -1,5 +1,5 @@
 import type { ShadowStatement, ShadowParagraph } from '../shadow';
-import type { EnrichedClaim } from '../../shared/contract';
+import type { EnrichedClaim, PassagePruningResult, ProvenanceRefinementResult } from '../../shared/contract';
 
 export type StatementAction = 'PROTECTED' | 'UNTRIAGED' | 'SKELETONIZE' | 'REMOVE';
 
@@ -109,6 +109,8 @@ export interface ChewedSubstrate {
     reconstructionTimeMs: number;
     totalTimeMs: number;
   };
+  /** Full passage pruning result when passage-based pruning was used (for UI) */
+  passagePruningResult?: PassagePruningResult;
 }
 
 export interface NormalizedTraversalState {
@@ -136,4 +138,8 @@ export interface SkeletonizationInput {
     cellUnitClaims?: Map<string, string[]> | Record<string, string[]>;
     unallocatedCellUnitIds?: string[];
   } | null;
+  /** Claim density profiles with passage boundaries (enables passage-based pruning) */
+  claimDensityProfiles?: Record<string, { passages: Array<{ modelIndex: number; startParagraphIndex: number; endParagraphIndex: number }> }> | null;
+  /** Provenance refinement output for allegiance lookups */
+  provenanceRefinement?: ProvenanceRefinementResult | null;
 }

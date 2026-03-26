@@ -48,7 +48,7 @@ const getErrorMessage = (error: unknown): string => {
 };
 
 /**
- * Clean, chat-like display of the Singularity (Concierge) response.
+ * Clean, chat-like display of the Singularity response.
  * Front and center, just like any modern chat interface.
  */
 const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
@@ -65,7 +65,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
 
     const currentProviderName = output?.providerId
         ? LLM_PROVIDERS_CONFIG.find(p => p.id === output.providerId)?.name || output.providerId
-        : "Concierge";
+        : "Singularity";
 
     const providerHasStoredResponse = (pid: string) => {
         const desired = normalizeProviderId(String(pid || "").trim());
@@ -200,10 +200,6 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                     </div>
                     <div className="text-xs text-text-muted mt-2 text-center">
                         Converging insights from the council.
-                    </div>
-                    {/* Switcher in Loading State too */}
-                    <div className="mt-6">
-                        {renderSwitcher('pill')}
                     </div>
                 </div>
             );

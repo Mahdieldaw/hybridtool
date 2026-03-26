@@ -17,11 +17,10 @@ import {
   MutualGraphCard,
   BasinInversionCard,
   BlastRadiusCard,
-  CarrierDetectionCard,
   ClaimDensityCard,
   ClaimStatementsCard,
   PassageOwnershipCard,
-  PassageRoutingCard,
+  PassagePruningCard,
   PruningDecisionsCard,
   ModelOrderingCard,
   AlignmentCard,
@@ -663,8 +662,6 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
         };
       }));
     }
-    case 'carrier-detection':
-      return ser(artifact?.completeness?.statementFates);
     case 'model-ordering':
       return ser(artifact?.geometry?.preSemantic?.modelOrdering);
     case 'blast-radius': {
@@ -711,12 +708,20 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       return ser({
         blastRadiusFilter: expandStmtRefs(artifact?.blastRadiusFilter),
         blastSurface: expandStmtRefs(artifact?.blastSurface),
+        statementFates: artifact?.completeness?.statementFates ?? null,
+        substrateSummary: artifact?.substrateSummary ?? artifact?.chewedSubstrateSummary ?? null,
+        claimRouting: artifact?.claimRouting ?? null,
+        questionSelectionInstrumentation: artifact?.questionSelectionInstrumentation ?? null,
       });
     }
     case 'alignment':
       return ser(artifact?.alignment ?? artifact?.geometry?.alignment);
     case 'claim-density':
-      return ser(artifact?.claimDensity ?? null);
+      return ser({
+        claimDensity: artifact?.claimDensity ?? null,
+        passageRouting: artifact?.passageRouting ?? null,
+        surveyGates: artifact?.surveyGates ?? null,
+      });
     case 'raw-artifacts':
       return ser(artifact);
     default:
@@ -732,6 +737,8 @@ export const DecisionMapSheet = React.memo(() => {
   const { runMappingForAiTurn } = useRoundActions();
   const setToast = useSetAtom(toastAtom);
   const [regenState, setRegenState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
 
   // ── Instrument state (v4 console layout) ──────────────────────────────
   const [instrumentState, instrumentActions] = useInstrumentState();
@@ -1406,70 +1413,90 @@ export const DecisionMapSheet = React.memo(() => {
               {/* Right: Actions */}
               <div className="flex-none flex items-center gap-3">
                 {/* Actions Menu */}
-                <div className="group relative">
-                  <button type="button" className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted flex items-center gap-2 hover:bg-white/10 transition-colors">
+                <div className="relative">
+                  <button type="button" onClick={() => { setActionsMenuOpen(!actionsMenuOpen); setCopyMenuOpen(false); }} className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted flex items-center gap-2 hover:bg-white/10 transition-colors">
                     <span>Actions</span>
                     <span className="opacity-60 text-[9px]">▼</span>
                   </button>
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-1 flex flex-col gap-1">
-                    <button
-                      type="button"
-                      onClick={handleRegenerateEmbeddings}
-                      disabled={!aiTurnSafe?.id || !activeMappingPid || regenState === "running"}
-                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
-                    >
-                      {regenState === "running" ? "Regenerating…" : regenState === "error" ? "Regen Failed" : regenState === "done" ? "Regenerated" : "Regenerate Embeddings"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRetryActiveMapper}
-                      disabled={!aiTurn || !activeMappingPid}
-                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
-                    >
-                      Retry Mapper
-                    </button>
-                  </div>
+                  {actionsMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[3599]" onClick={() => setActionsMenuOpen(false)} />
+                      <div className="absolute top-full right-0 mt-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] p-1 flex flex-col gap-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleRegenerateEmbeddings();
+                            setActionsMenuOpen(false);
+                            setToast({ id: Date.now(), message: "Regenerating embeddings…", type: "info" });
+                          }}
+                          disabled={!aiTurnSafe?.id || !activeMappingPid || regenState === "running"}
+                          className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
+                        >
+                          {regenState === "running" ? "Regenerating…" : regenState === "error" ? "Regen Failed" : regenState === "done" ? "Regenerated" : "Regenerate Embeddings"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleRetryActiveMapper();
+                            setActionsMenuOpen(false);
+                            setToast({ id: Date.now(), message: "Retrying mapper…", type: "info" });
+                          }}
+                          disabled={!aiTurn || !activeMappingPid}
+                          className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 disabled:opacity-50 text-text-secondary hover:text-text-primary"
+                        >
+                          Retry Mapper
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Copy Menu */}
-                <div className="group relative">
-                  <button type="button" className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted flex items-center gap-2 hover:bg-white/10 transition-colors">
+                <div className="relative">
+                  <button type="button" onClick={() => { setCopyMenuOpen(!copyMenuOpen); setActionsMenuOpen(false); }} className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted flex items-center gap-2 hover:bg-white/10 transition-colors">
                     <span>Copy</span>
                     <span className="opacity-60 text-[9px]">▼</span>
                   </button>
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-1 flex flex-col gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const text = formatDecisionMapForMd(
-                          mappingText,
-                          graphData.claims,
-                          graphData.edges,
-                          graphTopology
-                        );
-                        navigator.clipboard.writeText(text).then(() => {
-                          setToast({ id: Date.now(), message: "Map Copied!", type: "success" });
-                        });
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 text-text-secondary hover:text-text-primary"
-                    >
-                      Copy Map
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const text = rawMappingText || '';
-                        if (!text) return;
-                        navigator.clipboard.writeText(text).then(() => {
-                          setToast({ id: Date.now(), message: "Raw Response Copied!", type: "success" });
-                        });
-                      }}
-                      disabled={!rawMappingText}
-                      className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 text-text-secondary hover:text-text-primary disabled:opacity-50"
-                    >
-                      Copy Raw
-                    </button>
-                  </div>
+                  {copyMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[3599]" onClick={() => setCopyMenuOpen(false)} />
+                      <div className="absolute top-full right-0 mt-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated z-[3600] p-1 flex flex-col gap-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = formatDecisionMapForMd(
+                              mappingText,
+                              graphData.claims,
+                              graphData.edges,
+                              graphTopology
+                            );
+                            navigator.clipboard.writeText(text).then(() => {
+                              setToast({ id: Date.now(), message: "Map Copied!", type: "success" });
+                            });
+                            setCopyMenuOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 text-text-secondary hover:text-text-primary"
+                        >
+                          Copy Map
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = rawMappingText || '';
+                            if (!text) return;
+                            navigator.clipboard.writeText(text).then(() => {
+                              setToast({ id: Date.now(), message: "Raw Response Copied!", type: "success" });
+                            });
+                            setCopyMenuOpen(false);
+                          }}
+                          disabled={!rawMappingText}
+                          className="w-full text-left px-3 py-2 rounded-lg text-[11px] transition-colors hover:bg-white/5 text-text-secondary hover:text-text-primary disabled:opacity-50"
+                        >
+                          Copy Raw
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <button
                   onClick={() => setOpenState(null)}
@@ -1741,10 +1768,9 @@ export const DecisionMapSheet = React.memo(() => {
                               { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                              { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
-                              { id: 'passage-routing', label: 'Passage Routing', content: <PassageRoutingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'passage-pruning', label: 'Passage Pruning', content: <PassagePruningCard artifact={mappingArtifactWithCitations} /> },
                               {
                                 id: 'traversal-pruning',
                                 label: 'Traversal Pruning',
@@ -1765,7 +1791,7 @@ export const DecisionMapSheet = React.memo(() => {
                                 label={label}
                                 expanded={expandedRefSections.includes(id)}
                                 onToggle={() => instrumentActions.toggleRefSection(id)}
-                                copyText={id !== 'cross-signal' && id !== 'traversal-pruning' && id !== 'passage-ownership'
+                                copyText={id !== 'cross-signal' && id !== 'traversal-pruning' && id !== 'passage-ownership' && id !== 'passage-pruning'
                                   ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                   : undefined}
                               >
@@ -1871,10 +1897,9 @@ export const DecisionMapSheet = React.memo(() => {
                                 { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                                { id: 'carrier-detection', label: 'Carrier Detection', content: <CarrierDetectionCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
-                              { id: 'passage-routing', label: 'Passage Routing', content: <PassageRoutingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'passage-pruning', label: 'Passage Pruning', content: <PassagePruningCard artifact={mappingArtifactWithCitations} /> },
                                 {
                                   id: 'traversal-pruning',
                                   label: 'Traversal Pruning',
@@ -1895,7 +1920,7 @@ export const DecisionMapSheet = React.memo(() => {
                                   label={label}
                                   expanded={expandedRefSections.includes(id)}
                                   onToggle={() => instrumentActions.toggleRefSection(id)}
-                                  copyText={id !== 'cross-signal' && id !== 'traversal-pruning' && id !== 'passage-ownership'
+                                  copyText={id !== 'cross-signal' && id !== 'traversal-pruning' && id !== 'passage-ownership' && id !== 'passage-pruning'
                                     ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                     : undefined}
                                 >

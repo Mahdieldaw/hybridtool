@@ -129,7 +129,7 @@ function splitIntoSentences(paragraph: string): string[] {
 
     // Split on sentence boundaries: ASCII (.!?) and CJK (。！？)
     const sentences = protectedText
-        .split(/(?<=[.!?。！？])(?:\s+|$)/)
+        .split(/(?<=[.!?。！？])(?:\s+|(?=[^\s.!?。！？])|$)/)
         .map(s => s.replace(/\|\|\|/g, '.'))
         .map(s => s.trim())
         .filter(s => s.length > 0);

@@ -3,10 +3,10 @@ import { useState, useCallback, useMemo } from "react";
 // Keep PipelineLayer exported for backward compatibility (used in Reference Shelf cards)
 export type PipelineLayer =
   | 'substrate' | 'mutual-graph' | 'basin-inversion' | 'query-relevance'
-  | 'competitive-provenance' | 'carrier-detection' | 'claim-statements'
+  | 'competitive-provenance' | 'claim-statements'
   | 'model-ordering' | 'blast-radius' | 'alignment' | 'raw-artifacts'
   | 'provenance-comparison' | 'mixed-provenance' | 'traversal-pruning'
-  | 'claim-density' | 'passage-ownership';
+  | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions';
 
 export type SelectedEntity =
   | { type: 'claim'; id: string; label?: string }

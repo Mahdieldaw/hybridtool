@@ -79,6 +79,8 @@ export async function computeDerivedFields({
     claimRouting: null,
     passageRoutingResult: null,
     claimDensityResult: null,
+    provenanceRefinement: null,
+    passagePruning: null,
   };
 
   // ── Group A: Independent steps (no cross-dependencies) ─────────────
@@ -552,6 +554,51 @@ export async function computeDerivedFields({
     })(),
   ]);
 
+  // ── Provenance refinement (canonical provenance assignment) ──────────
+  try {
+    if (result.claimDensityResult && statementOwners.size > 0) {
+      const { computeProvenanceRefinement } = await import('../blast-radius/provenanceRefinement');
+      result.provenanceRefinement = computeProvenanceRefinement({
+        enrichedClaims,
+        shadowStatements,
+        shadowParagraphs,
+        statementOwnership: statementOwners,
+        statementEmbeddings: statementEmbeddings || new Map(),
+        claimEmbeddings: claimEmbeddings || new Map(),
+        claimDensityResult: result.claimDensityResult,
+      });
+      console.log(`[DeterministicPipeline] ProvenanceRefinement: ${result.provenanceRefinement.summary.totalJoint} joint stmts (cal=${result.provenanceRefinement.summary.resolvedByCalibration} ctr=${result.provenanceRefinement.summary.resolvedByCentroidFallback} psg=${result.provenanceRefinement.summary.resolvedByPassageDominance} unr=${result.provenanceRefinement.summary.unresolved}) in ${result.provenanceRefinement.meta.processingTimeMs.toFixed(0)}ms`);
+    }
+  } catch (err) {
+    console.warn('[DeterministicPipeline] Provenance refinement failed:', getErrorMessage(err));
+  }
+
+  // ── Passage pruning (speculative per-claim, after blast surface + density) ──
+  try {
+    if (result.blastSurfaceResult?.twinMap && result.claimDensityResult?.profiles) {
+      const { computePassagePruning } = await import('../blast-radius/passagePruningEngine');
+      const passagePruningByClaimId = {};
+      for (const [claimId, profile] of Object.entries(result.claimDensityResult.profiles)) {
+        if (!Array.isArray(profile.passages) || profile.passages.length === 0) continue;
+        passagePruningByClaimId[claimId] = computePassagePruning({
+          prunedPassages: profile.passages.map(p => ({ claimId, ...p })),
+          claims: enrichedClaims,
+          shadowStatements,
+          statementOwnership: statementOwners,
+          twinMap: result.blastSurfaceResult.twinMap,
+          statementEmbeddings: statementEmbeddings || new Map(),
+          claimEmbeddings: claimEmbeddings || new Map(),
+          provenanceRefinement: result.provenanceRefinement,
+        });
+      }
+      result.passagePruning = passagePruningByClaimId;
+      const claimCount = Object.keys(passagePruningByClaimId).length;
+      console.log(`[DeterministicPipeline] PassagePruning: ${claimCount} claims speculatively resolved`);
+    }
+  } catch (err) {
+    console.warn('[DeterministicPipeline] Passage pruning failed:', getErrorMessage(err));
+  }
+
   return result;
 }
 
@@ -732,6 +779,8 @@ export function assembleMapperArtifact({
     claimRouting,
     passageRoutingResult,
     claimDensityResult,
+    provenanceRefinement,
+    passagePruning,
   } = derived;
 
   return {
@@ -774,6 +823,8 @@ export function assembleMapperArtifact({
     ...(claimRouting ? { claimRouting } : {}),
     ...(passageRoutingResult ? { passageRouting: passageRoutingResult } : {}),
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
+    ...(provenanceRefinement ? { provenanceRefinement } : {}),
+    ...(passagePruning ? { passagePruning } : {}),
   };
 }
 

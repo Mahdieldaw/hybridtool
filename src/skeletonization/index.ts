@@ -4,8 +4,10 @@ export { triageStatements } from './TriageEngine';
 export { reconstructSubstrate, formatSubstrateForPrompt } from './SubstrateReconstructor';
 
 import type { ChewedSubstrate, NormalizedTraversalState, SkeletonizationInput, StatementFate, TriageResult } from './types';
+import type { PassagePruningResult } from '../../shared/contract';
 import type { AiTurn } from '../../shared/contract';
 import { triageStatements } from './TriageEngine';
+import { triageViaPassagePruning } from './passagePruningAdapter';
 import { reconstructSubstrate } from './SubstrateReconstructor';
 
 function requireArray(value: unknown, label: string): asserts value is unknown[] {
@@ -71,43 +73,68 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
     return createPassthroughSubstrate(normalizedInput);
   }
 
-  const triageResultPartial = await triageStatements(normalizedInput);
-  const statementFates = new Map<string, StatementFate>(triageResultPartial.statementFates);
+  // Prefer passage-based pruning when prerequisites are available;
+  // fall back to legacy TriageEngine otherwise.
+  const usePassagePruning = !!(normalizedInput.claimDensityProfiles && normalizedInput.blastSurface?.twinMap);
 
-  for (const st of normalizedInput.statements) {
-    if (!statementFates.has(st.id)) {
-      statementFates.set(st.id, { statementId: st.id, action: 'PROTECTED', reason: 'Passthrough' });
+  let triageResult: TriageResult;
+  let passagePruningResult: PassagePruningResult | undefined;
+
+  if (usePassagePruning) {
+    const adapted = triageViaPassagePruning(normalizedInput);
+    triageResult = adapted.triageResult;
+    passagePruningResult = adapted.passagePruningResult;
+    console.log('[Skeletonization] Using passage-based pruning:', {
+      dispositions: passagePruningResult.summary.total,
+      remove: passagePruningResult.summary.removeCount,
+      keep: passagePruningResult.summary.keepCount,
+      skeletonize: passagePruningResult.summary.skeletonizeCount,
+      drop: passagePruningResult.summary.dropCount,
+      anomalies: passagePruningResult.summary.anomalyCount,
+    });
+  } else {
+    const triageResultPartial = await triageStatements(normalizedInput);
+    const statementFates = new Map<string, StatementFate>(triageResultPartial.statementFates);
+
+    for (const st of normalizedInput.statements) {
+      if (!statementFates.has(st.id)) {
+        statementFates.set(st.id, { statementId: st.id, action: 'PROTECTED', reason: 'Passthrough' });
+      }
     }
-  }
 
-  const counts = countFates(normalizedInput.statements, statementFates);
-  const protectedStatementIds = new Set<string>();
-  for (const st of normalizedInput.statements) {
-    const action = statementFates.get(st.id)?.action ?? 'PROTECTED';
-    if (action === 'PROTECTED' || action === 'UNTRIAGED') protectedStatementIds.add(st.id);
+    const counts = countFates(normalizedInput.statements, statementFates);
+    const protectedStatementIds = new Set<string>();
+    for (const st of normalizedInput.statements) {
+      const action = statementFates.get(st.id)?.action ?? 'PROTECTED';
+      if (action === 'PROTECTED' || action === 'UNTRIAGED') protectedStatementIds.add(st.id);
+    }
+    triageResult = {
+      protectedStatementIds,
+      statementFates,
+      mixedInstrumentation: triageResultPartial.mixedInstrumentation ?? {
+        mixedCount: 0, mixedProtectedCount: 0, mixedRemovedCount: 0, mixedSkeletonizedCount: 0,
+        details: [], byPrunedClaim: {},
+      },
+      meta: {
+        totalStatements: normalizedInput.statements.length,
+        protectedCount: counts.protectedCount,
+        untriagedCount: counts.untriagedCount,
+        skeletonizedCount: counts.skeletonizedCount,
+        removedCount: counts.removedCount,
+        mixedCount: triageResultPartial.meta.mixedCount ?? 0,
+        mixedProtectedCount: triageResultPartial.meta.mixedProtectedCount ?? 0,
+        mixedRemovedCount: triageResultPartial.meta.mixedRemovedCount ?? 0,
+        mixedSkeletonizedCount: triageResultPartial.meta.mixedSkeletonizedCount ?? 0,
+        processingTimeMs: triageResultPartial.meta.processingTimeMs,
+      },
+    };
+    console.log('[Skeletonization] Using legacy TriageEngine (passage pruning prerequisites unavailable)');
   }
-  const triageResult: TriageResult = {
-    protectedStatementIds,
-    statementFates,
-    mixedInstrumentation: triageResultPartial.mixedInstrumentation ?? {
-      mixedCount: 0, mixedProtectedCount: 0, mixedRemovedCount: 0, mixedSkeletonizedCount: 0,
-      details: [], byPrunedClaim: {},
-    },
-    meta: {
-      totalStatements: normalizedInput.statements.length,
-      protectedCount: counts.protectedCount,
-      untriagedCount: counts.untriagedCount,
-      skeletonizedCount: counts.skeletonizedCount,
-      removedCount: counts.removedCount,
-      mixedCount: triageResultPartial.meta.mixedCount ?? 0,
-      mixedProtectedCount: triageResultPartial.meta.mixedProtectedCount ?? 0,
-      mixedRemovedCount: triageResultPartial.meta.mixedRemovedCount ?? 0,
-      mixedSkeletonizedCount: triageResultPartial.meta.mixedSkeletonizedCount ?? 0,
-      processingTimeMs: triageResultPartial.meta.processingTimeMs,
-    },
-  };
 
   const chewed = reconstructSubstrate(normalizedInput, triageResult);
+  if (passagePruningResult) {
+    chewed.passagePruningResult = passagePruningResult;
+  }
 
   // Cell-unit triage + table reconstruction
   const tca = normalizedInput.tableCellAllocation;

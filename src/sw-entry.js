@@ -754,466 +754,16 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       // Reconstruct full per-provider cognitive artifact.
       // Sources claims from mapping response text (same as graph view), not stale artifacts.
-      // Only embedding model call needed; everything else is deterministic math.
+      // Delegates to doRegenerateEmbeddings() which handles dedup + full pipeline.
       case "REGENERATE_EMBEDDINGS":
         (async () => {
-          const { aiTurnId, providerId, persist } = message.payload || {};
+          const { aiTurnId, providerId } = message.payload || {};
           if (!aiTurnId || !providerId) {
             sendResponse({ success: false, error: "Missing aiTurnId or providerId" });
             return;
           }
-          // Tier 3: artifacts are ephemeral — `persist` flag is ignored.
-
-          const turnRaw = await sm.adapter.get("turns", aiTurnId);
-          if (!turnRaw) {
-            sendResponse({ success: false, error: "Turn not found" });
-            return;
-          }
-
-          // ── Minimal imports (geometry I/O + codec only) ──
-          const {
-            generateStatementEmbeddings,
-            generateEmbeddings,
-            generateTextEmbeddings,
-            stripInlineMarkdown,
-            structuredTruncate,
-            DEFAULT_CONFIG,
-          } = await import("./clustering");
-          const { packEmbeddingMap, unpackEmbeddingMap } = await import("./persistence/embeddingCodec");
-          const dims = DEFAULT_CONFIG.embeddingDimensions;
-
-          const normalizeProvId = (pid) => String(pid || "").trim().toLowerCase();
-
-          // ── Load query text (shared) ──
-          const userTurnId = turnRaw.userTurnId;
-          let queryText = "";
-          if (userTurnId) {
-            try {
-              const userTurn = await sm.adapter.get("turns", userTurnId);
-              queryText = userTurn?.text || userTurn?.content || "";
-            } catch (err) {
-              console.error(`[Regenerate] Failed to load user turn for aiTurnId=${aiTurnId}:`, err);
-            }
-          }
-
-          const coerceJson = (value) => {
-            if (!value) return null;
-            if (typeof value === "string") {
-              try {
-                return JSON.parse(value);
-              } catch {
-                return null;
-              }
-            }
-            return value;
-          };
-
-          const readCitationOrderFromMeta = (meta) => {
-            try {
-              const raw = meta?.citationSourceOrder;
-              if (!raw || typeof raw !== "object") return [];
-              const entries = Object.entries(raw)
-                .map(([k, v]) => [Number(k), String(v || "").trim()])
-                .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
-              entries.sort((a, b) => a[0] - b[0]);
-              return entries.map(([, pid]) => normalizeProvId(pid));
-            } catch {
-              return [];
-            }
-          };
-
-          // ── A. Load provider responses (mappingResp + text only) ──
-          let responsesForTurn = [];
-          try {
-            if (sm.adapter?.getResponsesByTurnId) {
-              const resps = await sm.adapter.getResponsesByTurnId(aiTurnId);
-              responsesForTurn = Array.isArray(resps) ? resps : [];
-            }
-          } catch (err) {
-            console.error(`[Regenerate] Failed to load responses for aiTurnId=${aiTurnId}:`, err);
-            sendResponse({ success: false, error: "Failed to load responses for this turn" });
-            return;
-          }
-
-          const mappingResp = responsesForTurn
-            .filter(
-              (r) =>
-                r &&
-                r.responseType === "mapping" &&
-                normalizeProvId(r.providerId) === normalizeProvId(providerId)
-            )
-            .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0] || null;
-
-          const mappingText = String(mappingResp?.text || "").trim();
-          if (!mappingText) {
-            sendResponse({ success: false, error: "No mapping response text found for this provider" });
-            return;
-          }
-
-          // ── Survey gates recovery (Tier 2: provider response only) ──
-          const storedSurveyGates = Array.isArray(mappingResp?.surveyGates)
-            ? mappingResp.surveyGates
-            : [];
-          const storedSurveyRationale = mappingResp?.surveyRationale ?? null;
-
-          // ── B. Shadow + batch sources (no parsing here) ──
-          const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
-
-          let shadowStatements = null;
-          let shadowParagraphs = null;
-          let batchSources = [];
-
-          // Always rebuild batch sources from DB responses (canonical ordering)
-          try {
-            const allBatchResps = responsesForTurn
-              .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
-              .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
-
-            const seenBatchProviders = new Map();
-            for (const r of allBatchResps) {
-              const pid = normalizeProvId(r.providerId);
-              if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
-            }
-
-            const { canonicalCitationOrder } = await import("../shared/provider-config");
-            const canonicalOrder = canonicalCitationOrder(
-              Array.from(seenBatchProviders.keys())
-            );
-
-            batchSources = canonicalOrder.map((pid, idx) => {
-              const r = seenBatchProviders.get(pid);
-              return { modelIndex: idx + 1, content: String(r?.text || "") };
-            }).filter(s => s.content);
-          } catch (err) {
-            console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
-            sendResponse({ success: false, error: "Shadow reconstruction failed" });
-            return;
-          }
-
-          // ── Model count ──
-          const uniqueBatchProviders = new Set(
-            responsesForTurn
-              .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
-              .map((r) => normalizeProvId(r.providerId))
-          );
-          const modelCount = Math.max(citationOrderArr.length, uniqueBatchProviders.size, 1);
-
-          // ── B.1 Always re-extract shadow from batch (ground truth for current code) ──
-          // Never trust stored shadow statements — extraction rules may have changed.
-          let tableSidecar = [];
-          if (batchSources.length > 0) {
-            const { extractShadowStatements, projectParagraphs } = await import("./shadow");
-            const shadowResult = extractShadowStatements(batchSources);
-            shadowStatements = shadowResult.statements;
-            shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
-            tableSidecar = shadowResult.tableSidecar || [];
-            console.log(`[Regenerate] Fresh extraction: ${shadowStatements.length} stmts, ${shadowParagraphs.length} paras, ${tableSidecar.length} tables`);
-          }
-          if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
-            sendResponse({ success: false, error: "No shadow statements for embedding generation" });
-            return;
-          }
-          if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-            const { projectParagraphs } = await import("./shadow");
-            shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
-          }
-
-          // ── C. Geometry embeddings — regenerate if missing or stale ──
-          let geoRecord = await sm.loadEmbeddings(aiTurnId);
-
-          // Check if cached embeddings match current shadow extraction
-          const cachedStmtIds = new Set(geoRecord?.meta?.statementIndex || []);
-          const currentStmtIds = new Set(shadowStatements.map((s) => s.id));
-          const cachedParaIds = new Set(geoRecord?.meta?.paragraphIndex || []);
-          const currentParaIds = new Set(shadowParagraphs.map((p) => p.id));
-
-          const stmtIdMismatch =
-            cachedStmtIds.size !== currentStmtIds.size ||
-            [...currentStmtIds].some((id) => !cachedStmtIds.has(id));
-          const paraIdMismatch =
-            cachedParaIds.size !== currentParaIds.size ||
-            [...currentParaIds].some((id) => !cachedParaIds.has(id));
-
-          if (stmtIdMismatch || paraIdMismatch) {
-            console.log(
-              `[Regenerate] Embedding cache stale:`,
-              stmtIdMismatch ? `stmts ${cachedStmtIds.size}→${currentStmtIds.size}` : '',
-              paraIdMismatch ? `paras ${cachedParaIds.size}→${currentParaIds.size}` : '',
-            );
-          }
-
-          const needsRegeneration =
-            !geoRecord?.statementEmbeddings ||
-            !geoRecord?.paragraphEmbeddings ||
-            (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0) ||
-            !geoRecord?.meta?.semanticDensityScores ||
-            !geoRecord?.meta?.densityRegressionModel ||
-            !geoRecord?.meta?.paragraphSemanticDensityScores ||
-            geoRecord?.meta?.querySemanticDensity == null ||
-            geoRecord.meta?.embeddingVersion !== 2 ||
-            stmtIdMismatch ||
-            paraIdMismatch;
-
-          if (needsRegeneration) {
-
-            const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
-            const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
-
-            let queryEmbedding = null;
-            let queryDensityScore = null;
-            if (queryText) {
-              const cleaned = stripInlineMarkdown(String(queryText)).trim();
-              const truncated = structuredTruncate(cleaned, 1740);
-              const prefixed =
-                truncated && !truncated.toLowerCase().startsWith("represent this sentence")
-                  ? `Represent this sentence for searching relevant passages: ${truncated}`
-                  : truncated;
-              if (prefixed) {
-                const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG, {
-                  captureRawMagnitudes: true,
-                });
-                queryEmbedding = batch.embeddings.get("0") || null;
-                const qMag = batch.rawMagnitudes?.get("0") ?? null;
-                const qLen = batch.textLengths?.get("0") ?? null;
-                if (qMag != null && qLen != null && stmtResult.densityRegressionModel) {
-                  const { projectSemanticDensity } = await import("./clustering/semanticDensity");
-                  queryDensityScore = projectSemanticDensity(qMag, qLen, stmtResult.densityRegressionModel);
-                }
-              }
-            }
-
-            const packedStatements = packEmbeddingMap(stmtResult.embeddings, dims);
-            const packedParagraphs = packEmbeddingMap(paraResult.embeddings, dims);
-            const queryBuffer = queryEmbedding
-              ? queryEmbedding.buffer.slice(
-                  queryEmbedding.byteOffset,
-                  queryEmbedding.byteOffset + queryEmbedding.byteLength
-                )
-              : null;
-
-            const densityObj =
-              stmtResult.semanticDensityScores?.size > 0
-                ? Object.fromEntries(stmtResult.semanticDensityScores)
-                : null;
-            const paraDensityObj =
-              paraResult.semanticDensityScores?.size > 0
-                ? Object.fromEntries(paraResult.semanticDensityScores)
-                : null;
-
-            await sm.persistEmbeddings(aiTurnId, {
-              statementEmbeddings: packedStatements.buffer,
-              paragraphEmbeddings: packedParagraphs.buffer,
-              queryEmbedding: queryBuffer,
-              meta: {
-                embeddingModelId: DEFAULT_CONFIG.modelId,
-                dimensions: dims,
-                hasQuery: Boolean(queryEmbedding),
-                statementCount: packedStatements.index.length,
-                paragraphCount: packedParagraphs.index.length,
-                statementIndex: packedStatements.index,
-                paragraphIndex: packedParagraphs.index,
-                ...(densityObj ? { semanticDensityScores: densityObj } : {}),
-                ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
-                ...(stmtResult.densityRegressionModel
-                  ? { densityRegressionModel: stmtResult.densityRegressionModel }
-                  : {}),
-                ...(queryDensityScore != null ? { querySemanticDensity: queryDensityScore } : {}),
-                embeddingVersion: 2,
-                timestamp: Date.now(),
-              },
-            });
-            geoRecord = await sm.loadEmbeddings(aiTurnId);
-          }
-
-          if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings) {
-            sendResponse({ success: false, error: "Geometry embeddings unavailable" });
-            return;
-          }
-
-          const statementEmbeddings = unpackEmbeddingMap(
-            geoRecord.statementEmbeddings,
-            geoRecord.meta.statementIndex,
-            geoRecord.meta.dimensions
-          );
-          const paragraphEmbeddings = unpackEmbeddingMap(
-            geoRecord.paragraphEmbeddings,
-            geoRecord.meta.paragraphIndex,
-            geoRecord.meta.dimensions
-          );
-          const queryEmbedding =
-            geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
-              ? new Float32Array(geoRecord.queryEmbedding)
-              : null;
-
-          // ── D. Load or generate cell-unit embeddings ──
-          let cellUnitEmbeddings = null;
-          if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
-            // Load from cache
-            cellUnitEmbeddings = unpackEmbeddingMap(
-              geoRecord.cellUnitEmbeddings,
-              geoRecord.meta.cellUnitIndex,
-              geoRecord.meta.dimensions
-            );
-          } else if (tableSidecar.length > 0) {
-            // Generate + persist
-            try {
-              const { flattenCellUnits } = await import("./core/tableCellAllocation");
-              const cellUnits = flattenCellUnits(tableSidecar);
-              if (cellUnits.length > 0) {
-                const cellTexts = cellUnits.map((cu) => stripInlineMarkdown(cu.text));
-                const cellIds = cellUnits.map((cu) => cu.id);
-                const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
-                cellUnitEmbeddings = new Map();
-                for (let ci = 0; ci < cellIds.length; ci++) {
-                  const emb = cellBatch.embeddings.get(String(ci));
-                  if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
-                }
-                // Persist to geo record
-                if (cellUnitEmbeddings.size > 0) {
-                  const packedCells = packEmbeddingMap(cellUnitEmbeddings, dims);
-                  const existingRecord = await sm.loadEmbeddings(aiTurnId);
-                  if (existingRecord) {
-                    existingRecord.cellUnitEmbeddings = packedCells.buffer;
-                    existingRecord.meta = existingRecord.meta || {};
-                    existingRecord.meta.cellUnitIndex = packedCells.index;
-                    existingRecord.meta.cellUnitCount = packedCells.index.length;
-                    await sm.adapter.putBinary("embeddings", existingRecord);
-                    geoRecord = existingRecord;
-                  }
-                }
-                console.log(`[Regenerate] Embedded + cached ${cellUnitEmbeddings.size} table cell-units`);
-              }
-            } catch (cellErr) {
-              console.warn("[Regenerate] Cell-unit embedding failed:", cellErr?.message || String(cellErr));
-            }
-          }
-
-          // ══════════════════════════════════════════════════════════════
-          // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
-          // ══════════════════════════════════════════════════════════════
-          const { buildArtifactForProvider } = await import("./core/execution/deterministicPipeline");
-          const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } = await import("../shared/provider-config");
-          const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));
-
-          const buildResult = await buildArtifactForProvider({
-            mappingText,
-            shadowStatements: Array.isArray(shadowStatements) && shadowStatements.length > 0
-              ? shadowStatements
-              : null,
-            shadowParagraphs: Array.isArray(shadowParagraphs) && shadowParagraphs.length > 0
-              ? shadowParagraphs
-              : null,
-            batchSources,
-            statementEmbeddings,
-            paragraphEmbeddings,
-            queryEmbedding,
-            geoRecord,
-            claimEmbeddings: null, // always regenerate for now
-            surveyGates: storedSurveyGates.length > 0 ? storedSurveyGates : undefined,
-            surveyRationale: storedSurveyRationale,
-            citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
-            queryText,
-            modelCount,
-            tableSidecar,
-            cellUnitEmbeddings,
-          });
-
-          const {
-            cognitiveArtifact,
-            mapperArtifact,
-            enrichedClaims,
-            parsedClaims,
-            claimEmbeddings,
-            claimDensityScores,
-          } = buildResult;
-
-          // ── Persist claim embeddings ──
-          const hashString = (input) => {
-            let h = 5381;
-            for (let i = 0; i < input.length; i++) {
-              h = ((h << 5) + h) ^ input.charCodeAt(i);
-            }
-            return (h >>> 0).toString(16);
-          };
-                // ── Persist claim embeddings ──
-          // IMPORTANT: hash uses RAW parsedClaims (pre-enrichment) so the cache key
-          // stays stable even after provenance/density enrichment.
-          const claimsHash = hashString(
-            parsedClaims
-              .map((c) => `${String(c?.id || '')}\u001f${String(c?.label || '')}\u001f${String(c?.text || '')}`)
-              .join('\u001e')
-          );
-
-          if (claimEmbeddings && claimEmbeddings.size > 0) {
-            const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
-            await sm.persistClaimEmbeddings(aiTurnId, providerId, {
-              claimEmbeddings: packedClaims.buffer,
-              meta: {
-                dimensions: dims,
-                claimCount: packedClaims.index.length,
-                claimIndex: packedClaims.index,
-                claimsHash,
-                timestamp: Date.now(),
-              },
-            });
-          }
-
-          console.log(
-            `[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${
-              claimEmbeddings?.size || 0
-            } claims`
-          );
-
-          // Log semantic density
-          const cachedDensity = geoRecord?.meta?.semanticDensityScores;
-          if (cachedDensity && typeof cachedDensity === "object") {
-            const entries = Object.entries(cachedDensity).sort((a, b) => b[1] - a[1]);
-            const values = entries.map(([, v]) => v);
-            const mean = values.reduce((a, b) => a + b, 0) / values.length;
-            console.log(
-              `[Regenerate] Semantic density:`,
-              JSON.stringify({
-                count: entries.length,
-                mean,
-                topDense: entries.slice(0, 3).map(([id, score]) => ({ id, score })),
-                topHollow: entries.slice(-3).reverse().map(([id, score]) => ({ id, score })),
-              })
-            );
-          }
-
-          // ── G.1 Diagnostic ──
-          console.log(
-            `[Regenerate] Artifact diagnostics:`,
-            `shadow.paragraphs=${
-              Array.isArray(cognitiveArtifact?.shadow?.paragraphs)
-                ? cognitiveArtifact.shadow.paragraphs.length
-                : "missing"
-            }`,
-            `shadow.statements=${
-              Array.isArray(cognitiveArtifact?.shadow?.statements)
-                ? cognitiveArtifact.shadow.statements.length
-                : "missing"
-            }`,
-            `claimProvenance=${cognitiveArtifact?.claimProvenance ? "present" : "missing"}`,
-            `alignment=${cognitiveArtifact?.geometry?.alignment ? "present" : "missing"}`,
-            `basinInversion=${
-              cognitiveArtifact?.geometry?.basinInversion
-                ? cognitiveArtifact.geometry.basinInversion.status
-                : "missing"
-            }`,
-            `blastSurface=${cognitiveArtifact?.blastSurface ? "present" : "missing"}`
-          );
-
-          // ── H. Persist as provider-specific artifact (unchanged) ──
-          // Tier 3: artifact is ephemeral — return to UI but never persist.
-          sendResponse({
-            success: true,
-            data: {
-              artifact: cognitiveArtifact,
-              claimCount: enrichedClaims.length,
-              edgeCount: mapperArtifact.edges?.length || 0,
-            },
-          });
+          const result = await doRegenerateEmbeddings(aiTurnId, providerId, sm);
+          sendResponse(result);
         })().catch((e) => {
           console.error("[Regenerate] Failed:", e);
           sendResponse({ success: false, error: getErrorMessage(e) });
@@ -1474,6 +1024,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             sourceData,
             ...(statementEmbeddings ? { statementEmbeddings } : {}),
             blastSurface: blastSurfaceFromUi ?? mappingArtifact?.blastSurface ?? null,
+            claimDensityProfiles: mappingArtifact?.claimDensity?.profiles || null,
+            provenanceRefinement: mappingArtifact?.provenanceRefinement || null,
           });
 
           sendResponse({
@@ -1732,6 +1284,18 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               providerContexts
             }
           });
+
+          // Fire-and-forget: preemptively build artifact for latest turn so
+          // instrument panel is instant when opened. doRegenerateEmbeddings
+          // deduplicates — if the UI fires REGENERATE_EMBEDDINGS before this
+          // completes, they share the same in-flight promise.
+          const latestRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+          const latestMapper = latestRound?.meta?.mapper
+            || Object.keys(latestRound?.mappingResponses || {})[0]
+            || null;
+          if (latestRound?.aiTurnId && latestMapper) {
+            doRegenerateEmbeddings(latestRound.aiTurnId, latestMapper, sm).catch(() => {});
+          }
         })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
       }
@@ -1927,6 +1491,464 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
     sendResponse({ success: false, error: getErrorMessage(e) });
     return true;
   }
+}
+
+// ============================================================================
+// ARTIFACT REGENERATION — shared core (preemptive + on-demand)
+// ============================================================================
+// Full artifact rebuild: shadow extraction → embedding staleness check →
+// regenerate if needed → deterministic pipeline → cognitive artifact.
+// Used by both GET_HISTORY_SESSION (preemptive, fire-and-forget) and
+// REGENERATE_EMBEDDINGS (on-demand, returns artifact to UI).
+// Deduplication: concurrent calls for the same turnId::providerId share
+// the same in-flight promise.
+
+const regenInflight = new Map(); // "turnId::providerId" → Promise<result>
+
+/**
+ * Run the full regenerate-embeddings pipeline and return the result.
+ * Returns { success: true, data: { artifact, claimCount, edgeCount } }
+ * or { success: false, error: string }.
+ */
+function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
+  const cacheKey = `${aiTurnId}::${String(providerId || "").trim().toLowerCase()}`;
+
+  if (regenInflight.has(cacheKey)) return regenInflight.get(cacheKey);
+
+  const work = (async () => {
+    const normalizeProvId = (pid) => String(pid || "").trim().toLowerCase();
+
+    const turnRaw = await sm.adapter.get("turns", aiTurnId);
+    if (!turnRaw) return { success: false, error: "Turn not found" };
+
+    // ── Minimal imports (geometry I/O + codec only) ──
+    const {
+      generateStatementEmbeddings,
+      generateEmbeddings,
+      generateTextEmbeddings,
+      stripInlineMarkdown,
+      structuredTruncate,
+      DEFAULT_CONFIG,
+    } = await import("./clustering");
+    const { packEmbeddingMap, unpackEmbeddingMap } = await import("./persistence/embeddingCodec");
+    const dims = DEFAULT_CONFIG.embeddingDimensions;
+
+    // ── Load query text (shared) ──
+    const userTurnId = turnRaw.userTurnId;
+    let queryText = "";
+    if (userTurnId) {
+      try {
+        const userTurn = await sm.adapter.get("turns", userTurnId);
+        queryText = userTurn?.text || userTurn?.content || "";
+      } catch (err) {
+        console.error(`[Regenerate] Failed to load user turn for aiTurnId=${aiTurnId}:`, err);
+      }
+    }
+
+    const readCitationOrderFromMeta = (meta) => {
+      try {
+        const raw = meta?.citationSourceOrder;
+        if (!raw || typeof raw !== "object") return [];
+        const entries = Object.entries(raw)
+          .map(([k, v]) => [Number(k), String(v || "").trim()])
+          .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
+        entries.sort((a, b) => a[0] - b[0]);
+        return entries.map(([, pid]) => normalizeProvId(pid));
+      } catch {
+        return [];
+      }
+    };
+
+    // ── A. Load provider responses (mappingResp + text only) ──
+    let responsesForTurn = [];
+    try {
+      if (sm.adapter?.getResponsesByTurnId) {
+        const resps = await sm.adapter.getResponsesByTurnId(aiTurnId);
+        responsesForTurn = Array.isArray(resps) ? resps : [];
+      }
+    } catch (err) {
+      console.error(`[Regenerate] Failed to load responses for aiTurnId=${aiTurnId}:`, err);
+      return { success: false, error: "Failed to load responses for this turn" };
+    }
+
+    const mappingResp = responsesForTurn
+      .filter(
+        (r) =>
+          r &&
+          r.responseType === "mapping" &&
+          normalizeProvId(r.providerId) === normalizeProvId(providerId)
+      )
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0] || null;
+
+    const mappingText = String(mappingResp?.text || "").trim();
+    if (!mappingText) {
+      return { success: false, error: "No mapping response text found for this provider" };
+    }
+
+    // ── Survey gates recovery (Tier 2: provider response only) ──
+    const storedSurveyGates = Array.isArray(mappingResp?.surveyGates)
+      ? mappingResp.surveyGates
+      : [];
+    const storedSurveyRationale = mappingResp?.surveyRationale ?? null;
+
+    // ── B. Shadow + batch sources (no parsing here) ──
+    const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
+
+    let shadowStatements = null;
+    let shadowParagraphs = null;
+    let batchSources = [];
+
+    // Always rebuild batch sources from DB responses (canonical ordering)
+    try {
+      const allBatchResps = responsesForTurn
+        .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
+      const seenBatchProviders = new Map();
+      for (const r of allBatchResps) {
+        const pid = normalizeProvId(r.providerId);
+        if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
+      }
+
+      const { canonicalCitationOrder } = await import("../shared/provider-config");
+      const canonicalOrder = canonicalCitationOrder(
+        Array.from(seenBatchProviders.keys())
+      );
+
+      batchSources = canonicalOrder.map((pid, idx) => {
+        const r = seenBatchProviders.get(pid);
+        return { modelIndex: idx + 1, content: String(r?.text || "") };
+      }).filter(s => s.content);
+    } catch (err) {
+      console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
+      return { success: false, error: "Shadow reconstruction failed" };
+    }
+
+    // ── Model count ──
+    const uniqueBatchProviders = new Set(
+      responsesForTurn
+        .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
+        .map((r) => normalizeProvId(r.providerId))
+    );
+    const modelCount = Math.max(citationOrderArr.length, uniqueBatchProviders.size, 1);
+
+    // ── B.1 Always re-extract shadow from batch (ground truth for current code) ──
+    // Never trust stored shadow statements — extraction rules may have changed.
+    let tableSidecar = [];
+    if (batchSources.length > 0) {
+      const { extractShadowStatements, projectParagraphs } = await import("./shadow");
+      const shadowResult = extractShadowStatements(batchSources);
+      shadowStatements = shadowResult.statements;
+      shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
+      tableSidecar = shadowResult.tableSidecar || [];
+      console.log(`[Regenerate] Fresh extraction: ${shadowStatements.length} stmts, ${shadowParagraphs.length} paras, ${tableSidecar.length} tables`);
+    }
+    if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+      return { success: false, error: "No shadow statements for embedding generation" };
+    }
+    if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
+      const { projectParagraphs } = await import("./shadow");
+      shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
+    }
+
+    // ── C. Geometry embeddings — regenerate if missing or stale ──
+    let geoRecord = await sm.loadEmbeddings(aiTurnId);
+
+    // Check if cached embeddings match current shadow extraction
+    const cachedStmtIds = new Set(geoRecord?.meta?.statementIndex || []);
+    const currentStmtIds = new Set(shadowStatements.map((s) => s.id));
+    const cachedParaIds = new Set(geoRecord?.meta?.paragraphIndex || []);
+    const currentParaIds = new Set(shadowParagraphs.map((p) => p.id));
+
+    const stmtIdMismatch =
+      cachedStmtIds.size !== currentStmtIds.size ||
+      [...currentStmtIds].some((id) => !cachedStmtIds.has(id));
+    const paraIdMismatch =
+      cachedParaIds.size !== currentParaIds.size ||
+      [...currentParaIds].some((id) => !cachedParaIds.has(id));
+
+    if (stmtIdMismatch || paraIdMismatch) {
+      console.log(
+        `[Regenerate] Embedding cache stale:`,
+        stmtIdMismatch ? `stmts ${cachedStmtIds.size}→${currentStmtIds.size}` : '',
+        paraIdMismatch ? `paras ${cachedParaIds.size}→${currentParaIds.size}` : '',
+      );
+    }
+
+    const needsRegeneration =
+      !geoRecord?.statementEmbeddings ||
+      !geoRecord?.paragraphEmbeddings ||
+      (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0) ||
+      !geoRecord?.meta?.semanticDensityScores ||
+      !geoRecord?.meta?.densityRegressionModel ||
+      !geoRecord?.meta?.paragraphSemanticDensityScores ||
+      geoRecord?.meta?.querySemanticDensity == null ||
+      geoRecord.meta?.embeddingVersion !== 2 ||
+      stmtIdMismatch ||
+      paraIdMismatch;
+
+    if (needsRegeneration) {
+
+      const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
+      const paraResult = await generateEmbeddings(shadowParagraphs, shadowStatements, DEFAULT_CONFIG);
+
+      let queryEmbedding = null;
+      let queryDensityScore = null;
+      if (queryText) {
+        const cleaned = stripInlineMarkdown(String(queryText)).trim();
+        const truncated = structuredTruncate(cleaned, 1740);
+        const prefixed =
+          truncated && !truncated.toLowerCase().startsWith("represent this sentence")
+            ? `Represent this sentence for searching relevant passages: ${truncated}`
+            : truncated;
+        if (prefixed) {
+          const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG, {
+            captureRawMagnitudes: true,
+          });
+          queryEmbedding = batch.embeddings.get("0") || null;
+          const qMag = batch.rawMagnitudes?.get("0") ?? null;
+          const qLen = batch.textLengths?.get("0") ?? null;
+          if (qMag != null && qLen != null && stmtResult.densityRegressionModel) {
+            const { projectSemanticDensity } = await import("./clustering/semanticDensity");
+            queryDensityScore = projectSemanticDensity(qMag, qLen, stmtResult.densityRegressionModel);
+          }
+        }
+      }
+
+      const packedStatements = packEmbeddingMap(stmtResult.embeddings, dims);
+      const packedParagraphs = packEmbeddingMap(paraResult.embeddings, dims);
+      const queryBuffer = queryEmbedding
+        ? queryEmbedding.buffer.slice(
+            queryEmbedding.byteOffset,
+            queryEmbedding.byteOffset + queryEmbedding.byteLength
+          )
+        : null;
+
+      const densityObj =
+        stmtResult.semanticDensityScores?.size > 0
+          ? Object.fromEntries(stmtResult.semanticDensityScores)
+          : null;
+      const paraDensityObj =
+        paraResult.semanticDensityScores?.size > 0
+          ? Object.fromEntries(paraResult.semanticDensityScores)
+          : null;
+
+      await sm.persistEmbeddings(aiTurnId, {
+        statementEmbeddings: packedStatements.buffer,
+        paragraphEmbeddings: packedParagraphs.buffer,
+        queryEmbedding: queryBuffer,
+        meta: {
+          embeddingModelId: DEFAULT_CONFIG.modelId,
+          dimensions: dims,
+          hasQuery: Boolean(queryEmbedding),
+          statementCount: packedStatements.index.length,
+          paragraphCount: packedParagraphs.index.length,
+          statementIndex: packedStatements.index,
+          paragraphIndex: packedParagraphs.index,
+          ...(densityObj ? { semanticDensityScores: densityObj } : {}),
+          ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
+          ...(stmtResult.densityRegressionModel
+            ? { densityRegressionModel: stmtResult.densityRegressionModel }
+            : {}),
+          ...(queryDensityScore != null ? { querySemanticDensity: queryDensityScore } : {}),
+          embeddingVersion: 2,
+          timestamp: Date.now(),
+        },
+      });
+      geoRecord = await sm.loadEmbeddings(aiTurnId);
+    }
+
+    if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings) {
+      return { success: false, error: "Geometry embeddings unavailable" };
+    }
+
+    const statementEmbeddings = unpackEmbeddingMap(
+      geoRecord.statementEmbeddings,
+      geoRecord.meta.statementIndex,
+      geoRecord.meta.dimensions
+    );
+    const paragraphEmbeddings = unpackEmbeddingMap(
+      geoRecord.paragraphEmbeddings,
+      geoRecord.meta.paragraphIndex,
+      geoRecord.meta.dimensions
+    );
+    const queryEmbedding =
+      geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
+        ? new Float32Array(geoRecord.queryEmbedding)
+        : null;
+
+    // ── D. Load or generate cell-unit embeddings ──
+    let cellUnitEmbeddings = null;
+    if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
+      // Load from cache
+      cellUnitEmbeddings = unpackEmbeddingMap(
+        geoRecord.cellUnitEmbeddings,
+        geoRecord.meta.cellUnitIndex,
+        geoRecord.meta.dimensions
+      );
+    } else if (tableSidecar.length > 0) {
+      // Generate + persist
+      try {
+        const { flattenCellUnits } = await import("./core/tableCellAllocation");
+        const cellUnits = flattenCellUnits(tableSidecar);
+        if (cellUnits.length > 0) {
+          const cellTexts = cellUnits.map((cu) => stripInlineMarkdown(cu.text));
+          const cellIds = cellUnits.map((cu) => cu.id);
+          const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
+          cellUnitEmbeddings = new Map();
+          for (let ci = 0; ci < cellIds.length; ci++) {
+            const emb = cellBatch.embeddings.get(String(ci));
+            if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
+          }
+          // Persist to geo record
+          if (cellUnitEmbeddings.size > 0) {
+            const packedCells = packEmbeddingMap(cellUnitEmbeddings, dims);
+            const existingRecord = await sm.loadEmbeddings(aiTurnId);
+            if (existingRecord) {
+              existingRecord.cellUnitEmbeddings = packedCells.buffer;
+              existingRecord.meta = existingRecord.meta || {};
+              existingRecord.meta.cellUnitIndex = packedCells.index;
+              existingRecord.meta.cellUnitCount = packedCells.index.length;
+              await sm.adapter.putBinary("embeddings", existingRecord);
+              geoRecord = existingRecord;
+            }
+          }
+          console.log(`[Regenerate] Embedded + cached ${cellUnitEmbeddings.size} table cell-units`);
+        }
+      } catch (cellErr) {
+        console.warn("[Regenerate] Cell-unit embedding failed:", cellErr?.message || String(cellErr));
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
+    // ══════════════════════════════════════════════════════════════
+    const { buildArtifactForProvider } = await import("./core/execution/deterministicPipeline");
+    const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } = await import("../shared/provider-config");
+    const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));
+
+    const buildResult = await buildArtifactForProvider({
+      mappingText,
+      shadowStatements: Array.isArray(shadowStatements) && shadowStatements.length > 0
+        ? shadowStatements
+        : null,
+      shadowParagraphs: Array.isArray(shadowParagraphs) && shadowParagraphs.length > 0
+        ? shadowParagraphs
+        : null,
+      batchSources,
+      statementEmbeddings,
+      paragraphEmbeddings,
+      queryEmbedding,
+      geoRecord,
+      claimEmbeddings: null, // always regenerate for now
+      surveyGates: storedSurveyGates.length > 0 ? storedSurveyGates : undefined,
+      surveyRationale: storedSurveyRationale,
+      citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
+      queryText,
+      modelCount,
+      tableSidecar,
+      cellUnitEmbeddings,
+    });
+
+    const {
+      cognitiveArtifact,
+      mapperArtifact,
+      enrichedClaims,
+      parsedClaims,
+      claimEmbeddings,
+      claimDensityScores,
+    } = buildResult;
+
+    // ── Persist claim embeddings ──
+    const hashString = (input) => {
+      let h = 5381;
+      for (let i = 0; i < input.length; i++) {
+        h = ((h << 5) + h) ^ input.charCodeAt(i);
+      }
+      return (h >>> 0).toString(16);
+    };
+    // IMPORTANT: hash uses RAW parsedClaims (pre-enrichment) so the cache key
+    // stays stable even after provenance/density enrichment.
+    const claimsHash = hashString(
+      parsedClaims
+        .map((c) => `${String(c?.id || '')}\u001f${String(c?.label || '')}\u001f${String(c?.text || '')}`)
+        .join('\u001e')
+    );
+
+    if (claimEmbeddings && claimEmbeddings.size > 0) {
+      const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
+      await sm.persistClaimEmbeddings(aiTurnId, providerId, {
+        claimEmbeddings: packedClaims.buffer,
+        meta: {
+          dimensions: dims,
+          claimCount: packedClaims.index.length,
+          claimIndex: packedClaims.index,
+          claimsHash,
+          timestamp: Date.now(),
+        },
+      });
+    }
+
+    console.log(
+      `[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${
+        claimEmbeddings?.size || 0
+      } claims`
+    );
+
+    // Log semantic density
+    const cachedDensity = geoRecord?.meta?.semanticDensityScores;
+    if (cachedDensity && typeof cachedDensity === "object") {
+      const entries = Object.entries(cachedDensity).sort((a, b) => b[1] - a[1]);
+      const values = entries.map(([, v]) => v);
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      console.log(
+        `[Regenerate] Semantic density:`,
+        JSON.stringify({
+          count: entries.length,
+          mean,
+          topDense: entries.slice(0, 3).map(([id, score]) => ({ id, score })),
+          topHollow: entries.slice(-3).reverse().map(([id, score]) => ({ id, score })),
+        })
+      );
+    }
+
+    // ── Diagnostic ──
+    console.log(
+      `[Regenerate] Artifact diagnostics:`,
+      `shadow.paragraphs=${
+        Array.isArray(cognitiveArtifact?.shadow?.paragraphs)
+          ? cognitiveArtifact.shadow.paragraphs.length
+          : "missing"
+      }`,
+      `shadow.statements=${
+        Array.isArray(cognitiveArtifact?.shadow?.statements)
+          ? cognitiveArtifact.shadow.statements.length
+          : "missing"
+      }`,
+      `claimProvenance=${cognitiveArtifact?.claimProvenance ? "present" : "missing"}`,
+      `alignment=${cognitiveArtifact?.geometry?.alignment ? "present" : "missing"}`,
+      `basinInversion=${
+        cognitiveArtifact?.geometry?.basinInversion
+          ? cognitiveArtifact.geometry.basinInversion.status
+          : "missing"
+      }`,
+      `blastSurface=${cognitiveArtifact?.blastSurface ? "present" : "missing"}`
+    );
+
+    return {
+      success: true,
+      data: {
+        artifact: cognitiveArtifact,
+        claimCount: enrichedClaims.length,
+        edgeCount: mapperArtifact.edges?.length || 0,
+      },
+    };
+  })().finally(() => {
+    regenInflight.delete(cacheKey);
+  });
+
+  regenInflight.set(cacheKey, work);
+  return work;
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

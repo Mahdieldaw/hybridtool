@@ -1126,6 +1126,141 @@ export interface ClaimDensityResult {
   };
 }
 
+// ── Passage pruning (4-rule collateral resolution) ──────────────────────
+
+export type PruningFate = 'REMOVE' | 'KEEP' | 'SKELETONIZE' | 'DROP';
+export type PruningCategory = 'pruned-owned' | 'living-owned' | 'unclassified';
+
+export interface PrunedPassageSpec {
+  claimId: string;
+  modelIndex: number;
+  startParagraphIndex: number;
+  endParagraphIndex: number;
+}
+
+export interface StatementDisposition {
+  statementId: string;
+  statementText: string;
+  modelIndex: number;
+  paragraphIndex: number;
+  /** Which rule resolved this statement (1–3) */
+  rule: 1 | 2 | 3;
+  category: PruningCategory;
+  fate: PruningFate;
+  /** Sub-step detail: 'twin-exists', 'no-twin', 'legibility-fail', etc. */
+  substep: string;
+  reason: string;
+  ownerClaimIds: string[];
+  prunedClaimIds: string[];
+  twinStatementId?: string;
+  twinSimilarity?: number;
+  /** Rule 3 only: noun/entity count for legibility check */
+  nounEntityCount?: number;
+  skeletonText?: string;
+}
+
+export interface ConservationAnomaly {
+  /** The living claim that lost ALL canonical statements */
+  livingClaimId: string;
+  livingClaimLabel: string;
+  /** Pruned claims whose passages contain this claim's statements */
+  prunedClaimIds: string[];
+  /** cosSim(living centroid, each pruned centroid) — diagnostic */
+  centroidSimilarities: Array<{ prunedClaimId: string; cosSim: number }>;
+  totalCanonicalStatements: number;
+  removedStatements: number;
+}
+
+export interface ProvenanceQualityEntry {
+  statementId: string;
+  statementText: string;
+  livingClaimIds: string[];
+  livingClaimLabels: string[];
+  prunedClaimIds: string[];
+  prunedClaimLabels: string[];
+  /** cosSim(statement embedding, each living claim centroid) */
+  cosSimToLiving: Array<{ claimId: string; cosSim: number }>;
+  /** cosSim(statement embedding, each pruned claim centroid) */
+  cosSimToPruned: Array<{ claimId: string; cosSim: number }>;
+  livingClaimTotalStatements: Array<{ claimId: string; count: number }>;
+  livingClaimStatementsInPassage: Array<{ claimId: string; count: number }>;
+  /** True if statement is closer to any pruned centroid than its best living centroid */
+  closerToPruned: boolean;
+  /** From provenance refinement layer (null if refinement not available) */
+  refinedPrimaryClaim?: string | null;
+  refinedAllegianceMethod?: string | null;
+}
+
+export interface PassagePruningResult {
+  dispositions: StatementDisposition[];
+  anomalies: ConservationAnomaly[];
+  /** Rule 2 KEEP watchlist — provenance quality instrumentation */
+  provenanceQuality: ProvenanceQualityEntry[];
+  summary: {
+    total: number;
+    removeCount: number;
+    keepCount: number;
+    skeletonizeCount: number;
+    dropCount: number;
+    anomalyCount: number;
+  };
+  meta: { processingTimeMs: number };
+}
+
+// ── Provenance Refinement (canonical provenance assignment) ──────────────
+
+export interface RivalAllegiance {
+  claimId: string;
+  rawAllegiance: number;
+  weightedAllegiance: number;
+}
+
+export interface AllegianceSignal {
+  /** positive = leans toward dominant claim, negative = leans toward rival, null = unresolvable */
+  value: number | null;
+  calibrationWeight: number;
+  dominantClaimId: string;
+  rivalAllegiances: RivalAllegiance[];
+  /** Resolution tier: which fallback path resolved this statement */
+  method: 'calibrated' | 'centroid-fallback' | 'passage-dominance' | null;
+}
+
+export interface PassageDominanceSignal {
+  inPassage: boolean;
+  passageOwner: string | null;
+  coverageFraction: number;
+  passageLength: number;
+}
+
+export interface SignalStrengthSignal {
+  /** nounEntityCount / wordCount — referential density */
+  signalWeight: number;
+  nounEntityCount: number;
+  stmtWordCount: number;
+}
+
+export interface ProvenanceRefinementEntry {
+  statementId: string;
+  assignedClaims: string[];
+  primaryClaim: string | null;
+  secondaryClaims: string[];
+  allegiance: AllegianceSignal | null;
+  passageDominance: PassageDominanceSignal;
+  signalStrength: SignalStrengthSignal;
+}
+
+export interface ProvenanceRefinementResult {
+  entries: Record<string, ProvenanceRefinementEntry>;
+  summary: {
+    totalJoint: number;
+    resolvedByCalibration: number;
+    resolvedByCentroidFallback: number;
+    resolvedByPassageDominance: number;
+    unresolved: number;
+  };
+  meta: { processingTimeMs: number };
+}
+
 // ── Passage routing (evidence-concentration-based routing) ──────────────
 
 export type LandscapePosition = 'northStar' | 'eastStar' | 'mechanism' | 'floor';

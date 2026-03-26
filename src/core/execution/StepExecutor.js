@@ -1,7 +1,6 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { parseSemanticMapperOutput } from '../../../shared/parsing-utils';
 
 import { classifyError } from '../error-classifier';
 import {
