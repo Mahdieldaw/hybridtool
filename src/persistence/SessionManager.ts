@@ -74,6 +74,8 @@ type ExistingProviderResponse = {
   status?: unknown;
   meta?: Record<string, unknown>;
   artifact?: unknown;
+  surveyGates?: unknown[];
+  surveyRationale?: string;
   createdAt?: number;
   updatedAt?: number;
 };
@@ -892,10 +894,10 @@ export class SessionManager {
       const outputAny = output as any;
       const artifactObj = outputAny?.artifact;
       const surveyGates = Array.isArray(artifactObj?.surveyGates) ? artifactObj.surveyGates
-        : Array.isArray((existing as any)?.surveyGates) ? (existing as any).surveyGates
+        : Array.isArray(existing?.surveyGates) ? existing.surveyGates
         : undefined;
       const surveyRationale = artifactObj?.surveyRationale
-        ?? (existing as any)?.surveyRationale
+        ?? existing?.surveyRationale
         ?? undefined;
 
       recordsToSave.push({
@@ -1002,6 +1004,12 @@ export class SessionManager {
 
     const artifact = value["artifact"];
     if (artifact !== undefined) out.artifact = artifact;
+
+    const surveyGates = value["surveyGates"];
+    if (Array.isArray(surveyGates)) out.surveyGates = surveyGates;
+
+    const surveyRationale = value["surveyRationale"];
+    if (isString(surveyRationale)) out.surveyRationale = surveyRationale;
 
     const createdAt = value["createdAt"];
     if (isNumber(createdAt)) out.createdAt = createdAt;

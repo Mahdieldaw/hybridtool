@@ -151,11 +151,11 @@ function computeAllegiance(
       dominantClaimId = cv.claimId;
     }
   }
-  // If no density data, fall back to first assigned claim
+  // If no density data among assignedClaims, fall back to highest coverage
+  // that is still in assignedClaims (avoid picking an unrelated claim).
   if (bestCoverage < 0 && coverages.length > 0) {
-    // Use overall highest coverage in paragraph
     for (const cv of coverages) {
-      if (cv.coverage > bestCoverage) {
+      if (assignedClaims.includes(cv.claimId) && cv.coverage > bestCoverage) {
         bestCoverage = cv.coverage;
         dominantClaimId = cv.claimId;
       }

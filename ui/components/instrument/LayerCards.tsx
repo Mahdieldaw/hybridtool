@@ -863,7 +863,7 @@ export function RegionsCard({
   const regions = useMemo(() => {
     const ps = artifact?.geometry?.preSemantic;
     if (!ps || typeof ps !== 'object') return [];
-    
+
     const normalize = (input: unknown) => {
       if (!Array.isArray(input)) return [];
       const out: Array<{ id: string; kind: "component" | "patch"; nodeIds: string[] }> = [];
