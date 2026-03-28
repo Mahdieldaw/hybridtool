@@ -512,9 +512,11 @@ export function PassagePruningCard({ artifact }: { artifact: any }) {
                         }
                         return (
                           <span className="text-[10px] truncate block max-w-[120px]" title={
-                            r.rivalAllegiances.map((ra: any) =>
-                              `${claimLabelById.get(ra.claimId) ?? ra.claimId}: raw=${ra.rawAllegiance?.toFixed(4)} w=${ra.weightedAllegiance?.toFixed(4)}`
-                            ).join("; ")
+                            r.rivalAllegiances.map((ra: any) => {
+                              const rawDisp = Number.isFinite(ra.rawAllegiance) ? ra.rawAllegiance.toFixed(4) : "—";
+                              const wDisp = Number.isFinite(ra.weightedAllegiance) ? ra.weightedAllegiance.toFixed(4) : "—";
+                              return `${claimLabelById.get(ra.claimId) ?? ra.claimId}: raw=${rawDisp} w=${wDisp}`;
+                            }).join("; ")
                           }>
                             {r.rivalAllegiances.map((ra: any, i: number) => {
                               const w = ra.weightedAllegiance ?? 0;

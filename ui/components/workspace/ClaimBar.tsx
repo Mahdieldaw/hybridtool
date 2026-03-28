@@ -49,6 +49,7 @@ export const ClaimBar: React.FC<ClaimBarProps> = ({
         const isActive = focusedClaimId === pill.id;
         return (
           <button
+            type="button"
             key={pill.id}
             onClick={() => onFocusClaim(isActive ? null : pill.id)}
             className={`

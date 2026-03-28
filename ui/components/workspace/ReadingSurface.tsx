@@ -160,7 +160,7 @@ export const ReadingSurface: React.FC<ReadingSurfaceProps> = ({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
-        {paragraphs.map((para: any) => {
+        {paragraphs.map((para: any, paraIndex: number) => {
           const paraId = String(para.id ?? para.paragraphId ?? "");
           const stmts: any[] = Array.isArray(para.statements) ? para.statements : [];
           const hasOwned = stmts.some((s: any) => {
@@ -170,13 +170,13 @@ export const ReadingSurface: React.FC<ReadingSurfaceProps> = ({
 
           return (
             <div
-              key={paraId}
+              key={paraId || `para-${paraIndex}`}
               className={`
                 border-l-2 pl-3 py-1
                 ${hasOwned ? "border-brand-500/50" : "border-transparent"}
               `}
             >
-              {stmts.map((stmt: any) => {
+              {stmts.map((stmt: any, stmtIndex: number) => {
                 const sid = String(stmt.id ?? stmt.statementId ?? "");
                 const text = String(stmt.text ?? stmt.statement ?? stmt.content ?? "");
                 const ann = annotationMap.get(sid);
@@ -186,7 +186,7 @@ export const ReadingSurface: React.FC<ReadingSurfaceProps> = ({
 
                 return (
                   <div
-                    key={sid}
+                    key={sid || `stmt-${stmtIndex}`}
                     ref={(el) => {
                       if (el) stmtRefs.current.set(sid, el);
                       else stmtRefs.current.delete(sid);
