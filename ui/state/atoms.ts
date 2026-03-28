@@ -283,12 +283,8 @@ export const singularityProviderAtom = atomWithStorage<string | null>(
   null,
 );
 
-export const traversalStateByTurnAtom = atomWithStorage<Record<string, any>>(
-  "htos_traversal_state_by_turn_v1",
-  {},
-  undefined,
-  { getOnInit: true },
-);
+// traversalStateByTurnAtom removed — traversal state now persisted to IndexedDB
+// via SAVE_TRAVERSAL_STATE message (single source of truth on provider_responses).
 
 
 
@@ -432,6 +428,9 @@ export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null)
 
 export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
+
+/** When true, the workspace view renders instead of the legacy DecisionMapSheet. */
+export const useWorkspaceViewAtom = atom<boolean>(false);
 
 
 

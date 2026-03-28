@@ -260,28 +260,44 @@ export function computePassagePruning(input: PassagePruningInput): PassagePrunin
           twinSimilarity: bestTwinSim,
         });
       } else {
-        // KEEP — compute provenance quality instrumentation
+        // No twin — check provenance refinement to decide fate
         const refinement = provenanceRefinement?.entries?.[stmtId] ?? null;
         const prunedAligned = refinement?.primaryClaim != null
           && prunedClaimIdSet.has(refinement.primaryClaim);
 
-        dispositions.push({
-          statementId: stmtId,
-          statementText: text,
-          modelIndex: stmt.modelIndex,
-          paragraphIndex: stmt.location.paragraphIndex,
-          rule: 2,
-          category: 'living-owned',
-          fate: 'KEEP',
-          substep: prunedAligned ? 'no-twin-pruned-aligned' : 'no-twin',
-          reason: prunedAligned
-            ? `Living claim owns this statement; no twin; allegiance leans pruned (${refinement!.allegiance?.method ?? 'unknown'})`
-            : 'Living claim owns this statement; no twin in surviving corpus',
-          ownerClaimIds: [...owners],
-          prunedClaimIds: prunedOwners,
-        });
+        if (prunedAligned) {
+          // Allegiance points to pruned claim — REMOVE despite living owner
+          dispositions.push({
+            statementId: stmtId,
+            statementText: text,
+            modelIndex: stmt.modelIndex,
+            paragraphIndex: stmt.location.paragraphIndex,
+            rule: 2,
+            category: 'living-owned',
+            fate: 'REMOVE',
+            substep: 'allegiance-pruned',
+            reason: `Living claim owns this statement; no twin; allegiance resolves to pruned claim (${refinement!.allegiance?.method ?? 'unknown'})`,
+            ownerClaimIds: [...owners],
+            prunedClaimIds: prunedOwners,
+          });
+        } else {
+          // Allegiance points to living claim (or unavailable) — KEEP
+          dispositions.push({
+            statementId: stmtId,
+            statementText: text,
+            modelIndex: stmt.modelIndex,
+            paragraphIndex: stmt.location.paragraphIndex,
+            rule: 2,
+            category: 'living-owned',
+            fate: 'KEEP',
+            substep: 'no-twin',
+            reason: 'Living claim owns this statement; no twin in surviving corpus',
+            ownerClaimIds: [...owners],
+            prunedClaimIds: prunedOwners,
+          });
+        }
 
-        // Build provenance quality entry
+        // Build provenance quality entry (for both KEEP and allegiance-REMOVE)
         const stmtEmb = statementEmbeddings.get(stmtId);
         const cosSimToLiving: ProvenanceQualityEntry['cosSimToLiving'] = [];
         const cosSimToPruned: ProvenanceQualityEntry['cosSimToPruned'] = [];
@@ -335,6 +351,9 @@ export function computePassagePruning(input: PassagePruningInput): PassagePrunin
           closerToPruned: bestPrunedSim > bestLivingSim,
           refinedPrimaryClaim: refinement?.primaryClaim ?? null,
           refinedAllegianceMethod: refinement?.allegiance?.method ?? null,
+          refinedAllegianceValue: refinement?.allegiance?.value ?? null,
+          refinedCalibrationWeight: refinement?.allegiance?.calibrationWeight ?? null,
+          refinedRivalAllegiances: refinement?.allegiance?.rivalAllegiances ?? undefined,
         });
       }
       continue;

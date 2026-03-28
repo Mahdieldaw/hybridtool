@@ -119,12 +119,7 @@ function simulateStyle(values, c) {
     throw new Error('Invalid Grok SVG signature values');
   }
   const duration = 4096;
-  const frameJitter = (Math.random() - 0.5) * 3.5;
-  let currentTime = Math.round((c + frameJitter) / 10.0) * 10;
-  if (Math.random() < 0.03) {
-    currentTime += 16.67;
-  }
-  currentTime = Math.max(0, Math.min(currentTime, duration));
+  const currentTime = Math.round(c / 10.0) * 10;
   const t = currentTime / duration;
 
   // Control points from values[7:], alternating between param=0 and param=-1
@@ -412,11 +407,11 @@ export function parseSvgData(html, anim = 'loading-x-anim-0') {
 
 function _parseSvgFromCurves(text, animIndex) {
   const raw = String(text || '');
-  const startToken = raw.includes('\\"curves\\":') ? '\\"curves\\":' : '"curves":';
-  const startAt = raw.indexOf(startToken);
-  if (startAt === -1) return null;
 
-  const openIdx = raw.indexOf('[[', startAt);
+  // Find [[{"color"...}]] directly (matches Python regex approach)
+  const directMatch = raw.match(/\[\[\s*\{\s*"color"/);
+  if (!directMatch) return null;
+  const openIdx = raw.indexOf(directMatch[0]);
   if (openIdx === -1) return null;
 
   let depth = 0;

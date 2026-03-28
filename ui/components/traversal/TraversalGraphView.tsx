@@ -1,16 +1,17 @@
 import React from 'react';
-import { useAtomValue, useAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 
 import { useTraversal } from '../../hooks/useTraversal';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
 import type { Claim } from '../../../shared/contract';
-import { singularityProviderAtom, traversalStateByTurnAtom } from '../../state/atoms';
+import { singularityProviderAtom } from '../../state/atoms';
 import type { TraversalState } from '../../../src/utils/cognitive/traversalEngine';
 import {
   deserializeTraversalState,
   serializeTraversalState,
 } from '../../../src/utils/cognitive/traversalSerialization';
 import { submitTraversalToConcierge } from '../../services/traversalSubmission';
+import api from '../../services/extension-api';
 
 interface TraversalGraphViewProps {
   traversalGraph: any;
@@ -54,21 +55,29 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   }, [claims, conditionals, traversalGraph]);
 
   const singularityProvider = useAtomValue(singularityProviderAtom);
-  const [traversalStateByTurn, setTraversalStateByTurn] = useAtom(traversalStateByTurnAtom);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submissionError, setSubmissionError] = React.useState<string | null>(null);
   const isAwaitingTraversal = pipelineStatus === 'awaiting_traversal';
   const isReadOnly = !isAwaitingTraversal && !!hasReceivedSingularityResponse;
   const canViewGuidance = isReadOnly && typeof onComplete === 'function';
 
+  // Hydrate from IndexedDB (the single source of truth).
+  // Validate that stored claim IDs match the current artifact — if they don't,
+  // the state is stale (e.g. rebuilt after restart) and we start fresh.
   const hydrationTurnIdRef = React.useRef<string | null>(null);
   const hydratedOverrideRef = React.useRef<TraversalState | null>(null);
 
   if (hydrationTurnIdRef.current !== aiTurnId) {
     hydrationTurnIdRef.current = aiTurnId;
-    hydratedOverrideRef.current =
-      deserializeTraversalState(completedTraversalState) ??
-      deserializeTraversalState(traversalStateByTurn?.[aiTurnId]);
+    const deserialized = deserializeTraversalState(completedTraversalState);
+    if (deserialized) {
+      const currentClaimIds = new Set(claims.map(c => c.id));
+      const storedClaimIds = Array.from(deserialized.claimStatuses.keys());
+      const match = storedClaimIds.length > 0 && storedClaimIds.some(id => currentClaimIds.has(id));
+      hydratedOverrideRef.current = match ? deserialized : null;
+    } else {
+      hydratedOverrideRef.current = null;
+    }
   }
 
   const {
@@ -82,12 +91,18 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     getResolution,
   } = useTraversal(cleanGraph as any, claims as any, hydratedOverrideRef.current);
 
+  // Debounced save to IndexedDB via service worker
+  const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
-    setTraversalStateByTurn((prev: any) => ({
-      ...(prev || {}),
-      [aiTurnId]: serializeTraversalState(state),
-    }));
-  }, [aiTurnId, state, setTraversalStateByTurn]);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      api.queryBackend({
+        type: 'SAVE_TRAVERSAL_STATE',
+        payload: { aiTurnId, traversalState: serializeTraversalState(state) },
+      }).catch(() => {}); // fire-and-forget
+    }, 500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [aiTurnId, state]);
 
   const handleSubmitToConcierge = () => submitTraversalToConcierge(
     { sessionId, aiTurnId, originalQuery, claimStatuses: state.claimStatuses, singularityProvider: singularityProvider || undefined },

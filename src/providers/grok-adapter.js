@@ -11,6 +11,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isDefinitiveAuthError,
   isRateLimitError,
   isNetworkError,
   createProviderAuthError,
@@ -253,8 +254,12 @@ export class GrokAdapter {
 
     // Check for Grok-specific auth errors
     if (isProviderAuthError(error) || this._isGrokAuthError(error)) {
-      authManager.invalidateCache(this.id);
-      await authManager.verifyProvider(this.id);
+      if (!isDefinitiveAuthError(error) && !this._isGrokAuthError(error) && !_isRetry) {
+        console.log(`[GrokAdapter] Ambiguous auth error (${error?.status}), retrying once...`);
+        return await this.sendPrompt(req, onChunk, signal, true);
+      }
+      console.log(`[GrokAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+      await authManager.markUnauthenticated(this.id);
 
       const authError = createProviderAuthError(this.id, error);
       return {
@@ -376,8 +381,12 @@ export class GrokAdapter {
     }
 
     if (isProviderAuthError(error) || this._isGrokAuthError(error)) {
-      authManager.invalidateCache(this.id);
-      await authManager.verifyProvider(this.id);
+      if (!isDefinitiveAuthError(error) && !this._isGrokAuthError(error) && !_isRetry) {
+        console.log(`[GrokAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
+        return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+      }
+      console.log(`[GrokAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+      await authManager.markUnauthenticated(this.id);
 
       const authError = createProviderAuthError(this.id, error);
       return {

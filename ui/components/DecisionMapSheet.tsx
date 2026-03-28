@@ -1,12 +1,12 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnAtomFamily, mappingProviderAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, mappingRecomputeSelectionByRoundAtom, activeRecomputeStateAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, useWorkspaceViewAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { adaptGraphTopology } from "../utils/graphAdapter";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { getProviderColor, getProviderConfig } from "../utils/provider-helpers";
+import { getProviderColor, getProviderConfig, resolveProviderIdFromCitationOrder, getProviderName } from "../utils/provider-helpers";
 import type { AiTurnWithUI } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
@@ -39,6 +39,7 @@ import type { ColumnDef, ViewConfig } from "./instrument/columnRegistry";
 import { EvidenceTable } from "./instrument/EvidenceTable";
 import { ContextStrip } from "./instrument/ContextStrip";
 import { ColumnPicker } from "./instrument/ColumnPicker";
+import { ReadingSurface } from "./workspace/ReadingSurface";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -48,27 +49,12 @@ import type { GraphTopology } from "../../shared/contract";
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
-import { useProviderArtifact } from "../hooks/useProviderArtifact";
+import { useArtifactResolution } from "../hooks/useArtifactResolution";
 
 const DEBUG_DECISION_MAP_SHEET = false;
 const decisionMapSheetDbg = (...args: any[]) => {
   if (DEBUG_DECISION_MAP_SHEET) console.debug("[DecisionMapSheet]", ...args);
 };
-
-function normalizeArtifactCandidate(input: unknown): any | null {
-  if (!input) return null;
-  if (typeof input === "object") return input as any;
-  if (typeof input !== "string") return null;
-  const raw = input.trim();
-  if (!raw) return null;
-  if (!(raw.startsWith("{") || raw.startsWith("["))) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 function safeArr<T = any>(v: any): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -241,10 +227,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
     </div>
   );
 };
-
-function isAiTurn(turn: unknown): turn is AiTurnWithUI {
-  return !!turn && typeof turn === "object" && (turn as any).type === "ai";
-}
 
 function pearsonR(xs: number[], ys: number[]): number | null {
   if (xs.length !== ys.length || xs.length < 3) return null;
@@ -731,11 +713,11 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
 
 export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
-  const mappingProvider = useAtomValue(mappingProviderAtom);
   const sessionId = useAtomValue(currentSessionIdAtom);
   const lastSessionIdRef = useRef<string | null>(sessionId);
   const { runMappingForAiTurn } = useRoundActions();
   const setToast = useSetAtom(toastAtom);
+  const setWorkspaceView = useSetAtom(useWorkspaceViewAtom);
   const [regenState, setRegenState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [copyMenuOpen, setCopyMenuOpen] = useState(false);
@@ -784,6 +766,8 @@ export const DecisionMapSheet = React.memo(() => {
   const [isCardsCollapsed, setIsCardsCollapsed] = useState(false);
   const verticalSplitContainerRef = useRef<HTMLDivElement>(null);
   const [tableMode, setTableMode] = useState<'statement' | 'paragraph'>('statement');
+  const [topPanelMode, setTopPanelMode] = useState<'table' | 'text'>('table');
+  const [displayModelIndex, setDisplayModelIndex] = useState(0);
 
   // Scroll preservation on collapse/expand: save scrollTop before toggle, restore after render
   const rightPanelScrollRef = useRef<number>(0);
@@ -999,99 +983,20 @@ export const DecisionMapSheet = React.memo(() => {
     window.addEventListener('pointerup', onUp);
   }, [setOpenState, sheetHeightRatio]);
 
-  const aiTurn = useAtomValue(
-    useMemo(
-      () => turnAtomFamily(String(openState?.turnId || "")),
-      [openState?.turnId],
-    ),
-  ) as AiTurnWithUI | undefined;
-  const aiTurnSafe: AiTurnWithUI | null = isAiTurn(aiTurn) ? aiTurn : null;
-
-  const mappingSelectionByRound = useAtomValue(mappingRecomputeSelectionByRoundAtom);
-  const activeRecomputeState = useAtomValue(activeRecomputeStateAtom);
-
-  const activeMappingPid = useMemo(() => {
-    // 1. Explicit user selection THIS session for THIS turn overrides everything 
-    // (even if it doesn't have data yet - the user explicitly wants to look at it)
-    const explicitForTurn = aiTurnSafe?.userTurnId ? mappingSelectionByRound[aiTurnSafe.userTurnId] : null;
-    if (explicitForTurn) return explicitForTurn;
-
-    // 2. If a recompute is actively running for this turn, focus on it
-    if (activeRecomputeState?.aiTurnId === aiTurnSafe?.id && activeRecomputeState?.stepType === "mapping") {
-      return activeRecomputeState.providerId;
-    }
-
-    const preferred = mappingProvider;
-    const historical = aiTurnSafe?.meta?.mapper;
-
-    // Check if the given provider ID has actual data in this turn
-    const hasData = (pid: string | null | undefined) => {
-      if (!pid || !aiTurnSafe?.mappingResponses) return false;
-      const normalized = normalizeProviderId(String(pid));
-      const resp = (aiTurnSafe.mappingResponses as any)[normalized];
-      return Array.isArray(resp) && resp.length > 0;
-    };
-
-    // 3. If the global preferred mapper has data, use it.
-    if (preferred && hasData(preferred)) return normalizeProviderId(String(preferred));
-
-    // 4. Otherwise, fallback to the historical mapper if it has data.
-    if (historical && hasData(historical)) return normalizeProviderId(String(historical));
-
-    // 5. Pick ANY available mapper that has data.
-    const availableMappers = Object.keys(aiTurnSafe?.mappingResponses || {});
-    if (availableMappers.length > 0) return availableMappers[0];
-
-    // 6. Absolute Fallback
-    return preferred || historical || undefined;
-  }, [mappingProvider, aiTurnSafe, mappingSelectionByRound, activeRecomputeState]);
-
-  // Tier 3: read ephemeral artifact from Jotai atom
-  const { artifact: artifactFromAtom, rebuild: rebuildArtifact } = useProviderArtifact(
-    aiTurnSafe?.id,
+  // ── Artifact resolution (shared hook) ────────────────────────
+  const {
+    artifact: mappingArtifact,
+    artifactWithCitations: mappingArtifactWithCitations,
+    citationSourceOrder,
     activeMappingPid,
-  );
-  const mappingArtifact = useMemo(() => {
-    if (!artifactFromAtom) return null;
-    const parsed = normalizeArtifactCandidate(artifactFromAtom);
-    return (parsed || artifactFromAtom) && typeof (parsed || artifactFromAtom) === "object"
-      ? (parsed || artifactFromAtom)
-      : null;
-  }, [artifactFromAtom]);
-
-  const citationSourceOrder = useMemo(() => {
-    const fromArtifact =
-      (mappingArtifact as any)?.citationSourceOrder ??
-      (mappingArtifact as any)?.meta?.citationSourceOrder ??
-      null;
-    if (fromArtifact) return fromArtifact;
-
-    const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : null;
-    if (!pid || !aiTurnSafe?.mappingResponses) return null;
-    const entry = (aiTurnSafe.mappingResponses as any)[pid];
-    const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
-    const last = arr.length > 0 ? arr[arr.length - 1] : null;
-    return last?.meta?.citationSourceOrder ?? null;
-  }, [mappingArtifact, aiTurnSafe, activeMappingPid]);
-
-  const mappingArtifactWithCitations = useMemo(() => {
-    if (!mappingArtifact || !citationSourceOrder) return mappingArtifact;
-    const existing = (mappingArtifact as any)?.citationSourceOrder ?? (mappingArtifact as any)?.meta?.citationSourceOrder ?? null;
-    if (existing) return mappingArtifact;
-    return { ...(mappingArtifact as any), citationSourceOrder };
-  }, [mappingArtifact, citationSourceOrder]);
+    aiTurn: aiTurnSafe,
+    rebuild: rebuildArtifact,
+  } = useArtifactResolution(openState?.turnId);
+  const aiTurn = aiTurnSafe; // alias for downstream code that references aiTurn directly
 
   // ── Evidence rows (hook) ───────────────────────────────────────
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const evidenceRows = useEvidenceRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
   const paragraphRows = useParagraphRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
-
-  // Tier 3: auto-rebuild artifact if not yet in the atom
-  useEffect(() => {
-    if (!aiTurnSafe?.id || !activeMappingPid) return;
-    if (mappingArtifact) return; // already available
-    rebuildArtifact();
-  }, [aiTurnSafe?.id, activeMappingPid, mappingArtifact, rebuildArtifact]);
 
   const providerContexts = useAtomValue(providerContextsAtom);
 
@@ -1499,6 +1404,13 @@ export const DecisionMapSheet = React.memo(() => {
                   )}
                 </div>
                 <button
+                  onClick={() => setWorkspaceView(true)}
+                  className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted hover:bg-white/10 hover:text-text-primary transition-colors"
+                  title="Switch to workspace view"
+                >
+                  Workspace
+                </button>
+                <button
                   onClick={() => setOpenState(null)}
                   className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
                 >
@@ -1643,9 +1555,9 @@ export const DecisionMapSheet = React.memo(() => {
                 <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
                   {instrumentState.rightPanelMode === 'instrument' ? (
                     <>
-                      {/* ── Toolbar: Claim selector + View switcher + Scope toggle + Column picker ── */}
+                      {/* ── Toolbar: Claim selector + Table/Text toggle + context-sensitive controls ── */}
                       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-none flex-wrap">
-                        {/* Claim selector */}
+                        {/* Claim selector (both modes) */}
                         <select
                           className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary max-w-[160px] focus:outline-none focus:border-brand-500/50 cursor-pointer"
                           value={instrumentSelectedClaimId ?? ''}
@@ -1662,88 +1574,144 @@ export const DecisionMapSheet = React.memo(() => {
                           ))}
                         </select>
 
-                        {/* Statement / Paragraph toggle */}
+                        {/* Table / Text toggle (both modes) */}
                         <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
-                          {(['statement', 'paragraph'] as const).map(m => (
+                          {(['table', 'text'] as const).map(mode => (
                             <button
-                              key={m}
+                              key={mode}
                               type="button"
-                              onClick={() => setTableMode(m)}
+                              onClick={() => setTopPanelMode(mode)}
                               className={clsx(
                                 "px-2 py-1 text-[10px] transition-colors",
-                                tableMode === m
+                                topPanelMode === mode
                                   ? "bg-brand-500/20 text-brand-300"
                                   : "text-text-muted hover:text-text-secondary"
                               )}
                             >
-                              {m === 'statement' ? 'Stmt' : 'Para'}
+                              {mode === 'table' ? 'Table' : 'Text'}
                             </button>
                           ))}
                         </div>
 
-                        {/* View switcher */}
-                        <select
-                          className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-brand-500/50 cursor-pointer"
-                          value={selectedView}
-                          onChange={e => instrumentActions.setSelectedView(e.target.value)}
-                        >
-                          {(tableMode === 'paragraph' ? PARAGRAPH_VIEWS : DEFAULT_VIEWS).map(v => (
-                            <option key={v.id} value={v.id}>{v.label}</option>
-                          ))}
-                        </select>
+                        {topPanelMode === 'table' ? (
+                          <>
+                            {/* Statement / Paragraph toggle */}
+                            <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
+                              {(['statement', 'paragraph'] as const).map(m => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => setTableMode(m)}
+                                  className={clsx(
+                                    "px-2 py-1 text-[10px] transition-colors",
+                                    tableMode === m
+                                      ? "bg-brand-500/20 text-brand-300"
+                                      : "text-text-muted hover:text-text-secondary"
+                                  )}
+                                >
+                                  {m === 'statement' ? 'Stmt' : 'Para'}
+                                </button>
+                              ))}
+                            </div>
 
-                        {/* Scope toggle */}
-                        <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
-                          {(['claim', 'cross-claim'] as const).map(s => (
-                            <button
-                              key={s}
-                              type="button"
-                              onClick={() => instrumentActions.setScope(s)}
-                              className={clsx(
-                                "px-2 py-1 text-[10px] transition-colors",
-                                scope === s
-                                  ? "bg-brand-500/20 text-brand-300"
-                                  : "text-text-muted hover:text-text-secondary"
-                              )}
+                            {/* View switcher */}
+                            <select
+                              className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-brand-500/50 cursor-pointer"
+                              value={selectedView}
+                              onChange={e => instrumentActions.setSelectedView(e.target.value)}
                             >
-                              {s === 'claim' ? 'Claim' : 'All'}
-                            </button>
-                          ))}
-                        </div>
+                              {(tableMode === 'paragraph' ? PARAGRAPH_VIEWS : DEFAULT_VIEWS).map(v => (
+                                <option key={v.id} value={v.id}>{v.label}</option>
+                              ))}
+                            </select>
 
-                        {/* Column picker */}
-                        <div className="ml-auto flex items-center gap-2">
-                          <ColumnPicker
-                            allColumns={allColumns}
-                            visibleColumnIds={visibleColumnIds}
-                            defaultColumnIds={activeViewConfig.columns}
-                            onToggle={(colId) => {
-                              setVisibleColumnIds(prev =>
-                                prev.includes(colId)
-                                  ? prev.filter(id => id !== colId)
-                                  : [...prev, colId]
-                              );
-                            }}
-                            onAddComputed={(col) => {
-                              setExtraColumns(prev => [...prev, col]);
-                              setVisibleColumnIds(prev => [...prev, col.id]);
-                            }}
-                            onReset={() => setVisibleColumnIds(activeViewConfig.columns)}
-                          />
-                          <button
-                            type="button"
-                            className={clsx(
-                              "px-2.5 py-1 rounded-md border text-[10px] transition-colors",
-                              isTableCollapsed
-                                ? "border-brand-500/40 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20"
-                                : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
-                            )}
-                            onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsTableCollapsed(v => !v); }}
-                            title={isTableCollapsed ? "Expand table" : "Collapse table"}
-                          >
-                            {isTableCollapsed ? "Expand table" : "Collapse table"}
-                          </button>
-                        </div>
+                            {/* Scope toggle */}
+                            <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
+                              {(['claim', 'cross-claim'] as const).map(s => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => instrumentActions.setScope(s)}
+                                  className={clsx(
+                                    "px-2 py-1 text-[10px] transition-colors",
+                                    scope === s
+                                      ? "bg-brand-500/20 text-brand-300"
+                                      : "text-text-muted hover:text-text-secondary"
+                                  )}
+                                >
+                                  {s === 'claim' ? 'Claim' : 'All'}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Column picker */}
+                            <div className="ml-auto flex items-center gap-2">
+                              <ColumnPicker
+                                allColumns={allColumns}
+                                visibleColumnIds={visibleColumnIds}
+                                defaultColumnIds={activeViewConfig.columns}
+                                onToggle={(colId) => {
+                                  setVisibleColumnIds(prev =>
+                                    prev.includes(colId)
+                                      ? prev.filter(id => id !== colId)
+                                      : [...prev, colId]
+                                  );
+                                }}
+                                onAddComputed={(col) => {
+                                  setExtraColumns(prev => [...prev, col]);
+                                  setVisibleColumnIds(prev => [...prev, col.id]);
+                                }}
+                                onReset={() => setVisibleColumnIds(activeViewConfig.columns)}
+                              />
+                              <button
+                                type="button"
+                                className={clsx(
+                                  "px-2.5 py-1 rounded-md border text-[10px] transition-colors",
+                                  isTableCollapsed
+                                    ? "border-brand-500/40 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20"
+                                    : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
+                                )}
+                                onClick={() => { saveRightPanelScroll(); pendingScrollRestoreRef.current = true; setIsTableCollapsed(v => !v); }}
+                                title={isTableCollapsed ? "Expand table" : "Collapse table"}
+                              >
+                                {isTableCollapsed ? "Expand table" : "Collapse table"}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            {/* Model tabs (text mode) */}
+                            <div className="flex items-center gap-1 ml-1">
+                              {(() => {
+                                const allParas: any[] = Array.isArray(mappingArtifactWithCitations?.shadow?.paragraphs)
+                                  ? mappingArtifactWithCitations.shadow.paragraphs : [];
+                                const indices = Array.from(new Set(allParas.map((p: any) =>
+                                  typeof p.modelIndex === 'number' ? p.modelIndex : 0
+                                ))).sort((a, b) => a - b);
+                                if (indices.length === 0) indices.push(0);
+                                return indices.map(idx => {
+                                  const pid = resolveProviderIdFromCitationOrder(idx, citationSourceOrder ?? undefined);
+                                  const name = pid ? getProviderName(pid) : `Model ${idx}`;
+                                  return (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => setDisplayModelIndex(idx)}
+                                      className={clsx(
+                                        "px-2.5 py-1 rounded-md text-[10px] transition-colors border",
+                                        displayModelIndex === idx
+                                          ? "border-brand-500/40 bg-brand-500/15 text-brand-300"
+                                          : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
+                                      )}
+                                    >
+                                      {name}
+                                    </button>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       {/* ── Vertical-split: Table + Cards ── */}
@@ -1812,25 +1780,39 @@ export const DecisionMapSheet = React.memo(() => {
                             transition: isDraggingVerticalSplit ? 'none' : 'grid-template-rows 150ms ease-out',
                           }}
                         >
-                          {/* Row 1: EvidenceTable */}
+                          {/* Row 1: EvidenceTable or ReadingSurface */}
                           <div className="min-h-0 overflow-hidden relative">
-                            <EvidenceTable
-                              rows={activeRows}
-                              columns={activeColumns}
-                              viewConfig={activeViewConfig}
-                              scope={scope}
-                              mode={tableMode}
-                              bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 260) : 0}
-                              onRowClick={(row) => {
-                                if (tableMode === 'paragraph') {
-                                  if (row.paragraphId) {
-                                    instrumentActions.setSelectedEntity({ type: 'statement', id: row.paragraphId });
+                            {topPanelMode === 'text' ? (
+                              <ReadingSurface
+                                artifact={mappingArtifactWithCitations}
+                                displayModel={displayModelIndex}
+                                focusedClaimId={instrumentSelectedClaimId}
+                                selectedStatementId={selectedEntity?.type === 'statement' ? selectedEntity.id : null}
+                                citationSourceOrder={citationSourceOrder}
+                                onSelectStatement={(stmtId, _paraId) => {
+                                  instrumentActions.setSelectedEntity({ type: 'statement', id: stmtId });
+                                }}
+                                onSwitchModel={(idx) => setDisplayModelIndex(idx)}
+                              />
+                            ) : (
+                              <EvidenceTable
+                                rows={activeRows}
+                                columns={activeColumns}
+                                viewConfig={activeViewConfig}
+                                scope={scope}
+                                mode={tableMode}
+                                bottomInset={selectedClaimObj ? (isClaimPanelCollapsed ? 56 : 260) : 0}
+                                onRowClick={(row) => {
+                                  if (tableMode === 'paragraph') {
+                                    if (row.paragraphId) {
+                                      instrumentActions.setSelectedEntity({ type: 'statement', id: row.paragraphId });
+                                    }
+                                  } else if (row.statementId) {
+                                    instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
                                   }
-                                } else if (row.statementId) {
-                                  instrumentActions.setSelectedEntity({ type: 'statement', id: row.statementId });
-                                }
-                              }}
-                            />
+                                }}
+                              />
+                            )}
                             <AnimatePresence>
                               {selectedClaimObj && (
                                 <div

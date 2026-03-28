@@ -411,6 +411,33 @@ class AuthManager {
     }
 
     /**
+     * Mark a provider as unauthenticated locally (no network request).
+     * Use after a definitive auth failure (401) where the failed request
+     * already told us the session is dead.
+     */
+    async markUnauthenticated(providerId) {
+        const baseProvider = providerId.split('-')[0];
+        const providerIds = baseProvider === 'gemini'
+            ? GEMINI_VARIANTS
+            : [providerId];
+
+        let changed = false;
+        for (const pid of providerIds) {
+            if (this._cookieStatus[pid] !== false) {
+                console.log(`[AuthManager] Marking ${pid} as unauthenticated (no verify)`);
+                this._cookieStatus[pid] = false;
+                changed = true;
+            }
+        }
+
+        this._verificationCache.delete(baseProvider);
+
+        if (changed) {
+            await chrome.storage.local.set({ provider_auth_status: this._cookieStatus });
+        }
+    }
+
+    /**
      * Invalidate cache (call after suspected auth failure)
      */
     invalidateCache(providerId) {

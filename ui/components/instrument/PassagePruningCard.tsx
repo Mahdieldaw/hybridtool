@@ -206,6 +206,9 @@ export function PassagePruningCard({ artifact }: { artifact: any }) {
         concentration,
         refinedPrimaryClaim: pq.refinedPrimaryClaim ?? null,
         refinedAllegianceMethod: pq.refinedAllegianceMethod ?? null,
+        allegianceValue: typeof pq.refinedAllegianceValue === "number" ? pq.refinedAllegianceValue : null,
+        calWeight: typeof pq.refinedCalibrationWeight === "number" ? pq.refinedCalibrationWeight : null,
+        rivalAllegiances: safeArr<any>(pq.refinedRivalAllegiances),
       };
     });
   }, [activeResult]);
@@ -399,9 +402,9 @@ export function PassagePruningCard({ artifact }: { artifact: any }) {
 
           {/* ── Section 2: Provenance Quality Table ─────────────────── */}
           <div className="mt-3">
-            {sectionTitle("Provenance Quality \u2014 Rule 2 KEEPs")}
+            {sectionTitle("Provenance Quality \u2014 Rule 2 Joint Statements")}
             {pqRows.length === 0 ? (
-              <div className="text-[11px] text-text-muted mt-1">No Rule 2 KEEP statements for this claim.</div>
+              <div className="text-[11px] text-text-muted mt-1">No Rule 2 joint statements for this claim.</div>
             ) : (
               <>
                 {/* Summary callout */}
@@ -472,6 +475,59 @@ export function PassagePruningCard({ artifact }: { artifact: any }) {
                         </span>
                       ),
                       sortValue: (r) => r.refinedAllegianceMethod ?? "",
+                    },
+                    {
+                      key: "allegianceValue",
+                      header: "Alleg",
+                      title: "Signed allegiance value: positive = leans dominant, negative = leans rival",
+                      cell: (r) => {
+                        if (r.allegianceValue == null) return <span className="text-[10px] text-text-muted">{"\u2014"}</span>;
+                        const color = r.allegianceValue > 0.01
+                          ? "text-emerald-400"
+                          : r.allegianceValue < -0.01
+                            ? "text-rose-400"
+                            : "text-text-muted";
+                        return <span className={clsx("font-mono text-[10px]", color)}>{r.allegianceValue > 0 ? "+" : ""}{fmt(r.allegianceValue, 4)}</span>;
+                      },
+                      sortValue: (r) => r.allegianceValue,
+                    },
+                    {
+                      key: "calWeight",
+                      header: "Cal\u00A0W",
+                      title: "Calibration pool weight (0 = no pool, higher = more confident calibration)",
+                      cell: (r) => (
+                        <span className={clsx("font-mono text-[10px]", r.calWeight != null && r.calWeight > 0 ? "text-sky-400" : "text-text-muted")}>
+                          {r.calWeight != null ? fmt(r.calWeight, 2) : "\u2014"}
+                        </span>
+                      ),
+                      sortValue: (r) => r.calWeight,
+                    },
+                    {
+                      key: "rivals",
+                      header: "Rivals",
+                      title: "Per-rival weighted allegiance breakdown",
+                      cell: (r) => {
+                        if (!r.rivalAllegiances || r.rivalAllegiances.length === 0) {
+                          return <span className="text-[10px] text-text-muted">{"\u2014"}</span>;
+                        }
+                        return (
+                          <span className="text-[10px] truncate block max-w-[120px]" title={
+                            r.rivalAllegiances.map((ra: any) =>
+                              `${claimLabelById.get(ra.claimId) ?? ra.claimId}: raw=${ra.rawAllegiance?.toFixed(4)} w=${ra.weightedAllegiance?.toFixed(4)}`
+                            ).join("; ")
+                          }>
+                            {r.rivalAllegiances.map((ra: any, i: number) => {
+                              const w = ra.weightedAllegiance ?? 0;
+                              const color = w > 0.01 ? "text-emerald-400" : w < -0.01 ? "text-rose-400" : "text-text-muted";
+                              return (
+                                <span key={ra.claimId ?? i} className={clsx("font-mono", color)}>
+                                  {i > 0 ? " " : ""}{w > 0 ? "+" : ""}{fmt(w, 3)}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        );
+                      },
                     },
                     {
                       key: "cosSimLiving",

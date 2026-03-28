@@ -1143,6 +1143,28 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         return true;
 
 
+      case "SAVE_TRAVERSAL_STATE": {
+        (async () => {
+          const { aiTurnId, traversalState } = message.payload || {};
+          if (!aiTurnId || !traversalState) {
+            sendResponse({ success: false, error: "Missing aiTurnId or traversalState" });
+            return;
+          }
+          // Find the mapping provider response for this turn and patch traversalState
+          const responses = await sm.adapter.getResponsesByTurnId(aiTurnId);
+          const mappingResp = (responses || []).find(r => r.responseType === "mapping");
+          if (mappingResp?.id) {
+            await sm.adapter.put('provider_responses', {
+              ...mappingResp,
+              traversalState,
+              updatedAt: Date.now(),
+            }, mappingResp.id);
+          }
+          sendResponse({ success: true });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+      }
+
       case "GET_FULL_HISTORY": {
         const allSessions = await sm.adapter.getAllSessions() || [];
         const sessions = allSessions.map(r => ({

@@ -8,6 +8,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isDefinitiveAuthError,
   isNetworkError,
   createProviderAuthError,
   normalizeError
@@ -115,10 +116,14 @@ export class GeminiAdapter {
     } catch (error) {
       // Check Gemini-specific auth errors
       if (isProviderAuthError(error) || this._isGeminiAuthError(error)) {
-        authManager.invalidateCache(this.id);
-        await authManager.verifyProvider(this.id);
+        // 403 and not a provider-specific code → ambiguous, retry once
+        if (!isDefinitiveAuthError(error) && !this._isGeminiAuthError(error) && !_isRetry) {
+          console.log(`[GeminiAdapter] Ambiguous auth error (${error?.status}), retrying once...`);
+          return await this.sendPrompt(req, onChunk, signal, true);
+        }
+        console.log(`[GeminiAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        await authManager.markUnauthenticated(this.id);
 
-        // Special message for "no access" vs "session expired"
         if (error?.code === 'noGeminiAccess') {
           error.message = 'Your Google account does not have Gemini access.';
         }
@@ -277,8 +282,12 @@ export class GeminiAdapter {
       };
     } catch (error) {
       if (isProviderAuthError(error) || this._isGeminiAuthError(error)) {
-        authManager.invalidateCache(this.id);
-        await authManager.verifyProvider(this.id);
+        if (!isDefinitiveAuthError(error) && !this._isGeminiAuthError(error) && !_isRetry) {
+          console.log(`[GeminiAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
+          return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+        }
+        console.log(`[GeminiAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        await authManager.markUnauthenticated(this.id);
 
         if (error?.code === 'noGeminiAccess') {
           error.message = 'Your Google account does not have Gemini access.';

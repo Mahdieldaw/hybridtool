@@ -9,6 +9,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isDefinitiveAuthError,
   isNetworkError,
   createProviderAuthError,
   getErrorMessage,
@@ -209,12 +210,15 @@ export class ChatGPTAdapter {
         if (thinkingResult) return thinkingResult;
       }
 
-      // Observe auth failure and update status
+      // Auth failure: 401/pattern → definitive, 403 → retry once
       if (isProviderAuthError(error)) {
-        authManager.invalidateCache(this.id);
-        await authManager.verifyProvider(this.id);
+        if (!isDefinitiveAuthError(error) && !_isRetry) {
+          console.log(`[ChatGPT Adapter] Ambiguous auth error (${error?.status}), retrying once...`);
+          return await this.sendPrompt(req, onChunk, signal, true);
+        }
+        console.log(`[ChatGPT Adapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        await authManager.markUnauthenticated(this.id);
 
-        // Return structured error response
         const authError = createProviderAuthError(this.id, error);
         return {
           providerId: this.id,
@@ -379,10 +383,14 @@ export class ChatGPTAdapter {
       return response;
 
     } catch (error) {
-      // Observe auth failure and update status
+      // Auth failure: 401/pattern → definitive, 403 → retry once
       if (isProviderAuthError(error)) {
-        authManager.invalidateCache(this.id);
-        await authManager.verifyProvider(this.id);
+        if (!isDefinitiveAuthError(error) && !_isRetry) {
+          console.log(`[ChatGPT Adapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
+          return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+        }
+        console.log(`[ChatGPT Adapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
         return {

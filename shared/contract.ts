@@ -1189,6 +1189,12 @@ export interface ProvenanceQualityEntry {
   /** From provenance refinement layer (null if refinement not available) */
   refinedPrimaryClaim?: string | null;
   refinedAllegianceMethod?: string | null;
+  /** Signed allegiance value: positive = leans dominant, negative = leans rival */
+  refinedAllegianceValue?: number | null;
+  /** Calibration pool weight (0 = no calibration pool, higher = more confident) */
+  refinedCalibrationWeight?: number | null;
+  /** Per-rival allegiance breakdown from refinement */
+  refinedRivalAllegiances?: Array<{ claimId: string; rawAllegiance: number; weightedAllegiance: number }>;
 }
 
 export interface PassagePruningResult {

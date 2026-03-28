@@ -18,7 +18,6 @@ import {
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
   activeProviderTargetAtom,
-  traversalStateByTurnAtom,
   cleanupTurnAtoms,
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
@@ -62,7 +61,6 @@ export function useChat() {
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
-  const setTraversalStateByTurn = useSetAtom(traversalStateByTurnAtom);
   const store = useStore();
 
 
@@ -285,11 +283,6 @@ export function useChat() {
             }
           }
           cleanupTurnAtoms(currentTurnIds, pairs);
-          setTraversalStateByTurn((prev: Record<string, any>) => {
-            const next = { ...prev };
-            for (const turnId of currentTurnIds) delete next[turnId];
-            return next;
-          });
           setCurrentSessionId(null);
           setTurnsMap(new Map());
           setTurnIds([]);
@@ -311,7 +304,6 @@ export function useChat() {
       setTurnIds,
       setActiveAiTurnId,
       setActiveTarget,
-      setTraversalStateByTurn,
     ],
   );
 
@@ -335,11 +327,6 @@ export function useChat() {
             }
           }
           cleanupTurnAtoms(currentTurnIds, pairs);
-          setTraversalStateByTurn((prev: Record<string, any>) => {
-            const next = { ...prev };
-            for (const turnId of currentTurnIds) delete next[turnId];
-            return next;
-          });
           setCurrentSessionId(null);
           setTurnsMap(new Map());
           setTurnIds([]);
@@ -360,7 +347,6 @@ export function useChat() {
       setTurnIds,
       setActiveAiTurnId,
       setActiveTarget,
-      setTraversalStateByTurn,
     ],
   );
 

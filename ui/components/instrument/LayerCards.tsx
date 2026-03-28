@@ -1787,12 +1787,6 @@ function MixedResolutionInline({ artifact }: { artifact: any }) {
                   ),
                 },
                 {
-                  key: "probeCount", header: "Probes",
-                  title: "Number of surviving parents probed by the direction test.",
-                  sortValue: (r: any) => r.probes?.length ?? 0,
-                  cell: (r: any) => <span className="font-mono text-[10px] text-text-muted">{r.probes?.length ?? 0}</span>,
-                },
-                {
                   key: "bestSim", header: "Best τ",
                   title: "Highest twin similarity found across all direction probes for this statement.",
                   sortValue: (r: any) => {

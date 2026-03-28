@@ -9,6 +9,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isDefinitiveAuthError,
   createProviderAuthError,
   isNetworkError,
   normalizeError
@@ -415,21 +416,19 @@ export class ClaudeAdapter {
   async _handleAuthError(error, req, onChunk, signal, _isRetry, isContinuation = false) {
     console.warn(`[ClaudeAdapter] Auth error: ${error.status || error.message}`);
 
-    // Update auth status
-    authManager.invalidateCache(this.id);
-    const isStillValid = await authManager.verifyProvider(this.id);
-
-    if (isStillValid && !_isRetry) {
-      // Transient issue - retry once
-      console.log(`[ClaudeAdapter] Auth verified, retrying...`);
-      if (isContinuation) {
-        return await this.sendContinuation(req.originalPrompt, req.meta, undefined, onChunk, signal, true);
-      } else {
-        return await this.sendPrompt(req, onChunk, signal, true);
-      }
+    // 401 or pattern match (session expired, login required, etc.) → definitive, no retry
+    if (isDefinitiveAuthError(error) || _isRetry) {
+      console.log(`[ClaudeAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+      await authManager.markUnauthenticated(this.id);
+      throw createProviderAuthError(this.id, error);
     }
 
-    // Confirmed auth failure
-    throw createProviderAuthError(this.id, error);
+    // 403 → ambiguous, could be transient. Retry once.
+    console.log(`[ClaudeAdapter] Ambiguous auth error (${error.status}), retrying once...`);
+    if (isContinuation) {
+      return await this.sendContinuation(req.originalPrompt, req.meta, undefined, onChunk, signal, true);
+    } else {
+      return await this.sendPrompt(req, onChunk, signal, true);
+    }
   }
 }

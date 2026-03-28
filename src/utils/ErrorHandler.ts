@@ -6,6 +6,7 @@
 import { persistenceMonitor } from "../core/PersistenceMonitor";
 import {
   isProviderAuthError as _isProviderAuthError,
+  isDefinitiveAuthError as _isDefinitiveAuthError,
   isRateLimitError as _isRateLimitError,
   isNetworkError as _isNetworkError,
 } from "./error-classification";
@@ -207,6 +208,11 @@ export class ProviderAuthError extends HTOSError {
 export function isProviderAuthError(error: unknown): boolean {
   if (error instanceof ProviderAuthError) return true;
   return _isProviderAuthError(error);
+}
+
+export function isDefinitiveAuthError(error: unknown): boolean {
+  if (error instanceof ProviderAuthError) return true;
+  return _isDefinitiveAuthError(error);
 }
 
 const isRateLimitError = _isRateLimitError;
@@ -572,11 +578,9 @@ export class ErrorHandler {
         execute: async (error, context) => {
           if (context.authManager && context.providerId) {
             const authManager = context.authManager as {
-              invalidateCache: (pid: string) => void;
-              verifyProvider: (pid: string) => Promise<unknown>;
+              markUnauthenticated: (pid: string) => Promise<void>;
             };
-            authManager.invalidateCache(context.providerId as string);
-            await authManager.verifyProvider(context.providerId as string);
+            await authManager.markUnauthenticated(context.providerId as string);
           }
           throw error;
         },

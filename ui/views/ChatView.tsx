@@ -8,7 +8,8 @@ import {
   isSplitOpenAtom,
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
-  chatInputHeightAtom
+  chatInputHeightAtom,
+  useWorkspaceViewAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -30,6 +31,10 @@ const DecisionMapSheet = safeLazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
 );
 
+const WorkspaceShell = safeLazy(() =>
+  import("../components/workspace/WorkspaceShell").then(m => ({ default: m.WorkspaceShell }))
+);
+
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
@@ -44,6 +49,7 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
+  const useWorkspaceMode = useAtomValue(useWorkspaceViewAtom);
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -244,10 +250,16 @@ export default function ChatView() {
         />
       )}
 
-      {/* Decision Map - Fixed Overlay */}
-      <Suspense fallback={null}>
-        <DecisionMapSheet />
-      </Suspense>
+      {/* Decision Map / Workspace — only one renders at a time */}
+      {useWorkspaceMode ? (
+        <Suspense fallback={null}>
+          <WorkspaceShell />
+        </Suspense>
+      ) : (
+        <Suspense fallback={null}>
+          <DecisionMapSheet />
+        </Suspense>
+      )}
 
 
       <div

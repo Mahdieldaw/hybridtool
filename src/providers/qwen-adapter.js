@@ -7,6 +7,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isDefinitiveAuthError,
   isNetworkError,
   createProviderAuthError,
   normalizeError
@@ -78,8 +79,12 @@ export class QwenAdapter {
       };
     } catch (error) {
       if (isProviderAuthError(error) || this._isQwenAuthError(error)) {
-        authManager.invalidateCache(this.id);
-        await authManager.verifyProvider(this.id);
+        if (!isDefinitiveAuthError(error) && !this._isQwenAuthError(error) && !_isRetry) {
+          console.log(`[QwenAdapter] Ambiguous auth error (${error?.status}), retrying once...`);
+          return await this.sendPrompt(req, onChunk, signal, true);
+        }
+        console.log(`[QwenAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
         return {
@@ -224,8 +229,12 @@ export class QwenAdapter {
       };
     } catch (error) {
       if (isProviderAuthError(error) || this._isQwenAuthError(error)) {
-        authManager.invalidateCache(this.id);
-        await authManager.verifyProvider(this.id);
+        if (!isDefinitiveAuthError(error) && !this._isQwenAuthError(error) && !_isRetry) {
+          console.log(`[QwenAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
+          return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+        }
+        console.log(`[QwenAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
         return {

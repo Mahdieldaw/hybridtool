@@ -45,6 +45,10 @@ interface Props {
   // Blast surface risk overlay
   blastSurface?: BlastSurfaceResult | null;
   showRiskGlyphs?: boolean;
+
+  // External paragraph highlight (workspace bidirectional linking)
+  highlightedParagraphId?: string | null;
+  onParagraphClick?: (paragraphId: string, modelIndex: number) => void;
 }
 
 type Point = { x: number; y: number };
@@ -235,6 +239,8 @@ export function ParagraphSpaceView({
   highlightSpannedHulls = true,
   blastSurface,
   showRiskGlyphs = false,
+  highlightedParagraphId,
+  onParagraphClick,
 }: Props) {
   const nodes = graph?.nodes ?? [];
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
@@ -1012,6 +1018,7 @@ export function ParagraphSpaceView({
             const isHovSibling = !!hoveredNodeSiblingIds?.has(id);
             const isHovered = hoveredParagraphId === id;
             const isParaSelected = selectedParagraphId === id;
+            const isExternalHighlight = highlightedParagraphId === id;
 
             const regionId = nodeToRegionMap.get(id);
             const noRegionFilter = enabledRegionIds === null || enabledRegionIds.size === 0;
@@ -1026,7 +1033,7 @@ export function ParagraphSpaceView({
             const baseOpacity = hasSelection && highlightSourceParagraphs
                ? (isSource ? 1 : 0.55)
                : isHovSource || isHovered ? 1 : isHovSibling ? 0.95 : 0.85;
-            const forceVisible = isSource || isParaSelected || isHovSource || isHovSibling;
+            const forceVisible = isSource || isParaSelected || isExternalHighlight || isHovSource || isHovSibling;
             const nodeOpacity = (modelEnabled && inActiveRegion) || forceVisible ? baseOpacity : baseOpacity * 0.25;
             const paraData = paragraphDataMap.get(id);
             const hasText = !!paraData?._fullParagraph;
@@ -1070,22 +1077,30 @@ export function ParagraphSpaceView({
             }
 
             return (
-              <circle
-                key={id}
-                cx={x}
-                cy={y}
-                r={isParaSelected ? r + 1.5 : isHovSource ? r + 0.5 : r}
-                fill={isParaSelected ? "rgba(251,191,36,0.9)" : fill}
-                opacity={nodeOpacity}
-                stroke={isParaSelected ? "rgba(255,255,255,0.9)" : isHovSource ? "rgba(245,158,11,0.7)" : isHovered ? "rgba(255,255,255,0.6)" : isHovSibling ? "rgba(255,255,255,0.35)" : "none"}
-                strokeWidth={isParaSelected ? 2 : isHovSource ? 1.5 : isHovered ? 1.5 : isHovSibling ? 1 : 1}
-                onMouseEnter={() => setHoveredParagraphId(id)}
-                onMouseLeave={() => setHoveredParagraphId(null)}
-                onClick={hasText ? (e) => { e.stopPropagation(); setSelectedParagraphId(isParaSelected ? null : id); } : undefined}
-                style={{ cursor: hasText ? "pointer" : "default" }}
-              >
-                <title>{titleText}</title>
-              </circle>
+              <g key={id}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={isParaSelected ? r + 1.5 : isHovSource ? r + 0.5 : r}
+                  fill={isParaSelected ? "rgba(251,191,36,0.9)" : fill}
+                  opacity={nodeOpacity}
+                  stroke={isParaSelected ? "rgba(255,255,255,0.9)" : isHovSource ? "rgba(245,158,11,0.7)" : isHovered ? "rgba(255,255,255,0.6)" : isHovSibling ? "rgba(255,255,255,0.35)" : "none"}
+                  strokeWidth={isParaSelected ? 2 : isHovSource ? 1.5 : isHovered ? 1.5 : isHovSibling ? 1 : 1}
+                  onMouseEnter={() => setHoveredParagraphId(id)}
+                  onMouseLeave={() => setHoveredParagraphId(null)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onParagraphClick) onParagraphClick(id, nodeModelIndex ?? 0);
+                    if (hasText) setSelectedParagraphId(isParaSelected ? null : id);
+                  }}
+                  style={{ cursor: hasText || onParagraphClick ? "pointer" : "default" }}
+                >
+                  <title>{titleText}</title>
+                </circle>
+                {isExternalHighlight && (
+                  <circle cx={x} cy={y} r={r + 3} fill="none" stroke="rgba(99,102,241,0.8)" strokeWidth={2} strokeDasharray="3 2" />
+                )}
+              </g>
             );
           })}
 

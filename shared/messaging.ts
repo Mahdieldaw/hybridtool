@@ -24,4 +24,7 @@ export const RENAME_SESSION = "RENAME_SESSION";
 export const REFRESH_AUTH_STATUS = "REFRESH_AUTH_STATUS";
 export const RETRY_PROVIDERS = "RETRY_PROVIDERS";
 
+// Incremental traversal state persistence (UI → SW → IndexedDB)
+export const SAVE_TRAVERSAL_STATE = "SAVE_TRAVERSAL_STATE";
+
 
