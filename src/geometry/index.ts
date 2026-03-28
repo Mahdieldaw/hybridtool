@@ -37,7 +37,7 @@ export { buildGeometricSubstrate } from './substrate';
 // Utilities (for testing/debugging)
 export { quantize, buildTwoGraphs, buildPairwiseField } from './knn';
 export { computeSoftThreshold, computeSimilarityStats, computeExtendedStatsFromArray } from './threshold';
-export { computeTopology, computeMutualRankTopology } from './topology';
+export { computeMutualRankTopology } from './topology';
 export { buildMutualRankGraph } from './mutualRank';
 export { computeNodeStats } from './nodes';
 

@@ -2,8 +2,8 @@
 
 import { StoreConfig, MetadataRecord } from "./types";
 
-export const DB_NAME = "OpusDeusDB";
-export const DB_VERSION = 10;
+const DB_NAME = "OpusDeusDB";
+const DB_VERSION = 10;
 export const SCHEMA_VERSION = 10;
 
 // Store configurations - conversation-only architecture

@@ -513,30 +513,6 @@ export async function generateStatementEmbeddings(
     });
 }
 
-/**
- * Preload embedding model (call during idle time).
- */
-export async function preloadModel(config: ClusteringConfig = DEFAULT_CONFIG): Promise<void> {
-    await ensureOffscreen();
-
-    return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-            {
-                type: 'PRELOAD_MODEL',
-                payload: { modelId: config.modelId }
-            },
-            (response) => {
-                if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
-                } else if (response?.success) {
-                    resolve();
-                } else {
-                    reject(new Error(response?.error || 'Model preload failed'));
-                }
-            }
-        );
-    });
-}
 
 /**
  * Check embedding service status.

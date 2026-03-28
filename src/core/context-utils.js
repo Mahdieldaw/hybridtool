@@ -7,36 +7,6 @@
  * Consolidates logic to prevent drift between ContextResolver and WorkflowEngine.
  */
 
-/**
- * Extract batch outputs from a turn object (legacy/embedded format)
- * @param {Object} turn - The turn object
- * @returns {Object} Map of providerId -> details
- */
-export function extractBatchOutputs(turn) {
-    if (!turn) return {};
-
-    // Legacy fallback: if embedded responses exist on the turn, use them
-    const embedded = turn.batchResponses || turn.providerResponses || {};
-    if (embedded && Object.keys(embedded).length > 0) {
-        const frozen = {};
-        for (const [providerId, val] of Object.entries(embedded)) {
-            // Handle both array (new) and object (legacy) formats
-            const r = Array.isArray(val) ? val[val.length - 1] : val;
-            if (r && r.text) {
-                frozen[providerId] = {
-                    providerId,
-                    text: r.text,
-                    status: r.status || "completed",
-                    meta: r.meta || {},
-                    createdAt: r.createdAt || turn.createdAt,
-                    updatedAt: r.updatedAt || turn.createdAt,
-                };
-            }
-        }
-        return frozen;
-    }
-    return {};
-}
 
 /**
  * Aggregate batch outputs per provider from raw provider response records.

@@ -13,47 +13,6 @@
 // Guardrail: Pattern definitions are frozen on import to prevent runtime modification
 // ===========================================================================
 
-import { STANCE_PATTERNS, SIGNAL_PATTERNS } from './StatementTypes';
-import { EXCLUSION_RULES } from './ExclusionRules';
-
-// ===========================================================================
-// INITIALIZATION - FREEZE PATTERN DEFINITIONS
-// ===========================================================================
-
-let _initialized = false;
-
-export function initializeShadowMapper(): void {
-    if (_initialized) return;
-
-    // Freeze pattern objects to prevent runtime modification
-    Object.freeze(STANCE_PATTERNS);
-    Object.freeze(SIGNAL_PATTERNS);
-    Object.freeze(EXCLUSION_RULES);
-
-    // Freeze individual pattern arrays
-    for (const patterns of Object.values(STANCE_PATTERNS)) {
-        Object.freeze(patterns);
-    }
-
-    for (const patterns of Object.values(SIGNAL_PATTERNS)) {
-        Object.freeze(patterns);
-    }
-
-    // Freeze individual exclusion rules
-    for (const rule of EXCLUSION_RULES) {
-        Object.freeze(rule);
-        Object.freeze(rule.appliesTo);
-    }
-
-    _initialized = true;
-    const nodeEnv = (globalThis as any)?.process?.env?.NODE_ENV;
-    if (typeof nodeEnv === 'string' && nodeEnv !== 'production') {
-        console.log('[Shadow] Pattern definitions locked. Guardrail 1 active.');
-    }
-}
-
-// Auto-initialize on import
-initializeShadowMapper();
 
 // ===========================================================================
 // EXPORTS
@@ -106,7 +65,6 @@ export {
 // Functions - ExclusionRules
 export {
     isExcluded,
-    getExclusionViolations,
 } from './ExclusionRules';
 
 // Functions - ShadowExtractor
@@ -121,7 +79,6 @@ export {
 export {
     computeShadowDelta,
     getTopUnreferenced,
-    extractReferencedIds,
 } from './ShadowDelta';
 
 // ===========================================================================

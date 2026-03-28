@@ -17,10 +17,7 @@ import {
     KeystoneShapeData,
     LinearShapeData,
     ChainStep,
-    CascadeRisk,
-    DissentPatternData,
-    PrimaryShape,
-    SecondaryPattern
+    CascadeRisk
 } from "../../../shared/contract";
 
 export interface DissentVoice {
@@ -49,40 +46,6 @@ export const generateWhyItMatters = (
     }
 };
 
-export const generateTransferQuestion = (
-    primary: PrimaryShape,
-    patterns: SecondaryPattern[],
-    peaks: EnrichedClaim[]
-): string => {
-    const dissentPattern = patterns.find(p => p.type === 'dissent');
-    switch (primary) {
-        case 'convergent':
-            if (dissentPattern) {
-                const dissent = dissentPattern.data as DissentPatternData;
-                if (dissent.strongestVoice) {
-                    return `The consensus may be missing something. Is "${dissent.strongestVoice.label}" onto something the majority missed?`;
-                }
-            }
-            return "For the consensus to hold, what assumption must be true? Is it true in your situation?";
-        case 'forked':
-            const peakLabels = peaks.slice(0, 2).map(p => `"${p.label}"`).join(' vs ');
-            return `Two valid paths exist: ${peakLabels}. Which constraint matters more to you?`;
-        case 'constrained':
-            return "You can't maximize both—which matters more to you?";
-        case 'parallel':
-            return "Which dimension is most relevant to your situation?";
-        case 'sparse':
-            if (dissentPattern) {
-                const dissent = dissentPattern.data as DissentPatternData;
-                if (dissent.strongestVoice) {
-                    return `Signal is weak, but "${dissent.strongestVoice.label}" may be the answer despite low support. What's your context?`;
-                }
-            }
-            return "What specific question or constraint would clarify this?";
-        default:
-            return "What would help you navigate this?";
-    }
-};
 
 
 // AUDIT: Shape Data Builders — LIVE (structure), PARTIALLY DECORATIVE (detail fields)

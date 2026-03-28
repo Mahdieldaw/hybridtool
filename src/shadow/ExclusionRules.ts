@@ -28,7 +28,7 @@ export interface ExclusionRule {
     severity: 'hard' | 'soft';
 }
 
-export const ALL_STANCES: Stance[] = (Object.keys({
+const ALL_STANCES: Stance[] = (Object.keys({
     prescriptive: 1,
     cautionary: 1,
     prerequisite: 1,
@@ -304,28 +304,3 @@ export function isExcluded(text: string, stance: Stance, opts?: { isListItem?: b
     return { excluded: false, confidenceMultiplier };
 }
 
-/**
- * Get all exclusion violations for debugging
- */
-export function getExclusionViolations(
-    text: string,
-    stance: Stance
-): Array<{ id: string; reason: string; severity: string }> {
-    const applicableRules = EXCLUSION_RULES.filter(r =>
-        r.appliesTo.includes(stance)
-    );
-
-    const violations: Array<{ id: string; reason: string; severity: string }> = [];
-
-    for (const rule of applicableRules) {
-        if (rule.pattern.test(text)) {
-            violations.push({
-                id: rule.id,
-                reason: rule.reason,
-                severity: rule.severity,
-            });
-        }
-    }
-
-    return violations;
-}

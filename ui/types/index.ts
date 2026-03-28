@@ -55,16 +55,6 @@ export interface LLMProvider {
   logoSrc?: string;
 }
 
-export interface ParsedOption {
-  title: string;
-  description: string;
-  citations: (number | string)[];
-}
-
-export interface ParsedTheme {
-  name: string;
-  options: ParsedOption[];
-}
 
 // Helper type guards re-exported from contract
 export { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from "../../shared/contract";
@@ -116,4 +106,3 @@ export interface FullSessionPayload {
   providerContexts: Record<string, any>;
 }
 
-export type { GraphNode, GraphEdge, GraphTopology, Claim, Edge } from "../../shared/contract";

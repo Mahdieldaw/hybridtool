@@ -2,13 +2,6 @@
 // SIMILARITY UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Quantize similarity for deterministic comparisons.
- * Prevents floating-point drift across runs (GPU may vary slightly).
- */
-export function quantizeSimilarity(sim: number): number {
-    return Math.round(sim * 1e6) / 1e6;
-}
 
 /**
  * Cosine similarity between two normalized vectors.

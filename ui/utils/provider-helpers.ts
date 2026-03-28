@@ -52,14 +52,6 @@ export function getProviderLogo(providerId: string): string | undefined {
   return getProviderConfig(providerId)?.logoSrc;
 }
 
-/**
- * Helper to check if a provider requires auth/login
- * (Wraps your auth logic if you have a centralized status map, 
- * otherwise just checks if the provider exists in the config)
- */
-export function isProviderValid(providerId: string): boolean {
-  return !!getProviderConfig(providerId);
-}
 
 export function getProviderAbbreviation(providerId: string): string {
   const pid = normalizeProviderId(String(providerId || ""));

@@ -11,7 +11,6 @@ import QwenLogo from "../assets/providers/qwen.svg";
 
 // Central registry for provider metadata used by the UI (lanes/rail)
 // - Do NOT hard-code hex colors inside Rail; colors live here (or in tokens)
-// - This module exposes addProvider for future dynamic extension
 
 export interface ProviderConfig extends LLMProvider {
   // Icon component for micro-cards and badges
@@ -89,17 +88,8 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
 // Mutable list used by the LaneFactory/Rail
 let providers: ProviderConfig[] = [...INITIAL_PROVIDERS];
 
-export function getProviders(): ProviderConfig[] {
-  return providers;
-}
 
 export function getProviderById(id: string): ProviderConfig | undefined {
   return providers.find((p) => p.id === id);
 }
 
-// Add a provider at runtime. Higher layers can call this once adapter is available.
-export function addProvider(p: ProviderConfig): void {
-  if (!p || !p.id) return;
-  // De-duplicate by id
-  providers = [...providers.filter((x) => x.id !== p.id), p];
-}

@@ -232,34 +232,4 @@ export function getTopUnreferenced(
     return delta.unreferenced.slice(0, limit);
 }
 
-// ===========================================================================
-// EXPORT HELPERS FOR PIPELINE INTEGRATION
-// ===========================================================================
-type ClaimLike = {
-    sourceStatementIds?: string[];
-    gates?: {
-        conditionals?: Array<{ sourceStatementIds?: string[] }>;
-        prerequisites?: Array<{ sourceStatementIds?: string[] }>;
-    };
-    conflicts?: Array<{ sourceStatementIds?: string[] }>;
-};
-/**
- * Extract referenced statement IDs from semantic mapper output
- * Use this after semantic mapper runs to build the set for computeShadowDelta
- */
-export function extractReferencedIds(
-    claims: ClaimLike[]
-): Set<string> {
-    const ids = new Set<string>();
 
-    const add = (arr?: string[]) => (arr || []).forEach(id => ids.add(id));
-
-    for (const claim of claims || []) {
-        add(claim?.sourceStatementIds);
-
-        const conflicts = claim?.conflicts || [];
-        for (const e of conflicts) add(e?.sourceStatementIds);
-    }
-
-    return ids;
-}

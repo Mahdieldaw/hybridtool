@@ -4,7 +4,6 @@ import { isDecisionMapOpenAtom, providerAuthStatusAtom, toastAtom, providerConte
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
-import { adaptGraphTopology } from "../utils/graphAdapter";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderColor, getProviderConfig, resolveProviderIdFromCitationOrder, getProviderName } from "../utils/provider-helpers";
 import type { AiTurnWithUI } from "../types";
@@ -1109,7 +1108,7 @@ export const DecisionMapSheet = React.memo(() => {
       claims: 0,
       edges: 0,
     });
-    return { ...adaptGraphTopology(graphTopology), source: "traversal" as const };
+    return { claims: [], edges: [], source: "traversal" as const };
   }, [mappingArtifact, parsedMapping, graphTopology, parsedSemanticFromText]);
 
   const derivedMapperArtifact = useMemo(() => {

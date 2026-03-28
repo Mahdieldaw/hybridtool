@@ -55,20 +55,4 @@ export const DEFAULT_CONFIG: ClusteringConfig = {
     minParagraphsForClustering: 3,
 };
 
-export const CONFIG_PRESETS = {
-    highPrecision: {
-        ...DEFAULT_CONFIG,
-        similarityThreshold: 0.88,
-    } as ClusteringConfig,
 
-    balanced: DEFAULT_CONFIG,
-
-    highRecall: {
-        ...DEFAULT_CONFIG,
-        similarityThreshold: 0.78,
-    } as ClusteringConfig,
-
-    fast: {
-        ...DEFAULT_CONFIG,
-    } as ClusteringConfig,
-} as const;

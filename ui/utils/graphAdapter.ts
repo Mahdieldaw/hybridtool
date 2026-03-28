@@ -6,7 +6,16 @@ import {
     Edge,
 } from '../../shared/contract';
 
-const CLAIM_TYPES: Claim["type"][] = ["factual", "prescriptive", "conditional", "contested", "speculative"];
+const CLAIM_TYPES: Claim["type"][] = [
+    "factual",
+    "prescriptive",
+    "cautionary",
+    "assertive",
+    "uncertain",
+    "conditional",
+    "contested",
+    "speculative",
+];
 const isClaimType = (value: unknown): value is Claim["type"] =>
     typeof value === "string" && (CLAIM_TYPES as string[]).includes(value);
 
@@ -15,9 +24,6 @@ const mapGraphEdgeTypeToEdgeType = (value: unknown): Edge["type"] => {
     if (t === "conflicts" || t === "conflict") return "conflicts";
     if (t === "tradeoff") return "tradeoff";
     if (t === "prerequisite") return "prerequisite";
-    if (t === "supports") return "supports";
-    if (t === "complements") return "supports";
-    if (t === "bifurcation") return "supports";
     return "supports";
 };
 
@@ -39,7 +45,6 @@ export function adaptGraphTopology(topology: GraphTopology | null): {
             .filter((n: number) => Number.isFinite(n)),
         support_count: Number((node as any)?.support_count) || 0,
         type: isClaimType((node as any)?.theme) ? (node as any).theme : "factual",
-        role: "anchor",
         quote: (node as any)?.quote,
     }));
 

@@ -58,52 +58,9 @@ export const messagesAtom = atom<TurnMessage[]>((get) => {
   return ids.map((id) => map.get(id)).filter((t): t is TurnMessage => !!t);
 });
 
-/**
- * Selector: provider responses for a specific AI turn (isolated subscription).
- * DEPRECATED: Use providerEffectiveStateFamily for component isolation.
- */
-export const providerResponsesForTurnAtom = atom(
-  (get) =>
-    (turnId: string): Record<string, ProviderResponse> => {
-      const turn = get(turnsMapAtom).get(turnId);
-      if (!turn || turn.type !== "ai") return {};
-      const aiTurn = turn as AiTurn;
-      const batchResponses = getBatchResponses(aiTurn);
-      const out: Record<string, ProviderResponse> = {};
-      // Flatten arrays for batch responses: take latest per provider
-      Object.entries(batchResponses || {}).forEach(([pid, val]: [string, any]) => {
-        const arr = Array.isArray(val) ? val : [val];
-        if (arr.length > 0) out[pid] = arr[arr.length - 1] as ProviderResponse;
-      });
-      return out;
-    },
-);
-
 // -----------------------------
 // Provider Island Isolation Atoms
 // -----------------------------
-/**
- * Atom family: Get the full response array for a specific provider in a turn.
- * Returns the complete history as an array (never flattened).
- * If the provider has no responses, returns an empty array.
- */
-export const providerResponseArrayFamily = atomFamily(
-  ({ turnId, providerId }: { turnId: string; providerId: string }) =>
-    atom((get) => {
-      const turn = get(turnsMapAtom).get(turnId);
-      if (!turn || turn.type !== "ai") return [];
-
-      const aiTurn = turn as AiTurn;
-
-      const responses = getBatchResponses(aiTurn)[providerId];
-
-
-      // Always return array, normalize if needed
-      if (!responses) return [];
-      return Array.isArray(responses) ? responses : [responses];
-    }),
-  (a, b) => a.turnId === b.turnId && a.providerId === b.providerId
-);
 
 /**
  * Derived atom family: Stable, UI-optimized state for a provider.
@@ -112,7 +69,14 @@ export const providerResponseArrayFamily = atomFamily(
 export const providerEffectiveStateFamily = atomFamily(
   ({ turnId, providerId }: { turnId: string; providerId: string }) =>
     atom((get) => {
-      const responses = get(providerResponseArrayFamily({ turnId, providerId }));
+      const turn = get(turnsMapAtom).get(turnId);
+      if (!turn || turn.type !== "ai") {
+        return { latestResponse: null, historyCount: 0, isEmpty: true, allResponses: [] as ProviderResponse[] };
+      }
+
+      const aiTurn = turn as AiTurn;
+      const raw = getBatchResponses(aiTurn)[providerId];
+      const responses = !raw ? [] : Array.isArray(raw) ? raw : [raw];
 
       return {
         latestResponse: responses.length > 0 ? responses[responses.length - 1] : null,
@@ -124,30 +88,9 @@ export const providerEffectiveStateFamily = atomFamily(
   (a, b) => a.turnId === b.turnId && a.providerId === b.providerId
 );
 
-/**
- * Atom family: Get only the list of provider IDs for a turn.
- * Parent layout subscribes to this to avoid re-rendering on provider data changes.
- */
-export const providerIdsForTurnFamily = atomFamily(
-  (turnId: string) =>
-    atom((get) => {
-      const turn = get(turnsMapAtom).get(turnId);
-      if (!turn || turn.type !== "ai") return [];
 
-      const aiTurn = turn as AiTurn;
-      return Object.keys(getBatchResponses(aiTurn) || {});
-    }),
-  (a, b) => a === b
-);
 
-/**
- * Selector: get a single turn by ID (entity accessor).
- */
-export const turnByIdAtom = atom(
-  (get) =>
-    (turnId: string): TurnMessage | undefined =>
-      get(turnsMapAtom).get(turnId),
-);
+
 /**Atom family: Get a single turn by ID with isolated subscriptions.
  * Prefer this over turnByIdAtom when you need per-turn render isolation.*/
 export const turnAtomFamily = atomFamily(
@@ -192,23 +135,17 @@ export const isContinuationModeAtom = atom((get) => {
 export const lastStreamingProviderAtom = atom<string | null>(null);
 
 /**
- * Derived atom: represents the turn that should be "live" in the UI.
- * Merges recompute targeting and normal streaming into a single source of truth.
- */
-export const activeStreamingTurnIdAtom = atom<string | null>((get) => {
-  const recompute = get(activeRecomputeStateAtom);
-  if (recompute) return recompute.aiTurnId;
-  return get(activeAiTurnIdAtom);
-});
-
-/**
  * Bundle all global streaming state for efficient subscription.
  */
-const globalStreamingStateAtom = atom((get) => ({
-  activeId: get(activeStreamingTurnIdAtom),
-  isLoading: get(isLoadingAtom),
-  appStep: get(currentAppStepAtom),
-}));
+const globalStreamingStateAtom = atom((get) => {
+  const recompute = get(activeRecomputeStateAtom);
+  const activeId = recompute ? recompute.aiTurnId : get(activeAiTurnIdAtom);
+  return {
+    activeId,
+    isLoading: get(isLoadingAtom),
+    appStep: get(currentAppStepAtom),
+  };
+});
 
 /**
  * Shared idle state object: ensures reference equality for non-active turns.
@@ -260,7 +197,7 @@ export const turnExpandedStateFamily = atomFamily(
 
 
 
-export const showScrollToBottomAtom = atom<boolean>(false);
+
 
 // -----------------------------
 // Model & feature configuration (persisted)
@@ -317,10 +254,7 @@ export const isReducedMotionAtom = atomWithStorage<boolean>(
   "htos_reduced_motion",
   false,
 );
-export const includePromptInCopyAtom = atomWithStorage<boolean>(
-  "htos_include_prompt_in_copy",
-  true,
-);
+
 
 /**
  * Feature flag for the new Cognitive Pipeline (v2)
@@ -354,11 +288,7 @@ export const activeProviderTargetAtom = atom<{
 export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<
   Record<string, string | null>
 >({});
-// Persist "show history" state per provider (aiTurnId-providerId)
-export const providerHistoryExpandedFamily = atomFamily(
-  (_key: string) => atom(false),
-  (a, b) => a === b,
-);
+
 
 export const thinkMappingByRoundAtom = atomWithImmer<Record<string, boolean>>(
   {},
@@ -387,16 +317,7 @@ export const lastActivityAtAtom = atom<number>(0);
 // -----------------------------
 // Derived atoms (examples)
 // -----------------------------
-export const activeProviderCountAtom = atom((get) => {
-  const selected = get(selectedModelsAtom) || {};
-  return Object.values(selected).filter(Boolean).length;
-});
 
-export const isFirstTurnAtom = atom((get) => {
-  const ids = get(turnIdsAtom);
-  const map = get(turnsMapAtom);
-  return !ids.some((id) => map.get(id)?.type === "user");
-});
 
 export const chatInputValueAtom = atomWithStorage<string>(
   "htos_chat_input_value",
@@ -408,13 +329,11 @@ export const chatInputValueAtom = atomWithStorage<string>(
 // -----------------------------
 // Global Toast Notification
 // -----------------------------
-export type Toast = {
+export const toastAtom = atom<{
   id: number;
   message: string;
   type?: 'info' | 'success' | 'error';
-} | null;
-
-export const toastAtom = atom<Toast>(null);
+} | null>(null);
 
 // -----------------------------
 // Split Pane & Decision Map State
@@ -427,7 +346,7 @@ export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null)
 
 
 export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
-export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
+
 
 /** When true, the workspace view renders instead of the legacy DecisionMapSheet. */
 export const useWorkspaceViewAtom = atom<boolean>(false);
@@ -438,28 +357,24 @@ export const useWorkspaceViewAtom = atom<boolean>(false);
 // Workflow Progress (for Council Orbs UI)
 // =============================================================================
 
-export type WorkflowStage =
-  | 'idle'
-  | 'thinking'
-  | 'streaming'
-  | 'complete'
-  | 'error';
-
-export interface ProviderWorkflowState {
-  stage: WorkflowStage;
+// ProviderId -> { stage, progress }
+export const workflowProgressAtom = atom<Record<string, {
+  stage: 'idle' | 'thinking' | 'streaming' | 'complete' | 'error';
   progress?: number; // 0-100
   error?: string;
-}
+}>>({});
 
-// ProviderId -> { stage, progress }
-export const workflowProgressAtom = atom<Record<string, ProviderWorkflowState>>({});
-
-const idleWorkflowProgress: Record<string, ProviderWorkflowState> = {};
+const idleWorkflowProgress: Record<string, {
+  stage: 'idle' | 'thinking' | 'streaming' | 'complete' | 'error';
+  progress?: number; // 0-100
+  error?: string;
+}> = {};
 
 export const workflowProgressForTurnFamily = atomFamily(
   (turnId: string) =>
     atom((get) => {
-      const activeId = get(activeStreamingTurnIdAtom);
+      const recompute = get(activeRecomputeStateAtom);
+      const activeId = recompute ? recompute.aiTurnId : get(activeAiTurnIdAtom);
       const isLoading = get(isLoadingAtom);
       if (activeId === turnId && isLoading) return get(workflowProgressAtom);
       return idleWorkflowProgress;
@@ -482,34 +397,15 @@ const idleProviderErrors: Record<string, ProviderError> = {};
 export const providerErrorsForTurnFamily = atomFamily(
   (turnId: string) =>
     atom((get) => {
-      const activeId = get(activeStreamingTurnIdAtom);
+      const recompute = get(activeRecomputeStateAtom);
+      const activeId = recompute ? recompute.aiTurnId : get(activeAiTurnIdAtom);
       if (activeId === turnId) return get(providerErrorsAtom);
       return idleProviderErrors;
     }),
   (a, b) => a === b,
 );
 
-/**
- * Track which providers can be retried based on error classification
- */
-export const retryableProvidersAtom = atom<string[]>((get) => {
-  const errors = get(providerErrorsAtom);
-  return Object.entries(errors)
-    .filter(([, err]) => !!err && !!err.retryable)
-    .map(([pid]) => pid);
-});
 
-const idleRetryableProviders: string[] = [];
-
-export const retryableProvidersForTurnFamily = atomFamily(
-  (turnId: string) =>
-    atom((get) => {
-      const activeId = get(activeStreamingTurnIdAtom);
-      if (activeId === turnId) return get(retryableProvidersAtom);
-      return idleRetryableProviders;
-    }),
-  (a, b) => a === b,
-);
 
 /**
  * Current workflow degradation status
@@ -580,16 +476,12 @@ export function cleanupTurnAtoms(
     turnAtomFamily.remove(turnId);
     turnStreamingStateFamily.remove(turnId);
     turnExpandedStateFamily.remove(turnId);
-    providerIdsForTurnFamily.remove(turnId);
     workflowProgressForTurnFamily.remove(turnId);
     providerErrorsForTurnFamily.remove(turnId);
-    retryableProvidersForTurnFamily.remove(turnId);
   }
   for (const pair of turnIdProviderPairs) {
-    providerResponseArrayFamily.remove(pair);
     providerEffectiveStateFamily.remove(pair);
     providerArtifactFamily.remove(pair);
-    providerHistoryExpandedFamily.remove(`${pair.turnId}-${pair.providerId}`);
   }
 }
 

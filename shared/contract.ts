@@ -8,31 +8,10 @@ export type ProviderKey =
   | "gemini-exp"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType =
-  | "prompt"
-  | "mapping"
-  | "singularity";
-
 export type ProviderResponseType =
   | "batch"
   | "mapping"
   | "singularity";
-
-
-export interface SingularityPipelineSnapshot {
-  userMessage?: string;
-  prompt?: string;
-  stance?: string;
-  stanceReason?: string;
-  stanceConfidence?: number;
-  structuralShape?: {
-    primaryPattern?: string; // Legacy
-    primary?: PrimaryShape;
-    confidence?: number;
-  } | null;
-  leakageDetected?: boolean;
-  leakageViolations?: string[];
-}
 
 export interface SingularityOutput {
   text: string;
@@ -40,7 +19,7 @@ export interface SingularityOutput {
   timestamp: number;
   leakageDetected?: boolean;
   leakageViolations?: string[];
-  pipeline?: SingularityPipelineSnapshot | null;
+  pipeline?: any | null;
 }
 
 /**
@@ -79,7 +58,7 @@ export interface Claim {
   | 'conditional'
   | 'contested'
   | 'speculative';
-  role: 'anchor' | 'branch' | 'challenger' | 'supplement';
+  role?: 'anchor' | 'branch' | 'challenger' | 'supplement';
   quote?: string;
   support_count?: number;
   sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
@@ -120,25 +99,6 @@ export interface ConditionalPruner {
   prunesOn?: 'yes' | 'no';
 }
 
-export type Determinant =
-  | {
-    type: 'intrinsic';
-    fork: string;
-    hinge: string;
-    question: string;
-    claims: string[];
-    paths?: Record<string, string>;
-  }
-  | {
-    type: 'extrinsic';
-    fork: string;
-    hinge: string;
-    question: string;
-    claims: string[];
-    yes_means?: string;
-    no_means?: string;
-  };
-
 /**
  * Gate produced by the Survey Mapper (runs after blast radius filter).
  * Each gate tests one hidden real-world assumption about the user's situation.
@@ -160,22 +120,9 @@ export interface UnifiedMapperOutput {
     id: string;
     question: string;
   }>;
-  determinants?: Determinant[];
+  determinants?: any[];
   edges: Edge[];
   conditionals?: ConditionalPruner[];
-}
-
-export interface ConditionMatch {
-  statementId: string;
-  modelIndex: number;
-  text: string;
-  similarity: number;
-}
-
-export interface ConditionProvenance {
-  conditionId: string;
-  question: string;
-  linkedStatements: ConditionMatch[];
 }
 
 export interface GraphEdge {
@@ -220,7 +167,7 @@ export interface ProblemStructure extends ShapeClassification {
   peaks?: Array<{ id: string; label: string; supportRatio: number }>;
   peakRelationship?: "conflicting" | "trading-off" | "supporting" | "independent" | "none";
   peakPairRelations?: PeakPairRelationship[];
-  data?: ShapeData;
+  data?: any;
   signalStrength?: number;
   floorAssumptions?: string[];
   centralConflict?: string;
@@ -232,7 +179,6 @@ export type CompositeShape = ProblemStructure & {
   peaks: Array<{ id: string; label: string; supportRatio: number }>;
   peakRelationship: NonNullable<ProblemStructure["peakRelationship"]>;
 };
-export type ClaimRole = 'anchor' | 'branch' | 'challenger' | 'supplement';
 
 export interface ConflictClaim {
   id: string;
@@ -240,7 +186,7 @@ export interface ConflictClaim {
   text: string;
   supportCount: number;
   supportRatio: number;
-  role: ClaimRole;
+  role: any;
   isHighSupport: boolean;
 }
 
@@ -281,47 +227,7 @@ export interface SupportingClaim {
   relationship: 'supports' | 'prerequisite' | 'aligned';
 }
 
-export type CentralConflict = CentralConflictIndividual | CentralConflictCluster;
-
-export interface CentralConflictIndividual {
-  type: 'individual';
-  axis: string;
-  positionA: {
-    claim: ConflictClaim;
-    supportingClaims: SupportingClaim[];
-    supportRationale: string;
-  };
-  positionB: {
-    claim: ConflictClaim;
-    supportingClaims: SupportingClaim[];
-    supportRationale: string;
-  };
-  dynamics: 'symmetric' | 'asymmetric';
-  stakes: {
-    choosingA: string;
-    choosingB: string;
-  };
-}
-
-export interface CentralConflictCluster {
-  type: 'cluster';
-  axis: string;
-  target: {
-    claim: ConflictClaim;
-    supportingClaims: SupportingClaim[];
-    supportRationale: string;
-  };
-  challengers: {
-    claims: ConflictClaim[];
-    commonTheme: string;
-    supportingClaims: SupportingClaim[];
-  };
-  dynamics: 'one_vs_many';
-  stakes: {
-    acceptingTarget: string;
-    acceptingChallengers: string;
-  };
-}
+export type CentralConflict = any | any;
 
 export interface FloorClaim {
   id: string;
@@ -441,7 +347,7 @@ export interface ContestedShapeData {
     isContradictory: boolean;
   };
   fragilities: {
-    leverageInversions: LeverageInversionInfo[];
+    leverageInversions: any[];
     articulationPoints: string[];
   };
   collapsingQuestion: string | null;
@@ -505,45 +411,10 @@ export interface ExploratoryShapeData {
   sparsityReasons: string[];
 }
 
-export interface ContextualShapeData {
-  pattern: 'contextual';
-  governingCondition: string;
-  branches: Array<{
-    condition: string;
-    claims: FloorClaim[];
-  }>;
-  defaultPath: {
-    exists: boolean;
-    claims: FloorClaim[];
-  } | null;
-  missingContext: string[];
-}
-
-export type ShapeData =
-  | SettledShapeData
-  | LinearShapeData
-  | KeystoneShapeData
-  | ContestedShapeData
-  | TradeoffShapeData
-  | DimensionalShapeData
-  | ExploratoryShapeData
-  | ContextualShapeData;
-
-
-
 export type PrimaryShape = 'convergent' | 'forked' | 'parallel' | 'constrained' | 'sparse';
 
-export type SecondaryPatternType =
-  | 'challenged'
-  | 'keystone'
-  | 'chain'
-  | 'fragile'
-  | 'conditional'
-  | 'orphaned'
-  | 'dissent';
-
 export interface SecondaryPattern {
-  type: SecondaryPatternType;
+  type: any;
   severity: 'high' | 'medium' | 'low';
   data:
   | ChallengedPatternData
@@ -758,24 +629,8 @@ export interface MixedProvenanceResult {
   removalRate: number;    // % of merged-pool stmts removed by μ_global floor
 }
 
-export interface LeverageInversionInfo {
-  claimId: string;
-  claimLabel: string;
-  strongClaim?: string;
-  supporterCount: number;
-  reason: string;
-  affectedClaims: string[];
-}
-export type LeverageInversion = LeverageInversionInfo;
-
-export interface CascadeRiskInfo {
-  sourceId: string;
-  sourceLabel: string;
-  dependentIds: string[];
-  dependentLabels: string[];
-  depth: number;
-}
-export type CascadeRisk = CascadeRiskInfo;
+export type LeverageInversion = any;
+export type CascadeRisk = any;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BLAST SURFACE — Provenance-derived damage assessment (instrumentation)
@@ -783,33 +638,6 @@ export type CascadeRisk = CascadeRiskInfo;
 // Replaces L3 structural heuristics (leverage, cascade edges, articulation)
 // with L1 measurements derived from mixed-method provenance.
 // ═══════════════════════════════════════════════════════════════════════════
-
-export interface CrossClaimTwinEntry {
-  targetClaimId: string;
-  hasTwin: boolean;
-  bestSim: number;
-  bestCandidateId: string | null;
-  /** Gate 2: does bestCandidate's best match back into C's exclusives point to this statement? */
-  reciprocal: boolean | null;
-}
-
-export interface StatementAbsorption {
-  statementId: string;
-  muS: number;
-  sigmaS: number;
-  tauSim: number;
-  carriers: CrossClaimTwinEntry[];
-  carrierCount: number;
-  orphan: boolean;
-}
-
-export interface ClaimAbsorptionProfile {
-  exclusiveCount: number;
-  orphanCount: number;
-  absorbableCount: number;
-  orphanRatio: number;
-  statements: StatementAbsorption[];
-}
 
 /** Layer C: Evidence mass — how much territory does this claim cover? */
 export interface BlastSurfaceLayerC {
@@ -908,21 +736,16 @@ export interface MixedResolution {
 export interface BlastSurfaceClaimScore {
   claimId: string;
   claimLabel: string;
-  layerB?: ClaimAbsorptionProfile;
+  layerB?: any;
   layerC: BlastSurfaceLayerC;
   riskVector?: BlastSurfaceRiskVector;
   /** Speculative mixed-parent direction test: "if this claim were pruned, what happens to its shared statements?" */
   mixedResolution?: MixedResolution;
 }
 
-export interface StatementTwinResult {
-  twinStatementId: string;
-  similarity: number;
-}
-
 export interface StatementTwinMap {
   /** Per-claim twins: claimId → { statementId → twin result | null } */
-  perClaim: Record<string, Record<string, StatementTwinResult | null>>;
+  perClaim: Record<string, Record<string, any | null>>;
   /** Per-claim thresholds: claimId → { statementId → τ_sim } */
   thresholds: Record<string, Record<string, number>>;
   meta: {
@@ -994,79 +817,17 @@ export interface ValidatedConflict {
   querySimPair?: [number, number] | null;
 }
 
-export interface QuestionSelectionClaimProfile {
-  claimId: string;
-  claimLabel: string;
-  totalDamage: number | null;
-  resolvedDamage: number | null;
-  orphanRatio: number | null;
-  supportRatio: number;
-  modelCount: number;
-  soleSource: boolean;
-  queryRelevanceRaw: number;
-  wouldPenalize: boolean;
-  damageBand: number;
-  queryTiltReorder: boolean;
-}
-
-export interface QuestionSelectionGate {
-  sigmaDamage: number;
-  meanDamage: number;
-  wouldSkip: boolean;
-  hasValidatedConflicts: boolean;
-  overrideSkip: boolean;
-  epsilon: number;
-}
-
-export interface QuestionSelectionCeiling {
-  validatedConflictCount: number;
-  independentConflictClusters: number;
-  damageOutlierCount: number;
-  damageOutlierClaimIds: string[];
-  theoreticalCeiling: number;
-  actualClaimsSent: number;
-}
-
 export interface QuestionSelectionInstrumentation {
-  claimProfiles: QuestionSelectionClaimProfile[];
+  claimProfiles: any[];
   validatedConflicts: ValidatedConflict[];
-  gate: QuestionSelectionGate;
-  ceiling: QuestionSelectionCeiling;
+  gate: any;
+  ceiling: any;
   /** Single-authority routing — computed here, extracted by computeClaimRouting */
-  routing: ClaimRoutingResult;
+  routing: any;
   /** Fragility resolution convergence result (replaces raw damage for routing) */
   fragilityResolution?: FragilityResolutionResult | null;
   meta: {
     processingTimeMs: number;
-  };
-}
-
-export interface ClaimRoutingResult {
-  conflictClusters: Array<{
-    claimIds: string[];
-    edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
-  }>;
-  damageOutliers: Array<{
-    claimId: string;
-    claimLabel: string;
-    claimText: string;
-    totalDamage: number;
-    resolvedDamage: number;
-    supportRatio: number;
-    queryDistance: number | null;
-    supporters: number[];
-    promptType: 'isolate' | 'conditionality';
-  }>;
-  passthrough: string[];
-  skipSurvey: boolean;
-  /** Combined set: claimsInRoutedConflict ∪ post-ceiling damageOutliers */
-  routedClaimIds: string[];
-  diagnostics: {
-    damageThreshold: number | null;
-    damageDistribution: number[];
-    convergenceRatio: number;
-    totalClaims: number;
-    queryDistanceThreshold: number | null;
   };
 }
 
@@ -1129,7 +890,6 @@ export interface ClaimDensityResult {
 // ── Passage pruning (4-rule collateral resolution) ──────────────────────
 
 export type PruningFate = 'REMOVE' | 'KEEP' | 'SKELETONIZE' | 'DROP';
-export type PruningCategory = 'pruned-owned' | 'living-owned' | 'unclassified';
 
 export interface PrunedPassageSpec {
   claimId: string;
@@ -1145,7 +905,7 @@ export interface StatementDisposition {
   paragraphIndex: number;
   /** Which rule resolved this statement (1–3) */
   rule: 1 | 2 | 3;
-  category: PruningCategory;
+  category: any;
   fate: PruningFate;
   /** Sub-step detail: 'twin-exists', 'no-twin', 'legibility-fail', etc. */
   substep: string;
@@ -1351,24 +1111,9 @@ export interface ConflictPair {
   dynamics: "symmetric" | "asymmetric";
 }
 
-export interface MapperOutput {
-  claims: Claim[];
-  edges: Edge[];
-  conditionals?: ConditionalPruner[];
-  narrative?: string;
-}
-
-export interface ParsedMapperOutput extends MapperOutput {
-  narrative: string;
-  anchors: Array<{ label: string; id: string; position: number }>;
-  // Compatibility / Parsing fields
-  map?: MapperOutput | null;
-  topology?: GraphTopology | null;
-  options?: string | null;
-  artifact?: MapperArtifact | null;
-}
-
-export interface MapperArtifact extends MapperOutput {
+export interface MapperArtifact {
+    claims: Claim[];
+    edges: Edge[];
   id?: string;
   query?: string;
   turn?: number;
@@ -1392,7 +1137,7 @@ export interface MapperArtifact extends MapperOutput {
   blastSurface?: BlastSurfaceResult | null;
 
   questionSelectionInstrumentation?: QuestionSelectionInstrumentation | null;
-  claimRouting?: ClaimRoutingResult | null;
+  claimRouting?: any | null;
 
   // Survey Mapper output (runs after blast radius filter; null when skipped or found no gates)
   surveyGates?: SurveyGate[];
@@ -1405,37 +1150,13 @@ export interface MapperArtifact extends MapperOutput {
   };
 
   paragraphProjection?: ParagraphProjectionMeta;
-  paragraphClustering?: ParagraphClusteringSummary;
-  substrate?: GeometricSubstrateSummary;
+  paragraphClustering?: any;
+  substrate?: any;
   completeness?: {
     report: CompletenessReport;
     statementFates: Record<string, StatementFate>;
     unattendedRegions: UnattendedRegion[];
   };
-}
-
-export interface TraversalGate {
-  id: string;
-  type: 'conditional';
-  condition: string;
-  question: string;
-  blockedClaims: string[];
-  sourceStatementIds: string[];
-}
-
-export interface TraversalTier {
-  tierIndex: number;
-  claimIds: string[];
-  gates: TraversalGate[];
-}
-
-export interface LiveTension {
-  claimAId: string;
-  claimBId: string;
-  question: string;
-  sourceStatementIds: string[];
-  isLive: boolean;
-  blockedByGates: string[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1480,14 +1201,12 @@ export interface SerializedAssembledClaim {
 
 export interface SerializedTraversalGraph {
   claims: SerializedAssembledClaim[];
-  tensions: LiveTension[];
-  tiers: TraversalTier[];
+  tensions: any[];
+  tiers: any[];
   maxTier: number;
   roots: string[];
   cycles: string[][];
 }
-
-export type ForcingPointType = 'conditional' | 'conflict';
 
 export interface ConflictOption {
   claimId: string;
@@ -1496,7 +1215,7 @@ export interface ConflictOption {
 
 export interface SerializedForcingPoint {
   id: string;
-  type: ForcingPointType;
+  type: any;
   tier: number;
   question: string;
   condition: string;
@@ -1538,8 +1257,6 @@ export interface ConflictForcingPoint {
 export type UnifiedForcingPoint = ConditionalForcingPoint | ConflictForcingPoint;
 export type ForcingPoint = UnifiedForcingPoint | SerializedForcingPoint;
 
-export type PipelineStatus = 'in_progress' | 'awaiting_traversal' | 'complete' | 'error';
-
 export interface ParagraphProjectionMeta {
   totalParagraphs: number;
   byModel: Record<number, number>;
@@ -1556,7 +1273,7 @@ export interface PipelineShadowStatement {
   id: string;
   modelIndex: number;
   text: string;
-  stance: ShadowStance;
+  stance: any;
   confidence: number;
   signals: {
     sequence: boolean;
@@ -1578,7 +1295,7 @@ export interface PipelineShadowStatement {
 export interface PipelineShadowExtractionMeta {
   totalStatements: number;
   byModel: Record<number, number>;
-  byStance: Record<ShadowStance, number>;
+  byStance: Record<any, number>;
   bySignal: {
     sequence: number;
     tension: number;
@@ -1613,39 +1330,18 @@ export interface PipelineShadowParagraph {
   modelIndex: number;
   paragraphIndex: number;
   statementIds: string[];
-  dominantStance: ShadowStance;
-  stanceHints: ShadowStance[];
+  dominantStance: any;
+  stanceHints: any[];
   contested: boolean;
   confidence: number;
   signals: { sequence: boolean; tension: boolean; conditional: boolean };
-  statements: Array<{ id: string; text: string; stance: ShadowStance; signals: string[] }>;
+  statements: Array<{ id: string; text: string; stance: any; signals: string[] }>;
   _fullParagraph: string;
 }
 
 export interface PipelineParagraphProjectionResult {
   paragraphs: PipelineShadowParagraph[];
   meta: ParagraphProjectionMeta;
-}
-
-export interface ParagraphClusteringSummary {
-  meta: {
-    totalClusters: number;
-    singletonCount: number;
-    uncertainCount: number;
-    avgClusterSize: number;
-    maxClusterSize: number;
-    compressionRatio: number;
-    embeddingTimeMs: number;
-    clusteringTimeMs: number;
-    totalTimeMs: number;
-  };
-  clusters: Array<{
-    id: string;
-    size: number;
-    cohesion: number;
-    uncertain: boolean;
-    uncertaintyReasons?: string[];
-  }>;
 }
 
 export interface PipelineParagraphCluster {
@@ -1666,48 +1362,13 @@ export interface PipelineParagraphCluster {
 
 export interface PipelineClusteringResult {
   clusters: PipelineParagraphCluster[];
-  meta: ParagraphClusteringSummary['meta'];
+  meta: any['meta'];
 }
-
-export interface GeometricSubstrateSummary {
-  shape: {
-    confidence: number;
-    signals: {
-      fragmentationScore: number;
-      bimodalityScore: number;
-      parallelScore: number;
-      convergentScore: number;
-    };
-  };
-  topology: {
-    componentCount: number;
-    largestComponentRatio: number;
-    isolationRatio: number;
-    globalStrongDensity: number;
-  };
-  meta: {
-    embeddingSuccess: boolean;
-    embeddingBackend: 'webgpu' | 'wasm' | 'none';
-    nodeCount: number;
-    knnEdgeCount: number;
-    mutualEdgeCount: number;
-    strongEdgeCount: number;
-    softThreshold: number;
-    buildTimeMs: number;
-  };
-  nodes: {
-    contestedCount: number;
-    avgTop1Sim: number;
-    avgIsolationScore: number;
-  };
-}
-
-export type SubstrateSummary = GeometricSubstrateSummary;
 
 export interface PipelineSubstrateNode {
   paragraphId: string;
   modelIndex: number;
-  dominantStance: ShadowStance;
+  dominantStance: any;
   contested: boolean;
   statementIds: string[];
   top1Sim: number;
@@ -1789,11 +1450,10 @@ export interface PipelineRegionProfile {
   };
 }
 
-export type PipelineGateVerdict = 'proceed' | 'skip_geometry' | 'trivial_convergence' | 'insufficient_structure';
-export type GateVerdict = PipelineGateVerdict;
+export type GateVerdict = any;
 
 export interface PipelineGateResult {
-  verdict: PipelineGateVerdict;
+  verdict: any;
   confidence: number;
   evidence: string[];
   measurements?: {
@@ -1904,7 +1564,7 @@ export interface StatementFate {
   reason: string;
   querySimilarity?: number;
   shadowMetadata: {
-    stance: ShadowStance;
+    stance: any;
     confidence: number;
     signalWeight: number;
     geometricIsolation: number;
@@ -2174,7 +1834,7 @@ export interface AiTurn {
   /** Per-provider singularity responses */
   singularityResponses?: Record<string, any[]>;
 
-  pipelineStatus?: PipelineStatus;
+  pipelineStatus?: any;
 
   meta?: {
     mapper?: string;
@@ -2286,7 +1946,7 @@ export interface SingularityStepPayload {
 
 export interface WorkflowStep {
   stepId: string;
-  type: WorkflowStepType;
+  type: any;
   payload:
   | PromptStepPayload
   | MappingStepPayload
@@ -2310,36 +1970,15 @@ export interface WorkflowRequest {
 // ============================================================================
 
 export type ResolvedContext =
-  | InitializeContext
+  | any
   | ExtendContext
-  | RecomputeContext;
-
-export interface InitializeContext {
-  type: "initialize";
-  providers: ProviderKey[];
-}
+  | any;
 
 export interface ExtendContext {
   type: "extend";
   sessionId: string;
   lastTurnId: string;
   providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
-}
-
-export interface RecomputeContext {
-  type: "recompute";
-  sessionId: string;
-  sourceTurnId: string;
-  frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
-  latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
-  providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: ProviderResponseType;
-  targetProvider: ProviderKey;
-  sourceUserMessage: string;
-  /** Type of concierge prompt used (e.g. starter_1, explorer_1) */
-  frozenSingularityPromptType?: string;
-  /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
-  frozenSingularityPromptSeed?: any;
 }
 
 export type ProviderOutput = {
@@ -2362,7 +2001,7 @@ export type PersistRequest = {
   canonicalUserTurnId?: string;
   canonicalAiTurnId?: string;
   partial?: boolean;
-  pipelineStatus?: PipelineStatus;
+  pipelineStatus?: any;
   runId?: string | null;
 
   // Phase fields
@@ -2394,49 +2033,7 @@ export interface PartialResultMessage {
   chunk: { text?: string; meta?: any };
 }
 
-export interface WorkflowStepUpdateMessage {
-  type: "WORKFLOW_STEP_UPDATE";
-  sessionId: string;
-  stepId: string;
-  status: "completed" | "failed";
-  result?: {
-    results?: Record<string, ProviderResponse>; // For batch steps
-    providerId?: string; // For single-provider steps
-    text?: string;
-    status?: string;
-    meta?: any;
-  };
-  error?: string;
-}
-
-export interface WorkflowCompleteMessage {
-  type: "WORKFLOW_COMPLETE";
-  sessionId: string;
-  workflowId: string;
-  finalResults?: Record<string, any>;
-  error?: string;
-}
-
 // Real-time workflow progress telemetry for UI (optional but recommended)
-export interface WorkflowProgressMessage {
-  type: 'WORKFLOW_PROGRESS';
-  sessionId: string;
-  aiTurnId: string;
-  phase: 'batch' | 'mapping';
-  providerStatuses: ProviderStatus[];
-  completedCount: number;
-  totalCount: number;
-  estimatedTimeRemaining?: number; // milliseconds
-}
-
-export interface TurnCreatedMessage {
-  type: "TURN_CREATED";
-  sessionId: string;
-  userTurnId: string;
-  aiTurnId: string;
-  providers?: ProviderKey[];
-  mappingProvider?: ProviderKey | null;
-}
 
 export interface TurnFinalizedMessage {
   type: "TURN_FINALIZED";
@@ -2454,16 +2051,6 @@ export interface TurnFinalizedMessage {
     ai: AiTurn;
   };
 }
-
-export type PortMessage =
-  | PartialResultMessage
-  | WorkflowStepUpdateMessage
-  | WorkflowCompleteMessage
-  | WorkflowProgressMessage
-  | WorkflowPartialCompleteMessage
-  | RetryProviderRequest
-  | TurnFinalizedMessage
-  | TurnCreatedMessage;
 
 // ============================================================================
 // SECTION 3b: ERROR RESILIENCE & RETRIES (SHARED TYPES)
@@ -2499,32 +2086,6 @@ export interface ProviderStatus {
   progress?: number;
   error?: ProviderError;       // Detailed error info when status === 'failed'
   skippedReason?: string;      // Why it was skipped (e.g., "circuit open")
-}
-
-/**
- * Retry request from frontend
- */
-export interface RetryProviderRequest {
-  type: 'RETRY_PROVIDERS';
-  sessionId: string;
-  aiTurnId: string;
-  providerIds: string[];       // Which providers to retry
-  retryScope: 'batch' | 'mapping'; // Which phase to retry
-}
-
-/**
- * Partial completion message - sent when workflow completes with some failures
- */
-export interface WorkflowPartialCompleteMessage {
-  type: 'WORKFLOW_PARTIAL_COMPLETE';
-  sessionId: string;
-  aiTurnId: string;
-  successfulProviders: string[];
-  failedProviders: Array<{
-    providerId: string;
-    error: ProviderError;
-  }>;
-  mappingCompleted: boolean;
 }
 
 // ============================================================================
@@ -2616,21 +2177,12 @@ export interface ConvergencePoint {
   edgeType: "prerequisite" | "supports";
 }
 
-export type ShadowStance =
-  | 'prescriptive'
-  | 'cautionary'
-  | 'prerequisite'
-  | 'dependent'
-  | 'assertive'
-  | 'uncertain'
-  | 'unclassified';
-
 export interface ShadowAudit {
   shadowStatementCount: number;
   referencedCount: number;
   unreferencedCount: number;
   highSignalUnreferencedCount: number;
-  byStance: Record<ShadowStance, { total: number; unreferenced: number }>;
+  byStance: Record<any, { total: number; unreferenced: number }>;
   gaps: {
     conflicts: number;
     prerequisites: number;
@@ -2645,38 +2197,7 @@ export interface ShadowAudit {
   };
 }
 
-export interface ShadowEntry {
-  statement: {
-    id: string;
-    text: string;
-    stance: ShadowStance;
-    modelIndex: number;
-    confidence: number;
-    signals: {
-      sequence: boolean;
-      tension: boolean;
-      conditional: boolean;
-    };
-    location: {
-      paragraphIndex: number;
-      sentenceIndex: number;
-    };
-    fullParagraph: string;
-    geometricCoordinates?: {
-      paragraphId: string;
-      componentId: string | null;
-      regionId: string | null;
-      knnDegree: number;
-      mutualDegree: number;
-      isolationScore: number;
-    };
-  };
-  queryRelevance: number;
-  signalWeight: number;
-  adjustedScore: number;
-}
-
-export type ShadowStatement = ShadowEntry['statement'];
+export type ShadowStatement = any['statement'];
 
 export interface StructuralAnalysis {
   edges: Edge[];
@@ -2705,8 +2226,8 @@ export interface StructuralAnalysis {
   shape: ProblemStructure;
   shadow?: {
     audit: ShadowAudit;
-    unindexed: ShadowEntry[];
-    topUnindexed: ShadowEntry[];
+    unindexed: any[];
+    topUnindexed: any[];
     processingTime: number;
   };
 }

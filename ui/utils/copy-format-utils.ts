@@ -1,5 +1,5 @@
 import { AiTurn, GraphTopology, ProviderResponse, UserTurn, isUserTurn, isAiTurn, Claim, Edge } from "../../shared/contract";
-import { TurnMessage, ParsedTheme } from "../types";
+import { TurnMessage } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
@@ -8,107 +8,6 @@ import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
 // ============================================================================
-
-export function formatAnalysisContextForMd(analysis: any, providerName: string = "Unknown"): string {
-    if (!analysis) return "";
-    let md = "";
-
-    // Understand Logic
-    if (analysis.short_answer) {
-        md += `## Singularity Analysis (via ${providerName})\n\n`;
-        md += `### The Short Answer\n\n${analysis.short_answer}\n\n`;
-    }
-    if (analysis.long_answer) {
-        md += `### The Long Answer\n\n${analysis.long_answer}\n\n`;
-    }
-
-    // Gauntlet Logic
-    if (analysis.the_answer?.statement) {
-        md += `## Singularity Verdict (via ${providerName})\n\n`;
-        md += `> ${analysis.the_answer.statement}\n\n`;
-        if (analysis.the_answer.reasoning) {
-            md += `**Reasoning:** ${analysis.the_answer.reasoning}\n\n`;
-        }
-    }
-
-    return md;
-}
-
-export function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
-    if (!Array.isArray(claims) || claims.length === 0) return [];
-
-    const themesByName = new Map<string, ParsedTheme>();
-
-    const getThemeNameForClaim = (claim: any): string => {
-        switch (claim.type) {
-            case 'factual': return 'Facts';
-            case 'prescriptive': return 'Recommendations';
-            case 'conditional': return 'Conditions';
-            case 'contested': return 'Contested';
-            case 'speculative': return 'Possibilities';
-            default: return 'Positions';
-        }
-    };
-
-    for (const claim of claims) {
-        if (!claim) continue;
-        const themeName = getThemeNameForClaim(claim);
-        if (!themesByName.has(themeName)) {
-            themesByName.set(themeName, { name: themeName, options: [] });
-        }
-        const theme = themesByName.get(themeName)!;
-
-        const rawId = claim.id != null ? String(claim.id) : '';
-        const cleanId = rawId.replace(/^claim_?/i, "").trim();
-        const formattedId = cleanId ? `#${cleanId}` : "";
-        const rawLabel = typeof claim.label === 'string' ? claim.label : '';
-
-        const titleParts: string[] = [];
-        if (formattedId) titleParts.push(formattedId);
-        if (rawLabel.trim()) titleParts.push(rawLabel.trim());
-        const title = titleParts.length > 0 ? titleParts.join(' ') : 'Claim';
-
-        const description = typeof claim.text === 'string' ? claim.text : '';
-        const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
-
-        theme.options.push({
-            title,
-            description,
-            citations: supporters,
-        });
-    }
-
-    return Array.from(themesByName.values());
-}
-
-export function formatClaimsAsText(claims: Claim[], edges: Edge[]): string {
-    const lines: string[] = ['#### Positions\n'];
-
-    for (const claim of claims) {
-        // Title
-        lines.push(`**${claim.label}**`);
-
-        // Description
-        lines.push(claim.text);
-
-        // Relationships (inline, no hierarchy language)
-        const conflictsWith = edges
-            .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
-            .map(e => {
-                const otherId = e.from === claim.id ? e.to : e.from;
-                return claims.find(c => c.id === otherId)?.label;
-            })
-            .filter(Boolean);
-
-        if (conflictsWith.length > 0) {
-            lines.push(`↳ *Conflicts with: ${conflictsWith.join(', ')}*`);
-        }
-
-        lines.push(''); // blank line between claims
-    }
-
-    return lines.join('\n');
-}
 
 export function formatDecisionMapForMd(
     narrative: string,
@@ -123,27 +22,41 @@ export function formatDecisionMapForMd(
     }
 
     if (claims && claims.length > 0) {
-        md += formatClaimsAsText(claims, edges);
+        const lines: string[] = ['#### Positions\n'];
+        for (const claim of claims) {
+            lines.push(`**${claim.label}**`);
+            lines.push(claim.text);
+            const conflictsWith = edges
+                .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
+                .map(e => {
+                    const otherId = e.from === claim.id ? e.to : e.from;
+                    return claims.find(c => c.id === otherId)?.label;
+                })
+                .filter(Boolean);
+            if (conflictsWith.length > 0) {
+                lines.push(`↳ *Conflicts with: ${conflictsWith.join(', ')}*`);
+            }
+            lines.push('');
+        }
+        md += lines.join('\n');
         md += '\n';
     }
 
     if (graphTopology) {
-        md += `#### Graph Topology\n\n${formatGraphForMd(graphTopology)}\n\n`;
+        md += `#### Graph Topology\n\n`;
+        if (!graphTopology.edges || graphTopology.edges.length === 0) {
+            md += "*No graph relationships defined.*\n\n";
+        } else {
+            const lines = graphTopology.edges.map(edge => {
+                const source = graphTopology.nodes.find(n => n.id === edge.source)?.label || edge.source;
+                const target = graphTopology.nodes.find(n => n.id === edge.target)?.label || edge.target;
+                return `- **${source}** --[${edge.type}]--> **${target}**`;
+            });
+            md += `${lines.join('\n')}\n\n`;
+        }
     }
 
     return md;
-}
-
-export function formatGraphForMd(topology: GraphTopology): string {
-    if (!topology.edges || topology.edges.length === 0) return "*No graph relationships defined.*";
-
-    const lines = topology.edges.map(edge => {
-        const source = topology.nodes.find(n => n.id === edge.source)?.label || edge.source;
-        const target = topology.nodes.find(n => n.id === edge.target)?.label || edge.target;
-        return `- **${source}** --[${edge.type}]--> **${target}**`;
-    });
-
-    return lines.join('\n');
 }
 
 export function formatProviderResponseForMd(
@@ -156,71 +69,6 @@ export function formatProviderResponseForMd(
     return `**${providerName}**:\n\n${text}\n\n`;
 }
 
-export function formatTurnForMd(
-    _turnid: string,
-    userPrompt: string | null,
-    singularityText: string | null,
-    singularityProviderId: string | undefined,
-    decisionMap: { narrative?: string; claims?: Claim[]; edges?: Edge[]; options?: string | null; topology?: GraphTopology | null } | null,
-    batchResponses: Record<string, ProviderResponse>,
-    includePrompt: boolean = true
-): string {
-    let md = "";
-
-    // 0. User Prompt
-    if (includePrompt && userPrompt) {
-        md += `## User\n\n${userPrompt}\n\n`;
-    }
-
-    // 1. Singularity Analysis
-    if (singularityText) {
-        const providerName = singularityProviderId
-            ? getProviderName(singularityProviderId)
-            : "Singularity";
-        md += `## Singularity Analysis (via ${providerName})\n\n`;
-        md += `${singularityText}\n\n`;
-    }
-
-    // 4. Decision Map (Mappers)
-    if (decisionMap) {
-        md += formatDecisionMapForMd(
-            decisionMap.narrative || "",
-            decisionMap.claims || [],
-            decisionMap.edges || [],
-            decisionMap.topology || null
-        );
-    }
-
-    // 5. Raw Responses (Collapsible Council)
-    const providers = LLM_PROVIDERS_CONFIG;
-    const responsesWithContent = providers
-        .map(p => ({
-            name: p.name,
-            id: String(p.id),
-            response: batchResponses[String(p.id)] as ProviderResponse | undefined
-        }))
-        .filter(item => {
-            return !!item.response;
-        });
-
-    // Actually, let's make the input signature strictly Record<string, ProviderResponse>
-    // where ProviderResponse is the *latest* one.
-
-    if (responsesWithContent.length > 0) {
-        md += `<details>\n<summary>Raw Council Outputs (${responsesWithContent.length} Models)</summary>\n\n`;
-
-        responsesWithContent.forEach(({ name, response }) => {
-            // Check if it's the actual response object
-            if (response && typeof response === 'object' && 'text' in response) {
-                md += formatProviderResponseForMd(response as ProviderResponse, name);
-            }
-        });
-
-        md += `</details>\n\n`;
-    }
-
-    return md;
-}
 
 export function formatSessionForMarkdown(fullSession: { title: string, turns: TurnMessage[] }): string {
     let md = `# Session Title: ${fullSession.title}\n\n`;
@@ -374,15 +222,38 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             });
 
 
-            md += formatTurnForMd(
-                aiTurn.id,
-                userPrompt,
-                singularityText,
-                singularityProviderId,
-                decisionMap,
-                batchResponses,
-                !!userPrompt // include prompt if we found it
-            );
+            let turnMd = "";
+            if (!!userPrompt && userPrompt) {
+                turnMd += `## User\n\n${userPrompt}\n\n`;
+            }
+            if (singularityText) {
+                const providerName = singularityProviderId ? getProviderName(singularityProviderId) : "Singularity";
+                turnMd += `## Singularity Analysis (via ${providerName})\n\n`;
+                turnMd += `${singularityText}\n\n`;
+            }
+            if (decisionMap) {
+                turnMd += formatDecisionMapForMd(
+                    decisionMap.narrative || "",
+                    decisionMap.claims || [],
+                    decisionMap.edges || [],
+                    decisionMap.topology || null
+                );
+            }
+            const providers = LLM_PROVIDERS_CONFIG;
+            const responsesWithContent = providers.map(p => ({
+                name: p.name, id: String(p.id), response: batchResponses[String(p.id)] as ProviderResponse | undefined
+            })).filter(item => !!item.response);
+            
+            if (responsesWithContent.length > 0) {
+                turnMd += `<details>\n<summary>Raw Council Outputs (${responsesWithContent.length} Models)</summary>\n\n`;
+                responsesWithContent.forEach(({ name, response }) => {
+                    if (response && typeof response === 'object' && 'text' in response) {
+                        turnMd += formatProviderResponseForMd(response as ProviderResponse, name);
+                    }
+                });
+                turnMd += `</details>\n\n`;
+            }
+            md += turnMd;
             md += "\n---\n\n";
         }
     });
@@ -398,16 +269,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
 // JSON EXPORT UTILITIES (SAF - Singularity Archive Format)
 // ============================================================================
 
-export interface SingularityExport {
-    version: "1.0";
-    exportedAt: number;
-    session: {
-        id: string;
-        title: string;
-        sessionId: string;
-        turns: SanitizedTurn[];
-    };
-}
+
 
 type SanitizedTurn = SanitizedUserTurn | SanitizedAiTurn;
 
@@ -451,7 +313,7 @@ interface SanitizedAiTurn {
 export function sanitizeSessionForExport(
     fullSession: { id: string, title: string, sessionId: string, turns: TurnMessage[] },
     mode: 'safe' | 'full' = 'safe'
-): SingularityExport {
+): { version: "1.0"; exportedAt: number; session: { id: string; title: string; sessionId: string; turns: SanitizedTurn[]; } } {
     const sanitizedTurns: SanitizedTurn[] = fullSession.turns.map(turn => {
         if (isUserTurn(turn)) {
             return {
@@ -563,7 +425,7 @@ export function sanitizeSessionForExport(
         } as SanitizedUserTurn;
     });
 
-    const exportObj: SingularityExport = {
+    const exportObj: { version: "1.0"; exportedAt: number; session: { id: string; title: string; sessionId: string; turns: SanitizedTurn[]; } } = {
         version: "1.0",
         exportedAt: Date.now(),
         session: {

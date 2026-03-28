@@ -11,19 +11,6 @@ export const getTopNCount = (total: number, ratio: number): number => {
     return Math.max(1, Math.ceil(total * ratio));
 };
 
-export const isInTopPercentile = (value: number, allValues: number[], percentile: number): boolean => {
-    if (allValues.length === 0) return false;
-    let min = Infinity;
-    let max = -Infinity;
-    for (const v of allValues) {
-        min = Math.min(min, v);
-        max = Math.max(max, v);
-    }
-    if (min === max) return false;
-    const threshold = getPercentileThreshold(allValues, 1 - percentile);
-    return value >= threshold;
-};
-
 export const isInBottomPercentile = (value: number, allValues: number[], percentile: number): boolean => {
     if (allValues.length === 0) return false;
     let min = Infinity;

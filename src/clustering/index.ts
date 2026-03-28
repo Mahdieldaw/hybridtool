@@ -17,12 +17,10 @@ export { projectSemanticDensity } from './semanticDensity';
 export {
     type ClusteringConfig,
     DEFAULT_CONFIG,
-    CONFIG_PRESETS,
 } from './config';
 
 // Similarity utilities
 export {
-    quantizeSimilarity,
     cosineSimilarity,
 } from './distance';
 
@@ -31,7 +29,6 @@ export {
     generateEmbeddings,
     generateStatementEmbeddings,
     generateTextEmbeddings,
-    preloadModel,
     getEmbeddingStatus,
     cleanupPendingEmbeddingsBuffers,
     stripInlineMarkdown,

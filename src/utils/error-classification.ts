@@ -31,16 +31,6 @@ export const RATE_LIMIT_PATTERNS = [
 ];
 
 /**
- * Extract the HTTP status from an error object (if present).
- */
-export function getErrorStatus(error: unknown): number | undefined {
-  const errorObj = error as Record<string, unknown> | null;
-  const status =
-    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
-  return typeof status === "number" ? status : undefined;
-}
-
-/**
  * True for any auth-related error (401, 403, or pattern match).
  * Use isDefinitiveAuthError() to distinguish unrecoverable 401s.
  */
@@ -49,8 +39,9 @@ export function isProviderAuthError(error: unknown): boolean {
   if (errorObj?.name === "ProviderAuthError") return true;
   if (errorObj?.code === "AUTH_REQUIRED") return true;
 
-  const status = getErrorStatus(error);
-  if (status !== undefined && AUTH_STATUS_CODES.has(status)) return true;
+  const status =
+    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
+  if (typeof status === "number" && AUTH_STATUS_CODES.has(status)) return true;
 
   const message = (errorObj?.message as string) || String(error);
   return AUTH_ERROR_PATTERNS.some((p) => p.test(message));
@@ -66,8 +57,9 @@ export function isDefinitiveAuthError(error: unknown): boolean {
   if (errorObj?.name === "ProviderAuthError") return true;
   if (errorObj?.code === "AUTH_REQUIRED") return true;
 
-  const status = getErrorStatus(error);
-  if (status !== undefined && DEFINITIVE_AUTH_CODES.has(status)) return true;
+  const status =
+    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
+  if (typeof status === "number" && DEFINITIVE_AUTH_CODES.has(status)) return true;
 
   const message = (errorObj?.message as string) || String(error);
   return AUTH_ERROR_PATTERNS.some((p) => p.test(message));

@@ -1,4 +1,4 @@
-import { Claim, Edge, MapperArtifact, ConciergeDelta } from './contract';
+import { Claim, Edge, ConciergeDelta } from './contract';
 
 /**
  * Shared Parsing Utilities
@@ -332,14 +332,14 @@ export function extractJsonFromContent(content: string | null): any | null {
 // CONCIERGE BATCH REQUEST PARSING
 // ============================================================================ 
 
-export interface WorkflowSignal {
+interface WorkflowSignal {
     type: 'GENERATE_WORKFLOW';
     goal: string;
     context: string;
     batchPrompt: string;
 }
 
-export interface StepHelpSignal {
+interface StepHelpSignal {
     type: 'STEP_HELP_NEEDED';
     step: string;
     blocker: string;
@@ -347,7 +347,7 @@ export interface StepHelpSignal {
     batchPrompt: string;
 }
 
-export type ConciergeSignal = WorkflowSignal | StepHelpSignal | null;
+type ConciergeSignal = WorkflowSignal | StepHelpSignal | null;
 
 export interface ConciergeOutput {
     userResponse: string;
@@ -407,26 +407,6 @@ function parseSignalContent(content: string): ConciergeSignal {
     return null;
 }
 
-export function validateBatchPrompt(prompt: string): { valid: boolean; issues: string[] } {
-    const issues: string[] = [];
-    if (!prompt) {
-        issues.push('Prompt is empty');
-        return { valid: false, issues };
-    }
-    const startsWithRole = /^You are (a |an |the )/i.test(prompt.trim());
-    if (!startsWithRole) issues.push('Prompt should start with an expert role definition ("You are a...")');
-    if (prompt.length < 200) issues.push('Prompt seems too short—may lack necessary context');
-    const genericRoles = [
-        /You are an? (expert|assistant|helper|AI)/i,
-        /You are an? (software engineer|developer|marketer)\.?\s/i,
-    ];
-    if (genericRoles.some(p => p.test(prompt))) issues.push('Expert role may be too generic—add specific credentials and experience');
-    if (!/context|situation|background/i.test(prompt)) issues.push('Prompt may be missing context section');
-    if (!/provide|create|generate|output|deliverable/i.test(prompt)) issues.push('Prompt may be missing clear output specification');
-
-    return { valid: issues.length === 0, issues };
-}
-
 // ============================================================================ 
 // CONCIERGE HANDOFF PARSING (Phase 2: Conversational Evolution)
 // ============================================================================ 
@@ -440,7 +420,7 @@ const BLOCKED_COMMIT_PLACEHOLDERS = [
     '[only if user commits to a plan or requests execution guidance - summarize decision and intent]',
 ];
 
-export interface ParsedHandoffResponse {
+interface ParsedHandoffResponse {
     userFacing: string;
     handoff: ConciergeDelta | null;
 }
@@ -547,18 +527,6 @@ export function hasHandoffContent(delta: ConciergeDelta | null | undefined): boo
     );
 }
 
-export function formatHandoffContext(handoff: ConciergeDelta | null | undefined): string | null {
-    if (!handoff || !hasHandoffContent(handoff)) return null;
-
-    const lines = ['[Conversation context since last analysis:]'];
-    if ((handoff.constraints ?? []).length > 0) lines.push(`Constraints: ${handoff.constraints!.join('; ')}`);
-    if ((handoff.eliminated ?? []).length > 0) lines.push(`Ruled out: ${handoff.eliminated!.join('; ')}`);
-    if ((handoff.preferences ?? []).length > 0) lines.push(`Preferences: ${handoff.preferences!.join('; ')}`);
-    if ((handoff.context ?? []).length > 0) lines.push(`Situation: ${handoff.context!.join('; ')}`);
-
-    return lines.join('\n');
-}
-
 export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): string {
     if (!handoff) return '';
     const commit = handoff.commit ?? null;
@@ -580,12 +548,12 @@ export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): s
 // SEMANTIC MAPPER OUTPUT PARSING (V4)
 // ============================================================================ 
 
-export interface SemanticMapperParseError {
+interface SemanticMapperParseError {
     field: string;
     issue: string;
 }
 
-export interface SemanticMapperParseResult {
+interface SemanticMapperParseResult {
     success: boolean;
     output?: {
         claims: Claim[];
@@ -698,22 +666,5 @@ export function parseSemanticMapperOutput(rawResponse: string): SemanticMapperPa
         output: { claims, edges },
         narrative,
         warnings: warnings.length > 0 ? warnings : undefined,
-    };
-}
-
-// ============================================================================ 
-// MAPPER ARTIFACT UTILITY
-// ============================================================================ 
-
-export function createEmptyMapperArtifact(): MapperArtifact {
-    return {
-        claims: [],
-        edges: [],
-
-        query: "",
-        turn: 0,
-        timestamp: new Date().toISOString(),
-        model_count: 0,
-        narrative: ""
     };
 }

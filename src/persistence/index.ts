@@ -9,7 +9,7 @@ import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from "./database";
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter";
 
 // Simplified PersistenceLayer interface
-export interface PersistenceLayer {
+interface PersistenceLayer {
   adapter: SimpleIndexedDBAdapter;
   close: () => Promise<void>;
 }
@@ -75,66 +75,3 @@ export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
   };
 }
 
-export function isPersistenceAvailable(): boolean {
-  return typeof indexedDB !== "undefined" && typeof IDBDatabase !== "undefined";
-}
-
-export async function getPersistenceHealth(): Promise<{
-  available: boolean;
-  adapterReady: boolean;
-  databaseOpen: boolean;
-  error?: string;
-}> {
-  try {
-    const available = isPersistenceAvailable();
-    if (!available) {
-      return {
-        available: false,
-        adapterReady: false,
-        databaseOpen: false,
-        error: "IndexedDB not available",
-      };
-    }
-
-    const db = await openDatabase();
-    let databaseOpen = false;
-    let adapterReady = false;
-    
-    try {
-      try {
-        const tx = db.transaction(["sessions"], "readonly");
-        databaseOpen = tx !== null;
-      } catch (error) {
-        databaseOpen = false;
-      }
-
-      // Test the SimpleIndexedDBAdapter
-      const adapter = new SimpleIndexedDBAdapter();
-      let initSuccess = false;
-      try {
-        await adapter.init();
-        initSuccess = true;
-        adapterReady = await adapter.isReady();
-      } finally {
-        if (initSuccess) {
-          await adapter.close();
-        }
-      }
-      
-      return {
-        available: true,
-        adapterReady,
-        databaseOpen,
-      };
-    } finally {
-      db.close();
-    }
-  } catch (error) {
-    return {
-      available: false,
-      adapterReady: false,
-      databaseOpen: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
-  }
-}

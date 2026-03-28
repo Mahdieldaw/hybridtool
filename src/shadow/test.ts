@@ -5,7 +5,6 @@
 import {
     extractShadowStatements,
     computeShadowDelta,
-    extractReferencedIds,
     getTopUnreferenced,
 } from './index';
 
@@ -140,40 +139,14 @@ for (const u of topUnreferenced) {
     console.log();
 }
 
-// ===========================================================================
-// INTEGRATION EXAMPLE
-// ===========================================================================
+// Simulated semantic mapper output (not used for delta now)
+const referencedIds = new Set<string>([
+    shadowResult.statements[0]?.id,
+    shadowResult.statements[1]?.id,
+    shadowResult.statements[2]?.id,
+].filter(Boolean));
 
-console.log('===========================================================');
-console.log('TEST 5: Integration Pattern');
-console.log('===========================================================\n');
-
-console.log('Example pipeline flow:');
-console.log('1. Extract shadow statements');
-console.log('2. Pass to semantic mapper (LLM)');
-console.log('3. Semantic mapper references statement IDs in claims');
-console.log('4. Compute shadow delta to find unreferenced statements');
-console.log('5. Surface high-signal unreferenced to concierge');
-console.log();
-
-// Simulated semantic mapper output
-const mockSemanticOutput = {
-    claims: [
-        {
-            id: 'claim_1',
-            label: 'validate inputs at API boundary',
-            sourceStatementIds: [shadowResult.statements[0]?.id, shadowResult.statements[1]?.id].filter(Boolean),
-        },
-        {
-            id: 'claim_2',
-            label: 'use schema validation libraries',
-            sourceStatementIds: [shadowResult.statements[2]?.id].filter(Boolean),
-        },
-    ],
-};
-
-const referencedIds = extractReferencedIds(mockSemanticOutput.claims);
-console.log(`Semantic mapper used ${referencedIds.size} shadow statements across ${mockSemanticOutput.claims.length} claims`);
+console.log(`Simulated semantic mapper usage: ${referencedIds.size} statements`);
 console.log();
 
 const finalDelta = computeShadowDelta(shadowResult, referencedIds, 'How do I validate inputs?');

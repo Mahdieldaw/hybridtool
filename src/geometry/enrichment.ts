@@ -82,15 +82,3 @@ export function enrichStatementsWithGeometry(
     };
 }
 
-export function getStatementsInRegion(
-    region: Region,
-    paragraphs: ShadowParagraph[]
-): string[] {
-    const nodeSet = new Set(region.nodeIds);
-    const statementIds: string[] = [];
-    for (const para of paragraphs) {
-        if (!nodeSet.has(para.id)) continue;
-        statementIds.push(...para.statementIds);
-    }
-    return statementIds;
-}

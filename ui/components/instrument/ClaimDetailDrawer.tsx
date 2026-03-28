@@ -198,9 +198,11 @@ export function ClaimDetailDrawer({
         <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-5">
         {/* Role + Type badges */}
         <div className="flex items-center gap-2 flex-wrap">
+        {claim.role && (
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${roleClass}`}>
             {claim.role}
           </span>
+        )}
           {claim.type && (
             <span className="px-2 py-0.5 rounded-full text-[10px] border bg-white/5 border-white/10 text-text-muted">
               {claim.type}
