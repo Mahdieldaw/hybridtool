@@ -81,6 +81,7 @@ export async function computeDerivedFields({
     claimDensityResult: null,
     provenanceRefinement: null,
     passagePruning: null,
+    statementClassification: null,
   };
 
   // ── Group A: Independent steps (no cross-dependencies) ─────────────
@@ -599,6 +600,26 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Passage pruning failed:', getErrorMessage(err));
   }
 
+  // ── Statement classification (corpus coverage for reading surface) ──
+  try {
+    if (result.claimDensityResult && enrichedClaims.length > 0) {
+      const { computeStatementClassification } = await import('../statementClassification');
+      result.statementClassification = computeStatementClassification({
+        shadowStatements,
+        shadowParagraphs,
+        enrichedClaims,
+        claimDensityResult: result.claimDensityResult,
+        passageRoutingResult: result.passageRoutingResult,
+        paragraphEmbeddings: paragraphEmbeddings || new Map(),
+        claimEmbeddings: claimEmbeddings || new Map(),
+        queryRelevanceScores: result.queryRelevance?.statementScores ?? new Map(),
+      });
+      console.log(`[DeterministicPipeline] StatementClassification: ${result.statementClassification.summary.claimedCount} claimed, ${result.statementClassification.summary.unclaimedCount} unclaimed (${result.statementClassification.summary.unclaimedGroupCount} groups) in ${result.statementClassification.meta.processingTimeMs.toFixed(0)}ms`);
+    }
+  } catch (err) {
+    console.warn('[DeterministicPipeline] Statement classification failed:', getErrorMessage(err));
+  }
+
   return result;
 }
 
@@ -781,6 +802,7 @@ export function assembleMapperArtifact({
     claimDensityResult,
     provenanceRefinement,
     passagePruning,
+    statementClassification,
   } = derived;
 
   return {
@@ -825,6 +847,7 @@ export function assembleMapperArtifact({
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
     ...(provenanceRefinement ? { provenanceRefinement } : {}),
     ...(passagePruning ? { passagePruning } : {}),
+    ...(statementClassification ? { statementClassification } : {}),
   };
 }
 

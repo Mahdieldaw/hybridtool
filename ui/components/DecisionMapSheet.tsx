@@ -24,6 +24,7 @@ import {
   ModelOrderingCard,
   AlignmentCard,
   RegionsCard,
+  StatementClassificationCard,
 } from "./instrument/LayerCards";
 import { useInstrumentState } from "../hooks/useInstrumentState";
 import type { PipelineLayer } from "../hooks/useInstrumentState";
@@ -44,7 +45,6 @@ import { ReadingSurface } from "./workspace/ReadingSurface";
 // PARSING UTILITIES - Import from shared module (single source of truth)
 // ============================================================================
 
-import type { GraphTopology } from "../../shared/contract";
 import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
@@ -57,65 +57,6 @@ const decisionMapSheetDbg = (...args: any[]) => {
 
 function safeArr<T = any>(v: any): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
-}
-
-function tryParseJsonObject(text: string): any | null {
-  if (!text) return null;
-  let t = String(text).trim();
-  const codeBlockMatch = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (codeBlockMatch) t = codeBlockMatch[1].trim();
-  const firstBrace = t.indexOf('{');
-  const lastBrace = t.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
-  try {
-    return JSON.parse(t.slice(firstBrace, lastBrace + 1));
-  } catch {
-    return null;
-  }
-}
-
-function normalizeGraphTopologyCandidate(value: any): any | null {
-  if (!value) return null;
-  let candidate: any = value;
-  if (typeof candidate === 'string') {
-    candidate = tryParseJsonObject(candidate);
-  }
-  if (!candidate || typeof candidate !== 'object') return null;
-  if (Array.isArray(candidate.nodes) && Array.isArray(candidate.edges)) return candidate;
-  if (candidate.topology && Array.isArray(candidate.topology.nodes) && Array.isArray(candidate.topology.edges)) return candidate.topology;
-  if (candidate.graphTopology && Array.isArray(candidate.graphTopology.nodes) && Array.isArray(candidate.graphTopology.edges)) return candidate.graphTopology;
-  if (Array.isArray(candidate.claims) && Array.isArray(candidate.edges)) {
-    const nodes = candidate.claims
-      .map((c: any) => {
-        const id = c?.id != null ? String(c.id) : "";
-        if (!id) return null;
-        return {
-          id,
-          label: typeof c?.label === "string" && c.label.trim() ? c.label.trim() : id,
-          theme: typeof c?.type === "string" ? c.type : undefined,
-          support_count: typeof c?.support_count === "number" ? c.support_count : undefined,
-          supporters: Array.isArray(c?.supporters) ? c.supporters : undefined,
-        };
-      })
-      .filter(Boolean);
-
-    const edges = candidate.edges
-      .map((e: any) => {
-        const source = e?.source != null ? String(e.source) : e?.from != null ? String(e.from) : "";
-        const target = e?.target != null ? String(e.target) : e?.to != null ? String(e.to) : "";
-        if (!source || !target) return null;
-        return {
-          source,
-          target,
-          type: typeof e?.type === "string" ? e.type : "supports",
-          reason: typeof e?.reason === "string" ? e.reason : undefined,
-        };
-      })
-      .filter(Boolean);
-
-    return { nodes, edges } satisfies GraphTopology;
-  }
-  return null;
 }
 
 // ============================================================================
@@ -1054,19 +995,6 @@ export const DecisionMapSheet = React.memo(() => {
     return { claims, edges, conditionals, topology, map: { claims, edges } } as any;
   }, [mappingArtifact, parsedSemanticFromText]);
 
-  const graphTopology = useMemo(() => {
-    const fromMeta = normalizeGraphTopologyCandidate(mappingArtifact?.traversal?.graph) || null;
-    const fromParsed = normalizeGraphTopologyCandidate(parsedMapping.topology) || null;
-    const picked = fromMeta || fromParsed || null;
-    decisionMapSheetDbg("graphTopology source", {
-      fromMeta: Boolean(fromMeta),
-      fromParsed: Boolean(fromParsed),
-      nodes: picked ? (picked as any)?.nodes?.length : 0,
-      edges: picked ? (picked as any)?.edges?.length : 0,
-    });
-    return picked;
-  }, [mappingArtifact, parsedMapping.topology]);
-
   const graphData = useMemo(() => {
     const textClaims = Array.isArray(parsedSemanticFromText?.output?.claims) ? parsedSemanticFromText!.output!.claims : null;
     const textEdges = Array.isArray(parsedSemanticFromText?.output?.edges) ? parsedSemanticFromText!.output!.edges : null;
@@ -1109,7 +1037,7 @@ export const DecisionMapSheet = React.memo(() => {
       edges: 0,
     });
     return { claims: [], edges: [], source: "traversal" as const };
-  }, [mappingArtifact, parsedMapping, graphTopology, parsedSemanticFromText]);
+  }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
 
   const derivedMapperArtifact = useMemo(() => {
     if (!mappingArtifact) return null;
@@ -1371,8 +1299,7 @@ export const DecisionMapSheet = React.memo(() => {
                             const text = formatDecisionMapForMd(
                               mappingText,
                               graphData.claims,
-                              graphData.edges,
-                              graphTopology
+                              graphData.edges
                             );
                             navigator.clipboard.writeText(text).then(() => {
                               setToast({ id: Date.now(), message: "Map Copied!", type: "success" });
@@ -1749,6 +1676,7 @@ export const DecisionMapSheet = React.memo(() => {
                                   />
                                 )
                               },
+                              { id: 'stmt-classification', label: 'Statement Classification', content: <StatementClassificationCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
                             ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
@@ -1892,6 +1820,7 @@ export const DecisionMapSheet = React.memo(() => {
                                     />
                                   )
                                 },
+                                { id: 'stmt-classification', label: 'Statement Classification', content: <StatementClassificationCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
                               ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (

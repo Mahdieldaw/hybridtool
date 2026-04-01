@@ -78,7 +78,7 @@ export const computeLandscapeMetrics = (input: { claims: Claim[]; modelCount?: n
     for (const c of claims) {
         if (!c) continue;
         typeDistribution[c.type] = (typeDistribution[c.type] || 0) + 1;
-        roleDistribution[c.role] = (roleDistribution[c.role] || 0) + 1;
+        if (c.role) roleDistribution[c.role] = (roleDistribution[c.role] || 0) + 1;
         if (Array.isArray(c.supporters)) {
             for (const s of c.supporters) {
                 if (typeof s === "number") supporterSet.add(s);

@@ -1,4 +1,4 @@
-import { AiTurn, GraphTopology, ProviderResponse, UserTurn, isUserTurn, isAiTurn, Claim, Edge } from "../../shared/contract";
+import { AiTurn, ProviderResponse, UserTurn, isUserTurn, isAiTurn, Claim, Edge } from "../../shared/contract";
 import { TurnMessage } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
@@ -12,8 +12,7 @@ import { parseSemanticMapperOutput } from "../../shared/parsing-utils";
 export function formatDecisionMapForMd(
     narrative: string,
     claims: Claim[],
-    edges: Edge[],
-    graphTopology: GraphTopology | null
+    edges: Edge[]
 ): string {
     let md = "### The Decision Landscape\n\n";
 
@@ -40,20 +39,6 @@ export function formatDecisionMapForMd(
         }
         md += lines.join('\n');
         md += '\n';
-    }
-
-    if (graphTopology) {
-        md += `#### Graph Topology\n\n`;
-        if (!graphTopology.edges || graphTopology.edges.length === 0) {
-            md += "*No graph relationships defined.*\n\n";
-        } else {
-            const lines = graphTopology.edges.map(edge => {
-                const source = graphTopology.nodes.find(n => n.id === edge.source)?.label || edge.source;
-                const target = graphTopology.nodes.find(n => n.id === edge.target)?.label || edge.target;
-                return `- **${source}** --[${edge.type}]--> **${target}**`;
-            });
-            md += `${lines.join('\n')}\n\n`;
-        }
     }
 
     return md;
@@ -98,7 +83,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
         } else if (isAiTurn(turn)) {
             // Found AI turn. Render the pair.
             const aiTurn = turn as AiTurn;
-            let decisionMap: { narrative?: string; claims?: Claim[]; edges?: Edge[]; options?: string | null; topology?: GraphTopology | null } | null = null;
+            let decisionMap: { narrative?: string; claims?: Claim[]; edges?: Edge[]; options?: string | null } | null = null;
 
             // Resolve effective user prompt
             // If aiTurn.userTurnId matches lastUserTurn.id, use that.
@@ -163,7 +148,6 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                         narrative,
                         claims: parsed.output?.claims || [],
                         edges: parsed.output?.edges || [],
-                        topology: meta.graphTopology || null
                     };
                 }
             }
@@ -235,8 +219,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                 turnMd += formatDecisionMapForMd(
                     decisionMap.narrative || "",
                     decisionMap.claims || [],
-                    decisionMap.edges || [],
-                    decisionMap.topology || null
+                    decisionMap.edges || []
                 );
             }
             const providers = LLM_PROVIDERS_CONFIG;
@@ -287,7 +270,6 @@ interface SanitizedAiTurn {
         providerId: string;
         narrative: string;
         options: string | null;
-        graphTopology: GraphTopology | null;
     };
     councilMemberOutputs: {
         providerId: string;
@@ -370,7 +352,6 @@ export function sanitizeSessionForExport(
                         providerId: targetMapPid,
                         narrative: latest.text,
                         options: meta.allAvailableOptions || null,
-                        graphTopology: meta.graphTopology || null
                     };
                 }
             }
@@ -453,7 +434,6 @@ export function sanitizeSessionForExport(
 
             // Strip redundant extracted data
             if (meta.allAvailableOptions) delete meta.allAvailableOptions;
-            if (meta.graphTopology) delete meta.graphTopology;
 
             strippedContexts[pid] = {
                 ...rest,

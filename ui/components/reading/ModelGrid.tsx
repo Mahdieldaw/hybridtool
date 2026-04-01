@@ -1,0 +1,65 @@
+import React, { useMemo } from 'react';
+import clsx from 'clsx';
+import { resolveProviderIdFromCitationOrder, getProviderName } from '../../utils/provider-helpers';
+import { ModelColumn } from './ModelColumn';
+import type { ParagraphHighlight } from './usePassageHighlight';
+
+interface ModelGridProps {
+  artifact: any;
+  citationSourceOrder: Record<string | number, string> | null;
+  focusedClaimId: string | null;
+  highlightMap: Map<string, ParagraphHighlight>;
+}
+
+export const ModelGrid: React.FC<ModelGridProps> = ({
+  artifact,
+  citationSourceOrder,
+  focusedClaimId,
+  highlightMap,
+}) => {
+  const modelIndices = useMemo(() => {
+    const allParas: any[] = Array.isArray(artifact?.shadow?.paragraphs)
+      ? artifact.shadow.paragraphs
+      : [];
+    const set = new Set<number>();
+    for (const p of allParas) {
+      set.add(typeof p.modelIndex === 'number' ? p.modelIndex : 0);
+    }
+    const indices = Array.from(set).sort((a, b) => a - b);
+    return indices.length > 0 ? indices : [0];
+  }, [artifact]);
+
+  const gridClass = useMemo(() => {
+    const n = modelIndices.length;
+    if (n === 1) return 'grid-cols-1';
+    if (n === 2) return 'grid-cols-2';
+    return 'grid-cols-3';
+  }, [modelIndices]);
+
+  if (!artifact?.shadow?.paragraphs?.length) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
+        No model output available
+      </div>
+    );
+  }
+
+  return (
+    <div className={clsx('grid flex-1 min-h-0 overflow-hidden', gridClass)}>
+      {modelIndices.map((modelIndex) => {
+        const pid = resolveProviderIdFromCitationOrder(modelIndex, citationSourceOrder ?? undefined);
+        const modelName = pid ? getProviderName(pid) : `Model ${modelIndex}`;
+        return (
+          <ModelColumn
+            key={modelIndex}
+            artifact={artifact}
+            modelIndex={modelIndex}
+            modelName={modelName}
+            focusedClaimId={focusedClaimId}
+            highlightMap={highlightMap}
+          />
+        );
+      })}
+    </div>
+  );
+};

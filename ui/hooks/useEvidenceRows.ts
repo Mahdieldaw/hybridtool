@@ -58,6 +58,14 @@ export interface EvidenceRow {
   inPassage: boolean;             // part of a contiguous multi-paragraph passage (length >= 2)
   passageLength: number | null;   // length of containing passage (1 = isolated paragraph)
 
+  // Statement classification (corpus-level, not claim-relative)
+  sc_claimed: boolean;                 // owned by at least one claim
+  sc_inPassage: boolean;               // claimed + inside a detected passage boundary
+  sc_groupIdx: number | null;          // 1-based unclaimed group index (null if claimed)
+  sc_landscapePos: string | null;      // landscape position of nearest claim (unclaimed only)
+  sc_nearestClaimSim: number | null;   // paragraph cosine to nearest claim (unclaimed only)
+  sc_queryRelevance: number | null;    // per-statement query relevance from classification (unclaimed only)
+
   // Table cell-unit metadata
   isTableCell: boolean;
   tableMeta: { rowHeader: string; columnHeader: string; value: string } | null;
@@ -169,6 +177,53 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       if (id && text) stmtTextMap.set(id, text);
     }
 
+    // Statement classification lookups (corpus-level)
+    const scClaimed = new Set<string>();
+    const scInPassage = new Set<string>();
+    const scGroupByStmt = new Map<string, number>();       // stmtId → 1-based group index
+    const scLandscapeByStmt = new Map<string, string>();   // stmtId → landscape position
+    const scNearestSimByStmt = new Map<string, number>();  // stmtId → paragraph best cosine to claim
+    const scQrByStmt = new Map<string, number>();          // stmtId → query relevance
+
+    const scData = a?.statementClassification ?? null;
+    if (scData) {
+      // Claimed entries
+      const claimedEntries = scData.claimed;
+      if (claimedEntries && typeof claimedEntries === 'object') {
+        for (const [sid, entry] of Object.entries(claimedEntries)) {
+          scClaimed.add(sid);
+          if ((entry as any)?.inPassage) scInPassage.add(sid);
+        }
+      }
+      // Unclaimed groups
+      const groups: any[] = Array.isArray(scData.unclaimedGroups) ? scData.unclaimedGroups : [];
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const groupIdx = gi + 1;
+        const landscape = String(g?.nearestClaimLandscapePosition ?? 'floor');
+        const paragraphs: any[] = Array.isArray(g?.paragraphs) ? g.paragraphs : [];
+        for (const para of paragraphs) {
+          const bestSim = (() => {
+            const sims = para?.claimSimilarities;
+            if (!sims || typeof sims !== 'object') return null;
+            let best = -Infinity;
+            for (const v of Object.values(sims)) {
+              if (typeof v === 'number' && v > best) best = v;
+            }
+            return best === -Infinity ? null : best;
+          })();
+          const stmtQr: Record<string, number> = para?.statementQueryRelevance ?? {};
+          const unclaimed: string[] = Array.isArray(para?.unclaimedStatementIds) ? para.unclaimedStatementIds : [];
+          for (const sid of unclaimed) {
+            scGroupByStmt.set(sid, groupIdx);
+            scLandscapeByStmt.set(sid, landscape);
+            if (bestSim != null) scNearestSimByStmt.set(sid, bestSim);
+            if (typeof stmtQr[sid] === 'number') scQrByStmt.set(sid, stmtQr[sid]);
+          }
+        }
+      }
+    }
+
     return {
       queryScoreByStmt,
       fateByStmt,
@@ -180,6 +235,12 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       twinMapPerClaim,
       twinThresholdsPerClaim,
       stmtTextMap,
+      scClaimed,
+      scInPassage,
+      scGroupByStmt,
+      scLandscapeByStmt,
+      scNearestSimByStmt,
+      scQrByStmt,
     };
   }, [artifact]);
 
@@ -402,6 +463,13 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
           const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
           return claimMaps?.passageLenByPara.get(pid) ?? null;
         })(),
+
+        sc_claimed: globalMaps?.scClaimed.has(stmtId) ?? false,
+        sc_inPassage: globalMaps?.scInPassage.has(stmtId) ?? false,
+        sc_groupIdx: globalMaps?.scGroupByStmt.get(stmtId) ?? null,
+        sc_landscapePos: globalMaps?.scLandscapeByStmt.get(stmtId) ?? null,
+        sc_nearestClaimSim: globalMaps?.scNearestSimByStmt.get(stmtId) ?? null,
+        sc_queryRelevance: globalMaps?.scQrByStmt.get(stmtId) ?? null,
 
         isTableCell: !!stmt.isTableCell,
         tableMeta: stmt.tableMeta ?? null,

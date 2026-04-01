@@ -10,6 +10,7 @@ import {
   isDecisionMapOpenAtom,
   chatInputHeightAtom,
   useWorkspaceViewAtom,
+  readingPanelOpenAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -35,6 +36,10 @@ const WorkspaceShell = safeLazy(() =>
   import("../components/workspace/WorkspaceShell").then(m => ({ default: m.WorkspaceShell }))
 );
 
+const ReadingPanel = safeLazy(() =>
+  import("../components/reading/ReadingPanel").then(m => ({ default: m.ReadingPanel }))
+);
+
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
@@ -50,6 +55,8 @@ export default function ChatView() {
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
   const useWorkspaceMode = useAtomValue(useWorkspaceViewAtom);
+  const isReadingPanelOpen = useAtomValue(readingPanelOpenAtom);
+  const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -58,7 +65,9 @@ export default function ChatView() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isDecisionMapOpen) {
+        if (isReadingPanelOpen) {
+          setReadingPanelOpen(null);
+        } else if (isDecisionMapOpen) {
           setDecisionMapOpen(null);
         } else if (isSplitOpen) {
           setActiveSplitPanel(null);
@@ -67,7 +76,7 @@ export default function ChatView() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isDecisionMapOpen, isSplitOpen, setDecisionMapOpen, setActiveSplitPanel]);
+  }, [isReadingPanelOpen, isDecisionMapOpen, isSplitOpen, setReadingPanelOpen, setDecisionMapOpen, setActiveSplitPanel]);
 
   const itemContent = useMemo(
     () => (_index: number, turnId: string) => {
@@ -206,6 +215,17 @@ export default function ChatView() {
     };
   }, [turnIds, currentSessionId, selectChat, setActiveSplitPanel]);
 
+  // Reading panel gets a fully isolated view — hide everything else
+  if (isReadingPanelOpen) {
+    return (
+      <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
+        <Suspense fallback={null}>
+          <ReadingPanel />
+        </Suspense>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
       {showWelcome ? (
@@ -260,7 +280,6 @@ export default function ChatView() {
           <DecisionMapSheet />
         </Suspense>
       )}
-
 
       <div
         className={clsx(

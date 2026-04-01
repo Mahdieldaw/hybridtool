@@ -6,7 +6,6 @@ import {
     SettledShapeData,
     FloorClaim,
     ContestedShapeData,
-    CentralConflict,
     ConflictInfo,
     ConflictCluster,
     TradeoffPair,
@@ -70,18 +69,12 @@ export const generateWhyItMatters = (
 //       (L2/L3 interpretive logic — role labels, semantic edges, canned prose)
 //
 //   buildForkedData → ContestedShapeData
-//     LIVE: centralConflict (collapsingQuestion hoisted to shape.centralConflict)
-//     HEURISTIC: detectEnrichedConflicts + detectConflictClusters are substantial
-//       computations (~100 lines combined). Cluster structure (ConflictCluster[]) has
-//       no confirmed UI renderer. The individual conflict axis and stakes are rich
-//       data that may only partially reach the screen.
+//     LIVE: collapsingQuestion (hoisted to shape.centralConflict as string)
+//     Rich CentralConflict object removed — was L3 (canned prose, never read by UI).
+//     Now extracts axis + usedIds directly from conflict clusters / conflict infos.
 //     NOTE — FALLBACK EPISTEMIC ISSUE: if classified 'forked' but enrichedConflicts
 //       and conflictClusters are both empty, builder falls back to buildConvergentData.
-//       This silently reclassifies a forked shape as convergent. The primary shape
-//       label then mismatches the data pattern. A forked classification with no
-//       extractable conflicts indicates a classification error upstream (peak analysis
-//       detected conflict edges but enrichedConflicts found none); the fallback masks
-//       this rather than surfacing it.
+//       This silently reclassifies a forked shape as convergent.
 //
 //   buildConstrainedData → TradeoffShapeData
 //     LIVE: tradeoffs[] labels (hoisted to shape.tradeoffs as string array)
@@ -157,82 +150,28 @@ export const buildForkedData = (
     conflictInfos: ConflictInfo[],
     conflictClusters: ConflictCluster[]
 ): ContestedShapeData => {
-    let centralConflict: CentralConflict | undefined;
+    // Extract axis string and involved claim IDs from the top conflict
+    let axis: string | undefined;
+    const usedIds = new Set<string>();
+
     if (conflictClusters.length > 0) {
         const topCluster = [...conflictClusters].sort((a, b) =>
             b.challengerIds.length - a.challengerIds.length
         )[0];
-        const target = claims.find(c => c.id === topCluster.targetId);
-        if (target) {
-            const challengerClaims = claims.filter(c => topCluster.challengerIds.includes(c.id));
-            centralConflict = {
-                type: 'cluster',
-                axis: topCluster.axis,
-                target: {
-                    claim: {
-                        id: target.id,
-                        label: target.label,
-                        text: target.text,
-                        supportCount: target.supporters.length,
-                        supportRatio: target.supportRatio,
-                        role: target.role,
-                        isHighSupport: target.isHighSupport,
-                    },
-                    supportingClaims: [],
-                    supportRationale: target.text
-                },
-                challengers: {
-                    claims: challengerClaims.map(c => ({
-                        id: c.id,
-                        label: c.label,
-                        text: c.text,
-                        supportCount: c.supporters.length,
-                        supportRatio: c.supportRatio,
-                        role: c.role,
-                        isHighSupport: c.isHighSupport,
-                    })),
-                    commonTheme: topCluster.theme,
-                    supportingClaims: []
-                },
-                dynamics: 'one_vs_many',
-                stakes: {
-                    acceptingTarget: `Accepting ${target.label} means accepting the established position`,
-                    acceptingChallengers: `Accepting challengers means reconsidering the established position`
-                }
-            };
-        }
+        axis = topCluster.axis;
+        usedIds.add(topCluster.targetId);
+        topCluster.challengerIds.forEach((id: string) => usedIds.add(id));
     }
 
-    if (!centralConflict && conflictInfos.length > 0) {
+    if (!axis && conflictInfos.length > 0) {
         const topConflict = [...conflictInfos].sort((a, b) => b.significance - a.significance)[0];
-        centralConflict = {
-            type: 'individual',
-            axis: topConflict.axis.resolved,
-            positionA: {
-                claim: topConflict.claimA,
-                supportingClaims: [],
-                supportRationale: topConflict.claimA.text
-            },
-            positionB: {
-                claim: topConflict.claimB,
-                supportingClaims: [],
-                supportRationale: topConflict.claimB.text
-            },
-            dynamics: topConflict.dynamics,
-            stakes: topConflict.stakes
-        };
+        axis = topConflict.axis.resolved;
+        usedIds.add(topConflict.claimA.id);
+        usedIds.add(topConflict.claimB.id);
     }
 
-    if (!centralConflict) {
+    if (!axis) {
         throw new Error("Forked shape requires at least one conflict");
-    }
-    const usedIds = new Set<string>();
-    if (centralConflict.type === 'individual') {
-        usedIds.add(centralConflict.positionA.claim.id);
-        usedIds.add(centralConflict.positionB.claim.id);
-    } else {
-        usedIds.add(centralConflict.target.claim.id);
-        centralConflict.challengers.claims.forEach((c: { id: string }) => usedIds.add(c.id));
     }
     const secondaryConflicts = conflictInfos.filter(c =>
         !usedIds.has(c.claimA.id) || !usedIds.has(c.claimB.id)
@@ -240,7 +179,6 @@ export const buildForkedData = (
     const floorClaims = claims.filter(c => c.isHighSupport && !usedIds.has(c.id));
     return {
         pattern: 'contested',
-        centralConflict,
         secondaryConflicts,
         floor: {
             exists: floorClaims.length > 0,
@@ -260,7 +198,7 @@ export const buildForkedData = (
             leverageInversions: patterns.leverageInversions,
             articulationPoints: []
         },
-        collapsingQuestion: `What matters more: ${centralConflict.axis}?`
+        collapsingQuestion: `What matters more: ${axis}?`
     };
 };
 

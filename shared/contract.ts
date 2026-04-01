@@ -125,28 +125,6 @@ export interface UnifiedMapperOutput {
   conditionals?: ConditionalPruner[];
 }
 
-export interface GraphEdge {
-  source: string;
-  target: string;
-  type?: string;
-  reason?: string;
-}
-
-export interface GraphNode {
-  id: string;
-  label: string;
-  type?: string;
-  group?: string;
-  theme?: string;
-  support_count?: number;
-  supporters?: number[];
-}
-
-export interface GraphTopology {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
-
 export interface PeakPairRelationship {
   aId: string;
   bId: string;
@@ -227,7 +205,8 @@ export interface SupportingClaim {
   relationship: 'supports' | 'prerequisite' | 'aligned';
 }
 
-export type CentralConflict = any | any;
+// CentralConflict rich type removed — only collapsingQuestion string survives (see ContestedShapeData)
+
 
 export interface FloorClaim {
   id: string;
@@ -338,7 +317,6 @@ export interface KeystoneShapeData {
 
 export interface ContestedShapeData {
   pattern: 'contested';
-  centralConflict: CentralConflict;
   secondaryConflicts: ConflictInfo[];
   floor: {
     exists: boolean;
@@ -1104,6 +1082,48 @@ export interface PassageRoutingResult {
   meta: { processingTimeMs: number };
 }
 
+// ── Statement Classification ───────────────────────────────────────────
+
+export interface ClaimedStatementEntry {
+  claimIds: string[];
+  inPassage: boolean;
+  passageKey?: string;
+}
+
+export interface UnclaimedParagraphEntry {
+  paragraphId: string;
+  modelIndex: number;
+  paragraphIndex: number;
+  claimSimilarities: Record<string, number>;
+  unclaimedStatementIds: string[];
+  claimedStatementIds: string[];
+  statementQueryRelevance: Record<string, number>;
+}
+
+export interface UnclaimedGroup {
+  nearestClaimId: string;
+  nearestClaimLandscapePosition: LandscapePosition;
+  paragraphs: UnclaimedParagraphEntry[];
+  meanClaimSimilarity: number;
+  meanQueryRelevance: number;
+  maxQueryRelevance: number;
+}
+
+export interface StatementClassificationResult {
+  claimed: Record<string, ClaimedStatementEntry>;
+  unclaimedGroups: UnclaimedGroup[];
+  summary: {
+    totalStatements: number;
+    claimedCount: number;
+    unclaimedCount: number;
+    mixedParagraphCount: number;
+    fullyUnclaimedParagraphCount: number;
+    fullyCoveredParagraphCount: number;
+    unclaimedGroupCount: number;
+  };
+  meta: { processingTimeMs: number };
+}
+
 export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
@@ -1295,7 +1315,7 @@ export interface PipelineShadowStatement {
 export interface PipelineShadowExtractionMeta {
   totalStatements: number;
   byModel: Record<number, number>;
-  byStance: Record<any, number>;
+  byStance: Record<string, number>;
   bySignal: {
     sequence: number;
     tension: number;
@@ -1358,11 +1378,6 @@ export interface PipelineParagraphCluster {
       text: string;
     }>;
   };
-}
-
-export interface PipelineClusteringResult {
-  clusters: PipelineParagraphCluster[];
-  meta: any['meta'];
 }
 
 export interface PipelineSubstrateNode {
@@ -1970,9 +1985,8 @@ export interface WorkflowRequest {
 // ============================================================================
 
 export type ResolvedContext =
-  | any
   | ExtendContext
-  | any;
+  | Record<string, unknown>;
 
 export interface ExtendContext {
   type: "extend";
@@ -2182,7 +2196,7 @@ export interface ShadowAudit {
   referencedCount: number;
   unreferencedCount: number;
   highSignalUnreferencedCount: number;
-  byStance: Record<any, { total: number; unreferenced: number }>;
+  byStance: Record<string, { total: number; unreferenced: number }>;
   gaps: {
     conflicts: number;
     prerequisites: number;
@@ -2197,7 +2211,7 @@ export interface ShadowAudit {
   };
 }
 
-export type ShadowStatement = any['statement'];
+export type ShadowStatement = PipelineShadowStatement;
 
 export interface StructuralAnalysis {
   edges: Edge[];

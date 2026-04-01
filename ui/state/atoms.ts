@@ -351,6 +351,9 @@ export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'nar
 /** When true, the workspace view renders instead of the legacy DecisionMapSheet. */
 export const useWorkspaceViewAtom = atom<boolean>(false);
 
+/** When non-null, the multi-model reading panel is open for this turn. */
+export const readingPanelOpenAtom = atom<{ turnId: string } | null>(null);
+
 
 
 // =============================================================================
