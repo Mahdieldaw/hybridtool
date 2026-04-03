@@ -11,10 +11,15 @@ export const ReadingPanel: React.FC = () => {
   const [openState, setOpenState] = useAtom(readingPanelOpenAtom);
   const [focusedClaimId, setFocusedClaimId] = useState<string | null>(null);
 
-  const { artifact, citationSourceOrder } = useArtifactResolution(openState?.turnId ?? '');
+  const turnId = openState?.turnId ?? '';
+  const { artifact, citationSourceOrder } = useArtifactResolution(turnId);
   const highlightMap = usePassageHighlight(artifact, focusedClaimId);
 
-  // Reset focus when panel opens for a new turn
+  // Clear stale focus when the turn changes (e.g. direct switch without unmount)
+  React.useEffect(() => {
+    setFocusedClaimId(null);
+  }, [turnId]);
+
   const handleFocusClaim = (claimId: string | null) => {
     setFocusedClaimId(claimId);
   };

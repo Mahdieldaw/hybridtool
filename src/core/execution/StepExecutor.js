@@ -1275,7 +1275,8 @@ export class StepExecutor {
                   })();
 
                   if (enrichedClaims.length > 0) {
-                    try {
+                    // ── SURVEY MAPPER PAUSED — editorial model replaces this slot ──
+                    if (false) try {
                       const {
                         buildRoutedSurveyPrompt,
                         parseSurveyMapperOutput: parseSurveyOutput,
@@ -1462,6 +1463,113 @@ export class StepExecutor {
                     const mapperArtifact_claimProvenance = preSurvey.derived.claimProvenance;
                     if (mapperArtifact_claimProvenance) {
                       mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
+                    }
+                  }
+
+                  // ── EDITORIAL MODEL CALL (StepExecutor-only) ──────────────
+                  if (mapperArtifact && preSurvey?.derived) {
+                    try {
+                      const { buildSourceContinuityMap } = await import('../passageRouting');
+                      const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
+                        await import('../../ConciergeService/editorialMapper');
+
+                      const continuityMap = buildSourceContinuityMap(preSurvey.derived.claimDensityResult);
+                      const { buildCitationSourceOrder: bCSO } = await import('../../../shared/provider-config');
+                      const editorialCitationSourceOrder = bCSO(citationOrder);
+                      const { passages: indexedPassages, unclaimed: indexedUnclaimed } = buildPassageIndex(
+                        preSurvey.derived.claimDensityResult,
+                        preSurvey.derived.passageRoutingResult,
+                        preSurvey.derived.statementClassification,
+                        { paragraphs: paragraphResult?.paragraphs ?? [] },
+                        enrichedClaims,
+                        editorialCitationSourceOrder,
+                        continuityMap,
+                      );
+
+                      const validPassageKeys = new Set(indexedPassages.map(p => p.passageKey));
+                      const validUnclaimedKeys = new Set(indexedUnclaimed.map(u => u.groupKey));
+
+                      // Build corpus shape summary
+                      const concentrations = indexedPassages.map(p => p.concentrationRatio);
+                      const landscapeComp = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
+                      indexedPassages.forEach(p => { landscapeComp[p.landscapePosition]++; });
+
+                      const editorialPrompt = buildEditorialPrompt(
+                        payload.originalPrompt,
+                        indexedPassages,
+                        indexedUnclaimed,
+                        {
+                          passageCount: indexedPassages.length,
+                          claimCount: enrichedClaims.length,
+                          conflictCount: preSurvey.derived.passageRoutingResult?.routing?.conflictClusters?.length ?? 0,
+                          concentrationSpread: {
+                            min: Math.min(...concentrations, 0),
+                            max: Math.max(...concentrations, 0),
+                            mean: concentrations.length ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length : 0,
+                          },
+                          landscapeComposition: landscapeComp,
+                        },
+                      );
+
+                      // Fire LLM call (same pattern as survey mapper)
+                      const editorialResult = await new Promise((res) => {
+                        this.orchestrator.executeParallelFanout(
+                          editorialPrompt,
+                          [payload.mappingProvider],
+                          {
+                            sessionId: context.sessionId,
+                            useThinking: false,
+                            providerContexts: semanticContinuationMeta
+                              ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
+                              : mappingProviderContexts,
+                            onPartial: () => {},
+                            onAllComplete: async (results) => {
+                              const result = results?.get?.(payload.mappingProvider);
+                              if (result?.text) res({ text: result.text, meta: result.meta });
+                              else res({ text: '' });
+                            },
+                            onError: () => res({ text: '' }),
+                          },
+                        );
+                      });
+
+                      if (editorialResult?.text) {
+                        const parsed = parseEditorialOutput(editorialResult.text, validPassageKeys, validUnclaimedKeys);
+                        if (parsed.success && parsed.ast) {
+                          if (cognitiveArtifact) cognitiveArtifact.editorialAST = parsed.ast;
+                          console.log(`[StepExecutor] Editorial AST: ${parsed.ast.threads.length} thread(s), ${parsed.errors.length} warning(s)`);
+                        } else {
+                          console.warn('[StepExecutor] Editorial parse failed:', parsed.errors);
+                        }
+
+                        // Persist editorial raw text as a provider response (same pattern as batch/mapping)
+                        if (options.sessionManager?.adapter && context.canonicalAiTurnId) {
+                          try {
+                            const now = Date.now();
+                            const editorialRespId = `pr-${context.sessionId}-${context.canonicalAiTurnId}-${payload.mappingProvider}-editorial-0-${now}`;
+                            await options.sessionManager.adapter.put('provider_responses', {
+                              id: editorialRespId,
+                              sessionId: context.sessionId,
+                              aiTurnId: context.canonicalAiTurnId,
+                              providerId: payload.mappingProvider,
+                              responseType: 'editorial',
+                              responseIndex: 0,
+                              text: editorialResult.text,
+                              status: 'completed',
+                              meta: editorialResult.meta || {},
+                              createdAt: now,
+                              updatedAt: now,
+                              completedAt: now,
+                            });
+                            console.log(`[StepExecutor] Persisted editorial response for provider ${payload.mappingProvider}`);
+                          } catch (persistErr) {
+                            console.warn('[StepExecutor] Editorial persistence (non-blocking):', persistErr?.message || persistErr);
+                          }
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('[StepExecutor] Editorial model (non-blocking):', err?.message || err);
+                      // Editorial failure is non-blocking — artifact ships without AST
                     }
                   }
 

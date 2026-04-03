@@ -354,6 +354,20 @@ export const useWorkspaceViewAtom = atom<boolean>(false);
 /** When non-null, the multi-model reading panel is open for this turn. */
 export const readingPanelOpenAtom = atom<{ turnId: string } | null>(null);
 
+/**
+ * SCAFFOLDING — temporary atom for editorial surface development.
+ * Will be reconciled when editorial surface promotes to primary path.
+ */
+export const __scaffold__editorialSurfaceOpenAtom = atom<{ turnId: string } | null>(null);
+
+/**
+ * SCAFFOLDING — per-turn editorial surface state.
+ * Tracks columns → preview → expanded transitions.
+ */
+export const __scaffold__editorialStateFamily = atomFamily(
+  (_turnId: string) => atom<'columns' | 'preview' | 'expanded'>('columns'),
+  (a: string, b: string) => a === b,
+);
 
 
 // =============================================================================

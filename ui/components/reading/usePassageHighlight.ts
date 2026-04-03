@@ -75,7 +75,10 @@ export function usePassageHighlight(
       // Walk load-bearing claims in landscape priority order.
       // For each paragraph, keep the highest-tier claim that has a passage there.
 
-      const tierIndex = (pos: LandscapePosition): number => LANDSCAPE_ORDER.indexOf(pos);
+      const tierIndex = (pos: LandscapePosition): number => {
+        const idx = LANDSCAPE_ORDER.indexOf(pos);
+        return idx >= 0 ? idx : LANDSCAPE_ORDER.length;
+      };
 
       const allClaimIds = Object.keys(densityProfiles);
       // Sort by landscape tier ascending (northStar = 0 wins)

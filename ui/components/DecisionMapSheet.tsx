@@ -644,6 +644,35 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
         passageRouting: artifact?.passageRouting ?? null,
         surveyGates: artifact?.surveyGates ?? null,
       });
+    case 'stmt-classification': {
+      const sc = artifact?.statementClassification ?? null;
+      if (!sc) return ser(null);
+      const groups = safeArr(sc.unclaimedGroups);
+      const claimedEntries = Object.values(sc.claimed ?? {}) as any[];
+      return ser({
+        summary: sc.summary ?? null,
+        claimed: {
+          total: claimedEntries.length,
+          inPassage: claimedEntries.filter((e: any) => e.inPassage).length,
+          outsidePassage: claimedEntries.filter((e: any) => !e.inPassage).length,
+          multiClaim: claimedEntries.filter((e: any) => Array.isArray(e.claimIds) && e.claimIds.length > 1).length,
+        },
+        unclaimedGroups: groups.map((g: any, i: number) => {
+          let uc = 0;
+          for (const p of safeArr(g.paragraphs)) uc += safeArr(p.unclaimedStatementIds).length;
+          return {
+            index: i + 1,
+            nearestClaimId: g.nearestClaimId ?? null,
+            landscape: g.nearestClaimLandscapePosition ?? 'floor',
+            paragraphCount: safeArr(g.paragraphs).length,
+            unclaimedCount: uc,
+            meanClaimSimilarity: g.meanClaimSimilarity ?? 0,
+            meanQueryRelevance: g.meanQueryRelevance ?? 0,
+            maxQueryRelevance: g.maxQueryRelevance ?? 0,
+          };
+        }),
+      });
+    }
     case 'raw-artifacts':
       return ser(artifact);
     default:

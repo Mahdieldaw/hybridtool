@@ -72,9 +72,10 @@ export const generateWhyItMatters = (
 //     LIVE: collapsingQuestion (hoisted to shape.centralConflict as string)
 //     Rich CentralConflict object removed — was L3 (canned prose, never read by UI).
 //     Now extracts axis + usedIds directly from conflict clusters / conflict infos.
-//     NOTE — FALLBACK EPISTEMIC ISSUE: if classified 'forked' but enrichedConflicts
-//       and conflictClusters are both empty, builder falls back to buildConvergentData.
-//       This silently reclassifies a forked shape as convergent.
+//     NOTE — FALLBACK: engine.ts guards the call — if classified 'forked' but
+//       enrichedConflicts and conflictClusters are both empty, engine falls back to
+//       buildConvergentData (silently reclassifies as convergent). The builder itself
+//       throws if called without conflicts as a safety net.
 //
 //   buildConstrainedData → TradeoffShapeData
 //     LIVE: tradeoffs[] labels (hoisted to shape.tradeoffs as string array)

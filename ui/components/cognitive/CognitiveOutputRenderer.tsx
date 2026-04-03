@@ -6,7 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, readingPanelOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, readingPanelOpenAtom, __scaffold__editorialSurfaceOpenAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -72,6 +72,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
+    const setEditorialSurfaceOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
     const effectiveSessionId = currentSessionId || aiTurn.sessionId;
 
@@ -262,6 +263,16 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     >
                         <span>Read</span>
                     </button>
+                    {mappingArtifact?.editorialAST && (
+                        <button
+                            type="button"
+                            onClick={() => setEditorialSurfaceOpen({ turnId: aiTurn.id })}
+                            className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
+                            aria-label="Open editorial reading surface"
+                        >
+                            <span>Editorial</span>
+                        </button>
+                    )}
                 </div>
 
                 {canShowTraversal && canShowResponse && (

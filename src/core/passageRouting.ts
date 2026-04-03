@@ -327,3 +327,58 @@ export function buildClaimRoutingFromPassage(pr: PassageRoutingResult): ClaimRou
     },
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Source continuity: prev/next linking within a model's passage stream
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface SourceContinuityEntry {
+  passageKey: string;
+  modelIndex: number;
+  claimId: string;
+  startParagraphIndex: number;
+  endParagraphIndex: number;
+  prevPassageKey: string | null;
+  nextPassageKey: string | null;
+}
+
+/**
+ * Build a continuity map linking each passage to its prev/next within the
+ * same model's output. Grouped by modelIndex, sorted by startParagraphIndex.
+ */
+export function buildSourceContinuityMap(
+  claimDensity: ClaimDensityResult
+): Map<string, SourceContinuityEntry> {
+  const result = new Map<string, SourceContinuityEntry>();
+
+  // Collect all passage entries keyed by passageKey, grouped by modelIndex
+  const byModel = new Map<number, Array<{ passageKey: string; claimId: string; entry: import('../../shared/contract').PassageEntry }>>();
+
+  for (const [claimId, profile] of Object.entries(claimDensity.profiles)) {
+    for (const p of profile.passages) {
+      const key = `${claimId}:${p.modelIndex}:${p.startParagraphIndex}`;
+      const list = byModel.get(p.modelIndex) ?? [];
+      list.push({ passageKey: key, claimId, entry: p });
+      byModel.set(p.modelIndex, list);
+    }
+  }
+
+  // Sort each model group by start paragraph, then link prev/next
+  for (const [, passages] of byModel) {
+    passages.sort((a, b) => a.entry.startParagraphIndex - b.entry.startParagraphIndex);
+    for (let i = 0; i < passages.length; i++) {
+      const cur = passages[i];
+      result.set(cur.passageKey, {
+        passageKey: cur.passageKey,
+        modelIndex: cur.entry.modelIndex,
+        claimId: cur.claimId,
+        startParagraphIndex: cur.entry.startParagraphIndex,
+        endParagraphIndex: cur.entry.endParagraphIndex,
+        prevPassageKey: i > 0 ? passages[i - 1].passageKey : null,
+        nextPassageKey: i < passages.length - 1 ? passages[i + 1].passageKey : null,
+      });
+    }
+  }
+
+  return result;
+}

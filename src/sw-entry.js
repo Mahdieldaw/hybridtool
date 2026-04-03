@@ -1957,6 +1957,42 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       `blastSurface=${cognitiveArtifact?.blastSurface ? "present" : "missing"}`
     );
 
+    // ── Restore editorial AST from persisted editorial response ──
+    try {
+      const editorialResp = responsesForTurn
+        .filter((r) => r && r.responseType === "editorial" && normalizeProvId(r.providerId) === normalizeProvId(providerId))
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0] || null;
+
+      if (editorialResp?.text && mapperArtifact.claimDensity && mapperArtifact.passageRouting && mapperArtifact.statementClassification) {
+        const { buildPassageIndex, parseEditorialOutput } = await import("./ConciergeService/editorialMapper");
+        const { buildSourceContinuityMap } = await import("./core/passageRouting");
+
+        const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
+        const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
+          mapperArtifact.claimDensity,
+          mapperArtifact.passageRouting,
+          mapperArtifact.statementClassification,
+          { paragraphs: Array.isArray(shadowParagraphs) ? shadowParagraphs : [] },
+          enrichedClaims,
+          mapperArtifact.citationSourceOrder || {},
+          continuityMap,
+        );
+
+        const validPassageKeys = new Set(idxPassages.map(p => p.passageKey));
+        const validUnclaimedKeys = new Set(idxUnclaimed.map(u => u.groupKey));
+        const parsed = parseEditorialOutput(editorialResp.text, validPassageKeys, validUnclaimedKeys);
+
+        if (parsed.success && parsed.ast) {
+          cognitiveArtifact.editorialAST = parsed.ast;
+          console.log(`[Regenerate] Editorial AST restored: ${parsed.ast.threads.length} thread(s)`);
+        } else {
+          console.warn("[Regenerate] Editorial re-parse failed:", parsed.errors);
+        }
+      }
+    } catch (editorialErr) {
+      console.warn("[Regenerate] Editorial restore (non-blocking):", editorialErr?.message || editorialErr);
+    }
+
     return {
       success: true,
       data: {

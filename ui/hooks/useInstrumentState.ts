@@ -6,7 +6,8 @@ export type PipelineLayer =
   | 'competitive-provenance' | 'claim-statements'
   | 'model-ordering' | 'blast-radius' | 'alignment' | 'raw-artifacts'
   | 'provenance-comparison' | 'mixed-provenance' | 'traversal-pruning'
-  | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions';
+  | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions'
+  | 'stmt-classification';
 
 export type SelectedEntity =
   | { type: 'claim'; id: string; label?: string }

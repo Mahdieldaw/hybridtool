@@ -11,6 +11,7 @@ export type ProviderKey =
 export type ProviderResponseType =
   | "batch"
   | "mapping"
+  | "editorial"
   | "singularity";
 
 export interface SingularityOutput {
@@ -1124,6 +1125,31 @@ export interface StatementClassificationResult {
   meta: { processingTimeMs: number };
 }
 
+// ── Editorial AST (editorial model output) ───────────────────────────
+export interface EditorialAST {
+  orientation: string;
+  threads: EditorialThread[];
+  thread_order: string[];
+  diagnostics: {
+    flat_corpus: boolean;
+    conflict_count: number;
+    notes: string;
+  };
+}
+
+export interface EditorialThread {
+  id: string;
+  label: string;
+  why_care: string;
+  start_here: boolean;
+  items: EditorialThreadItem[];
+}
+
+export interface EditorialThreadItem {
+  id: string;                  // passageKey or unclaimed group key
+  role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
+}
+
 export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
@@ -1177,6 +1203,9 @@ export interface MapperArtifact {
     statementFates: Record<string, StatementFate>;
     unattendedRegions: UnattendedRegion[];
   };
+
+  // Editorial AST lives on CognitiveArtifact (set post-build in StepExecutor / rebuild path).
+  // Persisted as a responseType:"editorial" provider response; re-parsed on artifact rebuild.
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

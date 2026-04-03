@@ -11,6 +11,7 @@ import {
   chatInputHeightAtom,
   useWorkspaceViewAtom,
   readingPanelOpenAtom,
+  __scaffold__editorialSurfaceOpenAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -40,6 +41,10 @@ const ReadingPanel = safeLazy(() =>
   import("../components/reading/ReadingPanel").then(m => ({ default: m.ReadingPanel }))
 );
 
+const EditorialSurface = safeLazy(() =>
+  import("../components/editorial/EditorialSurface").then(m => ({ default: m.EditorialSurface }))
+);
+
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
@@ -57,6 +62,8 @@ export default function ChatView() {
   const useWorkspaceMode = useAtomValue(useWorkspaceViewAtom);
   const isReadingPanelOpen = useAtomValue(readingPanelOpenAtom);
   const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
+  const isEditorialOpen = useAtomValue(__scaffold__editorialSurfaceOpenAtom);
+  const setEditorialOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -65,7 +72,9 @@ export default function ChatView() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isReadingPanelOpen) {
+        if (isEditorialOpen) {
+          setEditorialOpen(null);
+        } else if (isReadingPanelOpen) {
           setReadingPanelOpen(null);
         } else if (isDecisionMapOpen) {
           setDecisionMapOpen(null);
@@ -76,7 +85,7 @@ export default function ChatView() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isReadingPanelOpen, isDecisionMapOpen, isSplitOpen, setReadingPanelOpen, setDecisionMapOpen, setActiveSplitPanel]);
+  }, [isEditorialOpen, isReadingPanelOpen, isDecisionMapOpen, isSplitOpen, setEditorialOpen, setReadingPanelOpen, setDecisionMapOpen, setActiveSplitPanel]);
 
   const itemContent = useMemo(
     () => (_index: number, turnId: string) => {
@@ -214,6 +223,17 @@ export default function ChatView() {
       document.removeEventListener("jump-to-turn", handler as EventListener);
     };
   }, [turnIds, currentSessionId, selectChat, setActiveSplitPanel]);
+
+  // Editorial surface gets a fully isolated view — hide everything else
+  if (isEditorialOpen) {
+    return (
+      <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
+        <Suspense fallback={null}>
+          <EditorialSurface />
+        </Suspense>
+      </div>
+    );
+  }
 
   // Reading panel gets a fully isolated view — hide everything else
   if (isReadingPanelOpen) {
