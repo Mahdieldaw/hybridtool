@@ -812,9 +812,6 @@ export class StepExecutor {
               statementEmbeddings: statementEmbeddingResult?.embeddings || null,
               paragraphEmbeddings: geometryParagraphEmbeddings || null,
               paragraphs: paragraphResult.paragraphs,
-              substrate,
-              regionization: preSemanticInterpretation?.regionization || null,
-              regionProfiles: preSemanticInterpretation?.regionProfiles || null,
             });
             const qrCount = queryRelevance?.statementScores?.size ?? 0;
             console.log(`[StepExecutor] Query relevance computed: ${qrCount} statements scored`);
@@ -1137,13 +1134,8 @@ export class StepExecutor {
                     return null;
                   })();
 
-                  let rawGates = [];
-                  let surveyRationale = null;
-
                   // ── POST-SEMANTIC ASSEMBLY ────────────────────────────────
                   const assemblyResult = await assembleFromPreSurvey(preSurvey, {
-                    surveyGates: rawGates.length > 0 ? rawGates : undefined,
-                    surveyRationale,
                     queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
                     turn: context.turn || 0,

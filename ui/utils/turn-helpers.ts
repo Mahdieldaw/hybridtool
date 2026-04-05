@@ -105,7 +105,7 @@ export function applyStreamingTurnUpdate(
       aiTurn.mapping = {
         artifact: {
           shadow: existingArtifact?.shadow || { statements: [], paragraphs: [], audit: {}, delta: null },
-          geometry: existingArtifact?.geometry || { embeddingStatus: "none", substrate: { nodes: [], edges: [] } },
+          geometry: existingArtifact?.geometry || { embeddingStatus: "none", substrate: { nodes: [], mutualEdges: [] } },
           semantic: {
             claims: existingArtifact?.semantic?.claims || [],
             edges: existingArtifact?.semantic?.edges || [],

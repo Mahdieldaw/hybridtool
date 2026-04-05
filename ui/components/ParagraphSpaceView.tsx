@@ -56,9 +56,8 @@ type Point = { x: number; y: number };
 const BASIN_COLORS = ["#34d399", "#60a5fa", "#fbbf24", "#fb7185", "#a78bfa", "#22d3ee", "#f472b6", "#c084fc", "#f97316", "#4ade80"];
 
 const REGION_KIND_STYLE: Record<string, { fill: string; stroke: string }> = {
-  cluster: { fill: "rgba(59,130,246,0.06)", stroke: "rgba(59,130,246,0.25)" },
-  component: { fill: "rgba(139,92,246,0.06)", stroke: "rgba(139,92,246,0.25)" },
-  patch: { fill: "rgba(148,163,184,0.05)", stroke: "rgba(148,163,184,0.20)" },
+  basin: { fill: "rgba(59,130,246,0.06)", stroke: "rgba(59,130,246,0.25)" },
+  gap: { fill: "rgba(148,163,184,0.05)", stroke: "rgba(148,163,184,0.20)" },
 };
 type HullStyle = { fill: string; stroke: string };
 const DEFAULT_HULL_STYLE: HullStyle = {

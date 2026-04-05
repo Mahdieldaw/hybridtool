@@ -12,9 +12,7 @@ import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd } from "../utils/copy-format-utils";
 import { ParagraphSpaceView } from "./ParagraphSpaceView";
 import {
-  SubstrateCard,
-  MutualGraphCard,
-  BasinInversionCard,
+  GeometryCard,
   BlastRadiusCard,
   ClaimDensityCard,
   ClaimStatementsCard,
@@ -496,33 +494,31 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
   const safeArr = (v: any): any[] => Array.isArray(v) ? v : [];
 
   switch (layer) {
-    case 'substrate': {
-      // Stats + per-node isolation table only — no raw edge array
+    case 'geometry': {
       const basin = artifact?.geometry?.basinInversion ?? null;
       const sub = artifact?.geometry?.substrate ?? null;
       const nodes = safeArr(sub?.nodes).map((n: any) => ({
-        id: n.id, mutualRankDegree: n.mutualRankDegree,
+        id: n.id, mutualRankDegree: n.mutualRankDegree, isolationScore: n.isolationScore,
       }));
       return ser({
-        nodeCount: nodes.length,
-        pairCount: sub?.pairCount ?? null,
-        mu: basin?.mu, sigma: basin?.sigma,
-        p10: basin?.p10, p90: basin?.p90,
-        discriminationRange: basin?.discriminationRange,
-        valleyThreshold: basin?.T_v ?? basin?.valleyThreshold,
-        nodes,
+        pairwiseField: {
+          nodeCount: nodes.length,
+          pairCount: basin?.pairCount ?? null,
+          mu: basin?.mu, sigma: basin?.sigma,
+          p10: basin?.p10, p90: basin?.p90,
+          discriminationRange: basin?.discriminationRange,
+        },
+        basinStructure: {
+          status: basin?.status, T_v: basin?.T_v,
+          basinCount: basin?.basinCount, basins: basin?.basins,
+          pctHigh: basin?.pctHigh, pctValleyZone: basin?.pctValleyZone, pctLow: basin?.pctLow,
+        },
+        mutualGraph: {
+          edgeCount: safeArr(sub?.mutualEdges).length,
+          nodes,
+        },
       });
     }
-    case 'mutual-graph': {
-      // Per-node mutual degree table only — no raw edge list
-      const sub = artifact?.geometry?.substrate ?? null;
-      const nodes = safeArr(sub?.nodes).map((n: any) => ({
-        id: n.id, mutualRankDegree: n.mutualRankDegree,
-      }));
-      return ser({ nodeCount: nodes.length, nodes });
-    }
-    case 'basin-inversion':
-      return ser(artifact?.geometry?.basinInversion);
     case 'query-relevance':
       return ser(artifact?.geometry?.query);
     case 'competitive-provenance':
@@ -1603,9 +1599,7 @@ export const DecisionMapSheet = React.memo(() => {
                           </div>
                           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar" ref={el => { if (isTableCollapsed) rightPanelScrollContainerRef.current = el; }}>
                             {([
-                              { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                              { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                              { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'geometry', label: 'Geometry', content: <GeometryCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
@@ -1719,9 +1713,7 @@ export const DecisionMapSheet = React.memo(() => {
                           ) : (
                             <div className="overflow-y-auto custom-scrollbar min-h-0" ref={el => { if (!isTableCollapsed) rightPanelScrollContainerRef.current = el; }}>
                               {([
-                                { id: 'substrate', label: 'Pairwise Geometry', content: <SubstrateCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                                { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                                { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'geometry', label: 'Geometry', content: <GeometryCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                   { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },

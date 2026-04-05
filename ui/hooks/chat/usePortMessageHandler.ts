@@ -748,7 +748,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
                       aiTurn.mapping = {
                         artifact: existingArtifact || {
                           shadow: { statements: [], paragraphs: [], audit: {}, delta: null },
-                          geometry: { embeddingStatus: "none", substrate: { nodes: [], edges: [] } },
+                          geometry: { embeddingStatus: "none", substrate: { nodes: [], mutualEdges: [] } },
                           semantic: { claims: [], edges: [], conditionals: [], narrative: errText || "" },
                         },
                         timestamp: now,

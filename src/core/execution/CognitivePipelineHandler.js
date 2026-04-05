@@ -15,9 +15,15 @@ export class CognitivePipelineHandler {
    */
   async orchestrateSingularityPhase(request, context, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
     try {
-      const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
+      const mappingEntry = Array.from(stepResults.entries()).find(([_, v]) =>
         v.status === "completed" && v.result?.mapping?.artifact,
-      )?.[1]?.result;
+      );
+      const mappingResult = mappingEntry?.[1]?.result;
+      // Extract mapping provider from stepId (format: "mapping-{provider}-{ts}")
+      const mappingStepId = mappingEntry?.[0] || '';
+      const mappingProviderId = mappingStepId.startsWith('mapping-')
+        ? mappingStepId.slice('mapping-'.length).replace(/-\d+$/, '')
+        : null;
 
       const userMessageForSingularity =
         context?.userMessage || currentUserMessage || "";
@@ -397,6 +403,7 @@ export class CognitivePipelineHandler {
         type: "MAPPER_ARTIFACT_READY",
         sessionId: context.sessionId,
         aiTurnId: context.canonicalAiTurnId,
+        providerId: mappingProviderId,
         mapping: {
           artifact: this.sessionManager && typeof this.sessionManager._safeArtifact === "function"
             ? this.sessionManager._safeArtifact(context.mappingArtifact)

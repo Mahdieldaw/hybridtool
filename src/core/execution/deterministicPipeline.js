@@ -91,9 +91,6 @@ export async function computeDerivedFields({
               statementEmbeddings,
               paragraphEmbeddings,
               paragraphs: shadowParagraphs,
-              substrate,
-              regionization: preSemantic?.regionization || null,
-              regionProfiles: preSemantic?.regionProfiles || null,
             });
           }
         } catch (err) {
@@ -496,8 +493,6 @@ export function assembleMapperArtifact({
   modelCount = 1,
   shadowStatements = [],
   turn = undefined,
-  surveyGates = undefined,
-  surveyRationale = undefined,
 }) {
   const {
     blastSurfaceResult,
@@ -542,8 +537,6 @@ export function assembleMapperArtifact({
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
     ...(provenanceRefinement ? { provenanceRefinement } : {}),
     ...(statementClassification ? { statementClassification } : {}),
-    ...(surveyGates ? { surveyGates } : {}),
-    ...(surveyRationale ? { surveyRationale } : {}),
   };
 }
 
@@ -718,9 +711,6 @@ export async function computePreSurveyPipeline({
           statementEmbeddings,
           paragraphEmbeddings,
           paragraphs: shadowParagraphs,
-          substrate,
-          regionization: preSemantic?.regionization || null,
-          regionProfiles: preSemantic?.regionProfiles || null,
         });
       }
     } catch (err) {
@@ -838,8 +828,6 @@ export async function assembleFromPreSurvey(preSurvey, {
   queryText = '',
   modelCount = 1,
   turn = undefined,
-  surveyGates = undefined,
-  surveyRationale = undefined,
   statementSemanticDensity = undefined,
   paragraphSemanticDensity = undefined,
   claimSemanticDensity = undefined,
@@ -862,8 +850,6 @@ export async function assembleFromPreSurvey(preSurvey, {
     modelCount,
     shadowStatements,
     turn,
-    surveyGates,
-    surveyRationale,
   });
 
   mapperArtifact.preSemantic = preSemantic || null;

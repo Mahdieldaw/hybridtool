@@ -376,7 +376,11 @@ export function isDefinitiveAuthError(error: unknown): boolean {
 
   const statusRaw = e?.status ?? e?.statusCode
     ?? (isRecord(e?.response) ? (e!.response as Record<string, unknown>).status : undefined);
-  const status = typeof statusRaw === "number" ? statusRaw : NaN;
+  const status = typeof statusRaw === "number"
+    ? statusRaw
+    : typeof statusRaw === "string"
+      ? Number(statusRaw)
+      : NaN;
   if (status === 401) return true;
   // 403 deliberately excluded — ambiguous
 

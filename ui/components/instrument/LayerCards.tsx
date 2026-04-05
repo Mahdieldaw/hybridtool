@@ -367,140 +367,7 @@ function SortableTable<Row extends Record<string, any>>({
 }
 
 // ============================================================================
-// SUBSTRATE CARD
-// ============================================================================
-
-export function SubstrateCard({ artifact, selectedEntity }: { artifact: any; selectedEntity: SelectedEntity }) {
-  const basinResult = artifact?.geometry?.basinInversion ?? null;
-  const substrate = artifact?.geometry?.substrate ?? null;
-
-  const nodes: any[] = useMemo(() => substrate?.nodes ?? [], [substrate]);
-  const allEdges: any[] = useMemo(() => substrate?.edges ?? [], [substrate]);
-
-  // Field-level edge similarities
-  const allSims = useMemo(() =>
-    allEdges.map((e: any) => e?.similarity).filter((s: any) => typeof s === "number" && Number.isFinite(s)),
-    [allEdges]
-  );
-
-  // Per-node isolation table
-  type NodeRow = { id: string; mutualRankDegree: number; isolationScore: number | null };
-  const nodeRows = useMemo<NodeRow[]>(() => {
-    return nodes.map((n: any, idx: number) => ({
-      id: (() => {
-        const raw = n?.id != null ? String(n.id) : "";
-        const trimmed = raw.trim();
-        return trimmed ? trimmed : `node-${idx}`;
-      })(),
-      mutualRankDegree: typeof n.mutualRankDegree === "number" ? n.mutualRankDegree : 0,
-      isolationScore: typeof n.isolationScore === "number" ? n.isolationScore : null,
-    }));
-  }, [nodes]);
-
-  const isolatedCount = nodeRows.filter((n) => n.mutualRankDegree === 0).length;
-  const D = basinResult?.discriminationRange ?? null;
-  const mu = basinResult?.mu ?? null;
-  const sigma = basinResult?.sigma ?? null;
-  const p10 = basinResult?.p10 ?? null;
-  const p90 = basinResult?.p90 ?? null;
-
-  // Histogram source: prefer pre-computed basin histogram, fall back to allSims
-  const hasArtifactHistogram =
-    basinResult &&
-    Array.isArray(basinResult.histogram) &&
-    basinResult.histogram.length > 0 &&
-    typeof basinResult.binMin === "number" &&
-    typeof basinResult.binMax === "number";
-
-  const dColor = D == null ? "text-text-muted" : D >= 0.10 ? "text-emerald-400" : D >= 0.05 ? "text-amber-400" : "text-rose-400";
-
-  // Claim-scoped view: show edge sims for statements belonging to this claim
-  const selectedClaimId = selectedEntity?.type === "claim" ? selectedEntity.id : null;
-
-  return (
-    <div className="space-y-4">
-      {/* Header badge */}
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
-        {selectedClaimId && (
-          <span className="text-[10px] text-text-muted">
-            Viewing claim: <span className="font-mono text-text-secondary">{selectedClaimId}</span>
-          </span>
-        )}
-      </div>
-
-      {/* Interpretive callout */}
-      <InterpretiveCallout
-        text={`${fmtInt(nodes.length)} paragraphs, discrimination range ${fmt(D, 3)} — ${D == null ? 'unavailable' : D >= 0.10 ? 'above 0.10 floor' : D >= 0.05 ? 'marginal (0.05–0.10)' : 'below 0.05'}. Geometry is ${D == null ? 'unknown' : D >= 0.10 ? 'meaningful' : D >= 0.05 ? 'marginal' : 'insufficient'}.`}
-        variant={D == null ? 'info' : D >= 0.10 ? 'ok' : D >= 0.05 ? 'warn' : 'error'}
-      />
-
-      {/* Pairwise distribution */}
-      <CardSection title="Pairwise Similarity Distribution">
-        {hasArtifactHistogram ? (
-          <BinHistogram
-            bins={basinResult.histogram}
-            binMin={basinResult.binMin}
-            binMax={basinResult.binMax}
-            binWidth={basinResult.binWidth}
-            height={90}
-            markers={[
-              { label: "μ", value: mu!, color: "#93c5fd" },
-              { label: "T_v", value: basinResult.T_v!, color: "#34d399" },
-              { label: "P90", value: p90!, color: "#f59e0b" },
-            ].filter((m) => m.value != null)}
-            zoneBounds={mu != null && sigma != null ? { T_low: mu - sigma, T_high: mu + sigma } : undefined}
-          />
-        ) : allSims.length > 0 ? (
-          <Histogram
-            values={allSims}
-            bins={20}
-            rangeMin={Math.max(0, Math.min(...allSims) - 0.01)}
-            rangeMax={Math.min(1, Math.max(...allSims) + 0.01)}
-            height={80}
-          />
-        ) : (
-          <div className="text-xs text-text-muted italic">No pairwise data available</div>
-        )}
-
-        <div className="grid grid-cols-2 gap-x-4 mt-2">
-          <div>
-            <StatRow label="Nodes" value={fmtInt(nodes.length)} />
-            <StatRow label="Pairs" value={fmtInt(basinResult?.pairCount ?? allSims.length)} />
-            <StatRow label="Isolated" value={fmtInt(isolatedCount)} color={isolatedCount > 0 ? "text-amber-400" : undefined} />
-          </div>
-          <div>
-            <StatRow label="μ" value={fmt(mu, 4)} />
-            <StatRow label="σ" value={fmt(sigma, 4)} />
-            <StatRow label="P10" value={fmt(p10, 4)} />
-            <StatRow label="P90" value={fmt(p90, 4)} />
-            <StatRow label="D = P90−P10" value={fmt(D, 4)} color={dColor} />
-          </div>
-        </div>
-      </CardSection>
-
-      {/* Isolation table */}
-      {nodeRows.length > 0 && (
-        <CardSection title="Per-Node Isolation">
-          <SortableTable
-            columns={[
-              { key: "id", header: "Node", cell: (r) => <span className="font-mono text-[10px]">{r.id}</span> },
-              { key: "mutualRankDegree", header: "MutualDeg", sortValue: (r) => r.mutualRankDegree, cell: (r) => <span className={clsx("font-mono", r.mutualRankDegree === 0 && "text-amber-400")}>{r.mutualRankDegree}</span> },
-              { key: "isolationScore", header: "Isolation", sortValue: (r) => r.isolationScore, cell: (r) => <span className={clsx("font-mono", (r.isolationScore ?? 0) > 0.5 && "text-rose-400")}>{fmt(r.isolationScore, 4)}</span> },
-            ]}
-            rows={nodeRows}
-            defaultSortKey="isolationScore"
-            defaultSortDir="desc"
-            maxRows={10}
-          />
-        </CardSection>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// MUTUAL GRAPH CARD
+// GEOMETRY CARD (consolidated: pairwise field → basin structure → mutual graph)
 // ============================================================================
 
 function computeComponents(nodeIds: string[], mutualEdges: any[]): { id: number; nodeIds: string[] }[] {
@@ -526,306 +393,281 @@ function computeComponents(nodeIds: string[], mutualEdges: any[]): { id: number;
   return Array.from(groups.values()).map((ids, i) => ({ id: i, nodeIds: ids }));
 }
 
-export function MutualGraphCard({
+export function GeometryCard({
   artifact,
   selectedEntity: _selectedEntity,
 }: {
   artifact: any;
   selectedEntity: SelectedEntity;
 }) {
+  const basin = artifact?.geometry?.basinInversion ?? null;
   const substrate = artifact?.geometry?.substrate ?? null;
   const nodes: any[] = useMemo(() => substrate?.nodes ?? [], [substrate]);
   const mutualEdges: any[] = useMemo(() => substrate?.mutualEdges ?? [], [substrate]);
 
-  const nodeIds = useMemo(() => nodes.map((n: any) => String(n.id ?? "")), [nodes]);
-
-  const components = useMemo(() => computeComponents(nodeIds, mutualEdges), [nodeIds, mutualEdges]);
-  const participatingNodes = nodes.filter((n: any) => (n.mutualRankDegree ?? 0) > 0).length;
-  const participationRate = nodes.length > 0 ? participatingNodes / nodes.length : null;
-
-  // Per-node mutual degree table
-  type NodeRow = { id: string; mutualRankDegree: number };
-  const nodeRows = useMemo<NodeRow[]>(() =>
-    nodes.map((n: any) => ({ id: String(n.id ?? ""), mutualRankDegree: typeof n.mutualRankDegree === "number" ? n.mutualRankDegree : 0 })),
-    [nodes]
-  );
-
-  // Mutual degree distribution
-  const mutualDegrees = nodeRows.map((n) => n.mutualRankDegree);
-  const degreeStats = useMemo(() => computeStats(mutualDegrees), [mutualDegrees]);
-
-  // Component size distribution
-  type CompRow = { id: string; size: number; ratio: number; participating: boolean };
-  const compRows = useMemo<CompRow[]>(() =>
-    components
-      .map((c) => ({
-        id: String(c.id),
-        size: c.nodeIds.length,
-        ratio: nodes.length > 0 ? c.nodeIds.length / nodes.length : 0,
-        participating: c.nodeIds.length > 1,
-      }))
-      .sort((a, b) => b.size - a.size),
-    [components, nodes.length]
-  );
-
-  const gateOk = participationRate != null && participationRate > 0.05 && mutualEdges.length > 0;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
-          <span className={clsx("text-[9px] px-1.5 py-0.5 rounded border", gateOk ? "border-emerald-500/30 text-emerald-400" : "border-rose-500/30 text-rose-400")}>
-            {gateOk ? "✓ structure present" : "⚠ insufficient structure"}
-          </span>
-        </div>
-      </div>
-
-      <InterpretiveCallout
-        text={`${participationRate != null ? `${(participationRate * 100).toFixed(0)}%` : '—'} participation. ${fmtInt(components.length)} components${compRows.length > 0 ? `, largest ${(compRows[0].ratio * 100).toFixed(0)}%` : ''}. Structure ${gateOk ? 'present' : 'insufficient'}.`}
-        variant={gateOk ? 'ok' : 'error'}
-      />
-
-      <CardSection title="Summary">
-        <div className="grid grid-cols-2 gap-x-4">
-          <div>
-            <StatRow label="Nodes" value={fmtInt(nodes.length)} />
-            <StatRow label="Mutual Edges" value={fmtInt(mutualEdges.length)} />
-            <StatRow label="Participating" value={`${fmtInt(participatingNodes)} (${participationRate != null ? (participationRate * 100).toFixed(1) : "—"}%)`} color={gateOk ? "text-emerald-400" : "text-rose-400"} />
-            <StatRow label="Components" value={fmtInt(components.length)} />
-          </div>
-          <div>
-            {degreeStats && (
-              <>
-                <StatRow label="Avg MutualDeg" value={fmt(degreeStats.mean, 2)} />
-                <StatRow label="Max MutualDeg" value={fmt(degreeStats.max, 0)} />
-                <StatRow label="Median MutualDeg" value={fmt(degreeStats.p50, 0)} />
-              </>
-            )}
-          </div>
-        </div>
-      </CardSection>
-
-      {mutualDegrees.length > 0 && (
-        <CardSection title="Mutual Degree Distribution">
-          <Histogram
-            values={mutualDegrees}
-            bins={Math.min(20, Math.max(...mutualDegrees) + 1)}
-            rangeMin={0}
-            rangeMax={Math.max(...mutualDegrees, 1) + 0.5}
-            height={60}
-          />
-        </CardSection>
-      )}
-
-      {compRows.length > 0 && (
-        <CardSection title="Connected Components">
-          <SortableTable
-            columns={[
-              { key: "id", header: "Comp", cell: (r) => <span className="font-mono text-text-muted">{r.id}</span> },
-              { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
-              { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
-            ]}
-            rows={compRows}
-            defaultSortKey="size"
-            defaultSortDir="desc"
-            maxRows={10}
-          />
-        </CardSection>
-      )}
-
-      {nodeRows.length > 0 && (
-        <CardSection title="Per-Node Mutual Degree">
-          <SortableTable
-            columns={[
-              { key: "id", header: "Node", cell: (r) => <span className="font-mono text-[10px]">{r.id}</span> },
-              { key: "mutualRankDegree", header: "MutualDeg", sortValue: (r) => r.mutualRankDegree, cell: (r) => <span className={clsx("font-mono", r.mutualRankDegree === 0 && "text-amber-400")}>{r.mutualRankDegree}</span> },
-            ]}
-            rows={nodeRows}
-            defaultSortKey="mutualRankDegree"
-            defaultSortDir="desc"
-            maxRows={10}
-          />
-        </CardSection>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// BASIN INVERSION CARD
-// ============================================================================
-
-export function BasinInversionCard({
-  artifact,
-  selectedEntity: _selectedEntity,
-}: {
-  artifact: any;
-  selectedEntity: SelectedEntity;
-}) {
-  const result = artifact?.geometry?.basinInversion ?? null;
-
-  if (!result) {
-    return <div className="text-xs text-text-muted italic py-4">Basin inversion data not available in artifact.</div>;
-  }
-
-  const D = result.discriminationRange;
+  // ── Pairwise field stats (from basin inversion — the only place these are surfaced) ──
+  const D = basin?.discriminationRange ?? null;
+  const mu = basin?.mu ?? null;
+  const sigma = basin?.sigma ?? null;
+  const p10 = basin?.p10 ?? null;
+  const p90 = basin?.p90 ?? null;
   const dColor = D == null ? "text-text-muted" : D >= 0.10 ? "text-emerald-400" : D >= 0.05 ? "text-amber-400" : "text-rose-400";
+  const hasHistogram = basin && Array.isArray(basin.histogram) && basin.histogram.length > 0;
 
-  // Bridge pairs table
+  // ── Basin structure ──
+  const basinCount = basin?.basinCount ?? basin?.basins?.length ?? 0;
+  const hasBasinStructure = basin?.status === "ok" && basinCount > 1;
+
+  type BasinRow = { id: string; basinId: number; size: number; ratio: number; trenchDepth: number | null };
+  const basinRows = useMemo<BasinRow[]>(() => {
+    const basins: any[] = basin?.basins ?? [];
+    const total = basin?.nodeCount ?? 0;
+    return basins.map((b: any) => ({
+      id: String(b.basinId),
+      basinId: b.basinId,
+      size: Array.isArray(b.nodeIds) ? b.nodeIds.length : (b.size ?? 0),
+      ratio: total > 0 ? (Array.isArray(b.nodeIds) ? b.nodeIds.length : (b.size ?? 0)) / total : 0,
+      trenchDepth: typeof b.trenchDepth === "number" ? b.trenchDepth : null,
+    }));
+  }, [basin]);
+
   type BridgeRow = { id: string; a: string; b: string; similarity: number; delta: number | null };
   const bridgeRows = useMemo<BridgeRow[]>(() => {
-    const pairs: any[] = result.bridgePairs ?? [];
+    const pairs: any[] = basin?.bridgePairs ?? [];
     return pairs.map((p: any, i: number) => ({
       id: String(i),
       a: String(p.nodeA ?? p.a ?? ""),
       b: String(p.nodeB ?? p.b ?? ""),
       similarity: typeof p.similarity === "number" ? p.similarity : 0,
-      delta: result.T_v != null && typeof p.similarity === "number" ? p.similarity - result.T_v : null,
+      delta: basin?.T_v != null && typeof p.similarity === "number" ? p.similarity - basin.T_v : null,
     })).sort((a, b) => Math.abs(a.delta ?? 999) - Math.abs(b.delta ?? 999));
-  }, [result]);
+  }, [basin]);
 
-  // Basin table
-  type BasinRow = { id: string; basinId: number; size: number; ratio: number; trenchDepth: number | null };
-  const basinRows = useMemo<BasinRow[]>(() => {
-    const basins: any[] = result.basins ?? [];
-    return basins.map((b: any) => ({
-      id: String(b.basinId),
-      basinId: b.basinId,
-      size: Array.isArray(b.nodeIds) ? b.nodeIds.length : (b.size ?? 0),
-      ratio: result.nodeCount > 0 ? (Array.isArray(b.nodeIds) ? b.nodeIds.length : (b.size ?? 0)) / result.nodeCount : 0,
-      trenchDepth: typeof b.trenchDepth === "number" ? b.trenchDepth : null,
-    }));
-  }, [result]);
+  // ── Mutual graph ──
+  const nodeIds = useMemo(() => nodes.map((n: any) => String(n.paragraphId ?? "")), [nodes]);
+  const components = useMemo(() => computeComponents(nodeIds, mutualEdges), [nodeIds, mutualEdges]);
+  const participatingNodes = nodes.filter((n: any) => (n.mutualRankDegree ?? 0) > 0).length;
+  const participationRate = nodes.length > 0 ? participatingNodes / nodes.length : null;
+  const mutualDegrees = useMemo(() => nodes.map((n: any) => typeof n.mutualRankDegree === "number" ? n.mutualRankDegree : 0), [nodes]);
+  const degreeStats = useMemo(() => computeStats(mutualDegrees), [mutualDegrees]);
 
-  const hasHistogram = Array.isArray(result.histogram) && result.histogram.length > 0;
+  type CompRow = { id: string; size: number; ratio: number };
+  const compRows = useMemo<CompRow[]>(() =>
+    components
+      .map((c) => ({ id: String(c.id), size: c.nodeIds.length, ratio: nodes.length > 0 ? c.nodeIds.length / nodes.length : 0 }))
+      .sort((a, b) => b.size - a.size),
+    [components, nodes.length]
+  );
+
+  type NodeRow = { id: string; mutualRankDegree: number; isolationScore: number | null };
+  const nodeRows = useMemo<NodeRow[]>(() =>
+    nodes.map((n: any, idx: number) => ({
+      id: (() => { const raw = n?.paragraphId != null ? String(n.paragraphId) : ""; const trimmed = raw.trim(); return trimmed || `node-${idx}`; })(),
+      mutualRankDegree: typeof n.mutualRankDegree === "number" ? n.mutualRankDegree : 0,
+      isolationScore: typeof n.isolationScore === "number" ? n.isolationScore : null,
+    })),
+    [nodes]
+  );
+
+  if (!basin && nodes.length === 0) {
+    return <div className="text-xs text-text-muted italic py-4">No geometry data available.</div>;
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded">L1</span>
+        {basin?.status && (
           <span className={clsx(
             "text-[9px] px-1.5 py-0.5 rounded border",
-            result.status === "ok" ? "border-emerald-500/30 text-emerald-400" : "border-amber-500/30 text-amber-400"
+            basin.status === "ok" ? "border-emerald-500/30 text-emerald-400" : "border-amber-500/30 text-amber-400"
           )}>
-            {result.statusLabel ?? result.status}
+            {basin.statusLabel ?? basin.status}
           </span>
-        </div>
+        )}
       </div>
 
       <InterpretiveCallout
         text={(() => {
-          const basinCount = result.basinCount ?? result.basins?.length ?? 0;
-          const tvStr = result.status === "ok" && result.T_v != null ? `Valley at T_v=${fmt(result.T_v, 3)}` : 'No valley detected';
-          const depthStr = result.valleyDepthSigma != null ? ` with depth ${fmt(result.valleyDepthSigma, 1)}σ` : '';
-          return `${basinCount} basin${basinCount !== 1 ? 's' : ''} detected. ${tvStr}${depthStr}. Thresholds will ${result.status === "ok" ? 'discriminate' : 'struggle'}.`;
+          const dDesc = D == null ? 'unavailable' : D >= 0.10 ? 'above 0.10 floor' : D >= 0.05 ? 'marginal' : 'below 0.05';
+          const basinDesc = hasBasinStructure
+            ? `${basinCount} basins, valley at T_v=${fmt(basin.T_v, 3)}${basin.valleyDepthSigma != null ? ` (${fmt(basin.valleyDepthSigma, 1)}σ deep)` : ''}`
+            : `${basinCount} basin${basinCount !== 1 ? 's' : ''}, no valley`;
+          const partDesc = participationRate != null ? `${(participationRate * 100).toFixed(0)}% mutual participation` : '';
+          return `${fmtInt(nodes.length)} paragraphs, D=${fmt(D, 3)} (${dDesc}). ${basinDesc}. ${partDesc}.`;
         })()}
-        variant={result.status === "ok" ? 'ok' : 'warn'}
+        variant={D == null ? 'info' : D >= 0.10 && hasBasinStructure ? 'ok' : D >= 0.05 ? 'warn' : 'error'}
       />
 
-      {/* Histogram with zone markers */}
-      {hasHistogram && (
-        <CardSection title="Similarity Field Topology">
+      {/* ── TIER 1: Pairwise Field ── */}
+      <CardSection title="Pairwise Similarity Field" badge={{ text: `${fmtInt(basin?.pairCount ?? 0)} pairs`, color: "#60a5fa" }}>
+        {hasHistogram && (
           <BinHistogram
-            bins={result.histogram}
-            binMin={result.binMin}
-            binMax={result.binMax}
-            binWidth={result.binWidth}
+            bins={basin.histogram}
+            binMin={basin.binMin}
+            binMax={basin.binMax}
+            binWidth={basin.binWidth}
             height={100}
             markers={[
-              result.mu != null ? { label: "μ", value: result.mu, color: "#93c5fd" } : null,
-              result.T_low != null ? { label: "μ-σ", value: result.T_low, color: "#a78bfa" } : null,
-              result.T_high != null ? { label: "μ+σ", value: result.T_high, color: "#a78bfa" } : null,
-              result.status === "ok" && result.T_v != null ? { label: "T_v", value: result.T_v, color: "#34d399" } : null,
+              mu != null ? { label: "μ", value: mu, color: "#93c5fd" } : null,
+              basin.T_low != null ? { label: "μ-σ", value: basin.T_low, color: "#a78bfa" } : null,
+              basin.T_high != null ? { label: "μ+σ", value: basin.T_high, color: "#a78bfa" } : null,
+              basin.status === "ok" && basin.T_v != null ? { label: "T_v", value: basin.T_v, color: "#34d399" } : null,
             ].filter(Boolean) as { label: string; value: number; color: string }[]}
-            zoneBounds={result.T_low != null && result.T_high != null ? { T_low: result.T_low, T_high: result.T_high } : (result.mu != null && result.sigma != null ? { T_low: result.mu - result.sigma, T_high: result.mu + result.sigma } : undefined)}
+            zoneBounds={basin.T_low != null && basin.T_high != null ? { T_low: basin.T_low, T_high: basin.T_high } : (mu != null && sigma != null ? { T_low: mu - sigma, T_high: mu + sigma } : undefined)}
           />
-        </CardSection>
-      )}
-
-      {/* Stats */}
-      <CardSection title="Distribution">
-        <div className="grid grid-cols-2 gap-x-4">
+        )}
+        <div className="grid grid-cols-2 gap-x-4 mt-2">
           <div>
-            <StatRow label="Nodes" value={fmtInt(result.nodeCount)} />
-            <StatRow label="Pairs" value={fmtInt(result.pairCount)} />
-            <StatRow label="μ" value={fmt(result.mu, 6)} />
-            <StatRow label="σ" value={fmt(result.sigma, 6)} />
+            <StatRow label="Nodes" value={fmtInt(basin?.nodeCount ?? nodes.length)} />
+            <StatRow label="Pairs" value={fmtInt(basin?.pairCount)} />
+            <StatRow label="μ" value={fmt(mu, 4)} />
+            <StatRow label="σ" value={fmt(sigma, 4)} />
           </div>
           <div>
-            <StatRow label="P10" value={fmt(result.p10, 6)} />
-            <StatRow label="P90" value={fmt(result.p90, 6)} />
-            <StatRow label="D = P90−P10" value={fmt(D, 6)} color={dColor} />
-            <StatRow label="T_v" value={result.status === "ok" ? fmt(result.T_v, 6) : "—"} color={result.status === "ok" ? "text-emerald-400" : undefined} />
+            <StatRow label="P10" value={fmt(p10, 4)} />
+            <StatRow label="P90" value={fmt(p90, 4)} />
+            <StatRow label="D = P90−P10" value={fmt(D, 4)} color={dColor} />
+            <StatRow label="T_v" value={basin?.status === "ok" ? fmt(basin.T_v, 4) : "—"} color={basin?.status === "ok" ? "text-emerald-400" : undefined} />
           </div>
         </div>
       </CardSection>
 
-      {/* Zone population */}
-      {(result.pctHigh != null || result.pctLow != null) && (
-        <CardSection title="Zone Population">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="bg-white/3 rounded-lg p-2 text-center">
-              <div className="text-[9px] text-text-muted uppercase">High</div>
-              <div className="text-sm font-mono font-semibold text-emerald-400">{result.pctHigh != null ? `${result.pctHigh.toFixed(1)}%` : "—"}</div>
+      {/* ── TIER 2: Basin Structure (only if meaningful) ── */}
+      {(hasBasinStructure || (basin?.pctHigh != null)) && (
+        <CardSection title="Basin Structure" badge={{ text: `${basinCount} basin${basinCount !== 1 ? 's' : ''}`, color: hasBasinStructure ? "#34d399" : "#fbbf24" }}>
+          {/* Zone population */}
+          {(basin.pctHigh != null || basin.pctLow != null) && (
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="bg-white/3 rounded-lg p-2 text-center">
+                <div className="text-[9px] text-text-muted uppercase">High</div>
+                <div className="text-sm font-mono font-semibold text-emerald-400">{basin.pctHigh != null ? `${basin.pctHigh.toFixed(1)}%` : "—"}</div>
+              </div>
+              <div className="bg-white/3 rounded-lg p-2 text-center">
+                <div className="text-[9px] text-text-muted uppercase">Valley</div>
+                <div className="text-sm font-mono font-semibold text-amber-400">{basin.pctValleyZone != null ? `${basin.pctValleyZone.toFixed(1)}%` : "—"}</div>
+              </div>
+              <div className="bg-white/3 rounded-lg p-2 text-center">
+                <div className="text-[9px] text-text-muted uppercase">Low</div>
+                <div className="text-sm font-mono font-semibold text-blue-400">{basin.pctLow != null ? `${basin.pctLow.toFixed(1)}%` : "—"}</div>
+              </div>
             </div>
-            <div className="bg-white/3 rounded-lg p-2 text-center">
-              <div className="text-[9px] text-text-muted uppercase">Valley</div>
-              <div className="text-sm font-mono font-semibold text-amber-400">{result.pctValleyZone != null ? `${result.pctValleyZone.toFixed(1)}%` : "—"}</div>
+          )}
+
+          {/* Basins table */}
+          {basinRows.length > 1 && (
+            <SortableTable
+              columns={[
+                { key: "basinId", header: "Basin", cell: (r) => <span className="font-mono text-text-muted">{r.basinId}</span> },
+                { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
+                { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
+                { key: "trenchDepth", header: "Trench", sortValue: (r) => r.trenchDepth, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.trenchDepth, 4)}</span> },
+              ]}
+              rows={basinRows}
+              defaultSortKey="size"
+              defaultSortDir="desc"
+            />
+          )}
+
+          {/* Bridge pairs */}
+          {bridgeRows.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1">Bridge Pairs Near T_v ({bridgeRows.length})</div>
+              <SortableTable
+                columns={[
+                  { key: "a", header: "Node A", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.a}</span> },
+                  { key: "b", header: "Node B", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.b}</span> },
+                  { key: "similarity", header: "Sim", sortValue: (r) => r.similarity, cell: (r) => <span className="font-mono">{fmt(r.similarity, 5)}</span> },
+                  {
+                    key: "delta", header: "Δ T_v", sortValue: (r) => r.delta == null ? 999 : Math.abs(r.delta), cell: (r) => {
+                      const d = r.delta;
+                      const color = d != null && Math.abs(d) < 0.002 ? "text-rose-400" : "text-text-muted";
+                      return <span className={clsx("font-mono", color)}>{d != null ? (d >= 0 ? "+" : "") + fmt(d, 5) : "—"}</span>;
+                    }
+                  },
+                ]}
+                rows={bridgeRows}
+                defaultSortKey="delta"
+                maxRows={10}
+              />
             </div>
-            <div className="bg-white/3 rounded-lg p-2 text-center">
-              <div className="text-[9px] text-text-muted uppercase">Low</div>
-              <div className="text-sm font-mono font-semibold text-blue-400">{result.pctLow != null ? `${result.pctLow.toFixed(1)}%` : "—"}</div>
+          )}
+        </CardSection>
+      )}
+
+      {/* ── TIER 3: Mutual Recognition Graph ── */}
+      {nodes.length > 0 && (
+        <CardSection title="Mutual Recognition" badge={{ text: `${fmtInt(mutualEdges.length)} edges`, color: participationRate != null && participationRate > 0.05 ? "#34d399" : "#f87171" }}>
+          <div className="grid grid-cols-2 gap-x-4">
+            <div>
+              <StatRow label="Mutual Edges" value={fmtInt(mutualEdges.length)} />
+              <StatRow label="Participating" value={`${fmtInt(participatingNodes)} (${participationRate != null ? (participationRate * 100).toFixed(1) : "—"}%)`} color={participationRate != null && participationRate > 0.05 ? "text-emerald-400" : "text-rose-400"} />
+              <StatRow label="Components" value={fmtInt(components.length)} />
+            </div>
+            <div>
+              {degreeStats && (
+                <>
+                  <StatRow label="Avg Degree" value={fmt(degreeStats.mean, 2)} />
+                  <StatRow label="Max Degree" value={fmt(degreeStats.max, 0)} />
+                  <StatRow label="Median Degree" value={fmt(degreeStats.p50, 0)} />
+                </>
+              )}
             </div>
           </div>
+
+          {/* Degree distribution */}
+          {mutualDegrees.length > 0 && (
+            <div className="mt-2">
+              <Histogram
+                values={mutualDegrees}
+                bins={Math.min(20, Math.max(...mutualDegrees) + 1)}
+                rangeMin={0}
+                rangeMax={Math.max(...mutualDegrees, 1) + 0.5}
+                height={50}
+              />
+            </div>
+          )}
+
+          {/* Components table (only if >1 component) */}
+          {compRows.length > 1 && (
+            <div className="mt-2">
+              <SortableTable
+                columns={[
+                  { key: "id", header: "Comp", cell: (r) => <span className="font-mono text-text-muted">{r.id}</span> },
+                  { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
+                  { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
+                ]}
+                rows={compRows}
+                defaultSortKey="size"
+                defaultSortDir="desc"
+                maxRows={10}
+              />
+            </div>
+          )}
+
+          {/* Per-node table */}
+          {nodeRows.length > 0 && (
+            <div className="mt-2">
+              <SortableTable
+                columns={[
+                  { key: "id", header: "Node", cell: (r) => <span className="font-mono text-[10px]">{r.id}</span> },
+                  { key: "mutualRankDegree", header: "Degree", sortValue: (r) => r.mutualRankDegree, cell: (r) => <span className={clsx("font-mono", r.mutualRankDegree === 0 && "text-amber-400")}>{r.mutualRankDegree}</span> },
+                  { key: "isolationScore", header: "Isolation", sortValue: (r) => r.isolationScore, cell: (r) => <span className={clsx("font-mono", (r.isolationScore ?? 0) > 0.5 && "text-rose-400")}>{fmt(r.isolationScore, 4)}</span> },
+                ]}
+                rows={nodeRows}
+                defaultSortKey="isolationScore"
+                defaultSortDir="desc"
+                maxRows={10}
+              />
+            </div>
+          )}
         </CardSection>
       )}
-
-      {/* Basins */}
-      {basinRows.length > 0 && (
-        <CardSection title={`Basins (${basinRows.length})`}>
-          <SortableTable
-            columns={[
-              { key: "basinId", header: "Basin", cell: (r) => <span className="font-mono text-text-muted">{r.basinId}</span> },
-              { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
-              { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
-              { key: "trenchDepth", header: "Trench", sortValue: (r) => r.trenchDepth, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.trenchDepth, 4)}</span> },
-            ]}
-            rows={basinRows}
-            defaultSortKey="size"
-            defaultSortDir="desc"
-          />
-        </CardSection>
-      )}
-
-      {/* Bridge inspector */}
-      <CardSection title={`Bridge Pairs — Near T_v (${bridgeRows.length})`}>
-        {bridgeRows.length > 0 ? (
-          <SortableTable
-            columns={[
-              { key: "a", header: "Node A", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.a}</span> },
-              { key: "b", header: "Node B", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.b}</span> },
-              { key: "similarity", header: "Sim", sortValue: (r) => r.similarity, cell: (r) => <span className="font-mono">{fmt(r.similarity, 5)}</span> },
-              {
-                key: "delta", header: "Δ from T_v", sortValue: (r) => r.delta == null ? 999 : Math.abs(r.delta), cell: (r) => {
-                  const d = r.delta;
-                  const color = d != null && Math.abs(d) < 0.002 ? "text-rose-400" : "text-text-muted";
-                  return <span className={clsx("font-mono", color)}>{d != null ? (d >= 0 ? "+" : "") + fmt(d, 5) : "—"}</span>;
-                }
-              },
-            ]}
-            rows={bridgeRows}
-            defaultSortKey="delta"
-            maxRows={10}
-          />
-        ) : (
-          <div className="text-[10px] text-text-muted italic py-1">No valley detected — no cross-basin bridge pairs.</div>
-        )}
-      </CardSection>
     </div>
   );
 }
+
 
 // ============================================================================
 // REGIONS CARD
@@ -844,14 +686,14 @@ export function RegionsCard({
 
     const normalize = (input: unknown) => {
       if (!Array.isArray(input)) return [];
-      const out: Array<{ id: string; kind: "component" | "patch"; nodeIds: string[] }> = [];
+      const out: Array<{ id: string; kind: "basin" | "gap"; nodeIds: string[] }> = [];
       for (const r of input) {
         if (!r || typeof r !== 'object') continue;
         const rr = r as Record<string, unknown>;
         const id = typeof rr.id === 'string' ? rr.id : '';
         if (!id) continue;
         const kindRaw = typeof rr.kind === 'string' ? rr.kind : '';
-        const kind = kindRaw === 'component' || kindRaw === 'patch' ? kindRaw : 'patch';
+        const kind = kindRaw === 'basin' || kindRaw === 'gap' ? kindRaw : 'basin';
         const nodeIds = Array.isArray(rr.nodeIds) ? rr.nodeIds.map((x) => String(x)).filter(Boolean) : [];
         out.push({ id, kind, nodeIds });
       }
@@ -903,7 +745,7 @@ export function RegionsCard({
         <SortableTable
           columns={[
             { key: "id", header: "Region", cell: (r) => <span className="font-mono text-[10px]">{r.id}</span> },
-            { key: "kind", header: "Kind", cell: (r) => <span className={clsx("text-[9px] uppercase", r.kind === 'component' ? 'text-blue-400' : 'text-amber-400')}>{r.kind}</span> },
+            { key: "kind", header: "Kind", cell: (r) => <span className={clsx("text-[9px] uppercase", r.kind === 'basin' ? 'text-blue-400' : 'text-amber-400')}>{r.kind}</span> },
             { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
             { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
           ]}

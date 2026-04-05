@@ -43,7 +43,7 @@ export const buildKeystonePatternData = (
             isFragile: keystoneClaim.supporters.length <= 1
         },
         dependencies,
-        cascadeSize: cascade?.dependentIds.length || dependencies.length,
+        cascadeSize: cascade?.dependentIds.length ?? dependencies.length,
     };
 };
 

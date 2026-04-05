@@ -1,6 +1,5 @@
 import type { ShadowStatement } from '../shadow/ShadowExtractor';
 import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
-import type { GeometricSubstrate } from './types';
 import { cosineSimilarity } from '../clustering/distance';
 
 export interface QueryRelevanceStatementScore {
@@ -28,9 +27,6 @@ export function computeQueryRelevance(input: {
     statementEmbeddings?: Map<string, Float32Array> | null;
     paragraphEmbeddings?: Map<string, Float32Array> | null;
     paragraphs: ShadowParagraph[];
-    substrate: GeometricSubstrate;
-    regionization?: unknown;
-    regionProfiles?: unknown;
 }): QueryRelevanceResult {
     const {
         queryEmbedding,

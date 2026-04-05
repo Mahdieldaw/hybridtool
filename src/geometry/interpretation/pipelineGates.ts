@@ -74,7 +74,7 @@ export function evaluatePipelineGates(substrate: GeometricSubstrate): PipelineGa
         };
     }
 
-    // Insufficient structure: most nodes isolated, trivial edge count
+    // Insufficient structure: high isolation ratio (>70% of nodes have no mutual recognition edges)
     if (isolationRatio > 0.7) {
         const confidence = clamp01((isolationRatio - 0.7) / 0.3);
         return {
