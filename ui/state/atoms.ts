@@ -348,9 +348,6 @@ export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null)
 export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
 
 
-/** When true, the workspace view renders instead of the legacy DecisionMapSheet. */
-export const useWorkspaceViewAtom = atom<boolean>(false);
-
 /** When non-null, the multi-model reading panel is open for this turn. */
 export const readingPanelOpenAtom = atom<{ turnId: string } | null>(null);
 

@@ -165,7 +165,7 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
     const basin = artifact?.geometry?.basinInversion;
     const substrate = artifact?.geometry?.substrate;
     const queryScores = artifact?.geometry?.query?.relevance?.statementScores;
-    const routing = artifact?.claimRouting ?? null;
+    const routing = artifact?.passageRouting?.routing ?? null;
 
     const D: number | null = basin?.discriminationRange ?? null;
     const T_v: number | null = basin?.T_v ?? null;
@@ -173,7 +173,7 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
     const status: string = basin?.status ?? 'unknown';
 
     const nodes: any[] = Array.isArray(substrate?.nodes) ? substrate.nodes : [];
-    const participating = nodes.filter((n: any) => (n.mutualDegree ?? 0) > 0).length;
+    const participating = nodes.filter((n: any) => (n.mutualRankDegree ?? 0) > 0).length;
     const participationRate = nodes.length > 0 ? participating / nodes.length : null;
 
     // Q_spread: P90 - P10 of query similarities

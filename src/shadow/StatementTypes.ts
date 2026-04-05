@@ -291,17 +291,3 @@ export function detectSignals(text: string): {
     };
 }
 
-/**
- * Compute signal weight for scoring (used in ShadowDelta)
- */
-export function computeSignalWeight(signals: {
-    sequence: boolean;
-    tension: boolean;
-    conditional: boolean;
-}): number {
-    let weight = 0;
-    if (signals.conditional) weight += 3;
-    if (signals.sequence) weight += 2;
-    if (signals.tension) weight += 1;
-    return weight;
-}

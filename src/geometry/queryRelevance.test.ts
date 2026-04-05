@@ -1,4 +1,4 @@
-import type { GeometricSubstrate, NodeLocalStats } from "./types";
+import type { GeometricSubstrate, NodeLocalStats, MutualRankGraph, PairwiseField } from "./types";
 import type { ShadowParagraph } from "../shadow/ShadowParagraphProjector";
 import type { ShadowStatement } from "../shadow/ShadowExtractor";
 import { computeQueryRelevance } from "./queryRelevance";
@@ -34,34 +34,38 @@ function makeParagraph(id: string, modelIndex: number, paragraphIndex: number, s
 }
 
 function makeSubstrate(nodes: NodeLocalStats[]): GeometricSubstrate {
-  const emptyAdjacency = new Map<string, any>();
-  for (const n of nodes) emptyAdjacency.set(n.paragraphId, []);
+  const nodeStats = new Map<string, any>();
+  for (const n of nodes) {
+    nodeStats.set(n.paragraphId, {
+      paragraphId: n.paragraphId,
+      mutualRankDegree: n.mutualRankDegree,
+      isolated: n.mutualRankDegree === 0,
+      mutualRankNeighborhood: n.mutualNeighborhoodPatch,
+    });
+  }
+
+  const mutualRankGraph: MutualRankGraph = {
+    edges: [],
+    adjacency: new Map(nodes.map(n => [n.paragraphId, []])),
+    nodeStats,
+    thresholdStats: new Map(),
+  };
+
+  const pairwiseField: PairwiseField = {
+    matrix: new Map(nodes.map(n => [n.paragraphId, new Map()])),
+    perNode: new Map(nodes.map(n => [n.paragraphId, []])),
+    stats: { count: 0, min: 0, p10: 0, p25: 0, p50: 0, p75: 0, p80: 0, p90: 0, p95: 0, max: 0, mean: 0, stddev: 0, discriminationRange: 0 },
+    nodeCount: nodes.length,
+  };
 
   return {
     nodes,
-    graphs: {
-      knn: { k: 5, edges: [], adjacency: emptyAdjacency },
-      mutual: { k: 5, edges: [], adjacency: emptyAdjacency },
-      strong: { softThreshold: 0.75, thresholdMethod: "fixed", edges: [], adjacency: emptyAdjacency },
-    },
-    topology: {
-      components: [],
-      componentCount: 0,
-      largestComponentRatio: 1,
-      isolationRatio: 0,
-      globalStrongDensity: 0,
-    },
-    shape: {
-      confidence: 0.5,
-      signals: { fragmentationScore: 1, bimodalityScore: 0, parallelScore: 0, convergentScore: 0 },
-    },
+    pairwiseField,
+    mutualRankGraph,
     meta: {
       embeddingSuccess: true,
       embeddingBackend: "wasm",
       nodeCount: nodes.length,
-      knnEdgeCount: 0,
-      mutualEdgeCount: 0,
-      strongEdgeCount: 0,
       similarityStats: { max: 0, p95: 0, p80: 0, p50: 0, mean: 0 },
       quantization: "1e-6",
       tieBreaker: "lexicographic",
@@ -71,18 +75,17 @@ function makeSubstrate(nodes: NodeLocalStats[]): GeometricSubstrate {
 }
 
 describe("computeQueryRelevance", () => {
-  test("returns querySimilarity and recusant for each statement", () => {
+  test("returns querySimilarity for each statement", () => {
     const nodes: NodeLocalStats[] = [
-      { paragraphId: "p0", modelIndex: 0, dominantStance: "assertive", contested: false, statementIds: ["s0"], top1Sim: 0, avgTopKSim: 0, knnDegree: 0, mutualDegree: 4, strongDegree: 0, isolationScore: 0, mutualNeighborhoodPatch: ["p0", "p1"] },
-      { paragraphId: "p1", modelIndex: 1, dominantStance: "assertive", contested: false, statementIds: ["s1"], top1Sim: 0, avgTopKSim: 0, knnDegree: 0, mutualDegree: 4, strongDegree: 0, isolationScore: 0, mutualNeighborhoodPatch: ["p1", "p0"] },
-      { paragraphId: "p2", modelIndex: 0, dominantStance: "assertive", contested: false, statementIds: ["s2"], top1Sim: 0, avgTopKSim: 0, knnDegree: 0, mutualDegree: 0, strongDegree: 0, isolationScore: 1, mutualNeighborhoodPatch: [] },
+      { paragraphId: "p0", modelIndex: 0, dominantStance: "assertive", contested: false, statementIds: ["s0"], isolationScore: 0, mutualNeighborhoodPatch: ["p0", "p1"], mutualRankDegree: 4 },
+      { paragraphId: "p1", modelIndex: 1, dominantStance: "assertive", contested: false, statementIds: ["s1"], isolationScore: 0, mutualNeighborhoodPatch: ["p1", "p0"], mutualRankDegree: 4 },
+      { paragraphId: "p2", modelIndex: 0, dominantStance: "assertive", contested: false, statementIds: ["s2"], isolationScore: 1, mutualNeighborhoodPatch: [], mutualRankDegree: 0 },
     ];
 
     const substrate = makeSubstrate(nodes);
     const statements: ShadowStatement[] = nodes.map((n, i) => makeStatement(`s${i}`, n.modelIndex));
     const paragraphs: ShadowParagraph[] = nodes.map((n, i) => makeParagraph(n.paragraphId, n.modelIndex, i, [`s${i}`]));
 
-    // s0 and s1 are aligned with query; s2 is orthogonal
     const statementEmbeddings = new Map<string, Float32Array>([
       ["s0", new Float32Array([1, 0])],
       ["s1", new Float32Array([1, 0])],
@@ -108,9 +111,5 @@ describe("computeQueryRelevance", () => {
     expect(s0!.querySimilarity).toBeGreaterThan(0.9);
     // s2 orthogonal to query → querySimilarity near 0.0 (raw cosine)
     expect(s2!.querySimilarity).toBeCloseTo(0.0, 1);
-    // s2 has degree 0 (max isolation) → recusant should be 1
-    expect(s2!.recusant).toBe(1);
-    // s0 has higher degree → lower recusant
-    expect(s0!.recusant).toBeLessThan(s2!.recusant);
   });
 });

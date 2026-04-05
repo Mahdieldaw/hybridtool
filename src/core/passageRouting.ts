@@ -22,7 +22,6 @@ import type {
   PassageRoutingResult,
   ValidatedConflict,
 } from '../../shared/contract';
-import type { ClaimRouting, ConflictCluster } from './blast-radius/questionSelection';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Input
@@ -201,12 +200,12 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
   }
 
   // ── E. Build conflict clusters from validated conflicts ──────────────
-  // Same logic as questionSelection: routing-aligned = validated AND mapper-labeled
+  // routing-aligned = validated AND mapper-labeled
   const routingConflictEdges = validatedConflicts.filter(
     c => c.validated && c.mapperLabeledConflict
   );
 
-  const conflictClusters: ConflictCluster[] = [];
+  const conflictClusters: PassageClaimRouting['conflictClusters'] = [];
   const claimsInRoutedConflict = new Set<string>();
 
   if (routingConflictEdges.length > 0) {
@@ -303,34 +302,7 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Adapter: passage routing → existing ClaimRouting shape
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * Convert PassageRoutingResult into the ClaimRouting interface that
- * StepExecutor and surveyMapper already consume. Provides backward
- * compatibility so existing destructuring patterns work unchanged.
- */
-export function buildClaimRoutingFromPassage(pr: PassageRoutingResult): ClaimRouting {
-  return {
-    conflictClusters: pr.routing.conflictClusters,
-    damageOutliers: [],  // passage routing doesn't produce damage outliers
-    passthrough: pr.routing.passthrough,
-    skipSurvey: pr.routing.skipSurvey,
-    routedClaimIds: pr.routing.routedClaimIds,
-    diagnostics: {
-      damageThreshold: null,
-      damageDistribution: [],
-      convergenceRatio: 0,
-      totalClaims: pr.routing.diagnostics.totalClaims,
-      queryDistanceThreshold: null,
-    },
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
 // Source continuity: prev/next linking within a model's passage stream
-// ─────────────────────────────────────────────────────────────────────────
 
 export interface SourceContinuityEntry {
   passageKey: string;

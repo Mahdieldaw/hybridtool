@@ -1,11 +1,11 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom, useWorkspaceViewAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom, currentSessionIdAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useRoundActions } from "../hooks/chat/useRoundActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { getProviderColor, getProviderConfig, resolveProviderIdFromCitationOrder, getProviderName } from "../utils/provider-helpers";
+import { getProviderColor, getProviderConfig } from "../utils/provider-helpers";
 import type { AiTurnWithUI } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
@@ -19,10 +19,6 @@ import {
   ClaimDensityCard,
   ClaimStatementsCard,
   PassageOwnershipCard,
-  PassagePruningCard,
-  PruningDecisionsCard,
-  ModelOrderingCard,
-  AlignmentCard,
   RegionsCard,
   StatementClassificationCard,
 } from "./instrument/LayerCards";
@@ -39,7 +35,6 @@ import type { ColumnDef, ViewConfig } from "./instrument/columnRegistry";
 import { EvidenceTable } from "./instrument/EvidenceTable";
 import { ContextStrip } from "./instrument/ContextStrip";
 import { ColumnPicker } from "./instrument/ColumnPicker";
-import { ReadingSurface } from "./workspace/ReadingSurface";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -267,7 +262,6 @@ function CrossSignalComparePanel({ artifact, selectedLayer }: { artifact: any; s
     'competitive-provenance': ['provenanceBulk', 'exclusivityRatio'],
     'blast-radius': ['provenanceBulk', 'blastRadius'],
     'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
-    'alignment': ['avgStatementRelevance', 'blastRadius'],
   };
   const defaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
   const [xKey, setXKey] = useState<string>(defaults[0]);
@@ -507,7 +501,7 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       const basin = artifact?.geometry?.basinInversion ?? null;
       const sub = artifact?.geometry?.substrate ?? null;
       const nodes = safeArr(sub?.nodes).map((n: any) => ({
-        id: n.id, mutualDegree: n.mutualDegree, top1Sim: n.top1Sim,
+        id: n.id, mutualRankDegree: n.mutualRankDegree,
       }));
       return ser({
         nodeCount: nodes.length,
@@ -523,7 +517,7 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       // Per-node mutual degree table only — no raw edge list
       const sub = artifact?.geometry?.substrate ?? null;
       const nodes = safeArr(sub?.nodes).map((n: any) => ({
-        id: n.id, mutualDegree: n.mutualDegree,
+        id: n.id, mutualRankDegree: n.mutualRankDegree,
       }));
       return ser({ nodeCount: nodes.length, nodes });
     }
@@ -561,7 +555,7 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       }
       const ownership = artifact?.claimProvenance?.statementOwnership ?? {};
       const exclusivity = artifact?.claimProvenance?.claimExclusivity ?? {};
-      const fates = artifact?.completeness?.statementFates ?? {};
+      const scClaimed = artifact?.statementClassification?.claimed ?? {};
       return ser(claims.map((c: any) => {
         const cid = String(c.id ?? '');
         const exData = exclusivity[cid];
@@ -572,20 +566,19 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
           label: String(c.label ?? cid),
           statements: stmtIds.map((sid) => {
             const owners: string[] = Array.isArray(ownership[sid]) ? ownership[sid].map(String) : [];
-            const fate = fates[sid];
+            const entry = scClaimed[sid];
+            const claimCount = Array.isArray(entry?.claimIds) ? entry.claimIds.length : 0;
             return {
               statementId: sid,
               text: stmtText.get(sid) ?? '',
               exclusive: exclusiveSet.has(sid),
               sharedWith: owners.filter((o: string) => o !== cid),
-              fate: String(fate?.fate ?? ''),
+              fate: claimCount >= 2 ? 'supporting' : claimCount === 1 ? 'primary' : 'unclaimed',
             };
           }),
         };
       }));
     }
-    case 'model-ordering':
-      return ser(artifact?.geometry?.preSemantic?.modelOrdering);
     case 'blast-radius': {
       const stmtText = new Map<string, string>();
       for (const s of safeArr(artifact?.shadow?.statements)) {
@@ -630,14 +623,9 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       return ser({
         blastRadiusFilter: expandStmtRefs(artifact?.blastRadiusFilter),
         blastSurface: expandStmtRefs(artifact?.blastSurface),
-        statementFates: artifact?.completeness?.statementFates ?? null,
-        substrateSummary: artifact?.substrateSummary ?? artifact?.chewedSubstrateSummary ?? null,
-        claimRouting: artifact?.claimRouting ?? null,
-        questionSelectionInstrumentation: artifact?.questionSelectionInstrumentation ?? null,
+        substrateSummary: artifact?.substrateSummary ?? null,
       });
     }
-    case 'alignment':
-      return ser(artifact?.alignment ?? artifact?.geometry?.alignment);
     case 'claim-density':
       return ser({
         claimDensity: artifact?.claimDensity ?? null,
@@ -686,7 +674,6 @@ export const DecisionMapSheet = React.memo(() => {
   const lastSessionIdRef = useRef<string | null>(sessionId);
   const { runMappingForAiTurn } = useRoundActions();
   const setToast = useSetAtom(toastAtom);
-  const setWorkspaceView = useSetAtom(useWorkspaceViewAtom);
   const [regenState, setRegenState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [copyMenuOpen, setCopyMenuOpen] = useState(false);
@@ -735,9 +722,6 @@ export const DecisionMapSheet = React.memo(() => {
   const [isCardsCollapsed, setIsCardsCollapsed] = useState(false);
   const verticalSplitContainerRef = useRef<HTMLDivElement>(null);
   const [tableMode, setTableMode] = useState<'statement' | 'paragraph'>('statement');
-  const [topPanelMode, setTopPanelMode] = useState<'table' | 'text'>('table');
-  const [displayModelIndex, setDisplayModelIndex] = useState(0);
-
   // Scroll preservation on collapse/expand: save scrollTop before toggle, restore after render
   const rightPanelScrollRef = useRef<number>(0);
   const rightPanelScrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1079,8 +1063,6 @@ export const DecisionMapSheet = React.memo(() => {
       forcingPoints: mappingArtifact.traversal?.forcingPoints || null,
       shadow: {
         statements: mappingArtifact.shadow?.statements || [],
-        audit: mappingArtifact.shadow?.audit || {},
-        topUnreferenced: [],
       },
     };
   }, [mappingArtifact]);
@@ -1104,14 +1086,14 @@ export const DecisionMapSheet = React.memo(() => {
 
     const normalize = (input: unknown) => {
       if (!Array.isArray(input)) return null;
-      const out: Array<{ id: string; kind: "component" | "patch"; nodeIds: string[] }> = [];
+      const out: Array<{ id: string; kind: "basin" | "gap"; nodeIds: string[] }> = [];
       for (const r of input) {
         if (!r || typeof r !== 'object') continue;
         const rr = r as Record<string, unknown>;
         const id = typeof rr.id === 'string' ? rr.id : '';
         if (!id) continue;
         const kindRaw = typeof rr.kind === 'string' ? rr.kind : '';
-        const kind = kindRaw === 'component' || kindRaw === 'patch' ? kindRaw : 'patch';
+        const kind = kindRaw === 'basin' || kindRaw === 'gap' ? kindRaw : 'basin';
         const nodeIds = Array.isArray(rr.nodeIds) ? rr.nodeIds.map((x) => String(x)).filter(Boolean) : [];
         out.push({ id, kind, nodeIds });
       }
@@ -1154,7 +1136,7 @@ export const DecisionMapSheet = React.memo(() => {
   }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
 
   // v3: Claim centroids for ParagraphSpaceView diamonds
-  // IMPORTANT: use artifact claims (enriched by reconstructProvenance, which adds sourceStatementIds).
+  // IMPORTANT: use artifact claims (enriched by reconstructCanonicalProvenance, which adds sourceStatementIds).
   // semanticClaims may resolve to raw LLM output (parsedSemanticFromText) which lacks sourceStatementIds,
   // making centroid computation fail with hasPosition=false on every claim.
   const claimCentroids = useClaimCentroids(
@@ -1359,13 +1341,6 @@ export const DecisionMapSheet = React.memo(() => {
                   )}
                 </div>
                 <button
-                  onClick={() => setWorkspaceView(true)}
-                  className="px-3 py-1.5 rounded-md border border-white/5 bg-white/5 text-[11px] text-text-muted hover:bg-white/10 hover:text-text-primary transition-colors"
-                  title="Switch to workspace view"
-                >
-                  Workspace
-                </button>
-                <button
                   onClick={() => setOpenState(null)}
                   className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
                 >
@@ -1529,28 +1504,7 @@ export const DecisionMapSheet = React.memo(() => {
                           ))}
                         </select>
 
-                        {/* Table / Text toggle (both modes) */}
-                        <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
-                          {(['table', 'text'] as const).map(mode => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() => setTopPanelMode(mode)}
-                              className={clsx(
-                                "px-2 py-1 text-[10px] transition-colors",
-                                topPanelMode === mode
-                                  ? "bg-brand-500/20 text-brand-300"
-                                  : "text-text-muted hover:text-text-secondary"
-                              )}
-                            >
-                              {mode === 'table' ? 'Table' : 'Text'}
-                            </button>
-                          ))}
-                        </div>
-
-                        {topPanelMode === 'table' ? (
-                          <>
-                            {/* Statement / Paragraph toggle */}
+                        {/* Statement / Paragraph toggle */}
                             <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
                               {(['statement', 'paragraph'] as const).map(m => (
                                 <button
@@ -1632,41 +1586,6 @@ export const DecisionMapSheet = React.memo(() => {
                                 {isTableCollapsed ? "Expand table" : "Collapse table"}
                               </button>
                             </div>
-                          </>
-                        ) : (
-                          <>
-                            {/* Model tabs (text mode) */}
-                            <div className="flex items-center gap-1 ml-1">
-                              {(() => {
-                                const allParas: any[] = Array.isArray(mappingArtifactWithCitations?.shadow?.paragraphs)
-                                  ? mappingArtifactWithCitations.shadow.paragraphs : [];
-                                const indices = Array.from(new Set(allParas.map((p: any) =>
-                                  typeof p.modelIndex === 'number' ? p.modelIndex : 0
-                                ))).sort((a, b) => a - b);
-                                if (indices.length === 0) indices.push(0);
-                                return indices.map(idx => {
-                                  const pid = resolveProviderIdFromCitationOrder(idx, citationSourceOrder ?? undefined);
-                                  const name = pid ? getProviderName(pid) : `Model ${idx}`;
-                                  return (
-                                    <button
-                                      key={idx}
-                                      type="button"
-                                      onClick={() => setDisplayModelIndex(idx)}
-                                      className={clsx(
-                                        "px-2.5 py-1 rounded-md text-[10px] transition-colors border",
-                                        displayModelIndex === idx
-                                          ? "border-brand-500/40 bg-brand-500/15 text-brand-300"
-                                          : "border-white/10 bg-white/5 text-text-muted hover:text-text-primary hover:bg-white/10"
-                                      )}
-                                    >
-                                      {name}
-                                    </button>
-                                  );
-                                });
-                              })()}
-                            </div>
-                          </>
-                        )}
                       </div>
 
                       {/* ── Vertical-split: Table + Cards ── */}
@@ -1688,25 +1607,11 @@ export const DecisionMapSheet = React.memo(() => {
                               { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                              { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
-                              { id: 'passage-pruning', label: 'Passage Pruning', content: <PassagePruningCard artifact={mappingArtifactWithCitations} /> },
-                              {
-                                id: 'traversal-pruning',
-                                label: 'Traversal Pruning',
-                                content: (
-                                  <PruningDecisionsCard
-                                    aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
-                                    providerId={activeMappingPid ? String(activeMappingPid) : null}
-                                    artifact={mappingArtifactWithCitations}
-                                  />
-                                )
-                              },
                               { id: 'stmt-classification', label: 'Statement Classification', content: <StatementClassificationCard artifact={mappingArtifactWithCitations} /> },
-                              { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
                             ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
                               <RefSection
@@ -1736,21 +1641,8 @@ export const DecisionMapSheet = React.memo(() => {
                             transition: isDraggingVerticalSplit ? 'none' : 'grid-template-rows 150ms ease-out',
                           }}
                         >
-                          {/* Row 1: EvidenceTable or ReadingSurface */}
+                          {/* Row 1: EvidenceTable */}
                           <div className="min-h-0 overflow-hidden relative">
-                            {topPanelMode === 'text' ? (
-                              <ReadingSurface
-                                artifact={mappingArtifactWithCitations}
-                                displayModel={displayModelIndex}
-                                focusedClaimId={instrumentSelectedClaimId}
-                                selectedStatementId={selectedEntity?.type === 'statement' ? selectedEntity.id : null}
-                                citationSourceOrder={citationSourceOrder}
-                                onSelectStatement={(stmtId, _paraId) => {
-                                  instrumentActions.setSelectedEntity({ type: 'statement', id: stmtId });
-                                }}
-                                onSwitchModel={(idx) => setDisplayModelIndex(idx)}
-                              />
-                            ) : (
                               <EvidenceTable
                                 rows={activeRows}
                                 columns={activeColumns}
@@ -1768,7 +1660,6 @@ export const DecisionMapSheet = React.memo(() => {
                                   }
                                 }}
                               />
-                            )}
                             <AnimatePresence>
                               {selectedClaimObj && (
                                 <div
@@ -1832,25 +1723,11 @@ export const DecisionMapSheet = React.memo(() => {
                                 { id: 'mutual-graph', label: 'Mutual Graph', content: <MutualGraphCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'basin-inversion', label: 'Basin Inversion', content: <BasinInversionCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
-                                { id: 'model-ordering', label: 'Model Ordering', content: <ModelOrderingCard artifact={mappingArtifactWithCitations} /> },
-                                { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
+                                  { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
-                              { id: 'passage-pruning', label: 'Passage Pruning', content: <PassagePruningCard artifact={mappingArtifactWithCitations} /> },
-                                {
-                                  id: 'traversal-pruning',
-                                  label: 'Traversal Pruning',
-                                  content: (
-                                    <PruningDecisionsCard
-                                      aiTurnId={aiTurnSafe?.id ? String(aiTurnSafe.id) : null}
-                                      providerId={activeMappingPid ? String(activeMappingPid) : null}
-                                      artifact={mappingArtifactWithCitations}
-                                    />
-                                  )
-                                },
                                 { id: 'stmt-classification', label: 'Statement Classification', content: <StatementClassificationCard artifact={mappingArtifactWithCitations} /> },
-                                { id: 'alignment', label: 'Alignment', content: <AlignmentCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
                               ] as { id: string; label: string; content: React.ReactNode }[]).map(({ id, label, content }) => (
                                 <RefSection

@@ -26,9 +26,10 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
   const threadRefs = useRef<Map<string, HTMLElement>>(new Map());
   const [focusedThreadIndex, setFocusedThreadIndex] = useState(-1);
 
-  const sortedThreads = [...ast.threads].sort((a, b) => {
-    return ast.thread_order.indexOf(a.id) - ast.thread_order.indexOf(b.id);
-  });
+  const sortedThreads = useMemo(() =>
+    [...ast.threads].sort((a, b) =>
+      ast.thread_order.indexOf(a.id) - ast.thread_order.indexOf(b.id)
+    ), [ast.threads, ast.thread_order]);
 
   // Serialize the full editorial document to plain text for copying
   const documentText = useMemo(() => {

@@ -6,11 +6,10 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, readingPanelOpenAtom, __scaffold__editorialSurfaceOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, readingPanelOpenAtom, __scaffold__editorialSurfaceOpenAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
-import { TraversalGraphView } from '../traversal/TraversalGraphView';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
 import { useProviderArtifact } from '../../hooks/useProviderArtifact';
 
@@ -29,26 +28,10 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     aiTurn,
     singularityState,
 }) => {
-    const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
     const activeMappingPid = useAtomValue(mappingProviderAtom);
     const effectivePid = activeMappingPid || aiTurn.meta?.mapper;
     const { artifact: mappingArtifact, rebuild: rebuildArtifact } = useProviderArtifact(aiTurn.id, effectivePid);
-
-    // Tier 2: completed traversal state from mapping provider response
-    const completedTraversalState = useMemo(() => {
-        if (!effectivePid) return aiTurn.singularity?.traversalState;
-        const pid = String(effectivePid).trim().toLowerCase();
-        const responses = (aiTurn as any)?.mappingResponses;
-        if (responses && typeof responses === 'object') {
-            const entry = responses[pid];
-            const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
-            const last = arr.length > 0 ? arr[arr.length - 1] : null;
-            if (last?.traversalState) return last.traversalState;
-        }
-        // Legacy fallback: singularity phase
-        return aiTurn.singularity?.traversalState;
-    }, [aiTurn, effectivePid]);
 
     // Tier 3: trigger lazy rebuild if artifact not yet in memory
     useEffect(() => {
@@ -59,7 +42,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     // Helper for recomputing singularity
     const triggerAndSwitch = async (options: any = {}) => {
-        setViewOverride('response');
         if (options.providerId) {
             singularityState.setPinnedProvider(options.providerId);
         }
@@ -73,15 +55,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
     const setEditorialSurfaceOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
-    const currentSessionId = useAtomValue(currentSessionIdAtom);
-    const effectiveSessionId = currentSessionId || aiTurn.sessionId;
-
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
     }, [singularityState.output]);
 
-    // Derived transition state: treat as loading when view was forced to response but text hasn't arrived yet
-    const isTransitioning = singularityState.isLoading || (viewOverride === 'response' && !hasSingularityText);
+    const isTransitioning = singularityState.isLoading;
 
     // Build "Copy All" text: Singularity → Mapper → Batch (same format as batch copy)
     const copyAllText = useMemo(() => {
@@ -215,27 +193,15 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         );
     }
 
-    const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
-    const hasTraversalGraph = !!mappingArtifact?.traversal?.graph && !!effectiveSessionId;
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
-    const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
+    const isRoundActive = streamingState.isLoading;
 
-    const canShowTraversal = hasTraversalGraph && !!effectiveSessionId;
     const canShowResponse = hasSingularityText || singularityState.isLoading || singularityState.isError;
 
-    const currentView: 'loading' | 'traverse' | 'response' = useMemo(() => {
-        // User-explicit overrides take priority over automatic state
-        // Allow 'response' override even before text arrives (shows loading spinner in SingularityOutputView)
-        if (viewOverride === 'response') return 'response';
-        if (viewOverride === 'traverse' && canShowTraversal) return 'traverse';
-        // Automatic: show traversal when pipeline is paused, response when text arrives
-        if (isAwaitingTraversal && canShowTraversal) return 'traverse';
+    const currentView: 'loading' | 'response' = useMemo(() => {
         if (canShowResponse) return 'response';
         return 'loading';
-    }, [isAwaitingTraversal, canShowTraversal, viewOverride, canShowResponse]);
-
-    const mappingFailure = null;
-
+    }, [canShowResponse]);
 
     return (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
@@ -274,18 +240,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         </button>
                     )}
                 </div>
-
-                {canShowTraversal && canShowResponse && (
-                    <div className="flex justify-center">
-                        <button
-                            onClick={() => setViewOverride(currentView === 'response' ? 'traverse' : 'response')}
-                            className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-sm font-medium text-text-secondary transition-all shadow-sm"
-                        >
-                            <span>{currentView === 'response' ? '🧭' : '✨'}</span>
-                            <span>{currentView === 'response' ? 'Back to Traverse' : 'Back to Response'}</span>
-                        </button>
-                    </div>
-                )}
 
                 {/* Council Orbs */}
                 <div className="flex justify-center">
@@ -351,9 +305,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             </div>
 
             {/* === MAIN CONTENT AREA === */}
-            {mappingFailure && currentView !== 'traverse' && (
-                <div className="mb-6" />
-            )}
             {currentView === 'response' ? (
                 <SingularityOutputView
                     aiTurn={aiTurn}
@@ -362,26 +313,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     isLoading={isTransitioning}
                     copyAllText={copyAllText}
                 />
-            ) : currentView === 'traverse' && canShowTraversal ? (
-                <div className="animate-in fade-in duration-500">
-                    <TraversalGraphView
-                        traversalGraph={
-                            mappingArtifact?.traversal?.graph ?? {
-                                claims: mappingArtifact?.semantic?.claims || [],
-                                conditionals: mappingArtifact?.semantic?.conditionals || [],
-                            }
-                        }
-                        conditionals={mappingArtifact!.semantic?.conditionals || []}
-                        claims={mappingArtifact!.semantic?.claims || []}
-                        originalQuery={mappingArtifact!.meta?.query || ''}
-                        aiTurnId={aiTurn.id}
-                        completedTraversalState={completedTraversalState}
-                        sessionId={effectiveSessionId!}
-                        pipelineStatus={aiTurn.pipelineStatus}
-                        hasReceivedSingularityResponse={hasSingularityText}
-                        onComplete={() => setViewOverride('response')}
-                    />
-                </div>
             ) : (
                 <div className="animate-in fade-in duration-500">
                     <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
@@ -390,7 +321,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             Gathering perspectives...
                         </div>
                         <div className="text-xs text-text-muted mt-2 text-center">
-                            Exploring council outputs. Decision traversal will appear when ready.
+                            Exploring council outputs. Response will appear when ready.
                         </div>
                     </div>
                 </div>

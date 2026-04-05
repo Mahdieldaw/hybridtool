@@ -1,58 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// CLUSTERING CONFIGURATION
+// EMBEDDING CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface ClusteringConfig {
-    // Similarity threshold for merging (cosine similarity)
-    // Higher = more clusters, stricter matching
-    similarityThreshold: number;
-
-    // Max clusters safety limit
-    maxClusters: number;
-
-    // Uncertainty detection thresholds
-    lowCohesionThreshold: number;
-    maxClusterSize: number;
-    stanceDiversityThreshold: number;      // Max unique stances before uncertain
-    contestedRatioThreshold: number;       // Max ratio of contested paragraphs
-
-    // Expansion limits
-    maxExpansionMembers: number;
-    maxExpansionCharsTotal: number;
-    maxMemberTextChars: number;
-
-    // Embedding configuration
+export interface EmbeddingConfig {
     embeddingDimensions: number;
     modelId: string;
-
-    // Minimum paragraphs to attempt clustering
-    minParagraphsForClustering: number;
 }
 
-export const DEFAULT_CONFIG: ClusteringConfig = {
-    // 0.72 = moderately conservative threshold
-    similarityThreshold: 0.72,
-
-    // Safety limit to prevent pathological explosion
-    maxClusters: 40,
-
-    // Uncertainty thresholds
-    lowCohesionThreshold: 0.70,
-    maxClusterSize: 8,
-    stanceDiversityThreshold: 3,
-    contestedRatioThreshold: 0.30,
-
-    // Expansion limits
-    maxExpansionMembers: 6,
-    maxExpansionCharsTotal: 2100,
-    maxMemberTextChars: 700,
-
-    // Embedding
+export const DEFAULT_CONFIG: EmbeddingConfig = {
     embeddingDimensions: 768,
     modelId: 'bge-base-en-v1.5',
-
-    // Minimum input
-    minParagraphsForClustering: 3,
 };
-
-

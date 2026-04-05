@@ -21,6 +21,7 @@ import type {
   UnclaimedGroup,
   UnclaimedParagraphEntry,
 } from '../../shared/contract';
+import { computeStatementOwnership } from '../ConciergeService/claimProvenance';
 
 // ── Input ───────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ export interface StatementClassificationInput {
   paragraphEmbeddings: Map<string, Float32Array>;
   claimEmbeddings: Map<string, Float32Array>;
   queryRelevanceScores: Map<string, { querySimilarity: number }>;
+  statementOwnership: Map<string, Set<string>> | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -58,18 +60,11 @@ export function computeStatementClassification(
     paragraphEmbeddings,
     claimEmbeddings,
     queryRelevanceScores,
+    statementOwnership,
   } = input;
 
   // ── 1. Build claimed set: stmtId → Set<claimId> ────────────────────
-  const claimedStmts = new Map<string, Set<string>>();
-  for (const claim of enrichedClaims) {
-    if (!Array.isArray(claim.sourceStatementIds)) continue;
-    for (const sid of claim.sourceStatementIds) {
-      if (typeof sid !== 'string' || !sid.trim()) continue;
-      if (!claimedStmts.has(sid)) claimedStmts.set(sid, new Set());
-      claimedStmts.get(sid)!.add(claim.id);
-    }
-  }
+  const claimedStmts = statementOwnership ?? computeStatementOwnership(enrichedClaims as any);
 
   // ── 2. Build passage membership lookup ─────────────────────────────
   // Pre-build paragraph lookup: "modelIndex:paragraphIndex" → ShadowParagraph

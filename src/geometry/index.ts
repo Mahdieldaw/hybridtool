@@ -4,14 +4,7 @@
 
 // Types
 export type {
-    KnnEdge,
-    MutualKnnEdge,
-    KnnGraph,
-    MutualKnnGraph,
-    StrongGraph,
     NodeLocalStats,
-    Component,
-    TopologyMetrics,
     GeometricSubstrate,
     DegenerateSubstrate,
     DegenerateReason,
@@ -20,64 +13,38 @@ export type {
     MutualRankEdge,
     MutualRankNodeStats,
     MutualRankGraph,
-    MutualRankTopologyMetrics,
 } from './types';
 
 export { isDegenerate } from './types';
 
 // Config
 export type { SubstrateConfig } from './substrate';
-export type { ThresholdConfig } from './threshold';
 export { DEFAULT_SUBSTRATE_CONFIG } from './substrate';
-export { DEFAULT_THRESHOLD_CONFIG } from './threshold';
 
 // Main builder
 export { buildGeometricSubstrate } from './substrate';
 
-// Utilities (for testing/debugging)
-export { quantize, buildTwoGraphs, buildPairwiseField } from './knn';
-export { computeSoftThreshold, computeSimilarityStats, computeExtendedStatsFromArray } from './threshold';
-export { computeMutualRankTopology } from './topology';
+// Utilities
+export { quantize, buildPairwiseField } from './knn';
+export { computeExtendedStatsFromArray } from './threshold';
 export { buildMutualRankGraph } from './mutualRank';
 export { computeNodeStats } from './nodes';
 
-export type { ShapeClassification } from './shape';
-export { classifyShape } from './shape';
-
 export type {
-    AdaptiveLens,
     Region,
     RegionizationResult,
     RegionProfile,
     PreSemanticInterpretation,
     GateVerdict,
     PipelineGateResult,
-    ModelScore,
-    ModelOrderingResult,
-    GeometricObservation,
-    DiagnosticsResult,
     InterpretationInputs,
     ClaimWithProvenance,
     EdgeList,
 } from './interpretation/types';
 
-// Alignment (claim↔geometry)
-export type {
-    ClaimVector,
-    RegionCoverage,
-    SplitAlert,
-    MergeAlert,
-    AlignmentResult,
-} from './alignment';
-export { buildClaimVectors, computeAlignment } from './alignment';
-
-export { deriveLens } from './interpretation/lens';
 export { buildRegions } from './interpretation/regions';
 export { profileRegions } from './interpretation/profiles';
-export { validateStructuralMapping } from './interpretation/validation';
 export { evaluatePipelineGates } from './interpretation/pipelineGates';
-export { computeModelOrdering } from './interpretation/modelOrdering';
-export { computeDiagnostics } from './interpretation/diagnostics';
 export { buildPreSemanticInterpretation } from './interpretation';
 
 export type { QueryRelevanceResult, QueryRelevanceStatementScore } from './queryRelevance';

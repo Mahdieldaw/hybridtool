@@ -387,12 +387,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                               "",
                         timestamp:
                           mergedSingularityTs,
-                        traversalState:
-                          incomingSingularityTs >= existingSingularityTs
-                            ? incomingSingularity?.traversalState ||
-                              existingSingularity?.traversalState
-                            : existingSingularity?.traversalState ||
-                              incomingSingularity?.traversalState,
                       }
                     : undefined;
                 const mergedAi: AiTurnWithUI = {
@@ -439,10 +433,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
           // Finalization UI state updates
           setIsLoading(false);
           setUiPhase("awaiting_action");
-          const isAwaitingTraversal =
-            String((turn as any)?.ai?.pipelineStatus || "") ===
-            "awaiting_traversal";
-          setActiveAiTurnId(isAwaitingTraversal ? aiTurnId : null);
+          setActiveAiTurnId(null);
           setLastActivityAt(Date.now());
 
           // Reset streaming UX state flags on finalization
@@ -671,12 +662,9 @@ export function usePortMessageHandler(enabled: boolean = true) {
                       out?.prompt ||
                       aiTurn.singularity?.prompt ||
                       "";
-                    const traversalState =
-                      out?.traversalState || aiTurn.singularity?.traversalState;
                     aiTurn.singularity = {
                       prompt,
                       output: outputText,
-                      traversalState,
                       timestamp: now,
                     } as any;
                     aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
@@ -762,7 +750,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                           shadow: { statements: [], paragraphs: [], audit: {}, delta: null },
                           geometry: { embeddingStatus: "none", substrate: { nodes: [], edges: [] } },
                           semantic: { claims: [], edges: [], conditionals: [], narrative: errText || "" },
-                          traversal: { forcingPoints: [], graph: { claims: [], edges: [], conditionals: [], tiers: [], maxTier: 0 } },
                         },
                         timestamp: now,
                       } as any;
@@ -771,7 +758,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                       aiTurn.singularity = {
                         prompt: aiTurn.singularity?.prompt || "",
                         output: errText || aiTurn.singularity?.output || "",
-                        traversalState: aiTurn.singularity?.traversalState,
                         timestamp: now,
                       } as any;
                       aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;

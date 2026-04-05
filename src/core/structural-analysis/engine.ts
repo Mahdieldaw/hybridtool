@@ -3,12 +3,9 @@ import {
     EnrichedClaim,
     Edge,
     StructuralAnalysis,
-    SettledShapeData,
-    ContestedShapeData,
-    TradeoffShapeData,
 } from "../../../shared/contract";
-import { computeLandscapeMetrics, computeClaimRatios, assignPercentileFlags, computeCoreRatios } from "./metrics";
-import { getTopNCount, computeSignalStrength } from "./utils";
+import { computeLandscapeMetrics, computeClaimRatios, assignPercentileFlags } from "./metrics";
+import { getTopNCount } from "./utils";
 import { analyzeGraph } from "./graph";
 import { detectCompositeShape } from "./classification";
 import {
@@ -21,13 +18,7 @@ import {
     detectEnrichedConflicts,
     detectConflictClusters,
 } from "./patterns";
-import {
-    buildConvergentData,
-    buildForkedData,
-    buildConstrainedData,
-    buildParallelData,
-    buildSparseData
-} from "./builders";
+
 export interface StructuralAnalysisInput {
     claims: EnrichedClaim[];
     edges: Edge[];
@@ -54,7 +45,6 @@ export const computeStructuralAnalysis = (input: StructuralAnalysisInput): Struc
         ? claimsWithFlags.map(c => c.id === graph.hubClaim ? { ...c, hubDominance: graph.hubDominance } : c)
         : claimsWithFlags;
     const claimMap = new Map<string, EnrichedClaim>(claimsWithLeverage.map((c) => [c.id, c]));
-    const ratios = computeCoreRatios(claimsWithLeverage, edges, graph, landscape.modelCount);
     const enrichedConflicts = detectEnrichedConflicts(edges, claimsWithLeverage, landscape);
     const conflictClusters = detectConflictClusters(enrichedConflicts, claimsWithLeverage);
     const patterns: StructuralAnalysis["patterns"] = {
@@ -67,83 +57,17 @@ export const computeStructuralAnalysis = (input: StructuralAnalysisInput): Struc
         convergencePoints: detectConvergencePoints(edges, claimMap),
         isolatedClaims: detectIsolatedClaims(claimsWithLeverage),
     };
-    const signalStrength = computeSignalStrength(
-        claimsWithLeverage.length,
-        edges.length,
-        landscape.modelCount,
-        claimsWithLeverage.map(c => c.supporters)
-    );
     const compositeShape = detectCompositeShape(
         claimsWithLeverage,
         edges,
         graph,
         patterns
     );
-    const buildShapeData = (): ProblemStructure['data'] => {
-        const { primary } = compositeShape;
-        switch (primary) {
-            case 'convergent':
-                return buildConvergentData(claimsWithLeverage, edges, landscape.modelCount);
-            case 'forked':
-                if (enrichedConflicts.length === 0 && conflictClusters.length === 0) {
-                    return buildConvergentData(claimsWithLeverage, edges, landscape.modelCount);
-                }
-                return buildForkedData(claimsWithLeverage, patterns, enrichedConflicts, conflictClusters);
-            case 'constrained':
-                if (patterns.tradeoffs.length === 0) {
-                    if (enrichedConflicts.length > 0) {
-                        return buildForkedData(claimsWithLeverage, patterns, enrichedConflicts, conflictClusters);
-                    }
-                    return buildSparseData(claimsWithLeverage, graph, signalStrength);
-                }
-                return buildConstrainedData(claimsWithLeverage, patterns.tradeoffs);
-            case 'parallel':
-                if (graph.componentCount < 2) {
-                    return buildConvergentData(claimsWithLeverage, edges, landscape.modelCount);
-                }
-                return buildParallelData(claimsWithLeverage, edges, graph);
-            case 'sparse':
-            default:
-                return buildSparseData(claimsWithLeverage, graph, signalStrength);
-        }
-    };
-    let shapeData: ProblemStructure['data'] | undefined;
-    try {
-        shapeData = buildShapeData();
-    } catch (err) {
-        console.error("[StructuralAnalysis] buildShapeData failed:", {
-            error: err,
-            claimsCount: claimsWithLeverage.length,
-            edgesCount: edges.length,
-        });
-        shapeData = buildSparseData(claimsWithLeverage, graph, signalStrength);
-    }
-    let floorAssumptions: string[] | undefined;
-    let centralConflict: string | undefined;
-    let tradeoffsList: string[] | undefined;
-
-    if (shapeData?.pattern === 'settled') {
-        floorAssumptions = (shapeData as SettledShapeData).floorAssumptions;
-    } else if (shapeData?.pattern === 'contested') {
-        centralConflict = (shapeData as ContestedShapeData).collapsingQuestion || undefined;
-    } else if (shapeData?.pattern === 'tradeoff') {
-        tradeoffsList = (shapeData as TradeoffShapeData).tradeoffs?.map(t =>
-            t.governingFactor || `${t.optionA.label} vs ${t.optionB.label}`
-        );
-    }
     const shape: ProblemStructure = {
         primary: compositeShape.primary,
         confidence: compositeShape.confidence,
         patterns: compositeShape.patterns,
-        peaks: compositeShape.peaks,
-        peakRelationship: compositeShape.peakRelationship,
-        peakPairRelations: compositeShape.peakPairRelations,
         evidence: compositeShape.evidence,
-        data: shapeData,
-        signalStrength,
-        floorAssumptions,
-        centralConflict,
-        tradeoffs: tradeoffsList,
     };
     const analysis: StructuralAnalysis = {
         edges,
@@ -151,9 +75,7 @@ export const computeStructuralAnalysis = (input: StructuralAnalysisInput): Struc
         claimsWithLeverage,
         patterns,
         graph,
-        ratios,
         shape,
     };
     return analysis;
 };
-

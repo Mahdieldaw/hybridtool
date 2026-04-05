@@ -20,20 +20,13 @@ export interface ParagraphRow {
   confidence: number;
 
   // Geometry (node-level)
-  top1Sim: number | null;
-  avgTopKSim: number | null;
   isolationScore: number | null;
-  mutualDegree: number | null;
+  mutualRankDegree: number | null;
 
   // Mixed provenance (claim-relative)
   origin: 'competitive-only' | 'claim-centric-only' | 'both' | null;
   claimCentricSim: number | null;
   claimCentricAboveThreshold: boolean | null;
-
-  // Density
-  semanticDensity: number | null;
-  claimDensity: number | null;     // selected claim's density (reference point)
-  queryDensity: number | null;     // query embedding density (reference point)
 
   // Competitive allocation
   compWeight: number | null;
@@ -67,40 +60,6 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
       if (id) map.set(id, node);
     }
     return map;
-  }, [artifact]);
-
-  // Build density maps once per artifact
-  const densityMaps = useMemo(() => {
-    if (!artifact) return null;
-    const a = artifact;
-
-    // Paragraph density: paragraphId -> z-score
-    const paraDensity = new Map<string, number>();
-    const rawPara = a?.paragraphSemanticDensity;
-    if (rawPara && typeof rawPara === 'object') {
-      for (const [k, v] of Object.entries(rawPara)) {
-        if (typeof v === 'number' && Number.isFinite(v)) paraDensity.set(String(k), v);
-      }
-    }
-
-    // Claim density: claimId -> z-score
-    const claimDensity = new Map<string, number>();
-    const rawClaim = a?.claimSemanticDensity;
-    if (rawClaim && typeof rawClaim === 'object') {
-      for (const [k, v] of Object.entries(rawClaim)) {
-        if (typeof v === 'number' && Number.isFinite(v)) claimDensity.set(String(k), v);
-      }
-    }
-
-    // Query density: single scalar
-    const rawQuery = a?.querySemanticDensity;
-    const queryDensity: number | null = typeof rawQuery === 'number' && Number.isFinite(rawQuery) ? rawQuery : null;
-
-    return {
-      paraDensity: paraDensity.size > 0 ? paraDensity : null,
-      claimDensity: claimDensity.size > 0 ? claimDensity : null,
-      queryDensity,
-    };
   }, [artifact]);
 
   // Build mixed provenance paragraph map per claim
@@ -212,14 +171,8 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         contested: para.contested === true,
         confidence: typeof para.confidence === 'number' ? para.confidence : 0,
 
-        top1Sim: fin(node?.top1Sim),
-        avgTopKSim: fin(node?.avgTopKSim),
         isolationScore: fin(node?.isolationScore),
-        mutualDegree: fin(node?.mutualDegree),
-
-        semanticDensity: densityMaps?.paraDensity?.get(paraId) ?? null,
-        claimDensity: selectedClaimId ? (densityMaps?.claimDensity?.get(selectedClaimId) ?? null) : null,
-        queryDensity: densityMaps?.queryDensity ?? null,
+        mutualRankDegree: fin(node?.mutualRankDegree),
 
         origin: mixed?.origin ?? null,
         claimCentricSim: fin(mixed?.claimCentricSim),
@@ -235,5 +188,5 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         passageLength: claimDensityParaMaps?.passageLenByPara.get(paraId) ?? null,
       };
     });
-  }, [artifact, nodeMap, mixedParaMap, densityMaps, claimDensityParaMaps, selectedClaimId, citationSourceOrder]);
+  }, [artifact, nodeMap, mixedParaMap, claimDensityParaMaps, selectedClaimId, citationSourceOrder]);
 }

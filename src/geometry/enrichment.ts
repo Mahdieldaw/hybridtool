@@ -30,13 +30,6 @@ export function enrichStatementsWithGeometry(
         paragraphToNode.set(node.paragraphId, node);
     }
 
-    const paragraphToComponent = new Map<string, string>();
-    for (const comp of substrate.topology.components) {
-        for (const nodeId of comp.nodeIds) {
-            paragraphToComponent.set(nodeId, comp.id);
-        }
-    }
-
     const paragraphToRegion = new Map<string, string>();
     for (const region of regions) {
         for (const nodeId of region.nodeIds) {
@@ -60,15 +53,11 @@ export function enrichStatementsWithGeometry(
             continue;
         }
 
-        const componentId = paragraphToComponent.get(paragraphId) ?? null;
         const regionId = paragraphToRegion.get(paragraphId) ?? null;
 
         stmt.geometricCoordinates = {
             paragraphId,
-            componentId,
             regionId,
-            knnDegree: node.knnDegree,
-            mutualDegree: node.mutualDegree,
             isolationScore: node.isolationScore,
         };
 
@@ -81,4 +70,3 @@ export function enrichStatementsWithGeometry(
         failures,
     };
 }
-

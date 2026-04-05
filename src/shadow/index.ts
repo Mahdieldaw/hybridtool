@@ -7,7 +7,6 @@
 //
 // Main exports:
 // - extractShadowStatements: Main extraction function
-// - computeShadowDelta: Compare shadow vs semantic mapper output
 // - Types: ShadowStatement, ShadowExtractionResult, etc.
 //
 // Guardrail: Pattern definitions are frozen on import to prevent runtime modification
@@ -34,11 +33,6 @@ export type {
 } from './ShadowExtractor';
 
 export type {
-    UnreferencedStatement,
-    ShadowDeltaResult,
-} from './ShadowDelta';
-
-export type {
     ShadowParagraph,
     ParagraphProjectionResult,
 } from './ShadowParagraphProjector';
@@ -59,7 +53,6 @@ export {
     getStancePriority,
     classifyStance,
     detectSignals,
-    computeSignalWeight,
 } from './StatementTypes';
 
 // Functions - ExclusionRules
@@ -76,23 +69,11 @@ export {
     projectParagraphs,
 } from './ShadowParagraphProjector';
 
-export {
-    computeShadowDelta,
-    getTopUnreferenced,
-} from './ShadowDelta';
-
 // ===========================================================================
 // LEGACY ALIASES (Migration Support)
 // ===========================================================================
 
 export { extractShadowStatements as executeShadowExtraction } from './ShadowExtractor';
-export { computeShadowDelta as executeShadowDelta } from './ShadowDelta';
-
-export type {
-    ShadowAudit,
-    UnreferencedStatement as UnindexedStatement,
-    ShadowDeltaResult as DeltaResult,
-} from './ShadowDelta';
 
 export type {
     ShadowExtractionResult as TwoPassResult,

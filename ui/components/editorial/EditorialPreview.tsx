@@ -14,12 +14,14 @@ export const EditorialPreview: React.FC<EditorialPreviewProps> = ({ ast, onExpan
   });
 
   return (
-    <m.div
+    <m.button
+      type="button"
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut' }}
       onClick={onExpand}
-      className="cursor-pointer px-6 py-4 mb-4 border-b border-border-subtle hover:bg-surface-highlight/30 transition-colors"
+      aria-label="Expand editorial reading surface"
+      className="cursor-pointer px-6 py-4 mb-4 border-b border-border-subtle hover:bg-surface-highlight/30 transition-colors text-left w-full"
     >
       {/* Orientation line */}
       <p className="text-lg text-text-secondary mb-3 leading-relaxed">
@@ -46,6 +48,6 @@ export const EditorialPreview: React.FC<EditorialPreviewProps> = ({ ast, onExpan
 
       {/* Expand affordance */}
       <div className="mt-3 text-xs text-text-muted">Click to expand full reading surface</div>
-    </m.div>
+    </m.button>
   );
 };

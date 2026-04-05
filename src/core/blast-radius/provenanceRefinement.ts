@@ -13,7 +13,6 @@
  */
 
 import { cosineSimilarity } from '../../clustering/distance';
-import { computeNounEntityCount } from './passagePruningEngine';
 import type { ShadowStatement } from '../../shadow/ShadowExtractor';
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
 import type {
@@ -377,11 +376,10 @@ function computePassageDominance(
 // ── Signal 3 — Signal Strength ──────────────────────────────────────────
 
 function computeSignalStrength(text: string): SignalStrengthSignal {
-  const nec = computeNounEntityCount(text);
   const wc = wordCount(text);
   return {
-    signalWeight: wc > 0 ? nec / wc : 0,
-    nounEntityCount: nec,
+    signalWeight: 0,
+    nounEntityCount: 0,
     stmtWordCount: wc,
   };
 }

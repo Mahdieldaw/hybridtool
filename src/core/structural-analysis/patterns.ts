@@ -11,7 +11,6 @@ import {
     ChainPatternData,
     FragilePatternData,
     ConditionalPatternData,
-    OrphanedPatternData,
     LeverageInversion,
     ConvergencePoint,
     CascadeRisk,
@@ -21,7 +20,7 @@ import {
     TradeoffPair
 } from "../../../shared/contract";
 import { MIN_CHAIN_LENGTH } from "./classification";
-import { buildKeystonePatternData, buildChainPatternData, generateWhyItMatters, DissentVoice } from "./builders";
+import { buildKeystonePatternData, buildChainPatternData } from "./builders";
 import { determineTensionDynamics } from "./utils";
 
 
@@ -62,7 +61,7 @@ export const detectDissentPattern = (
             return outsiderSupport > c.supporters.length * 0.5 && !peakIdsSet.has(c.id);
         });
         for (const claim of outsiderClaims) {
-            if (dissentVoices.some((v: DissentVoice) => v.id === claim.id)) continue;
+            if (dissentVoices.some((v: DissentPatternData['voices'][number]) => v.id === claim.id)) continue;
             dissentVoices.push({
                 id: claim.id,
                 label: claim.label,
@@ -77,7 +76,7 @@ export const detectDissentPattern = (
     const edgeCases = claims.filter((c: EnrichedClaim) =>
         c.type === 'conditional' &&
         c.supportRatio < 0.4 &&
-        !dissentVoices.some((v: DissentVoice) => v.id === c.id)
+        !dissentVoices.some((v: DissentPatternData['voices'][number]) => v.id === c.id)
     );
     for (const claim of edgeCases) {
         dissentVoices.push({
@@ -91,9 +90,9 @@ export const detectDissentPattern = (
         });
     }
     if (dissentVoices.length === 0) return null;
-    const rankedVoices = [...dissentVoices].sort((a: DissentVoice, b: DissentVoice) => (b.insightScore || 0) - (a.insightScore || 0));
+    const rankedVoices = [...dissentVoices].sort((a: DissentPatternData['voices'][number], b: DissentPatternData['voices'][number]) => (b.insightScore || 0) - (a.insightScore || 0));
     const peakTypes = new Set(peaks.map(p => p.type));
-    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map((v: DissentVoice) => {
+    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map((v: DissentPatternData['voices'][number]) => {
         const claim = claims.find((c: EnrichedClaim) => c.id === v.id);
         return claim?.type;
     }))).filter(t => t && !peakTypes.has(t));
@@ -109,7 +108,13 @@ export const detectDissentPattern = (
                 label: strongestVoice.label,
                 text: strongestVoice.text,
                 supportRatio: strongestVoice.supportRatio,
-                whyItMatters: generateWhyItMatters(strongestVoice, peaks),
+                whyItMatters: strongestVoice.insightType === 'leverage_inversion'
+                    ? `Low support but high structural importance—if "${strongestVoice.label}" is right, it reshapes the entire answer.`
+                    : strongestVoice.insightType === 'unique_perspective'
+                        ? `Comes from model(s) that don't support any consensus position—a genuinely different angle.`
+                        : strongestVoice.insightType === 'edge_case'
+                            ? `Conditional insight that may apply to your specific situation.`
+                            : `Minority position that warrants consideration.`,
                 insightType: strongestVoice.insightType,
             } : null,
             suppressedDimensions: minorityOnlyTypes as string[]
@@ -177,10 +182,9 @@ export const detectChainPattern = (
     graph: GraphAnalysis,
     claims: EnrichedClaim[],
     edges: Edge[],
-    cascadeRisks: CascadeRisk[]
 ): SecondaryPattern | null => {
     if (graph.longestChain.length < MIN_CHAIN_LENGTH) return null;
-    const chainShape = buildChainPatternData(claims, edges, graph, cascadeRisks);
+    const chainShape = buildChainPatternData(claims, edges, graph);
     const weakLinks = chainShape.weakLinks.map((w: { step: { id: string } }) => w.step.id);
     return {
         type: 'chain',
@@ -246,56 +250,6 @@ export const detectConditionalPattern = (
     };
 };
 
-export const detectOrphanedPattern = (
-    peaks: EnrichedClaim[],
-    edges: Edge[]
-): SecondaryPattern | null => {
-    const isolatedPeaks = peaks.filter(p => {
-        const hasEdge = edges.some(e => e.from === p.id || e.to === p.id);
-        return !hasEdge;
-    });
-    if (isolatedPeaks.length === 0) return null;
-    return {
-        type: 'orphaned',
-        severity: isolatedPeaks.length > 1 ? 'high' : 'medium',
-        data: {
-            orphans: isolatedPeaks.map(p => ({
-                id: p.id,
-                label: p.label,
-                supportRatio: p.supportRatio,
-                reason: 'High support but no structural connections'
-            }))
-        } as OrphanedPatternData
-    };
-};
-
-// AUDIT: Secondary Pattern Renderers
-//
-// shape.patterns (SecondaryPattern[]) flows to:
-//   - StructureGlyph: checks for keystone, chain, dissent, fragile, challenged, conditional
-//     presence (boolean checks — renders an icon or indicator if the pattern exists).
-//     ALL SIX of these types trigger UI output. orphaned is NOT checked by StructureGlyph.
-//   - DecisionMapGraph: reads dissent (strongestVoice.id, voices[].id), keystone
-//     (keystone.id), chain (chain[] ids with position), fragile (fragilities[].peak.id)
-//     for node decoration. Does NOT use challenged, conditional, or orphaned.
-//   - CognitiveOutputRenderer: passes patterns array to StructureGlyph (no direct reads).
-//   - classification.ts: maps pattern types to evidence strings for shape.evidence array.
-//
-// Per-pattern UI rendering status:
-//   dissent    — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node decoration)
-//   keystone   — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node decoration)
-//   chain      — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node sequence)
-//   fragile    — LIVE: StructureGlyph (indicator) + DecisionMapGraph (node decoration)
-//   challenged — LIVE: StructureGlyph (indicator only, no detail rendering confirmed)
-//   conditional — LIVE: StructureGlyph (indicator only, no detail rendering confirmed)
-//   orphaned   — DECORATIVE: not checked by StructureGlyph, not used by DecisionMapGraph.
-//     Detection cost is low (~5 lines) but output has no live consumer. Candidate for
-//     removal or for adding to StructureGlyph's pattern checks.
-//
-// NOTE: For dissent, keystone, chain, fragile — the pattern.data sub-structures are
-//   consumed by DecisionMapGraph for node-level decoration. The rich fields inside
-//   (dissentVoices[], strongestVoice, cascadeSize, weakLinks[], etc.) are accessed.
-//   For challenged and conditional, only the pattern's existence is checked (not data).
 export const detectAllSecondaryPatterns = (
     claims: EnrichedClaim[],
     peaks: EnrichedClaim[],
@@ -313,7 +267,7 @@ export const detectAllSecondaryPatterns = (
         if (keystonePattern) patterns.push(keystonePattern);
     }
     if (graph.longestChain.length >= MIN_CHAIN_LENGTH) {
-        const chainPattern = detectChainPattern(graph, claims, edges, patternsObj.cascadeRisks);
+        const chainPattern = detectChainPattern(graph, claims, edges);
         if (chainPattern) patterns.push(chainPattern);
     }
     const sharedPeakAnalysis: PeakAnalysis = {
@@ -332,8 +286,6 @@ export const detectAllSecondaryPatterns = (
     if (challengedPattern) patterns.push(challengedPattern);
     const conditionalPattern = detectConditionalPattern(claims, edges);
     if (conditionalPattern) patterns.push(conditionalPattern);
-    const orphanedPattern = detectOrphanedPattern(peaks, edges);
-    if (orphanedPattern) patterns.push(orphanedPattern);
     return patterns;
 };
 

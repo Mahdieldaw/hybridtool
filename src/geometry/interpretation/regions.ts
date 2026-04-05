@@ -1,6 +1,6 @@
 import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
 import type { NodeLocalStats, GeometricSubstrate } from '../types';
-import type { AdaptiveLens, Region, RegionizationResult } from './types';
+import type { Region, RegionizationResult } from './types';
 
 function uniqueSorted(numbers: number[]): number[] {
     return Array.from(new Set(numbers)).sort((a, b) => a - b);
@@ -19,50 +19,6 @@ function unionStatementIdsStable(nodeIds: string[], nodesById: Map<string, NodeL
         }
     }
     return out;
-}
-
-function componentToRegion(
-    component: GeometricSubstrate['topology']['components'][0],
-    nodeIds: string[],
-    regionId: string,
-    nodesById: Map<string, NodeLocalStats>
-): Region {
-    const modelIndices: number[] = [];
-    for (const nodeId of nodeIds) {
-        const node = nodesById.get(nodeId);
-        if (node) modelIndices.push(node.modelIndex);
-    }
-    const statementIds = unionStatementIdsStable(nodeIds, nodesById);
-    return {
-        id: regionId,
-        kind: 'component',
-        nodeIds: [...nodeIds],
-        statementIds,
-        sourceId: component.id,
-        modelIndices: uniqueSorted(modelIndices),
-    };
-}
-
-function patchToRegion(
-    nodeIds: string[],
-    regionId: string,
-    nodesById: Map<string, NodeLocalStats>
-): Region {
-    const modelIndices: number[] = [];
-    for (const nodeId of nodeIds) {
-        const node = nodesById.get(nodeId);
-        if (node) modelIndices.push(node.modelIndex);
-    }
-    const statementIds = unionStatementIdsStable(nodeIds, nodesById);
-    const sorted = [...nodeIds].sort();
-    return {
-        id: regionId,
-        kind: 'patch',
-        nodeIds: sorted,
-        statementIds,
-        sourceId: `patch_${sorted.join('_')}`,
-        modelIndices: uniqueSorted(modelIndices),
-    };
 }
 
 function basinToRegion(
@@ -110,7 +66,6 @@ function gapToRegion(
 export function buildRegions(
     substrate: GeometricSubstrate,
     paragraphs: ShadowParagraph[],
-    _lens: AdaptiveLens,
     basinInversionResult?: any,
     gapResult?: any
 ): RegionizationResult {
@@ -121,7 +76,6 @@ export function buildRegions(
     const coveredNodeIds = new Set<string>();
     let regionIndex = 0;
 
-    // PRIMARY PASS: Gap Regionalization
     if (gapResult && Array.isArray(gapResult.regions) && gapResult.regions.length > 0) {
         console.log(`[buildRegions] Dominating topography with ${gapResult.regions.length} gap regions.`);
         for (const gr of gapResult.regions) {
@@ -130,62 +84,29 @@ export function buildRegions(
             for (const id of gr.allNodeIds) coveredNodeIds.add(id);
         }
     } else if (basinInversionResult?.status === 'ok' && Array.isArray(basinInversionResult.basins) && basinInversionResult.basins.length > 1) {
-        // FALLBACK: Basin Inversion
         console.log(`[buildRegions] Dominating topography with ${basinInversionResult.basins.length} basins.`);
         for (const basin of basinInversionResult.basins) {
             const region = basinToRegion(basin, `r_${regionIndex++}`, nodesById);
             regions.push(region);
             for (const id of basin.nodeIds) coveredNodeIds.add(id);
         }
-    } else {
-        // Component-based regions: each connected component with ≥2 nodes becomes a region
-        for (const component of substrate.topology.components) {
-            const uncoveredInComponent = component.nodeIds.filter(id => !coveredNodeIds.has(id));
-            if (uncoveredInComponent.length >= 2) {
-                const region = componentToRegion(component, uncoveredInComponent, `r_${regionIndex++}`, nodesById);
-                regions.push(region);
-                for (const id of uncoveredInComponent) coveredNodeIds.add(id);
-            }
-        }
     }
 
-    // Patch-based regions: group remaining uncovered nodes by mutual neighborhood
-    const stillUncovered = substrate.nodes.filter(n => !coveredNodeIds.has(n.paragraphId));
-    if (stillUncovered.length > 0) {
-        const patchMap = new Map<string, string[]>();
-
-        for (const node of stillUncovered) {
-            const patchKey = [...node.mutualNeighborhoodPatch].sort().join('|');
-            if (!patchMap.has(patchKey)) {
-                patchMap.set(patchKey, [node.paragraphId]);
-            } else {
-                patchMap.get(patchKey)!.push(node.paragraphId);
-            }
-        }
-
-        for (const patchNodeIds of patchMap.values()) {
-            const region = patchToRegion(patchNodeIds, `r_${regionIndex++}`, nodesById);
-            regions.push(region);
-            for (const id of patchNodeIds) coveredNodeIds.add(id);
-        }
-    }
-
-    // Sort: gaps first, then basins, then components (larger first), then patches
+    // Sort: gaps first, then basins (larger first)
     regions.sort((a, b) => {
-        const kindOrder = { gap: 0, basin: 1, component: 2, patch: 3 } as const;
-        if (kindOrder[a.kind as keyof typeof kindOrder] !== kindOrder[b.kind as keyof typeof kindOrder]) {
-            return kindOrder[a.kind as keyof typeof kindOrder] - kindOrder[b.kind as keyof typeof kindOrder];
+        const kindOrder = { gap: 0, basin: 1 } as const;
+        if (kindOrder[a.kind] !== kindOrder[b.kind]) {
+            return kindOrder[a.kind] - kindOrder[b.kind];
         }
         if (b.nodeIds.length !== a.nodeIds.length) return b.nodeIds.length - a.nodeIds.length;
         return a.id.localeCompare(b.id);
     });
 
-    // Renumber IDs after sort
     regions.forEach((r, idx) => {
         r.id = `r_${idx}`;
     });
 
-    const kindCounts: Record<Region['kind'], number> = { gap: 0, basin: 0, component: 0, patch: 0 };
+    const kindCounts: Record<Region['kind'], number> = { gap: 0, basin: 0 };
     for (const r of regions) kindCounts[r.kind]++;
 
     void paragraphs;

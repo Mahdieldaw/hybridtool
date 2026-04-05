@@ -215,9 +215,8 @@ const ChatInput = ({
     }
     return null;
   }, [turnIds, turnsMap]);
-  const isAwaitingTraversal = latestAiTurn?.pipelineStatus === "awaiting_traversal";
   const isInProgress = latestAiTurn?.pipelineStatus === "in_progress";
-  const showConfigOrbs = !isRoundActive && !isAwaitingTraversal && !isInProgress;
+  const showConfigOrbs = !isRoundActive && !isInProgress;
 
   return (
     <div ref={containerRef} className="flex justify-center flex-col items-center pointer-events-auto">

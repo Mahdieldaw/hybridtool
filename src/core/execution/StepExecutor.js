@@ -10,7 +10,6 @@ import {
   getErrorMessage
 } from '../../utils/ErrorHandler';
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
-import { formatSubstrateForPrompt } from '../../skeletonization';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
 import { DEFAULT_CONFIG } from '../../clustering';
 // computeExplore import removed (unused)
@@ -460,7 +459,7 @@ export class StepExecutor {
     });
 
     // ══════════════════════════════════════════════════════════════════════
-    // NEW PIPELINE: Shadow -> Semantic -> Traversal
+    // NEW PIPELINE: Shadow -> Semantic -> Editorial
     // ══════════════════════════════════════════════════════════════════════
 
     // 1. Import new modules dynamically
@@ -469,7 +468,6 @@ export class StepExecutor {
     const { extractShadowStatements } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
     // claimAssembly import removed — computePreSurveyPipeline handles it internally
-    const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
     const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
 
     const nowMs = () =>
@@ -504,8 +502,6 @@ export class StepExecutor {
     let embeddingResult = null;
     let statementEmbeddingResult = null;
     let geometryParagraphEmbeddings = null;
-    let paragraphDensityScores = null;  // Map<paragraphId, number> — hoisted from paragraph embedding IIFE
-    let queryDensityScore = null;       // number — hoisted from query density projection
     let queryEmbedding = null;
     let queryRelevance = null;
     let substrateSummary = null;
@@ -514,7 +510,6 @@ export class StepExecutor {
     let substrateDegenerateReason = null;
     let preSemanticInterpretation = null;
     let substrate = null;
-    let enrichmentResult = null;
     let basinInversionResult = null;
     let clusteringModule = null;
     let cellUnitEmbeddings = null; // Map<string, Float32Array> | null
@@ -551,7 +546,6 @@ export class StepExecutor {
           generateEmbeddings,
           generateTextEmbeddings,
           generateStatementEmbeddings,
-          projectSemanticDensity,
           stripInlineMarkdown,
           structuredTruncate,
           getEmbeddingStatus,
@@ -579,16 +573,12 @@ export class StepExecutor {
             ? `Represent this sentence for searching relevant passages: ${truncatedQuery}`
             : truncatedQuery;
 
-        let queryRawMagnitude = null;
-        let queryTextLength = null;
         const queryEmbeddingPromise = (async () => {
           try {
             await offscreenReadyPromise;
             console.log(`[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`);
-            const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG, { captureRawMagnitudes: true });
+            const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG);
             queryEmbedding = queryEmbeddingBatch.embeddings.get('0') || null;
-            queryRawMagnitude = queryEmbeddingBatch.rawMagnitudes?.get('0') ?? null;
-            queryTextLength = queryEmbeddingBatch.textLengths?.get('0') ?? null;
             if (queryEmbedding && queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
               throw new Error(
                 `[StepExecutor] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${queryEmbedding.length}`
@@ -618,26 +608,10 @@ export class StepExecutor {
             );
             embeddingResult = paragraphEmbeddingResult;
             geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
-            paragraphDensityScores = paragraphEmbeddingResult?.semanticDensityScores ?? null;
-            const paraDensity = paragraphDensityScores;
-            let paragraphSemanticDensity = null;
-            if (paraDensity && paraDensity.size > 0) {
-              const entries = Array.from(paraDensity.entries());
-              const values = entries.map(([, v]) => v);
-              const mean = values.reduce((a, b) => a + b, 0) / values.length;
-              const sorted = entries.slice().sort((a, b) => b[1] - a[1]);
-              paragraphSemanticDensity = {
-                count: paraDensity.size,
-                mean,
-                topDense: sorted.slice(0, 3).map(([id, score]) => ({ id, score })),
-                topHollow: sorted.slice(-3).reverse().map(([id, score]) => ({ id, score })),
-              };
-            }
             geometryDiagnostics.stages.paragraphEmbeddings = {
               status: 'ok',
               paragraphs: paragraphResult.paragraphs.length,
               paragraphEmbeddings: paragraphEmbeddingResult.embeddings.size,
-              semanticDensity: paragraphSemanticDensity,
             };
           } catch (err) {
             embeddingResult = null;
@@ -665,29 +639,11 @@ export class StepExecutor {
               shadowResult.statements,
               DEFAULT_CONFIG
             );
-            const densityScores = statementEmbeddingResult?.semanticDensityScores;
-            let semanticDensity = null;
-            if (densityScores && densityScores.size > 0) {
-              const densityEntries = Array.from(densityScores.entries());
-              const densityValues = densityEntries.map(([, v]) => v);
-              const densityMean = densityValues.reduce((a, b) => a + b, 0) / densityValues.length;
-              const sorted = densityEntries.slice().sort((a, b) => b[1] - a[1]);
-              semanticDensity = {
-                count: densityScores.size,
-                mean: densityMean,
-                topDense: sorted.slice(0, 3).map(([id, score]) => ({ id, score })),
-                topHollow: sorted.slice(-3).reverse().map(([id, score]) => ({ id, score })),
-              };
-            }
             geometryDiagnostics.stages.statementEmbeddings = {
               status: 'ok',
               statements: shadowResult.statements.length,
               embedded: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
-              semanticDensity,
             };
-            if (semanticDensity) {
-              console.log('[StepExecutor] Semantic density:', JSON.stringify(semanticDensity));
-            }
           } catch (embeddingError) {
             console.warn('[StepExecutor] Statement embedding generation failed, continuing without embeddings:', getErrorMessage(embeddingError));
             geometryDiagnostics.embeddingBackendFailure = true;
@@ -731,21 +687,6 @@ export class StepExecutor {
               status: 'failed',
               error: getErrorMessage(cellEmbErr),
             };
-          }
-        }
-
-        // Post-await: project query density using statement regression model
-        if (queryRawMagnitude != null && queryTextLength != null
-            && statementEmbeddingResult?.densityRegressionModel) {
-          const score = projectSemanticDensity(
-            queryRawMagnitude,
-            queryTextLength,
-            statementEmbeddingResult.densityRegressionModel
-          );
-          queryDensityScore = score;
-          const querySemanticDensity = { score, projectedFrom: 'statement-regression' };
-          if (geometryDiagnostics.stages.queryEmbedding) {
-            geometryDiagnostics.stages.queryEmbedding.semanticDensity = querySemanticDensity;
           }
         }
 
@@ -809,42 +750,21 @@ export class StepExecutor {
           const contestedCount = Array.isArray(substrate.nodes)
             ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
             : 0;
-          const avgTop1Sim = Array.isArray(substrate.nodes) && nodeCount > 0
-            ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.top1Sim === 'number' ? n.top1Sim : 0), 0) / nodeCount
-            : 0;
           const avgIsolationScore = Array.isArray(substrate.nodes) && nodeCount > 0
             ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0), 0) / nodeCount
             : 0;
+          const mutualRankEdgeCount = substrate.mutualRankGraph?.edges?.length ?? 0;
 
           substrateSummary = {
-            shape: {
-              confidence: typeof substrate?.shape?.confidence === 'number' ? substrate.shape.confidence : 0,
-              signals: {
-                fragmentationScore: typeof substrate?.shape?.signals?.fragmentationScore === 'number' ? substrate.shape.signals.fragmentationScore : 0,
-                bimodalityScore: typeof substrate?.shape?.signals?.bimodalityScore === 'number' ? substrate.shape.signals.bimodalityScore : 0,
-                parallelScore: typeof substrate?.shape?.signals?.parallelScore === 'number' ? substrate.shape.signals.parallelScore : 0,
-                convergentScore: typeof substrate?.shape?.signals?.convergentScore === 'number' ? substrate.shape.signals.convergentScore : 0,
-              },
-            },
-            topology: {
-              componentCount: typeof substrate?.topology?.componentCount === 'number' ? substrate.topology.componentCount : 0,
-              largestComponentRatio: typeof substrate?.topology?.largestComponentRatio === 'number' ? substrate.topology.largestComponentRatio : 0,
-              isolationRatio: typeof substrate?.topology?.isolationRatio === 'number' ? substrate.topology.isolationRatio : 0,
-              globalStrongDensity: typeof substrate?.topology?.globalStrongDensity === 'number' ? substrate.topology.globalStrongDensity : 0,
-            },
             meta: {
               embeddingSuccess: !!substrate?.meta?.embeddingSuccess,
               embeddingBackend: substrate?.meta?.embeddingBackend || 'none',
               nodeCount: typeof substrate?.meta?.nodeCount === 'number' ? substrate.meta.nodeCount : nodeCount,
-              knnEdgeCount: typeof substrate?.meta?.knnEdgeCount === 'number' ? substrate.meta.knnEdgeCount : 0,
-              mutualEdgeCount: typeof substrate?.meta?.mutualEdgeCount === 'number' ? substrate.meta.mutualEdgeCount : 0,
-              strongEdgeCount: typeof substrate?.meta?.strongEdgeCount === 'number' ? substrate.meta.strongEdgeCount : 0,
-              softThreshold: typeof substrate?.graphs?.strong?.softThreshold === 'number' ? substrate.graphs.strong.softThreshold : 0,
+              mutualRankEdgeCount,
               buildTimeMs: typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
             },
             nodes: {
               contestedCount,
-              avgTop1Sim,
               avgIsolationScore,
             },
           };
@@ -856,26 +776,9 @@ export class StepExecutor {
           console.warn(`[StepExecutor] Degenerate substrate: ${substrate.degenerateReason}`);
         } else {
           console.log(
-            `[StepExecutor] Substrate shape confidence: ${substrate.shape.confidence.toFixed(2)} ` +
-            `(frag=${substrate.shape.signals.fragmentationScore.toFixed(2)}, ` +
-            `bim=${substrate.shape.signals.bimodalityScore.toFixed(2)}, ` +
-            `par=${substrate.shape.signals.parallelScore.toFixed(2)}, ` +
-            `conv=${substrate.shape.signals.convergentScore.toFixed(2)})`
+            `[StepExecutor] Substrate: ${substrate.meta.nodeCount} nodes, ` +
+            `${substrate.mutualRankGraph?.edges?.length ?? 0} mutual recognition edges`
           );
-        }
-
-        let perModelQueryRelevance = undefined;
-        if (queryEmbedding && statementEmbeddingResult?.embeddings && paragraphResult?.paragraphs) {
-          try {
-            const { computePerModelQueryRelevance } = await import('../../geometry/interpretation/modelOrdering');
-            perModelQueryRelevance = computePerModelQueryRelevance(
-              queryEmbedding,
-              statementEmbeddingResult.embeddings,
-              paragraphResult.paragraphs
-            );
-          } catch (err) {
-            console.warn('[StepExecutor] Per-model query relevance failed:', getErrorMessage(err));
-          }
         }
 
         try {
@@ -884,7 +787,7 @@ export class StepExecutor {
               substrate,
               paragraphResult.paragraphs,
               geometryParagraphEmbeddings,
-              perModelQueryRelevance,
+              undefined,
               basinInversionResult
             );
           } else {
@@ -939,31 +842,6 @@ export class StepExecutor {
         }
 
         try {
-          const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
-            ? preSemanticInterpretation.regionization.regions
-            : [];
-          if (substrate && regions.length > 0) {
-            enrichmentResult = enrichStatementsWithGeometry(
-              shadowResult.statements,
-              paragraphResult.paragraphs,
-              substrate,
-              regions
-            );
-            if (enrichmentResult?.unenrichedCount > 0) {
-              console.warn(
-                `[Enrichment] ${enrichmentResult.unenrichedCount}/${shadowResult.statements.length} statements could not be enriched`,
-                enrichmentResult.failures.slice(0, 5)
-              );
-            }
-          } else {
-            enrichmentResult = null;
-          }
-        } catch (err) {
-          enrichmentResult = null;
-          console.warn('[Enrichment] Failed:', getErrorMessage(err));
-        }
-
-        try {
           if (options.sessionManager && context.canonicalAiTurnId) {
             const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
             const stmtDim = statementEmbeddingResult?.embeddings?.values?.().next?.().value?.length;
@@ -988,13 +866,6 @@ export class StepExecutor {
               : null;
 
             if (packedStatements || packedParagraphs || queryBuffer) {
-              const densityMap = statementEmbeddingResult?.semanticDensityScores;
-              const densityObj = densityMap && densityMap.size > 0
-                ? Object.fromEntries(densityMap)
-                : null;
-              const paraDensityObj = paragraphDensityScores && paragraphDensityScores.size > 0
-                ? Object.fromEntries(paragraphDensityScores)
-                : null;
               // Pack cell-unit embeddings if available
               const packedCellUnits = cellUnitEmbeddings && cellUnitEmbeddings.size > 0
                 ? packEmbeddingMap(cellUnitEmbeddings, dims)
@@ -1014,10 +885,6 @@ export class StepExecutor {
                   ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
                   ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
                   ...(packedCellUnits ? { cellUnitCount: packedCellUnits.index.length, cellUnitIndex: packedCellUnits.index } : {}),
-                  ...(densityObj ? { semanticDensityScores: densityObj } : {}),
-                  ...(paraDensityObj ? { paragraphSemanticDensityScores: paraDensityObj } : {}),
-                  ...(statementEmbeddingResult?.densityRegressionModel ? { densityRegressionModel: statementEmbeddingResult.densityRegressionModel } : {}),
-                  ...(queryDensityScore != null ? { querySemanticDensity: queryDensityScore } : {}),
                   embeddingVersion: 2,
                   timestamp: Date.now(),
                 },
@@ -1212,7 +1079,6 @@ export class StepExecutor {
                     statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
                     paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
                     queryEmbedding,
-                    statementDensityScores: statementEmbeddingResult?.semanticDensityScores || null,
                     preBuiltSubstrate: substrate,
                     preBuiltPreSemantic: preSemanticInterpretation,
                     preBuiltQueryRelevance: queryRelevance,
@@ -1261,9 +1127,6 @@ export class StepExecutor {
                     console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
                   }
 
-                  // ── SURVEY MAPPER LLM (StepExecutor-only) ─────────────────
-                  let rawGates = [];
-                  let surveyRationale = null;
                   const semanticContinuationMeta = (() => {
                     try {
                       const meta = finalResult?.meta;
@@ -1274,123 +1137,10 @@ export class StepExecutor {
                     return null;
                   })();
 
-                  if (enrichedClaims.length > 0) {
-                    // ── SURVEY MAPPER PAUSED — editorial model replaces this slot ──
-                    if (false) try {
-                      const {
-                        buildRoutedSurveyPrompt,
-                        parseSurveyMapperOutput: parseSurveyOutput,
-                        validateAssessmentCoverage,
-                      } =
-                        await import('../../ConciergeService/surveyMapper');
+                  let rawGates = [];
+                  let surveyRationale = null;
 
-                      const claimsForSurvey = enrichedClaims.map((c) => ({
-                        id: String(c?.id || ''),
-                        label: String(c?.label || ''),
-                        text: String(c?.text || ''),
-                        supporters: Array.isArray(c?.supporters) ? c.supporters : [],
-                      }));
-
-                      let surveyPrompt = null;
-                      let claimsExpectedInSurvey = claimsForSurvey;
-                      if (claimRouting && !claimRouting.skipSurvey) {
-                        const routedSet = new Set(claimRouting.routedClaimIds);
-                        const routedClaims = claimsForSurvey.filter((c) => routedSet.has(c.id));
-                        claimsExpectedInSurvey = routedClaims;
-                        const passageRoutedClaims = preSurvey.derived.passageRoutingResult?.routing?.loadBearingClaims ?? [];
-                        surveyPrompt = buildRoutedSurveyPrompt({
-                          userQuery: payload.originalPrompt,
-                          routing: claimRouting,
-                          allClaims: routedClaims,
-                          batchTexts: indexedSourceData.map((s) => ({
-                            modelIndex: s.modelIndex,
-                            content: s.text,
-                          })),
-                          edges: preSurvey.parsedEdges,
-                          passageRoutedClaims,
-                        });
-                      }
-
-                      if (!surveyPrompt) {
-                        console.log('[SurveyMapper] Skipped: routing determined no survey needed');
-                      } else {
-                        const surveyResult = await new Promise((resolve) => {
-                          let surveyText = '';
-                          this.orchestrator.executeParallelFanout(
-                            surveyPrompt,
-                            [payload.mappingProvider],
-                            {
-                              sessionId: context.sessionId,
-                              useThinking: false,
-                              providerContexts: semanticContinuationMeta
-                                ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
-                                : mappingProviderContexts,
-                              onPartial: () => { },
-                              onAllComplete: async (results) => {
-                                const r = results?.get?.(payload.mappingProvider);
-                                surveyText = r?.text || '';
-                                if (r?.meta && Object.keys(r.meta).length > 0) {
-                                  await options.persistenceCoordinator.persistProviderContexts(
-                                    context.sessionId,
-                                    { [payload.mappingProvider]: { text: surveyText, meta: r.meta } },
-                                    "batch",
-                                  );
-                                }
-                                resolve({ text: surveyText });
-                              },
-                              onError: () => resolve({ text: '' }),
-                            }
-                          );
-                        });
-
-                        if (surveyResult?.text) {
-                          const parsed = parseSurveyOutput(surveyResult.text);
-                          rawGates = parsed.gates;
-                          surveyRationale = parsed.rationale;
-
-                          const expectedIds = claimsExpectedInSurvey.map((c) => c.id);
-                          const coverage = validateAssessmentCoverage(expectedIds, parsed.assessments);
-                          if (coverage.errors.length > 0) {
-                            parsed.errors.push(...coverage.errors);
-                          }
-
-                          if (parsed.errors.length > 0) {
-                            console.warn('[SurveyMapper] Parse warnings:', parsed.errors);
-                          }
-                          console.log(`[SurveyMapper] ${rawGates.length} gate(s) produced, ${parsed.assessments.length}/${expectedIds.length} claims assessed`);
-                        }
-                      }
-                    } catch (err) {
-                      console.warn('[SurveyMapper] Failed, continuing without gates:', getErrorMessage(err));
-                      rawGates = [];
-                      surveyRationale = null;
-                    }
-                  }
-
-                  // ── PERSIST SURVEY GATES (StepExecutor-only) ──────────────
-                  if (rawGates.length > 0 && options.sessionManager?.adapter && context.canonicalAiTurnId) {
-                    try {
-                      const existingMappingResps = await options.sessionManager.adapter.getResponsesByTurnId(context.canonicalAiTurnId);
-                      const mappingResp = (existingMappingResps || [])
-                        .filter(r => r?.responseType === 'mapping' && r?.providerId === payload.mappingProvider)
-                        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
-
-                      if (mappingResp?.id) {
-                        const updated = {
-                          ...mappingResp,
-                          surveyGates: rawGates,
-                          surveyRationale: surveyRationale || null,
-                          updatedAt: Date.now(),
-                        };
-                        await options.sessionManager.adapter.put('provider_responses', updated, mappingResp.id);
-                        console.log(`[StepExecutor] Persisted ${rawGates.length} survey gate(s) to mapping provider response`);
-                      }
-                    } catch (persistErr) {
-                      console.warn('[StepExecutor] Survey gate persistence (non-blocking):', persistErr);
-                    }
-                  }
-
-                  // ── POST-SURVEY ASSEMBLY ───────────────────────────────────
+                  // ── POST-SEMANTIC ASSEMBLY ────────────────────────────────
                   const assemblyResult = await assembleFromPreSurvey(preSurvey, {
                     surveyGates: rawGates.length > 0 ? rawGates : undefined,
                     surveyRationale,
@@ -1400,14 +1150,15 @@ export class StepExecutor {
                     statementSemanticDensity: statementEmbeddingResult?.semanticDensityScores?.size > 0
                       ? Object.fromEntries(statementEmbeddingResult.semanticDensityScores)
                       : undefined,
-                    paragraphSemanticDensity: paragraphDensityScores?.size > 0
-                      ? Object.fromEntries(paragraphDensityScores)
+                    paragraphSemanticDensity: embeddingResult?.semanticDensityScores?.size > 0
+                      ? Object.fromEntries(embeddingResult.semanticDensityScores)
                       : undefined,
                     claimSemanticDensity: claimDensityScores?.size > 0
                       ? Object.fromEntries(claimDensityScores)
                       : undefined,
-                    querySemanticDensity: queryDensityScore,
                   });
+
+
 
                   mapperArtifact = assemblyResult.mapperArtifact;
                   cognitiveArtifact = assemblyResult.cognitiveArtifact;
@@ -1417,47 +1168,41 @@ export class StepExecutor {
                   if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
 
-                  // Diagnostics
-                  let diagnosticsResult = null;
-                  try {
-                    if (preSemanticInterpretation && mapperArtifact) {
-                      const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                      let postSemantic = cachedStructuralAnalysis;
-                      if (!postSemantic) {
-                        const { computeStructuralAnalysis } = await import('../PromptMethods');
-                        postSemantic = computeStructuralAnalysis({
-                          claims: mapperArtifact.claims ?? [],
-                          edges: mapperArtifact.edges ?? [],
-                          modelCount: mapperArtifact.model_count,
-                        });
-                      }
-                      diagnosticsResult = validateStructuralMapping(
-                        preSemanticInterpretation,
-                        postSemantic,
-                        substrate,
-                        statementEmbeddingResult?.embeddings ?? null,
-                        paragraphResult?.paragraphs ?? null
-                      );
-                    }
-                  } catch (_) {
-                    diagnosticsResult = null;
-                  }
-
+                  // Stamp sourceCoherence per claim (pairwise cosine similarity of source statement embeddings)
                   if (mapperArtifact) {
                     try {
-                      mapperArtifact.diagnostics = diagnosticsResult;
-                      const claimMeasurements = diagnosticsResult?.measurements?.claimMeasurements;
-                      if (Array.isArray(claimMeasurements)) {
-                        const coherenceById = new Map(claimMeasurements.map(m => [m.claimId, m]));
+                      const embMap = statementEmbeddingResult?.embeddings;
+                      if (embMap) {
                         for (const c of (mapperArtifact.claims ?? [])) {
-                          const m = coherenceById.get(c?.id);
-                          if (m && typeof m.sourceCoherence === 'number') {
-                            c.sourceCoherence = m.sourceCoherence;
+                          const sids = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
+                          const vecs = [];
+                          for (const sid of sids) {
+                            const v = embMap.get(String(sid || '').trim());
+                            if (v) vecs.push(v);
+                          }
+                          if (vecs.length >= 2) {
+                            const sims = [];
+                            for (let i = 0; i < vecs.length; i++) {
+                              for (let j = i + 1; j < vecs.length; j++) {
+                                const a = vecs[i], b = vecs[j];
+                                const n = Math.min(a.length, b.length);
+                                let dot = 0, na2 = 0, nb2 = 0;
+                                for (let k = 0; k < n; k++) {
+                                  dot += a[k] * b[k];
+                                  na2 += a[k] * a[k];
+                                  nb2 += b[k] * b[k];
+                                }
+                                if (na2 > 0 && nb2 > 0) sims.push(dot / (Math.sqrt(na2) * Math.sqrt(nb2)));
+                              }
+                            }
+                            if (sims.length > 0) {
+                              c.sourceCoherence = sims.reduce((s, x) => s + x, 0) / sims.length;
+                            }
                           }
                         }
                       }
                     } catch (err) {
-                      console.error('[StepExecutor] Diagnostics stamp failed', err);
+                      console.error('[StepExecutor] sourceCoherence stamp failed', err);
                     }
 
                     const mapperArtifact_claimProvenance = preSurvey.derived.claimProvenance;
@@ -1503,8 +1248,8 @@ export class StepExecutor {
                           claimCount: enrichedClaims.length,
                           conflictCount: preSurvey.derived.passageRoutingResult?.routing?.conflictClusters?.length ?? 0,
                           concentrationSpread: {
-                            min: Math.min(...concentrations, 0),
-                            max: Math.max(...concentrations, 0),
+                            min: concentrations.length ? Math.min(...concentrations) : 0,
+                            max: concentrations.length ? Math.max(...concentrations) : 0,
                             mean: concentrations.length ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length : 0,
                           },
                           landscapeComposition: landscapeComp,
@@ -2041,45 +1786,8 @@ export class StepExecutor {
     // ══════════════════════════════════════════════════════════════════
 
     const promptSeed = options?.frozenSingularityPromptSeed || payload.conciergePromptSeed;
-    let evidenceSubstrate = null;
-    try {
-      const substrate = payload?.chewedSubstrate;
-      if (substrate && typeof substrate === "object") {
-        try {
-          if (typeof formatSubstrateForPrompt === 'function') {
-            const formatted = String(formatSubstrateForPrompt(substrate) || '').trim();
-            if (formatted) evidenceSubstrate = formatted;
-          }
-        } catch (_) { }
 
-        if (!evidenceSubstrate) {
-          const outputs = substrate && typeof substrate === "object" ? substrate.outputs : null;
-          if (Array.isArray(outputs) && outputs.length > 0) {
-            const parts = [];
-            for (const out of outputs) {
-              const text = out && typeof out === "object" ? String(out.text || "") : "";
-              if (!text.trim()) continue;
-              parts.push(text.trim());
-            }
-            evidenceSubstrate = parts.length > 0 ? parts.join("\n\n") : null;
-          }
-        }
-      }
-    } catch (_) {
-      evidenceSubstrate = null;
-    }
-
-
-    if (evidenceSubstrate && ConciergeService.buildConciergePrompt) {
-      // When chewed substrate is available, always rebuild the prompt so the
-      // evidence section is injected.  This covers both traversal-continuation
-      // and recompute flows where a frozen/pre-built prompt would otherwise
-      // skip the substrate.
-      const userMessage = payload.originalPrompt;
-      const opts = promptSeed && typeof promptSeed === "object" ? { ...promptSeed } : {};
-      opts.evidenceSubstrate = evidenceSubstrate;
-      singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, opts);
-    } else if (options?.frozenSingularityPrompt) {
+    if (options?.frozenSingularityPrompt) {
       singularityPrompt = options.frozenSingularityPrompt;
     } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
       singularityPrompt = payload.conciergePrompt;
@@ -2112,8 +1820,6 @@ export class StepExecutor {
       const pipeline = {
         userMessage: payload.originalPrompt,
         prompt: singularityPrompt,
-        traversal: payload?.traversalMetrics || null,
-        chewedSubstrateSummary: payload?.chewedSubstrate?.summary || null,
         parsed: {
           signal,
           rawText,

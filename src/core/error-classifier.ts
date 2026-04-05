@@ -3,6 +3,7 @@
 import type { ProviderError, ProviderErrorType } from "../../shared/contract";
 
 type ErrorCandidate = {
+  name?: unknown;
   code?: unknown;
   errorCode?: unknown;
   status?: unknown;
@@ -13,6 +14,7 @@ type ErrorCandidate = {
   error?: unknown;
   details?: unknown;
   context?: unknown;
+  response?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -349,6 +351,57 @@ export function formatRetryAfter(ms: number): string {
   const remainingMinutes = minutes % 60;
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
+
+// ============================================================
+// Boolean predicates (formerly in utils/error-classification.ts)
+// Thin wrappers over classifyError, except isDefinitiveAuthError
+// which distinguishes 401 (definitive) from 403 (ambiguous).
+// ============================================================
+
+export function isProviderAuthError(error: unknown): boolean {
+  const e = asErrorCandidate(error);
+  if (e?.name === "ProviderAuthError") return true;
+  if (e?.code === "AUTH_REQUIRED") return true;
+  return classifyError(error).type === "auth_expired";
+}
+
+/**
+ * True only for 401 or message-pattern matches — NOT 403.
+ * 403 is ambiguous (capacity gate, anti-bot, geo block) and may be transient.
+ */
+export function isDefinitiveAuthError(error: unknown): boolean {
+  const e = asErrorCandidate(error);
+  if (e?.name === "ProviderAuthError") return true;
+  if (e?.code === "AUTH_REQUIRED") return true;
+
+  const statusRaw = e?.status ?? e?.statusCode
+    ?? (isRecord(e?.response) ? (e!.response as Record<string, unknown>).status : undefined);
+  const status = typeof statusRaw === "number" ? statusRaw : NaN;
+  if (status === 401) return true;
+  // 403 deliberately excluded — ambiguous
+
+  const message = typeof e?.message === "string" ? e.message : String(error);
+  return AUTH_ERROR_PATTERNS.some((p) => p.test(message));
+}
+
+export function isRateLimitError(error: unknown): boolean {
+  return classifyError(error).type === "rate_limit";
+}
+
+export function isNetworkError(error: unknown): boolean {
+  const t = classifyError(error).type;
+  return t === "network" || t === "timeout";
+}
+
+const AUTH_ERROR_PATTERNS = [
+  /NOT_LOGIN/i,
+  /session.?expired/i,
+  /unauthorized/i,
+  /login.?required/i,
+  /authentication.?required/i,
+  /invalid.?session/i,
+  /please.?log.?in/i,
+];
 
 /**
  * User-friendly error messages by type

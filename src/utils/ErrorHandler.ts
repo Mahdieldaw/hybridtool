@@ -9,7 +9,7 @@ import {
   isDefinitiveAuthError as _isDefinitiveAuthError,
   isRateLimitError as _isRateLimitError,
   isNetworkError as _isNetworkError,
-} from "./error-classification";
+} from "../core/error-classifier";
 
 // ============================================================
 // Inline types to avoid contract.ts dependencies
@@ -115,7 +115,7 @@ export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
 };
 
 // ============================================================
-// Auth error detection patterns — re-exported from error-classification
+// Auth error detection patterns — re-exported from core/error-classifier
 // ============================================================
 
 
@@ -204,7 +204,7 @@ export class ProviderAuthError extends HTOSError {
 // Error classification helpers
 // ============================================================
 
-// Delegate to shared error-classification module — keep these exports for backwards compat.
+// Delegate to core/error-classifier — keep these exports for backwards compat.
 export function isProviderAuthError(error: unknown): boolean {
   if (error instanceof ProviderAuthError) return true;
   return _isProviderAuthError(error);

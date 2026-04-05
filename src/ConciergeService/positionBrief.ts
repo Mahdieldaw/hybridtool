@@ -18,7 +18,6 @@ import type {
     Edge,
 } from '../../shared/contract';
 
-import type { TraversalGraph, TraversalState } from '../utils/cognitive/traversalEngine';
 
 // ===========================================================================
 // UTILITIES
@@ -97,128 +96,6 @@ function buildTensionPairs(
         }
     }
     return pairs;
-}
-
-// NEW: Targeted structural analysis for active/path-specific concerns
-export interface TargetedAnalysis {
-    keystones: Array<{
-        claim: EnrichedClaim;
-        dependentCount: number;
-        userConfirmed: boolean;  // Did user confirm this?
-    }>;
-    dissent: Array<{
-        claim: EnrichedClaim;
-        contrastingWith: string; // User's preference
-    }>;
-    fragilePaths: Array<{
-        claim: EnrichedClaim;
-        unblockedGate: string;   // Gate not yet confirmed
-    }>;
-}
-
-/**
- * Compute a targeted analysis contextualized to the user's active path.
- * - Only analyzes currently active claims
- * - Identifies keystones (claims many others depend on)
- * - Finds dissenting active alternatives that conflict with user choices
- * - Marks fragile paths (claims still gated by unresolved gates)
- */
-export function computeTargetedAnalysis(
-    activeClaims: EnrichedClaim[],
-    traversalState: TraversalState,
-    graph: TraversalGraph
-): TargetedAnalysis {
-    // Work only on currently active claims
-    const activeIds = new Set(activeClaims.map(c => c.id));
-    const selectedClaimIds = new Set<string>(
-        Array.from(traversalState.resolutions.values())
-            .filter(r => r.type === 'conflict' && !!r.selectedClaimId)
-            .map(r => String(r.selectedClaimId))
-    );
-
-    // 1) Keystones: active claims that many others depend on (cascade size)
-    const keystones: TargetedAnalysis['keystones'] = [];
-
-    // 2) Dissent: active claims that conflict with something the user has chosen
-    const dissent: Array<{ claim: EnrichedClaim; contrastingWith: string }> = [];
-    const selectedIds = Array.from(selectedClaimIds);
-
-    if (selectedIds.length > 0) {
-        for (const e of graph.edges || []) {
-            if (e?.type !== 'conflicts') continue;
-
-            const aSelected = selectedIds.includes(e.from);
-            const bSelected = selectedIds.includes(e.to);
-
-            if (aSelected && activeIds.has(e.to)) {
-                const claim = graph.claims.find(c => c.id === e.to);
-                if (claim) dissent.push({ claim, contrastingWith: e.from });
-            }
-            if (bSelected && activeIds.has(e.from)) {
-                const claim = graph.claims.find(c => c.id === e.from);
-                if (claim) dissent.push({ claim, contrastingWith: e.to });
-            }
-        }
-    }
-
-    // Deduplicate dissent by claim id
-    const seenDissent = new Set<string>();
-    const dedupedDissent = dissent.filter(d => {
-        if (seenDissent.has(d.claim.id)) return false;
-        seenDissent.add(d.claim.id);
-        return true;
-    });
-
-    // 3) Fragile paths: active claims that still depend on unresolved gates
-    const fragilePaths: Array<{ claim: EnrichedClaim; unblockedGate: string }> = [];
-
-    for (const c of activeClaims) {
-        for (const cond of graph.conditionals || []) {
-            if (!Array.isArray(cond?.affectedClaims)) continue;
-            if (!cond.affectedClaims.includes(c.id)) continue;
-            const fpId = String(cond?.id || '').trim();
-            if (!fpId) continue;
-            const resolution = traversalState.resolutions.get(fpId);
-            if (!resolution) {
-                fragilePaths.push({ claim: c, unblockedGate: String(cond?.question || fpId) });
-                break;
-            }
-        }
-    }
-
-    return {
-        keystones,
-        dissent: dedupedDissent,
-        fragilePaths,
-    };
-}
-
-/**
- * Format targeted analysis insights into human-readable notes.
- */
-export function formatTargetedInsights(
-    analysis: TargetedAnalysis,
-    _state: TraversalState
-): string {
-    const notes: string[] = [];
-
-    for (const ks of analysis.keystones) {
-        if (ks.userConfirmed) {
-            notes.push(`⚠️ The "${ks.claim.label}" you confirmed is a keystone — ${ks.dependentCount} claims depend on it`);
-        }
-    }
-
-    for (const d of analysis.dissent) {
-        notes.push(`📊 Dissent exists on "${d.claim.label}" despite your preference for "${d.contrastingWith}"`);
-    }
-
-    for (const fp of analysis.fragilePaths) {
-        notes.push(`⚙️ Fragile path: "${fp.claim.label}" depends on "${fp.unblockedGate}" which you haven't confirmed`);
-    }
-
-    return notes.length > 0
-        ? `<NOTES>\n${notes.join('\n\n')}\n</NOTES>\n\n`
-        : '';
 }
 
 // ===========================================================================

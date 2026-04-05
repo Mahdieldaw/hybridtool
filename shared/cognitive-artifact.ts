@@ -10,7 +10,6 @@ export function buildCognitiveArtifact(
   }
 
   const substrateGraph = pipeline?.substrate?.graph;
-  const traversalGraph = mapper?.traversalGraph;
   const pipelineQuery = pipeline?.query ? { ...pipeline.query } : undefined;
   const rawScores = pipelineQuery?.relevance?.statementScores;
   if (rawScores instanceof Map) {
@@ -28,8 +27,6 @@ export function buildCognitiveArtifact(
         mapper?.shadow?.statements ??
         [],
       paragraphs: pipeline?.paragraphProjection?.paragraphs ?? [],
-      audit: mapper?.shadow?.audit ?? {},
-      delta: pipeline?.shadow?.delta ?? null,
       tableSidecar: pipeline?.shadow?.extraction?.tableSidecar ?? [],
     },
     geometry: {
@@ -38,25 +35,12 @@ export function buildCognitiveArtifact(
       basinInversion: mapper?.basinInversion ?? pipeline?.basinInversion ?? undefined,
       substrate: {
         nodes: substrateGraph?.nodes ?? [],
-        edges: substrateGraph?.edges ?? [],
         mutualEdges: substrateGraph?.mutualEdges ?? [],
-        strongEdges: substrateGraph?.strongEdges ?? [],
-        softThreshold: substrateGraph?.softThreshold,
-        similarityStats: substrateGraph?.similarityStats ?? null,
-        extendedSimilarityStats: substrateGraph?.extendedSimilarityStats ?? null,
-        allPairwiseSimilarities: substrateGraph?.allPairwiseSimilarities ?? null,
       },
       query: pipelineQuery,
       preSemantic: pipeline?.preSemantic
         ? {
           ...pipeline.preSemantic,
-          shapeSignals: {
-            fragmentationScore: pipeline?.substrate?.shape?.signals?.fragmentationScore ?? 1,
-            bimodalityScore: pipeline?.substrate?.shape?.signals?.bimodalityScore ?? 0,
-            parallelScore: pipeline?.substrate?.shape?.signals?.parallelScore ?? 0,
-            convergentScore: pipeline?.substrate?.shape?.signals?.convergentScore ?? 0,
-            confidence: pipeline?.substrate?.shape?.confidence ?? 0,
-          },
           regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
             id: r.id,
             kind: r.kind,
@@ -67,33 +51,12 @@ export function buildCognitiveArtifact(
       diagnostics: mapper?.diagnostics ?? mapper?.structuralValidation ?? undefined,
       structuralValidation: mapper?.structuralValidation ?? undefined,
       convergence: mapper?.convergence ?? undefined,
-      alignment: mapper?.alignment ?? undefined,
     },
     semantic: {
       claims: mapper?.claims ?? [],
       edges: mapper?.edges ?? [],
       conditionals: mapper?.conditionals ?? [],
       narrative: mapper?.narrative,
-
-    },
-    traversal: {
-      forcingPoints: mapper?.forcingPoints ?? [],
-      traversalQuestions: Array.isArray(mapper?.traversalQuestions) ? mapper.traversalQuestions : undefined,
-      graph: traversalGraph
-        ? {
-          claims: traversalGraph.claims ?? [],
-          edges: traversalGraph.edges ?? [],
-          conditionals: traversalGraph.conditionals ?? [],
-          tiers: traversalGraph.tiers ?? [],
-          maxTier: traversalGraph.maxTier ?? 0,
-        }
-        : {
-          claims: [],
-          edges: [],
-          conditionals: [],
-          tiers: [],
-          maxTier: 0,
-        },
     },
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
@@ -111,8 +74,6 @@ export function buildCognitiveArtifact(
   const consumedMapperKeys = new Set([
     // → semantic
     'claims', 'edges', 'conditionals', 'narrative',
-    // → traversal
-    'traversalGraph', 'forcingPoints', 'traversalQuestions',
     // → geometry
     'diagnostics', 'structuralValidation', 'convergence', 'alignment',
     'basinInversion', 'preSemantic',

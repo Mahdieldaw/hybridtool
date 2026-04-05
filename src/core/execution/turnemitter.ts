@@ -54,70 +54,30 @@ interface PreSemanticRegion {
   nodeIds: string[];
 }
 
-interface ForcingPoint {
-  id: string;
-  claimId: string;
-  strength: number;
-}
-
-interface Tension {
-  id: string;
-  claims: string[];
-  severity: number;
-}
-
 interface Narrative {
   summary?: string;
   themes?: string[];
   [key: string]: unknown;
 }
 
-interface ShadowAudit {
-  extractionTime?: number;
-  statementCount?: number;
-  [key: string]: unknown;
-}
-
-interface ShadowDelta {
-  added?: string[];
-  removed?: string[];
-  modified?: string[];
-}
-
 interface CognitiveArtifact {
   shadow: {
     statements: Statement[];
     paragraphs: Paragraph[];
-    audit: ShadowAudit;
-    delta: ShadowDelta | null;
   };
   geometry: {
     embeddingStatus: 'computed' | 'failed';
     substrate: {
       nodes: SubstrateNode[];
-      edges: SubstrateEdge[];
       mutualEdges?: SubstrateEdge[];
-      strongEdges?: SubstrateEdge[];
-      softThreshold?: number;
     };
-    preSemantic?: { shapeSignals: { fragmentationScore: number; bimodalityScore: number; parallelScore: number; confidence: number }; regions?: PreSemanticRegion[] };
+    preSemantic?: { regions?: PreSemanticRegion[] };
   };
   semantic: {
     claims: Claim[];
     edges: SemanticEdge[];
     conditionals: Conditional[];
     narrative?: Narrative;
-  };
-  traversal: {
-    forcingPoints: ForcingPoint[];
-    graph: {
-      claims: Claim[];
-      tensions: Tension[];
-      tiers: number[];
-      maxTier: number;
-      roots: string[];
-      cycles: string[][];
-    };
   };
 }
 
@@ -169,10 +129,6 @@ interface WorkflowControl {
   [key: string]: unknown;
 }
 
-interface TraversalState {
-  [key: string]: unknown;
-}
-
 interface EmitContext {
   sessionId: string;
   userMessage?: string;
@@ -181,7 +137,6 @@ interface EmitContext {
   mappingArtifact?: CognitiveArtifact;
   singularityOutput?: SingularityOutput;
   pipelineStatus?: string;
-  traversalState?: TraversalState;
   workflowControl?: WorkflowControl;
 }
 
@@ -226,7 +181,6 @@ interface AiTurn {
   singularity?: {
     prompt: string;
     output: string;
-    traversalState?: TraversalState;
     timestamp: number;
   };
   meta: {
@@ -517,7 +471,6 @@ export class TurnEmitter {
                 inferredSingularityOutput?.output ??
                 inferredSingularityOutput?.text ??
                 '',
-              traversalState: context?.traversalState,
               timestamp:
                 (typeof (inferredSingularityOutput as any)?.timestamp === 'number'
                   ? (inferredSingularityOutput as any).timestamp

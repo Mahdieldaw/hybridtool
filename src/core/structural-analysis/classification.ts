@@ -6,8 +6,7 @@ import {
     SecondaryPattern,
     StructuralAnalysis,
     GraphAnalysis,
-    CompositeShape,
-    PeakPairRelationship,
+    ProblemStructure,
     KeystonePatternData,
     ChainPatternData
 } from "../../../shared/contract";
@@ -168,50 +167,12 @@ export const detectPrimaryShape = (
     };
 };
 
-export const computePeakPairRelationships = (
-    peaks: EnrichedClaim[],
-    edges: Edge[]
-): PeakPairRelationship[] => {
-    // Pre-index edges by endpoint pairs for O(1) lookup
-    const edgeMap = new Map<string, Edge[]>();
-    for (const edge of edges) {
-        const key = `${edge.from}-${edge.to}`;
-        if (!edgeMap.has(key)) {
-            edgeMap.set(key, []);
-        }
-        edgeMap.get(key)!.push(edge);
-    }
-
-    const relations: PeakPairRelationship[] = [];
-    for (let i = 0; i < peaks.length; i++) {
-        for (let j = i + 1; j < peaks.length; j++) {
-            const a = peaks[i];
-            const b = peaks[j];
-
-            // Look up edges in both directions
-            const forward = edgeMap.get(`${a.id}-${b.id}`) || [];
-            const backward = edgeMap.get(`${b.id}-${a.id}`) || [];
-            const relEdges = [...forward, ...backward];
-
-            relations.push({
-                aId: a.id,
-                bId: b.id,
-                conflicts: relEdges.some(e => e.type === 'conflicts'),
-                tradesOff: relEdges.some(e => e.type === 'tradeoff'),
-                supports: relEdges.some(e => e.type === 'supports'),
-                prerequisites: relEdges.some(e => e.type === 'prerequisite'),
-            });
-        }
-    }
-    return relations;
-};
-
 export const detectCompositeShape = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
     patternsObj: StructuralAnalysis["patterns"]
-): CompositeShape => {
+): ProblemStructure => {
     const peakAnalysis = analyzePeaks(claims, edges);
     const { primary, confidence: primaryConfidence, evidence } = detectPrimaryShape(peakAnalysis);
     const secondaryPatterns = detectAllSecondaryPatterns(
@@ -223,32 +184,20 @@ export const detectCompositeShape = (
         patternsObj
     );
 
-    let peakRelationship: CompositeShape['peakRelationship'] = 'none';
-    const peakPairRelations = computePeakPairRelationships(peakAnalysis.peaks, edges);
-
-    if (peakAnalysis.peaks.length > 1) {
-        if (peakAnalysis.peakConflicts.length > 0) peakRelationship = 'conflicting';
-        else if (peakAnalysis.peakTradeoffs.length > 0) peakRelationship = 'trading-off';
-        else if (peakAnalysis.peakSupports.length > 0) peakRelationship = 'supporting';
-        else if (peakAnalysis.peakUnconnected) peakRelationship = 'independent';
-    }
-
     const patternEvidence = secondaryPatterns.map((p: SecondaryPattern) => {
         switch (p.type) {
             case 'dissent':
-                return `⚡ Minority voice with potential insight`;
+                return `Minority voice with potential insight`;
             case 'challenged':
-                return `⚠️ Dominant position under challenge`;
+                return `Dominant position under challenge`;
             case 'keystone':
-                return `🔑 Structure depends on "${(p.data as KeystonePatternData).keystone.label}"`;
+                return `Structure depends on "${(p.data as KeystonePatternData).keystone.label}"`;
             case 'chain':
-                return `⛓️ ${(p.data as ChainPatternData).length}-step dependency chain`;
+                return `${(p.data as ChainPatternData).length}-step dependency chain`;
             case 'fragile':
-                return `🧊 Peak(s) on weak foundations`;
+                return `Peak(s) on weak foundations`;
             case 'conditional':
-                return `🔀 Context-dependent branches`;
-            case 'orphaned':
-                return `🏝️ Isolated high-support claim(s)`;
+                return `Context-dependent branches`;
             default:
                 return null;
         }
@@ -258,13 +207,6 @@ export const detectCompositeShape = (
         primary,
         confidence: primaryConfidence,
         patterns: secondaryPatterns,
-        peaks: peakAnalysis.peaks.map(p => ({
-            id: p.id,
-            label: p.label,
-            supportRatio: p.supportRatio
-        })),
-        peakRelationship,
-        peakPairRelations,
         evidence: [...evidence, ...patternEvidence],
     };
 };

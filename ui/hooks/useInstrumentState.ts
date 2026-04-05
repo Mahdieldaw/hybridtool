@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo } from "react";
 export type PipelineLayer =
   | 'substrate' | 'mutual-graph' | 'basin-inversion' | 'query-relevance'
   | 'competitive-provenance' | 'claim-statements'
-  | 'model-ordering' | 'blast-radius' | 'alignment' | 'raw-artifacts'
+  | 'blast-radius' | 'raw-artifacts'
   | 'provenance-comparison' | 'mixed-provenance' | 'traversal-pruning'
   | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions'
   | 'stmt-classification';

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { AiTurn } from '../../../shared/contract';
 import MarkdownDisplay from '../MarkdownDisplay';
-import { ShadowAuditView } from './ShadowAuditView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CopyButton } from '../CopyButton';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
@@ -282,8 +281,6 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                 </div>
             )}
 
-            {/* Shadow Audit (Debug) */}
-            <ShadowAuditView />
         </div>
     );
 };

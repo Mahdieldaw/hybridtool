@@ -13,55 +13,35 @@ function formatPct(value: number): string {
 }
 
 /**
- * Pipeline gates — Step 7 rewire.
- *
- * Gates now key off mutual recognition structure:
- *   1. Mutual recognition edge count > 0
- *   2. Discrimination range (P90-P10) ≥ 0.10
- *   3. Node participation > 5% (nodes with mutual recognition edges / total)
+ * Pipeline gates — derived inline from mutualRankGraph + pairwiseField.
  *
  * Verdicts:
- *   skip_geometry       — degenerate substrate OR no mutual recognition edges OR discrimination < 0.10
- *   trivial_convergence — largest component > 85% with high model diversity and low isolation
- *   insufficient_structure — >70% isolated (no mutual recognition edges) and no components > 2
- *   proceed             — normal
+ *   skip_geometry           — degenerate OR no mutual recognition edges OR discrimination < 0.10
+ *   insufficient_structure  — >70% isolated and edge count trivially low
+ *   proceed                 — normal
  */
 export function evaluatePipelineGates(substrate: GeometricSubstrate): PipelineGateResult {
-    const nodeCount = substrate.meta.nodeCount ?? substrate.nodes.length;
-    const topology = substrate.topology;
-    const components = Array.isArray(topology.components) ? topology.components : [];
-    const largestComponent = components.length > 0 ? components[0] : null;
+    const nodeCount = substrate.meta.nodeCount;
+    const maxPossibleEdges = nodeCount > 1 ? (nodeCount * (nodeCount - 1)) / 2 : 0;
 
-    const observedModels = new Set<number>();
-    const modelIndexByParagraphId = new Map<string, number>();
-    for (const n of substrate.nodes) {
-        observedModels.add(n.modelIndex);
-        modelIndexByParagraphId.set(n.paragraphId, n.modelIndex);
+    const edgeCount = substrate.mutualRankGraph.edges.length;
+    const discriminationRange = substrate.pairwiseField.stats.discriminationRange;
+
+    // Isolation: fraction of nodes with zero mutual recognition edges
+    let isolatedCount = 0;
+    for (const ns of substrate.mutualRankGraph.nodeStats.values()) {
+        if (ns.isolated) isolatedCount++;
     }
-    const totalModels = observedModels.size;
-
-    const largestComponentModelIndices = new Set<number>();
-    if (largestComponent) {
-        for (const pid of largestComponent.nodeIds) {
-            const mi = modelIndexByParagraphId.get(pid);
-            if (typeof mi === 'number') largestComponentModelIndices.add(mi);
-        }
-    }
-
-    const largestComponentRatio = typeof topology.largestComponentRatio === 'number' ? topology.largestComponentRatio : 0;
-    const isolationRatio = typeof topology.isolationRatio === 'number' ? topology.isolationRatio : 0;
-    const maxComponentSize = largestComponent?.size ?? 0;
-    const largestComponentModelDiversityRatio =
-        totalModels > 0 ? largestComponentModelIndices.size / totalModels : 0;
+    const isolationRatio = nodeCount > 0 ? isolatedCount / nodeCount : 1;
+    const density = maxPossibleEdges > 0 ? edgeCount / maxPossibleEdges : 0;
 
     const measurements: PipelineGateResult['measurements'] = {
         isDegenerate: isDegenerate(substrate),
-        largestComponentRatio,
-        largestComponentModelDiversityRatio,
         isolationRatio,
-        maxComponentSize,
+        edgeCount,
+        density,
+        discriminationRange,
         nodeCount,
-        participationRate: 0, // will be set below
     };
 
     if (measurements.isDegenerate) {
@@ -74,32 +54,19 @@ export function evaluatePipelineGates(substrate: GeometricSubstrate): PipelineGa
     }
 
     const evidence: string[] = [];
-
-    // ── Step 7 gate signals ──────────────────────────────────────────────
-    const mutualRecognitionEdgeCount = substrate.mutualRankGraph?.edges.length ?? 0;
-    const discriminationRange = substrate.pairwiseField?.stats?.discriminationRange ?? 0;
-    const participationRate = nodeCount > 0 ? (1 - isolationRatio) : 0; // fraction with mutual recognition edges
-
-    // update measurements
-    measurements.participationRate = participationRate;
-
-    evidence.push(`mutual_recognition_edges=${mutualRecognitionEdgeCount}`);
+    evidence.push(`mutual_recognition_edges=${edgeCount}`);
     evidence.push(`discrimination_range=${discriminationRange.toFixed(3)}`);
-    evidence.push(`participation_rate=${formatPct(participationRate)}`);
-    evidence.push(`largest_component=${formatPct(largestComponentRatio)}_of_nodes`);
-    if (totalModels > 0) {
-        evidence.push(`model_diversity_in_largest=${largestComponentModelIndices.size}/${totalModels}`);
-    }
     evidence.push(`isolation_ratio=${formatPct(isolationRatio)}`);
+    evidence.push(`density=${density.toFixed(4)}`);
 
     // Skip geometry if no mutual recognition structure or insufficient discrimination
-    if (mutualRecognitionEdgeCount === 0 || discriminationRange < 0.10) {
+    if (edgeCount === 0 || discriminationRange < 0.10) {
         return {
             verdict: 'skip_geometry',
             confidence: 0.9,
             evidence: [
                 ...evidence,
-                mutualRecognitionEdgeCount === 0
+                edgeCount === 0
                     ? 'no_mutual_recognition_edges'
                     : `discrimination_range_below_floor(${discriminationRange.toFixed(3)}<0.10)`,
             ],
@@ -107,56 +74,21 @@ export function evaluatePipelineGates(substrate: GeometricSubstrate): PipelineGa
         };
     }
 
-    // If participation is extremely low (< 5%) treat as insufficient structure (spurious dyads)
-    if (participationRate < 0.05) {
-        // Few nodes participate: a handful of edges in an otherwise empty field is not reliable structure
-        const confidence = 0.6;
-        return {
-            verdict: 'insufficient_structure',
-            confidence,
-            evidence: [...evidence, `participation_below_floor(${formatPct(participationRate)}<5%)`],
-            measurements,
-        };
-    }
-
-    // Trivial convergence (uses mutual recognition topology)
-    const isTrivialConvergence =
-        largestComponentRatio > 0.85 &&
-        largestComponentModelDiversityRatio > 0.8 &&
-        isolationRatio < 0.1;
-
-    if (isTrivialConvergence) {
-        const a = clamp01((largestComponentRatio - 0.85) / 0.15);
-        const b = clamp01((largestComponentModelDiversityRatio - 0.8) / 0.2);
-        const c = clamp01((0.1 - isolationRatio) / 0.1);
-        const confidence = clamp01((a + b + c) / 3);
-
-        return {
-            verdict: 'trivial_convergence',
-            confidence,
-            evidence,
-            measurements,
-        };
-    }
-
-    const hasComponentSizeAboveTwo = components.some(c => (c?.size ?? 0) > 2);
-    const isInsufficientStructure = isolationRatio > 0.7 && !hasComponentSizeAboveTwo;
-
-    if (isInsufficientStructure) {
+    // Insufficient structure: most nodes isolated, trivial edge count
+    if (isolationRatio > 0.7) {
         const confidence = clamp01((isolationRatio - 0.7) / 0.3);
         return {
             verdict: 'insufficient_structure',
             confidence,
-            evidence,
+            evidence: [...evidence, `isolation_above_threshold(${formatPct(isolationRatio)}>70%)`],
             measurements,
         };
     }
 
-    // Proceed confidence based on mutual recognition density and connectivity
-    const mutualRecognitionDensity = typeof topology.globalStrongDensity === 'number' ? topology.globalStrongDensity : 0;
+    // Proceed
     const proceedConfidence = clamp01(
         0.25 +
-        clamp01(mutualRecognitionDensity / 0.35) * 0.45 +
+        clamp01(density / 0.35) * 0.45 +
         clamp01((1 - isolationRatio) / 0.9) * 0.3
     );
 

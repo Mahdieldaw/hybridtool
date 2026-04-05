@@ -13,7 +13,7 @@
  * - rateLimitUntil: dynamic timestamp for 429 exponential back-off
  */
 
-import { isProviderAuthError, isRateLimitError } from '../utils/error-classification.ts';
+import { isProviderAuthError, isRateLimitError } from './error-classifier';
 
 // Exponential back-off for rate limits: 5s → 10s → 20s → 40s, capped at 60s
 const RATE_LIMIT_BACKOFF_BASE_MS = 5000;

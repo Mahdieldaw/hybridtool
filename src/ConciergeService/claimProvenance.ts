@@ -3,10 +3,10 @@ import type { EnrichedClaim } from '../../shared/contract';
 /**
  * Claim Provenance Utilities
  *
- * Three pure structural measurements over claims and their source statements.
- * No geometry, no semantic interpretation — set membership and set overlap only.
+ * Two pure structural measurements over claims and their source statements.
+ * No geometry, no semantic interpretation — set membership only.
  *
- * All three require claims with sourceStatementIds (post-mapper).
+ * Both require claims with sourceStatementIds (post-mapper).
  * Primary consumer: triage / synthesis. Secondary: debug panel.
  */
 
@@ -81,55 +81,3 @@ export function computeClaimExclusivity(
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// 3. Claim overlap — pairwise Jaccard on full source statement sets.
-//    High Jaccard = near-duplicate claims by provenance (independent of semantic content).
-//    Only pairs with jaccard > 0 are returned, sorted descending.
-// ---------------------------------------------------------------------------
-
-export interface ClaimOverlapEntry {
-    claimA: string;
-    claimB: string;
-    jaccard: number;
-}
-
-function jaccard(a: Set<string>, b: Set<string>): number {
-    if (a.size === 0 && b.size === 0) return 1;
-    if (a.size === 0 || b.size === 0) return 0;
-    const small = a.size <= b.size ? a : b;
-    const large = a.size <= b.size ? b : a;
-    let inter = 0;
-    for (const x of small) if (large.has(x)) inter++;
-    const union = a.size + b.size - inter;
-    return union > 0 ? inter / union : 0;
-}
-
-export function computeClaimOverlap(
-    claims: EnrichedClaim[]
-): ClaimOverlapEntry[] {
-    const sourceSets = new Map<string, Set<string>>();
-    for (const c of claims) {
-        const claimId = String((c as any)?.id || '').trim();
-        if (!claimId) continue;
-        const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
-            ? (c as any).sourceStatementIds
-            : [];
-        sourceSets.set(claimId, new Set(
-            sourceIds.map((s: any) => String(s || '').trim()).filter(Boolean)
-        ));
-    }
-
-    const ids = Array.from(sourceSets.keys());
-    const result: ClaimOverlapEntry[] = [];
-    for (let i = 0; i < ids.length; i++) {
-        const a = ids[i];
-        const setA = sourceSets.get(a)!;
-        for (let j = i + 1; j < ids.length; j++) {
-            const b = ids[j];
-            const sim = jaccard(setA, sourceSets.get(b)!);
-            if (sim > 0) result.push({ claimA: a, claimB: b, jaccard: sim });
-        }
-    }
-    result.sort((a, b) => b.jaccard - a.jaccard);
-    return result;
-}

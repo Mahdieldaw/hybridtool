@@ -35,14 +35,8 @@ export interface EvidenceRow {
   routeCategory: 'conflict' | 'isolate' | 'passthrough' | null;
   queryDistance: number | null;
 
-  // Density
-  semanticDensity: number | null;  // statement-level z-scored OLS residual magnitude
-  densityDelta: number | null;     // statement density minus claim density (positive = statement denser than claim)
-  densityLift: number | null;      // claim's densityLift (constant for all rows under this claim)
-  queryDensity: number | null;     // query embedding density (single scalar, same for all rows — reference)
-
   // Metadata
-  fate: 'primary' | 'supporting' | 'unaddressed' | 'orphan' | 'noise' | null;
+  fate: 'primary' | 'supporting' | 'unclaimed' | null;
   stance: string | null;
   confidence: number;
   isExclusive: boolean;
@@ -126,40 +120,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     if (!artifact) return null;
     const a = artifact;
     const citationSourceOrder = a?.citationSourceOrder ?? a?.meta?.citationSourceOrder ?? null;
-    const completeness = a?.completeness ?? a?.derived?.completeness ?? null;
-
     const queryScoreByStmt = new Map<string, number>();
     const queryScores = a?.geometry?.query?.relevance?.statementScores;
     for (const [stmtId, val] of normalizeEntries(queryScores)) {
       const qs = typeof val === "number" ? val : (val as any)?.querySimilarity;
       if (typeof qs === "number" && Number.isFinite(qs)) queryScoreByStmt.set(String(stmtId), qs);
-    }
-
-    const fateByStmt = new Map<string, { fate: string; claimIds: string[] }>();
-    const statementFates = completeness?.statementFates;
-    for (const [stmtId, val] of normalizeEntries(statementFates)) {
-      const fate = (val as any)?.fate;
-      const claimIds = (val as any)?.claimIds ?? [];
-      if (fate) fateByStmt.set(String(stmtId), { fate, claimIds: Array.isArray(claimIds) ? claimIds : [] });
-    }
-
-    const semanticDensityByStmt = new Map<string, number>();
-    const rawDensity = a?.statementSemanticDensity;
-    if (rawDensity && typeof rawDensity === 'object') {
-      for (const [k, v] of Object.entries(rawDensity)) {
-        if (typeof v === 'number' && Number.isFinite(v)) semanticDensityByStmt.set(String(k), v);
-      }
-    }
-
-    const rawQueryDensity = a?.querySemanticDensity;
-    const queryDensity: number | null = typeof rawQueryDensity === 'number' && Number.isFinite(rawQueryDensity) ? rawQueryDensity : null;
-
-    const claimDensityMap = new Map<string, number>();
-    const rawClaimDensity = a?.claimSemanticDensity;
-    if (rawClaimDensity && typeof rawClaimDensity === 'object') {
-      for (const [k, v] of Object.entries(rawClaimDensity)) {
-        if (typeof v === 'number' && Number.isFinite(v)) claimDensityMap.set(String(k), v);
-      }
     }
 
     const bsScores: any[] = Array.isArray(a?.blastSurface?.scores) ? a.blastSurface.scores : [];
@@ -226,10 +191,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
     return {
       queryScoreByStmt,
-      fateByStmt,
-      semanticDensityByStmt,
-      queryDensity,
-      claimDensityMap,
       citationSourceOrder,
       bsScores,
       twinMapPerClaim,
@@ -291,14 +252,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       for (const id of excl) exclusiveIds.add(String(id));
     }
 
-    const claimDensityRaw = typeof claimObj?.density === 'number' && Number.isFinite(claimObj.density)
-      ? claimObj.density as number
-      : null;
-
-    const densityLiftForClaim = typeof claimObj?.densityLift === 'number' && Number.isFinite(claimObj.densityLift)
-      ? claimObj.densityLift as number
-      : null;
-
     // Claim density: paragraph coverage + passage membership for this claim
     const cdProfile = a?.claimDensity?.profiles?.[selectedClaimId] ?? null;
     const paraCoverageByPara = new Map<string, number>();
@@ -326,8 +279,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       mixedByStmt,
       exclusiveIds,
       directTopIds,
-      claimDensityRaw,
-      densityLiftForClaim,
       paraCoverageByPara,
       passageLenByPara,
       inPassageParas,
@@ -339,7 +290,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const a = artifact;
     const statements: any[] = normalizeShadowStatements(a?.shadow?.statements);
 
-    const routing = a?.claimRouting ?? null;
+    const routing = a?.passageRouting?.routing ?? null;
     const routeCategory: EvidenceRow['routeCategory'] = (() => {
       if (!selectedClaimId || !routing) return null;
       const inConflict = Array.isArray(routing?.conflictClusters)
@@ -374,9 +325,12 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
       // Global fields
       const sim_query = globalMaps?.queryScoreByStmt.get(stmtId) ?? null;
-      const semanticDensity = globalMaps?.semanticDensityByStmt.get(stmtId) ?? null;
-      const fateEntry = globalMaps?.fateByStmt.get(stmtId) ?? null;
-      const fate = (fateEntry?.fate as EvidenceRow['fate']) ?? null;
+      const scEntry = (globalMaps?.scClaimed.has(stmtId))
+        ? (a?.statementClassification?.claimed?.[stmtId] ?? null)
+        : null;
+      const fate: EvidenceRow['fate'] = scEntry
+        ? (Array.isArray(scEntry.claimIds) && scEntry.claimIds.length >= 2 ? 'supporting' : 'primary')
+        : (stmtId ? 'unclaimed' : null);
 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
@@ -431,15 +385,6 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
         routeCategory,
         queryDistance,
-
-        semanticDensity,
-        densityDelta: (() => {
-          if (semanticDensity == null || !selectedClaimId) return null;
-          const cd = globalMaps?.claimDensityMap.get(selectedClaimId) ?? claimMaps?.claimDensityRaw ?? null;
-          return cd != null ? semanticDensity - cd : null;
-        })(),
-        densityLift: claimMaps?.densityLiftForClaim ?? null,
-        queryDensity: globalMaps?.queryDensity ?? null,
 
         fate,
         stance: typeof stmt.stance === 'string' ? stmt.stance : null,

@@ -125,19 +125,8 @@ export class WorkflowEngine {
         );
 
         if (haltReason) {
-          if (haltReason === "awaiting_traversal") {
-            this._safePostMessage({
-              type: "WORKFLOW_COMPLETE",
-              sessionId: context.sessionId,
-              workflowId: request.workflowId,
-              finalResults: Object.fromEntries(stepResults),
-              haltReason,
-            });
-            return;
-          } else {
-            await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
-            return;
-          }
+          await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
+          return;
         }
       }
 
@@ -370,11 +359,6 @@ export class WorkflowEngine {
       }
     }
 
-    // Singularity step handles its own orchestration — halt only for traversal pause
-    if (step.type === 'singularity' && result === "awaiting_traversal") {
-      return "awaiting_traversal";
-    }
-
     return null;
   }
 
@@ -466,7 +450,6 @@ export class WorkflowEngine {
       ? {
         prompt: singularity?.prompt || "",
         output: singularity?.output || singularity?.text || "",
-        traversalState: context.traversalState,
         timestamp: Number(singularity?.timestamp) || Date.now(),
       }
       : undefined;

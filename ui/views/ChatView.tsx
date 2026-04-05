@@ -9,7 +9,6 @@ import {
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
   chatInputHeightAtom,
-  useWorkspaceViewAtom,
   readingPanelOpenAtom,
   __scaffold__editorialSurfaceOpenAtom,
 } from "../state/atoms";
@@ -31,10 +30,6 @@ const CouncilOrbsVertical = safeLazy(() => import("../components/CouncilOrbsVert
 // Uses safeLazy for robust loading
 const DecisionMapSheet = safeLazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
-);
-
-const WorkspaceShell = safeLazy(() =>
-  import("../components/workspace/WorkspaceShell").then(m => ({ default: m.WorkspaceShell }))
 );
 
 const ReadingPanel = safeLazy(() =>
@@ -59,7 +54,6 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-  const useWorkspaceMode = useAtomValue(useWorkspaceViewAtom);
   const isReadingPanelOpen = useAtomValue(readingPanelOpenAtom);
   const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
   const isEditorialOpen = useAtomValue(__scaffold__editorialSurfaceOpenAtom);
@@ -290,16 +284,10 @@ export default function ChatView() {
         />
       )}
 
-      {/* Decision Map / Workspace — only one renders at a time */}
-      {useWorkspaceMode ? (
-        <Suspense fallback={null}>
-          <WorkspaceShell />
-        </Suspense>
-      ) : (
-        <Suspense fallback={null}>
-          <DecisionMapSheet />
-        </Suspense>
-      )}
+      {/* Decision Map */}
+      <Suspense fallback={null}>
+        <DecisionMapSheet />
+      </Suspense>
 
       <div
         className={clsx(

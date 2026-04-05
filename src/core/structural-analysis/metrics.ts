@@ -3,113 +3,31 @@ import {
     Edge,
     EnrichedClaim,
     CascadeRisk,
-    CoreRatios
 } from "../../../shared/contract";
 import {
-    getTopNCount,
     isInBottomPercentile,
     isHubLoadBearing
 } from "./utils";
 
-// AUDIT: computeCoreRatios — DECORATIVE
-// Returns concentration, alignment, tension, fragmentation, depth.
-// As of this audit, no UI component or downstream consumer reads `ratios` from
-// the StructuralAnalysis object. The context-resolver discards it; StepExecutor
-// diagnostics don't reference it; no UI component destructures it.
-// These ratios are candidates for removal once positionBrief/synthesisPrompt are
-// reconnected — at that point they could feed the synthesis layer meaningfully.
-// DO NOT REMOVE YET: retain as documented placeholders for the reconnection phase.
-export const computeCoreRatios = (
-    claims: EnrichedClaim[],
-    edges: Edge[],
-    graph: { componentCount: number; longestChain: string[] },
-    modelCount: number
-): CoreRatios => {
-    const claimCount = claims.length;
-    const edgeCount = edges.length;
-
-    const maxSupport = Math.max(...claims.map(c => c.supporters.length), 0);
-    const concentration = modelCount > 0 ? maxSupport / modelCount : 0;
-
-    const topCount = getTopNCount(claimCount, 0.3);
-    const sortedBySupport = [...claims].sort((a, b) => b.supporters.length - a.supporters.length);
-    const topIds = new Set(sortedBySupport.slice(0, topCount).map(c => c.id));
-
-    const topEdges = edges.filter(e => topIds.has(e.from) && topIds.has(e.to));
-    const reinforcingEdges = topEdges.filter(e =>
-        e.type === "supports" || e.type === "prerequisite"
-    ).length;
-
-    const alignment = topEdges.length > 0
-        ? reinforcingEdges / topEdges.length
-        : null;
-
-    const tensionEdges = edges.filter(e =>
-        e.type === "conflicts" || e.type === "tradeoff"
-    ).length;
-    const tension = edgeCount > 0 ? tensionEdges / edgeCount : 0;
-
-    const fragmentation = claimCount > 1
-        ? (graph.componentCount - 1) / (claimCount - 1)
-        : 0;
-
-    const depth = claimCount > 0
-        ? graph.longestChain.length / claimCount
-        : 0;
-
-    return { concentration, alignment, tension, fragmentation, depth };
-};
-
 export const computeLandscapeMetrics = (input: { claims: Claim[]; modelCount?: number }): {
-    dominantType: Claim["type"];
-    typeDistribution: Record<string, number>;
-    dominantRole: Claim["role"];
-    roleDistribution: Record<string, number>;
-    claimCount: number;
     modelCount: number;
-    convergenceRatio: number;
 } => {
     const claims = Array.isArray(input?.claims) ? input.claims : [];
-
-    const typeDistribution: Record<string, number> = {};
-    const roleDistribution: Record<string, number> = {};
     const supporterSet = new Set<number>();
-
     for (const c of claims) {
         if (!c) continue;
-        typeDistribution[c.type] = (typeDistribution[c.type] || 0) + 1;
-        if (c.role) roleDistribution[c.role] = (roleDistribution[c.role] || 0) + 1;
         if (Array.isArray(c.supporters)) {
             for (const s of c.supporters) {
                 if (typeof s === "number") supporterSet.add(s);
             }
         }
     }
-
-    const dominantType = (Object.entries(typeDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "prescriptive") as Claim["type"];
-    const dominantRole = (Object.entries(roleDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "anchor") as Claim["role"];
-
     const explicitModelCount = input?.modelCount;
-
     const modelCount =
         typeof explicitModelCount === "number" && explicitModelCount > 0
             ? explicitModelCount
             : supporterSet.size > 0 ? supporterSet.size : 1;
-
-    const topThreshold = getTopNCount(claims.length, 0.3);
-    const sortedBySupport = [...claims].sort((a, b) => (b.supporters?.length || 0) - (a.supporters?.length || 0));
-    const topSupportLevel = sortedBySupport[topThreshold - 1]?.supporters?.length || 1;
-    const convergentClaims = claims.filter((c) => (c.supporters?.length || 0) >= topSupportLevel);
-
-    return {
-        dominantType,
-        typeDistribution,
-        dominantRole,
-        roleDistribution,
-        claimCount: claims.length,
-        modelCount,
-        convergenceRatio: claims.length > 0 ? convergentClaims.length / claims.length : 0,
-    };
+    return { modelCount };
 };
 
 export const computeClaimRatios = (
@@ -203,13 +121,10 @@ export const assignPercentileFlags = (
         const isHighSupport = topClaimIds.has(claim.id);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);
 
-        // isLeverageInversion: structurally active (has outgoing edges or conflict edges) but low support
         const isLeverageInversion = isLowSupport && (claim.outDegree >= 2 || claim.conflictEdgeCount >= 1);
 
-        // isKeystone: outgoing connections + high support + structurally load-bearing hub
         const isKeystone = claim.outDegree >= 2 && isHighSupport && isHubLoadBearing(claim.id, edges);
 
-        // isOutlier: single-model support with narrow supporter base
         const distinctModelCount = new Set(claim.supporters.map(String)).size;
         const isOutlier = claim.supporters.length <= 2 && distinctModelCount === 1;
 

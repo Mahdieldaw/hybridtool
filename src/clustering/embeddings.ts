@@ -12,10 +12,28 @@
 
 import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
 import type { ShadowStatement } from '../shadow/ShadowExtractor';
-import type { EmbeddingResult, StatementEmbeddingResult, TextEmbeddingResult } from './types';
-import type { DensityRegressionModel } from './semanticDensity';
-import { ClusteringConfig, DEFAULT_CONFIG } from './config';
-import { computeSemanticDensityScores, projectSemanticDensity } from './semanticDensity';
+import { EmbeddingConfig, DEFAULT_CONFIG } from './config';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMBEDDING RESULT TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface EmbeddingResult {
+    embeddings: Map<string, Float32Array>;  // paragraphId -> embedding
+    dimensions: number;
+    timeMs: number;
+}
+
+export interface StatementEmbeddingResult {
+    embeddings: Map<string, Float32Array>;  // statementId -> embedding
+    dimensions: number;
+    statementCount: number;
+    timeMs: number;
+}
+
+export interface TextEmbeddingResult {
+    embeddings: Map<string, Float32Array>;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STRUCTURED TRUNCATION (query relevance embedding path)
@@ -251,7 +269,6 @@ async function decodeEmbeddingsResultAsync(
     ids: string[],
     expectedDims: number,
     label: string,
-    rawMagnitudesOut?: Map<string, number>
 ): Promise<Map<string, Float32Array>> {
     const dims = Number(result?.dimensions) || expectedDims;
     if (dims < expectedDims) {
@@ -281,11 +298,6 @@ async function decodeEmbeddingsResultAsync(
             const end = start + expectedDims;
             const row = new Float32Array(expectedDims);
             row.set(floats.subarray(start, end));
-            if (rawMagnitudesOut) {
-                let sqSum = 0;
-                for (let d = 0; d < row.length; d++) sqSum += row[d] * row[d];
-                rawMagnitudesOut.set(ids[i], Math.sqrt(sqSum));
-            }
             embeddings.set(ids[i], normalizeEmbedding(row) as Float32Array<ArrayBuffer>);
         }
         return embeddings;
@@ -305,11 +317,6 @@ async function decodeEmbeddingsResultAsync(
 
         const truncatedData = rawData.slice(0, expectedDims);
         const emb = new Float32Array(truncatedData);
-        if (rawMagnitudesOut) {
-            let sqSum = 0;
-            for (let d = 0; d < emb.length; d++) sqSum += emb[d] * emb[d];
-            rawMagnitudesOut.set(ids[i], Math.sqrt(sqSum));
-        }
         embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
     }
     return embeddings;
@@ -324,7 +331,7 @@ async function decodeEmbeddingsResultAsync(
 export async function generateEmbeddings(
     paragraphs: ShadowParagraph[],
     shadowStatements: ShadowStatement[],
-    config: ClusteringConfig = DEFAULT_CONFIG
+    config: EmbeddingConfig = DEFAULT_CONFIG
 ): Promise<EmbeddingResult> {
     await ensureOffscreen();
 
@@ -364,15 +371,11 @@ export async function generateEmbeddings(
                 (async () => {
                     try {
                         const expectedDims = config.embeddingDimensions;
-                        const rawMagnitudes = new Map<string, number>();
-                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'paragraph', rawMagnitudes);
-                        const textLengths = new Map<string, number>(ids.map((id, i) => [id, texts[i].length]));
-                        const { scores: semanticDensityScores } = computeSemanticDensityScores(rawMagnitudes, textLengths);
+                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'paragraph');
                         resolve({
                             embeddings,
                             dimensions: expectedDims,
                             timeMs: response.result.timeMs,
-                            semanticDensityScores,
                         });
                     } catch (e) {
                         reject(e instanceof Error ? e : new Error(String(e)));
@@ -385,13 +388,11 @@ export async function generateEmbeddings(
 
 export async function generateTextEmbeddings(
     texts: string[],
-    config: ClusteringConfig = DEFAULT_CONFIG,
-    options?: { densityModel?: DensityRegressionModel; captureRawMagnitudes?: boolean }
+    config: EmbeddingConfig = DEFAULT_CONFIG,
 ): Promise<TextEmbeddingResult> {
     await ensureOffscreen();
 
     const ids = texts.map((_, idx) => String(idx));
-    const needMagnitudes = options?.captureRawMagnitudes || options?.densityModel != null;
 
     return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(
@@ -419,22 +420,8 @@ export async function generateTextEmbeddings(
                 (async () => {
                     try {
                         const expectedDims = config.embeddingDimensions;
-                        const rawMagnitudes = needMagnitudes ? new Map<string, number>() : undefined;
-                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'text', rawMagnitudes);
-                        const textLengths = needMagnitudes
-                            ? new Map<string, number>(ids.map((id, i) => [id, texts[i].length]))
-                            : undefined;
-
-                        let semanticDensityScores: Map<string, number> | undefined;
-                        if (options?.densityModel && rawMagnitudes && textLengths) {
-                            semanticDensityScores = new Map<string, number>();
-                            for (const [id, mag] of rawMagnitudes) {
-                                const len = textLengths.get(id) ?? 1;
-                                semanticDensityScores.set(id, projectSemanticDensity(mag, len, options.densityModel));
-                            }
-                        }
-
-                        resolve({ embeddings, semanticDensityScores, rawMagnitudes, textLengths });
+                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'text');
+                        resolve({ embeddings });
                     } catch (e) {
                         reject(e instanceof Error ? e : new Error(String(e)));
                     }
@@ -456,7 +443,7 @@ export async function generateTextEmbeddings(
  */
 export async function generateStatementEmbeddings(
     statements: ShadowStatement[],
-    config: ClusteringConfig = DEFAULT_CONFIG
+    config: EmbeddingConfig = DEFAULT_CONFIG
 ): Promise<StatementEmbeddingResult> {
     await ensureOffscreen();
 
@@ -490,19 +477,12 @@ export async function generateStatementEmbeddings(
                 (async () => {
                     try {
                         const expectedDims = config.embeddingDimensions;
-                        const rawMagnitudes = new Map<string, number>();
-                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'statement', rawMagnitudes);
-                        const textLengths = new Map<string, number>(
-                            statements.map((s, i) => [s.id, texts[i].length])
-                        );
-                        const { scores: semanticDensityScores, model: densityRegressionModel } = computeSemanticDensityScores(rawMagnitudes, textLengths);
+                        const embeddings = await decodeEmbeddingsResultAsync(response.result, ids, expectedDims, 'statement');
                         resolve({
                             embeddings,
                             dimensions: expectedDims,
                             statementCount: ids.length,
                             timeMs: performance.now() - startTime,
-                            semanticDensityScores,
-                            densityRegressionModel,
                         });
                     } catch (e) {
                         reject(e instanceof Error ? e : new Error(String(e)));

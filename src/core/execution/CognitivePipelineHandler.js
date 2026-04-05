@@ -37,120 +37,7 @@ export class CognitivePipelineHandler {
       // Store cognitive artifact on context
       context.mappingArtifact = mappingArtifact;
 
-      // ══════════════════════════════════════════════════════════════════
-      // TRAVERSAL GATING CHECK (Pipeline Pause)
-      // ══════════════════════════════════════════════════════════════════
-        const hasTraversalGraph = !!mappingArtifact?.traversal?.graph;
-      const hasForcingPoints =
-        Array.isArray(mappingArtifact?.traversal?.forcingPoints) && mappingArtifact.traversal.forcingPoints.length > 0;
-      const isTraversalContinuation = request?.isTraversalContinuation || context?.isTraversalContinuation;
-      const shouldPauseForTraversal = hasTraversalGraph && hasForcingPoints;
-
-      if (shouldPauseForTraversal && !isTraversalContinuation) {
-        console.log("[CognitiveHandler] Traversal detected with conflicts. Pausing pipeline for user input.");
-
-        const aiTurnId = context.canonicalAiTurnId;
-        try {
-          let batchPhase = undefined;
-          try {
-            const priorResponses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurnId);
-            const buckets = { batchResponses: {} };
-            for (const r of priorResponses || []) {
-              if (!r || r.responseType !== "batch" || !r.providerId) continue;
-              const entry = {
-                providerId: r.providerId,
-                text: r.text || "",
-                status: r.status || "completed",
-                createdAt: r.createdAt || Date.now(),
-                updatedAt: r.updatedAt || r.createdAt || Date.now(),
-                meta: r.meta || {},
-                responseIndex: r.responseIndex ?? 0,
-              };
-              (buckets.batchResponses[r.providerId] ||= []).push(entry);
-            }
-            for (const pid of Object.keys(buckets.batchResponses)) {
-              buckets.batchResponses[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-            }
-            batchPhase = Object.keys(buckets.batchResponses || {}).length > 0
-              ? {
-                responses: Object.fromEntries(
-                  Object.entries(buckets.batchResponses).map(([pid, arr]) => {
-                    const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
-                    return [
-                      pid,
-                      {
-                        text: last?.text || "",
-                        modelIndex: last?.meta?.modelIndex || last?.responseIndex || 0,
-                        status: last?.status || "completed",
-                        meta: last?.meta,
-                      },
-                    ];
-                  }),
-                ),
-              }
-              : undefined;
-          } catch (_) { }
-
-          // Tier 3: artifact is ephemeral — persist only status + metadata.
-          const mapperProviderId = mappingResult?.providerId || context?.mappingProvider || null;
-
-          const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
-          if (currentAiTurn) {
-            currentAiTurn.pipelineStatus = 'awaiting_traversal';
-            if (!currentAiTurn.batch && batchPhase) {
-              currentAiTurn.batch = batchPhase;
-            }
-            if (mapperProviderId) {
-              currentAiTurn.meta = { ...(currentAiTurn.meta || {}), mapper: mapperProviderId };
-            }
-            await this.sessionManager.adapter.put("turns", currentAiTurn);
-          }
-
-          const aiTurnForMessage = currentAiTurn
-            ? { ...currentAiTurn, pipelineStatus: 'awaiting_traversal' }
-            : {
-              id: aiTurnId,
-              type: "ai",
-              userTurnId: context.canonicalUserTurnId,
-              sessionId: context.sessionId,
-              threadId: DEFAULT_THREAD,
-              createdAt: Date.now(),
-              pipelineStatus: 'awaiting_traversal',
-              ...(batchPhase ? { batch: batchPhase } : {}),
-              meta: {},
-            };
-
-          // 2. Notify UI — send full in-memory artifact (UI stores in Jotai atom)
-          this.port.postMessage({
-            type: "MAPPER_ARTIFACT_READY",
-            sessionId: context.sessionId,
-            aiTurnId: context.canonicalAiTurnId,
-            providerId: mapperProviderId,
-            mapping: { artifact: mappingArtifact, timestamp: Date.now() },
-            singularityOutput: null,
-            singularityProvider: null,
-            pipelineStatus: 'awaiting_traversal'
-          });
-
-          this.port.postMessage({
-            type: "TURN_FINALIZED",
-            sessionId: context.sessionId,
-            userTurnId: context.canonicalUserTurnId,
-            aiTurnId: aiTurnId,
-            turn: {
-              user: { id: context.canonicalUserTurnId, type: "user", text: userMessageForSingularity || "", createdAt: Date.now(), sessionId: context.sessionId },
-              ai: aiTurnForMessage
-            }
-          });
-
-        } catch (err) {
-          console.error("[CognitiveHandler] Failed to pause pipeline:", err);
-        }
-
-        return "awaiting_traversal";
-      }
-
-      // ✅ Execute Singularity step automatically
+      // Execute Singularity step
       let singularityOutput = null;
       let singularityProviderId = null;
 
@@ -576,42 +463,9 @@ export class CognitivePipelineHandler {
       this._inflightContinuations.set(inflightKey, Date.now());
 
       try {
-        try {
-          this.port.postMessage({
-            type: 'CHEWED_SUBSTRATE_DEBUG',
-            sessionId: effectiveSessionId,
-            aiTurnId,
-            stage: 'continue_request_received',
-            isTraversalContinuation: !!payload?.isTraversalContinuation,
-            hasTraversalState: !!payload?.traversalState,
-            pipelineStatus: aiTurn?.pipelineStatus || null,
-          });
-        } catch (_) { }
-
-        if (payload?.isTraversalContinuation) {
-          if (aiTurn.pipelineStatus !== 'awaiting_traversal') {
-            try {
-              this.port.postMessage({
-                type: "CONTINUATION_ERROR",
-                sessionId: effectiveSessionId,
-                aiTurnId,
-                error: `Invalid turn state: ${aiTurn.pipelineStatus || 'unknown'}`,
-              });
-            } catch (_) { }
-            return;
-          }
-          try {
-            this.port.postMessage({
-              type: "CONTINUATION_ACK",
-              sessionId: effectiveSessionId,
-              aiTurnId,
-            });
-          } catch (_) { }
-        }
         const userTurnId = aiTurn.userTurnId;
         const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
 
-        // Allow overriding prompt for traversal continuation
         const originalPrompt = payload.userMessage || extractUserMessage(userTurn);
 
         // Tier 3: Artifact is ephemeral. Try payload (UI in-memory) first,
@@ -651,12 +505,6 @@ export class CognitivePipelineHandler {
               const queryEmbedding =
                 geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
                   ? new Float32Array(geoRecord.queryEmbedding) : null;
-
-              // Survey gates from provider response (Phase 2 storage location)
-              const mappingProvResp = mappingResponses?.[0];
-              const surveyGates = Array.isArray(mappingProvResp?.surveyGates)
-                ? mappingProvResp.surveyGates : undefined;
-              const surveyRationale = mappingProvResp?.surveyRationale ?? null;
 
               // Canonical provider ordering for deterministic statement IDs
               const { canonicalCitationOrder } = await import('../../../shared/provider-config');
@@ -747,8 +595,6 @@ export class CognitivePipelineHandler {
                 paragraphEmbeddings,
                 queryEmbedding,
                 geoRecord,
-                surveyGates,
-                surveyRationale,
                 citationSourceOrder: buildCSO(canonicalOrder),
                 queryText: originalPrompt,
                 modelCount,
@@ -766,190 +612,12 @@ export class CognitivePipelineHandler {
         if (!mappingArtifact) {
           throw new Error(`Mapping artifact missing for turn ${aiTurnId}. buildArtifactForProvider likely failed — check embeddings persistence.`);
         }
-        let chewedSubstrate = null;
-        if (payload?.isTraversalContinuation && payload?.traversalState) {
-          try {
-            const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
-
-            // Canonical provider ordering for deterministic statement IDs
-            const { canonicalCitationOrder: canonTraversal } = await import('../../../shared/provider-config');
-
-            const batchRespMap = new Map();
-            for (const r of (priorResponses || []).filter(r => r?.responseType === 'batch' && r.providerId && r.text?.trim())) {
-              const pid = String(r.providerId || '').trim().toLowerCase();
-              if (pid && !batchRespMap.has(pid)) batchRespMap.set(pid, r);
-            }
-
-            const traversalCanonicalOrder = canonTraversal(Array.from(batchRespMap.keys()));
-            const sourceDataFromResponses = traversalCanonicalOrder.map((pid, idx) => ({
-              providerId: pid,
-              modelIndex: idx + 1,
-              text: batchRespMap.get(pid)?.text || '',
-            })).filter(s => s.text?.trim());
-
-            console.log('[Skeletonization] Source data from DB:', {
-              count: sourceDataFromResponses.length,
-              providers: sourceDataFromResponses.map(s => `${s.providerId}(idx=${s.modelIndex})`),
-              hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
-            });
-
-
-
-            const sourceData = sourceDataFromResponses.length > 0
-              ? sourceDataFromResponses
-              : getSourceData(aiTurn);
-
-            if (Array.isArray(sourceData) && sourceData.length > 0) {
-              let statements = mappingArtifact?.shadow?.statements || [];
-              let paragraphs = mappingArtifact?.shadow?.paragraphs || [];
-              const hasStatements = Array.isArray(statements) && statements.length > 0;
-              const hasParagraphs = Array.isArray(paragraphs) && paragraphs.length > 0;
-
-              if (!hasStatements && !hasParagraphs) {
-                try {
-                  const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
-                  const shadowInput = sourceData.map((s, idx) => ({
-                    modelIndex: typeof s?.modelIndex === 'number' && s.modelIndex > 0 ? s.modelIndex : idx + 1,
-                    content: String(s?.text || ''),
-                  }));
-
-                  const shadowResult = extractShadowStatements(shadowInput);
-                  const paragraphResult = projectParagraphs(shadowResult.statements);
-                  statements = shadowResult.statements;
-                  paragraphs = paragraphResult.paragraphs;
-
-                  mappingArtifact.shadow = {
-                    ...(mappingArtifact.shadow || {}),
-                    ...(Array.isArray(statements) ? { statements } : {}),
-                    ...(Array.isArray(paragraphs) ? { paragraphs } : {}),
-                  };
-                } catch (e) {
-                  console.warn('[CognitiveHandler] Shadow reconstruction failed, falling back to empty arrays:', e);
-                  statements = Array.isArray(statements) ? statements : [];
-                  paragraphs = Array.isArray(paragraphs) ? paragraphs : [];
-                }
-              } else if (hasStatements && !hasParagraphs) {
-                try {
-                  const { projectParagraphs } = await import('../../shadow');
-                  const paragraphResult = projectParagraphs(statements);
-                  paragraphs = paragraphResult.paragraphs;
-                  mappingArtifact.shadow = {
-                    ...(mappingArtifact.shadow || {}),
-                    statements,
-                    paragraphs,
-                  };
-                } catch (e) {
-                  console.warn('[CognitiveHandler] Paragraph reconstruction failed, falling back to empty paragraphs:', e);
-                  paragraphs = [];
-                }
-              } else if (!hasStatements && hasParagraphs) {
-                try {
-                  const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
-                  const shadowInput = sourceData.map((s, idx) => ({
-                    modelIndex: typeof s?.modelIndex === 'number' && s.modelIndex > 0 ? s.modelIndex : idx + 1,
-                    content: String(s?.text || ''),
-                  }));
-                  const shadowResult = extractShadowStatements(shadowInput);
-                  statements = shadowResult.statements;
-
-                  const statementIdSet = new Set(Array.isArray(statements) ? statements.map((s) => String(s?.id || '')).filter(Boolean) : []);
-                  const paragraphsCompatible = paragraphs.every((p) => {
-                    const ids = Array.isArray(p?.statementIds) ? p.statementIds : [];
-                    return ids.every((sid) => statementIdSet.has(String(sid)));
-                  });
-                  if (!paragraphsCompatible) {
-                    const paragraphResult = projectParagraphs(statements);
-                    paragraphs = paragraphResult.paragraphs;
-                  }
-
-                  mappingArtifact.shadow = {
-                    ...(mappingArtifact.shadow || {}),
-                    statements,
-                    paragraphs,
-                  };
-                } catch (e) {
-                  console.warn('[CognitiveHandler] Statement reconstruction failed, falling back to empty statements:', e);
-                  statements = [];
-                }
-              }
-              const normalizedTraversalState = normalizeTraversalState(payload.traversalState);
-
-              chewedSubstrate = await buildChewedSubstrate({
-                statements: Array.isArray(statements) ? statements : [],
-                paragraphs: Array.isArray(paragraphs) ? paragraphs : [],
-                claims: mappingArtifact?.semantic?.claims || mappingArtifact?.claims || [],
-                traversalState: normalizedTraversalState,
-                sourceData,
-                blastSurface: mappingArtifact?.blastSurface || null,
-                tableSidecar: mappingArtifact?.shadow?.tableSidecar || [],
-                tableCellAllocation: mappingArtifact?.tableCellAllocation || null,
-                claimDensityProfiles: mappingArtifact?.claimDensity?.profiles || null,
-                provenanceRefinement: mappingArtifact?.provenanceRefinement || null,
-              });
-
-              console.log('🍖 Chewed substrate built:', {
-                hasSubstrate: !!chewedSubstrate,
-                outputsCount: chewedSubstrate?.outputs?.length,
-                nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
-                  ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
-                  : 0,
-                protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
-                skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
-                removedCount: chewedSubstrate?.summary?.removedStatementCount
-              });
-
-              try {
-                this.port.postMessage({
-                  type: 'CHEWED_SUBSTRATE_DEBUG',
-                  sessionId: effectiveSessionId,
-                  aiTurnId,
-                  stage: 'chewed_substrate_built',
-                  hasSubstrate: !!chewedSubstrate,
-                  outputsCount: chewedSubstrate?.outputs?.length,
-                  nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
-                    ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
-                    : 0,
-                  protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
-                  skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
-                  removedCount: chewedSubstrate?.summary?.removedStatementCount,
-                });
-              } catch (_) { }
-            } else {
-              console.warn('🍖 No source data available for chewed substrate');
-
-              try {
-                this.port.postMessage({
-                  type: 'CHEWED_SUBSTRATE_DEBUG',
-                  sessionId: effectiveSessionId,
-                  aiTurnId,
-                  stage: 'no_source_data',
-                });
-              } catch (_) { }
-            }
-          } catch (e) {
-            console.error('[CognitiveHandler] Failed to build chewedSubstrate:', e);
-
-            try {
-              this.port.postMessage({
-                type: 'CHEWED_SUBSTRATE_DEBUG',
-                sessionId: effectiveSessionId,
-                aiTurnId,
-                stage: 'chewed_substrate_error',
-                error: String(e?.message || e),
-              });
-            } catch (_) { }
-            chewedSubstrate = null;
-          }
-        }
 
         const context = {
           sessionId: effectiveSessionId,
           canonicalAiTurnId: aiTurnId,
           canonicalUserTurnId: userTurnId,
           userMessage: originalPrompt,
-          // Pass flag to context for orchestration logic if needed
-          isTraversalContinuation: payload.isTraversalContinuation,
-          chewedSubstrate
         };
 
         const executorOptions = {
@@ -975,8 +643,6 @@ export class CognitivePipelineHandler {
             mappingText: latestMappingText,
             mappingMeta: latestMappingMeta,
             useThinking: payload.useThinking || false,
-            isTraversalContinuation: payload.isTraversalContinuation,
-            chewedSubstrate,
             conciergePromptSeed: frozenSingularityPromptSeed || null,
           },
         };
@@ -999,9 +665,7 @@ export class CognitivePipelineHandler {
           ? {
             prompt: context.singularityPromptUsed || originalPrompt || "",
             output: singularityOutput.text,
-            traversalState: payload?.traversalState,
             timestamp: singularityOutput.timestamp,
-            chewedSubstrateSummary: singularityOutput.pipeline?.chewedSubstrateSummary || null,
           }
           : undefined;
 
@@ -1026,28 +690,6 @@ export class CognitivePipelineHandler {
           0,
           { text: result?.text || "", status: result?.status || "completed", meta: result?.meta || {} },
         );
-
-        // Tier 2: persist traversal state to the MAPPING provider response.
-        // The traversal answers belong to the mapper's claim set, not the singularity output.
-        if (payload?.isTraversalContinuation && payload?.traversalState) {
-          try {
-            const mapperPid = aiTurn.meta?.mapper || mappingResponses?.[0]?.providerId;
-            if (mapperPid) {
-              const mappingResp = mappingResponses?.find(
-                r => String(r.providerId || '').toLowerCase() === String(mapperPid).toLowerCase()
-              );
-              if (mappingResp?.id) {
-                await adapter.put('provider_responses', {
-                  ...mappingResp,
-                  traversalState: payload.traversalState,
-                  updatedAt: Date.now(),
-                }, mappingResp.id);
-              }
-            }
-          } catch (e) {
-            console.warn('[CognitiveHandler] Traversal state persistence (non-blocking):', e);
-          }
-        }
 
         // Re-fetch and emit final turn
         const responses = await adapter.getResponsesByTurnId(aiTurnId);
@@ -1086,21 +728,6 @@ export class CognitivePipelineHandler {
         for (const group of Object.values(buckets)) {
           for (const pid of Object.keys(group)) {
             group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-          }
-        }
-
-        // Update pipeline status if we were waiting
-        if (aiTurn.pipelineStatus === 'awaiting_traversal') {
-          try {
-            const t = await adapter.get("turns", aiTurnId);
-            if (t) {
-              t.pipelineStatus = 'complete';
-              await adapter.put("turns", t);
-              // Update local reference for emission
-              aiTurn.pipelineStatus = 'complete';
-            }
-          } catch (e) {
-            console.warn("[CognitiveHandler] Failed to update pipeline status:", e);
           }
         }
 

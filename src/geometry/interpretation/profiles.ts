@@ -17,8 +17,7 @@ function computeInternalDensity(nodeIds: string[], substrate: GeometricSubstrate
     if (nodeIds.length < 2) return 0;
     const nodeSet = new Set(nodeIds);
     let internalEdges = 0;
-    // Step 7: use mutual recognition edges as structural backbone
-    const edges = substrate.mutualRankGraph?.edges ?? substrate.graphs.strong.edges;
+    const edges = substrate.mutualRankGraph.edges;
     for (const edge of edges) {
         if (nodeSet.has(edge.source) && nodeSet.has(edge.target)) internalEdges++;
     }
@@ -30,55 +29,34 @@ function computeAvgInternalSimilarity(nodeIds: string[], substrate: GeometricSub
     if (nodeIds.length < 2) return 0;
     const nodeSet = new Set(nodeIds);
 
-    // Step 7: prefer mutual recognition edges, fall back to mutual kNN
-    const mrEdges = substrate.mutualRankGraph?.edges;
-    if (mrEdges && mrEdges.length > 0) {
-        let sum = 0;
-        let count = 0;
-        for (const edge of mrEdges) {
-            if (nodeSet.has(edge.source) && nodeSet.has(edge.target)) {
-                const sim = edge.similarity;
-                if (typeof sim === 'number' && Number.isFinite(sim)) {
-                    sum += sim;
-                    count++;
-                }
-            }
-        }
-        if (count > 0) return sum / count;
-    }
-
-    // Fallback to pairwise field for accurate measurement
-    if (substrate.pairwiseField) {
-        let sum = 0;
-        let count = 0;
-        const ids = nodeIds;
-        for (let i = 0; i < ids.length; i++) {
-            const row = substrate.pairwiseField.matrix.get(ids[i]);
-            if (!row) continue;
-            for (let j = i + 1; j < ids.length; j++) {
-                const sim = row.get(ids[j]);
-                if (typeof sim === 'number' && Number.isFinite(sim)) {
-                    sum += sim;
-                    count++;
-                }
-            }
-        }
-        if (count > 0) return sum / count;
-    }
-
-    // Final fallback: mutual kNN edges
-    let mutualSum = 0;
-    let mutualCount = 0;
-    for (const edge of substrate.graphs.mutual.edges) {
+    // Use mutual recognition edges first
+    let sum = 0;
+    let count = 0;
+    for (const edge of substrate.mutualRankGraph.edges) {
         if (nodeSet.has(edge.source) && nodeSet.has(edge.target)) {
             const sim = edge.similarity;
             if (typeof sim === 'number' && Number.isFinite(sim)) {
-                mutualSum += sim;
-                mutualCount++;
+                sum += sim;
+                count++;
             }
         }
     }
-    if (mutualCount > 0) return mutualSum / mutualCount;
+    if (count > 0) return sum / count;
+
+    // Fallback to pairwise field for accurate measurement
+    const ids = nodeIds;
+    for (let i = 0; i < ids.length; i++) {
+        const row = substrate.pairwiseField.matrix.get(ids[i]);
+        if (!row) continue;
+        for (let j = i + 1; j < ids.length; j++) {
+            const sim = row.get(ids[j]);
+            if (typeof sim === 'number' && Number.isFinite(sim)) {
+                sum += sim;
+                count++;
+            }
+        }
+    }
+    if (count > 0) return sum / count;
 
     return 0;
 }
@@ -160,7 +138,7 @@ export function profileRegions(
 
     const usedCentroids = computeByCentroids(paragraphEmbeddings ?? null);
     if (!usedCentroids) {
-        for (const edge of substrate.graphs.mutual.edges) {
+        for (const edge of substrate.mutualRankGraph.edges) {
             const a = nodeToRegion.get(edge.source);
             const b = nodeToRegion.get(edge.target);
             if (!a || !b || a === b) continue;

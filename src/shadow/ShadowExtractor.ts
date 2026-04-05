@@ -61,10 +61,7 @@ export interface ShadowStatement {
 
     geometricCoordinates?: {
         paragraphId: string;
-        componentId: string | null;
         regionId: string | null;
-        knnDegree: number;
-        mutualDegree: number;
         isolationScore: number;
     };
 }

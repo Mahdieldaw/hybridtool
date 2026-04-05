@@ -7,57 +7,52 @@ import type { LinkedClaim, MapperClaim, MixedProvenanceResult, MixedProvenanceCl
 import type { Region } from '../geometry/interpretation/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
-import type { DensityRegressionModel } from '../clustering/semanticDensity';
 
 /**
- * Generate claim embeddings once. Returns embeddings keyed by claim ID,
- * plus optional density scores projected via the statement regression model.
+ * Generate claim embeddings once. Returns embeddings keyed by claim ID.
  */
 export async function generateClaimEmbeddings(
     claims: Array<{ id: string; label: string; text?: string }>,
-    densityModel?: DensityRegressionModel,
-): Promise<{ embeddings: Map<string, Float32Array>; semanticDensityScores?: Map<string, number> }> {
+): Promise<{ embeddings: Map<string, Float32Array> }> {
     const claimTexts = claims.map(c => `${c.label}. ${c.text || ''}`);
-    const raw = await generateTextEmbeddings(claimTexts, undefined, densityModel ? { densityModel } : undefined);
+    const raw = await generateTextEmbeddings(claimTexts);
     const embeddings = new Map<string, Float32Array>();
-    let semanticDensityScores: Map<string, number> | undefined;
-    if (raw.semanticDensityScores) {
-        semanticDensityScores = new Map<string, number>();
-    }
     for (let idx = 0; idx < claims.length; idx++) {
         const emb = raw.embeddings.get(String(idx));
         if (emb) embeddings.set(claims[idx].id, emb);
-        if (semanticDensityScores) {
-            const s = raw.semanticDensityScores!.get(String(idx));
-            if (s != null) semanticDensityScores.set(claims[idx].id, s);
-        }
     }
-    return { embeddings, semanticDensityScores };
+    return { embeddings };
 }
 
-export async function reconstructProvenance(
+/**
+ * Unified provenance: competitive allocation + claim-centric scoring + μ_global
+ * filter in a single pass. Returns LinkedClaim[] with canonical sourceStatementIds
+ * and the full MixedProvenanceResult.
+ *
+ * Replaces the former two-step reconstructProvenance → computeMixedMethodProvenance
+ * pipeline. The old split routed intermediate (non-canonical) statement IDs through
+ * enrichedClaims, causing downstream steps to read pre-filtered assignments.
+ * Now, claimPools (paragraph-level) feed directly into the mixed-method merge —
+ * no round-trip through statement IDs.
+ */
+export async function reconstructCanonicalProvenance(
     claims: MapperClaim[],
     statements: ShadowStatement[],
     paragraphs: ShadowParagraph[],
     paragraphEmbeddings: Map<string, Float32Array>,
+    statementEmbeddings: Map<string, Float32Array> | null,
+    precomputedClaimEmbeddings: Map<string, Float32Array>,
     regions: Region[],
     totalModelCount: number,
-    statementEmbeddings: Map<string, Float32Array> | null = null,
-    precomputedClaimEmbeddings: Map<string, Float32Array> | null = null,
 ): Promise<{
     claims: LinkedClaim[];
+    mixedProvenanceResult: MixedProvenanceResult;
     competitiveWeights: Map<string, Map<string, number>>;
     competitiveExcess: Map<string, Map<string, number>>;
     competitiveThresholds: Map<string, number>;
 }> {
     const statementsById = new Map(statements.map(s => [s.id, s]));
-
-    // reference unused optional parameter to avoid TS 'noUnusedLocals' errors
-    void statementEmbeddings;
-
-    // Use pre-computed claim embeddings if provided, otherwise generate (legacy path)
-    const claimEmbeddings: Map<string, Float32Array> = precomputedClaimEmbeddings
-        ?? (await generateTextEmbeddings(claims.map(c => `${c.label}. ${c.text || ''}`), undefined, undefined)).embeddings;
+    const claimEmbeddings = precomputedClaimEmbeddings;
 
     // Build paragraph-node → region lookup for sourceRegionIds derivation
     const paragraphToRegionIds = new Map<string, string[]>();
@@ -87,11 +82,9 @@ export async function reconstructProvenance(
 
     // Normalize claim embedding keying to claim.id
     // precomputedClaimEmbeddings are keyed by claim.id
-    // legacy generateTextEmbeddings are keyed by String(index)
     const centroidByClaimId = new Map<string, Float32Array>();
-    for (let idx = 0; idx < claims.length; idx++) {
-        const claim = claims[idx];
-        const emb = claimEmbeddings.get(claim.id) || claimEmbeddings.get(String(idx));
+    for (const claim of claims) {
+        const emb = claimEmbeddings.get(claim.id);
         if (emb) centroidByClaimId.set(claim.id, emb);
     }
 
@@ -122,7 +115,7 @@ export async function reconstructProvenance(
         claimPools.set(claim.id, []);
     }
 
-    // Step 10: Track linear excess weights per (paragraph, claim)
+    // Track linear excess weights per (paragraph, claim)
     // excess(P, c) = sim(P, c) - (μ_P + σ_P)  — positive for assigned claims only
     // weight(P, c) = excess(P, c) / Σ excess(P, c') — normalized across assigned claims
     const rawExcess = new Map<string, Map<string, number>>(); // paraId → claimId → excess
@@ -219,76 +212,6 @@ export async function reconstructProvenance(
     console.log(`[Provenance] Competitive assignment: ${claims.length} claims, ${simMatrix.size} paragraphs, ${centroidByClaimId.size} centroids`);
     console.log(`[Provenance] Pool sizes: ${poolSummary}`);
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE 3: Collect source statement IDs from assigned paragraphs
-    // ═══════════════════════════════════════════════════════════════
-
-    const paragraphById = new Map(paragraphs.map(p => [p.id, p]));
-
-    const results = claims.map((claim) => {
-        const pool = claimPools.get(claim.id) || [];
-        const stmtIds = new Set<string>();
-
-        for (const paraId of pool) {
-            const para = paragraphById.get(paraId);
-            if (para) {
-                for (const sid of para.statementIds) {
-                    stmtIds.add(sid);
-                }
-            }
-        }
-
-        const sourceStatementIds = Array.from(stmtIds).sort();
-        const sourceStatements = sourceStatementIds
-            .map(id => statementsById.get(id))
-            .filter((s): s is ShadowStatement => s !== undefined);
-
-        // Derive region IDs from source statements → paragraphs → regions
-        const matchedRegionIds = new Set<string>();
-        for (const sid of sourceStatementIds) {
-            const pid = statementToParagraphId.get(sid);
-            if (!pid) continue;
-            for (const rid of paragraphToRegionIds.get(pid) || []) matchedRegionIds.add(rid);
-        }
-        const sourceRegionIds = Array.from(matchedRegionIds).sort();
-
-        const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
-        const supportRatio = totalModelCount > 0 ? supporters.length / totalModelCount : 0;
-        // Step 10: Compute bulk (weighted evidence mass) per claim
-        // bulk(c) = Σ weight(P, c) across all assigned paragraphs
-        let bulk = 0;
-        for (const paraId of pool) {
-            const w = normalizedWeights.get(paraId)?.get(claim.id) ?? 0;
-            bulk += w;
-        }
-
-        // Per-paragraph weight map for this claim (for consumers needing per-statement weights)
-        const paragraphWeights = new Map<string, number>();
-        for (const paraId of pool) {
-            const w = normalizedWeights.get(paraId)?.get(claim.id) ?? 0;
-            paragraphWeights.set(paraId, w);
-        }
-
-        return {
-            id: claim.id,
-            label: claim.label,
-            text: claim.text,
-            supporters,
-            support_count: supporters.length,
-            type: 'assertive' as const,
-            role: 'supplement' as const,
-            sourceStatementIds,
-            sourceStatements,
-            sourceRegionIds,
-            supportRatio,
-            provenanceBulk: bulk,
-        };
-    });
-
-    // Debug: log final statement counts per claim
-    const stmtSummary = results.map(r => `${r.id}:pool=${claimPools.get(r.id)?.length ?? '?'},stmts=${r.sourceStatementIds.length}`).join(', ');
-    console.log(`[Provenance] Final statement counts: ${stmtSummary}`);
-
     // Build per-paragraph threshold map (paraId → threshold value)
     const thresholdByParagraph = new Map<string, number>();
     for (const [paraId, sims] of simMatrix) {
@@ -303,45 +226,13 @@ export async function reconstructProvenance(
         }
     }
 
-    return {
-        claims: results,
-        competitiveWeights: normalizedWeights,
-        competitiveExcess: rawExcess,
-        competitiveThresholds: thresholdByParagraph,
-    };
-}
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 3: Mixed-method merge — claim-centric scoring + μ_global filter
+    // Uses claimPools directly (paragraph-level) — no round-trip through
+    // intermediate statement IDs.
+    // ═══════════════════════════════════════════════════════════════
 
-/**
- * Mixed-method provenance: merges paragraph-centric competitive allocation
- * with claim-centric paragraph scoring, then applies a preservation-by-default
- * filter (μ_global floor) to remove only below-average-relevance statements.
- *
- * This is a measurement phase — runs alongside existing provenance.
- */
-export function computeMixedMethodProvenance(
-    claims: Array<{ id: string; supporters?: number[] }>,
-    paragraphs: Array<{ id: string; statementIds: string[] }>,
-    statements: Array<{ id: string; modelIndex?: number }>,
-    paragraphEmbeddings: Map<string, Float32Array>,
-    statementEmbeddings: Map<string, Float32Array>,
-    claimEmbeddings: Map<string, Float32Array>,
-    competitivePools: Map<string, Set<string>>,
-    competitiveWeights?: Map<string, Map<string, number>>,   // paraId → claimId → normalized weight
-    competitiveExcess?: Map<string, Map<string, number>>,    // paraId → claimId → raw excess
-    competitiveThresholds?: Map<string, number>,             // paraId → threshold
-): MixedProvenanceResult {
-    // Build lookup maps
-    const stmtById = new Map<string, { id: string; modelIndex?: number }>();
-    for (const s of statements) stmtById.set(s.id, s);
-
-    const paraByStmtId = new Map<string, string>();
-    const paraById = new Map<string, { id: string; statementIds: string[] }>();
-    for (const para of paragraphs) {
-        paraById.set(para.id, para);
-        for (const sid of para.statementIds) {
-            paraByStmtId.set(sid, para.id);
-        }
-    }
+    const paragraphById = new Map(paragraphs.map(p => [p.id, p]));
 
     // Aggregate for diagnostics
     let totalKept = 0;
@@ -352,10 +243,13 @@ export function computeMixedMethodProvenance(
 
     const perClaim: Record<string, MixedProvenanceClaimResult> = {};
 
-    for (const claim of claims) {
-        const claimEmb = claimEmbeddings.get(claim.id);
+    // Per-claim canonical results (built during Phase 3, used in Phase 4)
+    const canonicalPerClaim = new Map<string, { canonicalStatementIds: string[]; mergedParaIds: Set<string> }>();
 
-        // ── Step 2a: Claim-centric paragraph scoring ───────────────────
+    for (const claim of claims) {
+        const claimEmb = centroidByClaimId.get(claim.id);
+
+        // ── Claim-centric paragraph scoring ───────────────────────────
         let ccMu = 0;
         let ccSigma = 0;
         let ccThreshold = 0;
@@ -386,8 +280,8 @@ export function computeMixedMethodProvenance(
             }
         }
 
-        // ── Step 2b: Merge pools ───────────────────────────────────────
-        const competitiveParas = competitivePools.get(claim.id) ?? new Set<string>();
+        // ── Merge competitive + claim-centric pools ───────────────────
+        const competitiveParas = new Set(claimPools.get(claim.id) ?? []);
         const allParaIds = new Set<string>([...competitiveParas, ...ccPool]);
 
         const mergedParagraphs: MixedParagraphEntry[] = [];
@@ -408,16 +302,15 @@ export function computeMixedMethodProvenance(
                 origin,
                 claimCentricSim: ccSimByPara.get(paraId) ?? null,
                 claimCentricAboveThreshold: ccPool.has(paraId),
-                compWeight: competitiveWeights?.get(paraId)?.get(claim.id) ?? null,
-                compExcess: competitiveExcess?.get(paraId)?.get(claim.id) ?? null,
-                compThreshold: competitiveThresholds?.get(paraId) ?? null,
+                compWeight: normalizedWeights.get(paraId)?.get(claim.id) ?? null,
+                compExcess: rawExcess.get(paraId)?.get(claim.id) ?? null,
+                compThreshold: thresholdByParagraph.get(paraId) ?? null,
             });
         }
 
-        // ── Step 2c: Preservation-by-default statement filter ─────────
-        // Compute global μ: mean sim of ALL statements to this claim
+        // ── Preservation-by-default statement filter (μ_global floor) ─
         const allGlobalSims: number[] = [];
-        if (claimEmb) {
+        if (claimEmb && statementEmbeddings) {
             for (const stmt of statements) {
                 const stmtEmb = statementEmbeddings.get(stmt.id);
                 if (!stmtEmb) continue;
@@ -427,22 +320,22 @@ export function computeMixedMethodProvenance(
         const globalMu = allGlobalSims.length > 0
             ? allGlobalSims.reduce((a, b) => a + b, 0) / allGlobalSims.length
             : 0;
-        // Collect all statements from merged paragraph pool
+
         const candidateStatements: MixedStatementEntry[] = [];
         const stmtIdsSeen = new Set<string>();
 
         for (const pEntry of mergedParagraphs) {
-            const para = paraById.get(pEntry.paragraphId);
+            const para = paragraphById.get(pEntry.paragraphId);
             if (!para) continue;
             for (const sid of para.statementIds) {
                 if (stmtIdsSeen.has(sid)) continue;
                 stmtIdsSeen.add(sid);
 
-                const stmtObj = stmtById.get(sid);
+                const stmtObj = statementsById.get(sid);
                 if (!stmtObj) continue;
 
                 let globalSim = 0;
-                if (claimEmb) {
+                if (claimEmb && statementEmbeddings) {
                     const stmtEmb = statementEmbeddings.get(sid);
                     if (stmtEmb) globalSim = cosineSimilarity(claimEmb, stmtEmb);
                 }
@@ -464,27 +357,21 @@ export function computeMixedMethodProvenance(
             }
         }
 
-        const coreStmts = candidateStatements.filter(s => s.zone === 'core');
-
-        const canonicalStatements = candidateStatements.filter(
-            s => s.zone === 'core'
-        );
+        const canonicalStatements = candidateStatements.filter(s => s.zone === 'core');
         const canonicalStatementIds = canonicalStatements.map(s => s.statementId);
-
-        const keptStatements = canonicalStatements;
-        const removedCount = candidateStatements.length - keptStatements.length;
+        const removedCount = candidateStatements.length - canonicalStatements.length;
 
         totalMergedStmts += candidateStatements.length;
-        totalKept += keptStatements.length;
+        totalKept += canonicalStatements.length;
         totalRemoved += removedCount;
 
         // Compare against competitive set for diagnostics
         const compStmtIds = new Set<string>();
         for (const paraId of competitiveParas) {
-            const para = paraById.get(paraId);
+            const para = paragraphById.get(paraId);
             if (para) for (const sid of para.statementIds) compStmtIds.add(sid);
         }
-        for (const s of keptStatements) {
+        for (const s of canonicalStatements) {
             if (compStmtIds.has(s.statementId)) totalInCompetitive++;
             else totalExpanded++;
         }
@@ -497,20 +384,84 @@ export function computeMixedMethodProvenance(
             mergedParagraphs,
             statements: candidateStatements,
             globalMu,
-            keptCount: keptStatements.length,
+            keptCount: canonicalStatements.length,
             removedCount,
             totalCount: candidateStatements.length,
             bothCount,
             competitiveOnlyCount: compOnlyCount,
             claimCentricOnlyCount: ccOnlyCount,
-            coreCount: coreStmts.length,
+            coreCount: canonicalStatements.length,
             canonicalStatementIds,
         };
+
+        canonicalPerClaim.set(claim.id, { canonicalStatementIds, mergedParaIds: allParaIds });
     }
 
     const recoveryRate = totalKept > 0 ? totalInCompetitive / totalKept : 0;
     const expansionRate = totalKept > 0 ? totalExpanded / totalKept : 0;
     const removalRate = totalMergedStmts > 0 ? totalRemoved / totalMergedStmts : 0;
 
-    return { perClaim, recoveryRate, expansionRate, removalRate };
+    const mixedProvenanceResult: MixedProvenanceResult = { perClaim, recoveryRate, expansionRate, removalRate };
+
+    console.log(`[Provenance] MixedProvenance: recovery=${(recoveryRate * 100).toFixed(1)}% expansion=${(expansionRate * 100).toFixed(1)}% removal=${(removalRate * 100).toFixed(1)}%`);
+
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 4: Build LinkedClaim results from canonical statement IDs
+    // ═══════════════════════════════════════════════════════════════
+
+    const results = claims.map((claim) => {
+        const canonical = canonicalPerClaim.get(claim.id);
+        const sourceStatementIds = canonical?.canonicalStatementIds ?? [];
+        const sourceStatements = sourceStatementIds
+            .map(id => statementsById.get(id))
+            .filter((s): s is ShadowStatement => s !== undefined);
+
+        // Derive region IDs from source statements → paragraphs → regions
+        const matchedRegionIds = new Set<string>();
+        for (const sid of sourceStatementIds) {
+            const pid = statementToParagraphId.get(sid);
+            if (!pid) continue;
+            for (const rid of paragraphToRegionIds.get(pid) || []) matchedRegionIds.add(rid);
+        }
+        const sourceRegionIds = Array.from(matchedRegionIds).sort();
+
+        const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
+        const supportRatio = totalModelCount > 0 ? supporters.length / totalModelCount : 0;
+
+        // Compute bulk (weighted evidence mass) per claim
+        // bulk uses the merged paragraph set (competitive + claim-centric) for the claim
+        const mergedParaIds = canonical?.mergedParaIds ?? new Set<string>();
+        let bulk = 0;
+        for (const paraId of mergedParaIds) {
+            const w = normalizedWeights.get(paraId)?.get(claim.id) ?? 0;
+            bulk += w;
+        }
+
+        return {
+            id: claim.id,
+            label: claim.label,
+            text: claim.text,
+            supporters,
+            support_count: supporters.length,
+            type: 'assertive' as const,
+            role: 'supplement' as const,
+            sourceStatementIds,
+            sourceStatements,
+            sourceRegionIds,
+            supportRatio,
+            provenanceBulk: bulk,
+        };
+    });
+
+    // Debug: log final statement counts per claim
+    const stmtSummary = results.map(r => `${r.id}:stmts=${r.sourceStatementIds.length}`).join(', ');
+    console.log(`[Provenance] Canonical statement counts: ${stmtSummary}`);
+
+    return {
+        claims: results,
+        mixedProvenanceResult,
+        competitiveWeights: normalizedWeights,
+        competitiveExcess: rawExcess,
+        competitiveThresholds: thresholdByParagraph,
+    };
 }

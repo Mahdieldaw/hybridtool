@@ -4,8 +4,6 @@
 
 import {
     extractShadowStatements,
-    computeShadowDelta,
-    getTopUnreferenced,
 } from './index';
 
 // ===========================================================================
@@ -95,63 +93,5 @@ for (const stmt of shadowResult.statements.slice(0, 5)) {
 // ===========================================================================
 // FILTERING TESTS
 // ===========================================================================
-
-// ===========================================================================
-// SHADOW DELTA TEST
-// ===========================================================================
-
-console.log('===========================================================');
-console.log('TEST 4: Shadow Delta (Simulated)');
-console.log('===========================================================\n');
-
-// Simulate semantic mapper using some statements
-const usedStatementIds = new Set([
-    shadowResult.statements[0]?.id,
-    shadowResult.statements[1]?.id,
-    shadowResult.statements[2]?.id,
-    shadowResult.statements[5]?.id,
-].filter(Boolean));
-
-console.log(`Simulating semantic mapper using ${usedStatementIds.size} statements`);
-console.log();
-
-const delta = computeShadowDelta(
-    shadowResult,
-    usedStatementIds,
-    'How do I validate inputs in my application?'
-);
-
-const topUnreferenced = getTopUnreferenced(delta, 5);
-console.log(`Top ${topUnreferenced.length} unreferenced statements (by adjusted score):\n`);
-
-for (const u of topUnreferenced) {
-    const signals: string[] = [];
-    if (u.statement.signals.sequence) signals.push('SEQ');
-    if (u.statement.signals.tension) signals.push('TENS');
-    if (u.statement.signals.conditional) signals.push('COND');
-    
-    const signalStr = signals.length > 0 ? ` [${signals.join(',')}]` : '';
-    
-    console.log(`[${u.statement.id}] Score: ${u.adjustedScore.toFixed(2)} (${u.statement.stance}${signalStr})`);
-    console.log(`  Query relevance: ${(u.queryRelevance * 100).toFixed(0)}%`);
-    console.log(`  Signal weight: ${u.signalWeight}`);
-    console.log(`  "${u.statement.text}"`);
-    console.log();
-}
-
-// Simulated semantic mapper output (not used for delta now)
-const referencedIds = new Set<string>([
-    shadowResult.statements[0]?.id,
-    shadowResult.statements[1]?.id,
-    shadowResult.statements[2]?.id,
-].filter(Boolean));
-
-console.log(`Simulated semantic mapper usage: ${referencedIds.size} statements`);
-console.log();
-
-const finalDelta = computeShadowDelta(shadowResult, referencedIds, 'How do I validate inputs?');
-console.log(`Unreferenced: ${finalDelta.audit.unreferencedCount} statements`);
-console.log(`High-signal unreferenced: ${finalDelta.audit.highSignalUnreferencedCount} statements`);
-console.log();
 
 console.log('✓ Phase 1 Shadow Mapper tests complete!');

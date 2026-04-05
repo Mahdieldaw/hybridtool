@@ -415,7 +415,7 @@ export function ParagraphSpaceView({
       const x = toX(Number(n.x));
       const y = toY(Number(n.y));
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const degree = typeof n.mutualDegree === "number" ? n.mutualDegree : 0;
+      const degree = typeof n.mutualRankDegree === "number" ? n.mutualRankDegree : 0;
       const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7)) + 1; // +1 for isSource
       const fraction = Math.max(0, Math.min(1, selectedClaimCanonicalFractions.get(id) ?? 1));
       m.set(id, { x, y, r, fraction });
@@ -994,7 +994,7 @@ export function ParagraphSpaceView({
             const x = toX(Number(n.x));
             const y = toY(Number(n.y));
             if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-            const degree = typeof n.mutualDegree === "number" ? n.mutualDegree : 0;
+            const degree = typeof n.mutualRankDegree === "number" ? n.mutualRankDegree : 0;
             const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7));
 
             const basinId = basinResult?.basinByNodeId?.[id];
