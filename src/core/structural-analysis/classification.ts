@@ -40,7 +40,7 @@ export const analyzePeaks = (
 
     const peakIds = new Set(peaks.map(p => p.id));
 
-    const peakEdges = edges.filter(e => peakIds.has(e.from) && peakIds.has(e.to));
+    const peakEdges = edges.filter(e => e.from !== e.to && peakIds.has(e.from) && peakIds.has(e.to));
     const peakConflicts = peakEdges.filter(e => e.type === 'conflicts');
     const peakTradeoffs = peakEdges.filter(e => e.type === 'tradeoff');
     const peakSupports = peakEdges.filter(e =>

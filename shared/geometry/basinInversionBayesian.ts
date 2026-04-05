@@ -16,10 +16,15 @@
  *      If the posterior is flat → no boundary (continuous field)
  * 
  * Basin construction:
- *   Two nodes share a basin when each includes the other in its in-group
- *   (mutual inclusion). Union-find on mutual pairs produces basins.
- *   This is NON-TRANSITIVE — A↔B and B↔C does NOT imply A↔C unless
- *   A and C also mutually include each other.
+ *   Two nodes share a basin when:
+ *   1. Each includes the other in its in-group (mutual inclusion)
+ *   2. Their in-groups substantially overlap (Jaccard of neighborhoods)
+ *   The Jaccard threshold is itself landscape-derived via change-point
+ *   detection on the distribution of Jaccard values across all mutual pairs.
+ *   If the Jaccard distribution is one population (no split), all mutual
+ *   pairs connect. If it splits into high-overlap and low-overlap groups,
+ *   only high-overlap pairs connect — preventing transitive chaining
+ *   through bridge nodes that belong to different neighborhoods.
  * 
  * Output: same BasinInversionResult shape for drop-in compatibility with
  * regions.ts and the instrumentation panel.
@@ -238,7 +243,7 @@ function computeNodeProfile(
 // Main entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function computeBasinInversionBayesian(
+export function computeBasinInversion(
     idsIn: string[],
     vectorsIn: Float32Array[]
 ): BasinInversionResult {
@@ -331,17 +336,93 @@ export function computeBasinInversionBayesian(
         profiles.push(computeNodeProfile(i, pairLookup, nodeCount));
     }
 
-    // ── Basin construction via mutual inclusion ──────────────────────────
-    const uf = new UnionFind(nodeCount);
+    // ── Basin construction via Jaccard-gated mutual inclusion ─────────────
+    //
+    // Step 1: Find all mutual inclusion pairs and compute their in-group Jaccard.
+    // Step 2: Apply change-point detection to the Jaccard distribution itself
+    //         to find where "same neighborhood" transitions to "different
+    //         neighborhood." This is the same principled method used for per-node
+    //         boundaries, applied recursively to the derived overlap signal.
+    // Step 3: Union-find only on pairs whose Jaccard exceeds the landscape-
+    //         derived threshold. This prevents transitive chaining through
+    //         nodes that mutually include each other but belong to different
+    //         neighborhoods.
+    //
     const inGroupSets: Set<number>[] = profiles.map(p => new Set(p.inGroupIndices));
 
-    let mutualPairCount = 0;
+    // Step 1: Collect all mutual pairs with their Jaccard overlap
+    interface MutualPair { i: number; j: number; jaccard: number; }
+    const mutualPairs: MutualPair[] = [];
     for (let i = 0; i < nodeCount; i++) {
         for (const j of inGroupSets[i]) {
             if (j > i && inGroupSets[j].has(i)) {
-                uf.union(i, j);
-                mutualPairCount++;
+                // Jaccard of in-groups: |A ∩ B| / |A ∪ B|
+                const setA = inGroupSets[i];
+                const setB = inGroupSets[j];
+                let intersection = 0;
+                for (const x of setA) { if (setB.has(x)) intersection++; }
+                const union = setA.size + setB.size - intersection;
+                const jaccard = union > 0 ? intersection / union : 0;
+                mutualPairs.push({ i, j, jaccard });
             }
+        }
+    }
+    const mutualPairCount = mutualPairs.length;
+
+    // Step 2: Find landscape-derived Jaccard threshold via change-point
+    // Sort Jaccards descending and apply the same BIC-penalized Bayes factor
+    // test: does a two-segment model (high-overlap vs low-overlap) beat the
+    // null (one population)?
+    let jaccardThreshold = 0; // default: accept all mutual pairs (no split found)
+    if (mutualPairs.length >= 4) {
+        const sortedJaccards = mutualPairs.map(p => p.jaccard).sort((a, b) => b - a);
+        const M = sortedJaccards.length;
+        const jPrefixSum = new Float64Array(M + 1);
+        const jPrefixSumSq = new Float64Array(M + 1);
+        for (let i = 0; i < M; i++) {
+            jPrefixSum[i + 1] = jPrefixSum[i] + sortedJaccards[i];
+            jPrefixSumSq[i + 1] = jPrefixSumSq[i] + sortedJaccards[i] * sortedJaccards[i];
+        }
+
+        // Null model
+        const jRssNull = Math.max(jPrefixSumSq[M] - (jPrefixSum[M] * jPrefixSum[M]) / M, 1e-15);
+        const jLogNull = -(M / 2) * Math.log(jRssNull);
+
+        // Best split
+        const jMinSeg = 2;
+        let jBestLogP = -Infinity;
+        let jBestK = jMinSeg;
+        for (let jk = jMinSeg; jk <= M - jMinSeg; jk++) {
+            const nHi = jk;
+            const nLo = M - jk;
+            const sHi = jPrefixSum[jk];
+            const sqHi = jPrefixSumSq[jk];
+            const sLo = jPrefixSum[M] - jPrefixSum[jk];
+            const sqLo = jPrefixSumSq[M] - jPrefixSumSq[jk];
+            const rHi = Math.max(sqHi - (sHi * sHi) / nHi, 1e-15);
+            const rLo = Math.max(sqLo - (sLo * sLo) / nLo, 1e-15);
+            const logP = -(nHi / 2) * Math.log(rHi) - (nLo / 2) * Math.log(rLo);
+            if (logP > jBestLogP) { jBestLogP = logP; jBestK = jk; }
+        }
+
+        const jBicPenalty = 3 * Math.log(M) / 2;
+        const jLogBF = jBestLogP - jLogNull - jBicPenalty;
+
+        if (jLogBF > 0) {
+            // Split found: threshold is the Jaccard value at the change point
+            // (first value in the "low overlap" segment)
+            jaccardThreshold = sortedJaccards[jBestK];
+        }
+        // else: no split found, all mutual pairs are one population → threshold stays 0
+    }
+
+    // Step 3: Union-find only on pairs above the Jaccard threshold
+    const uf = new UnionFind(nodeCount);
+    let connectedPairCount = 0;
+    for (const { i, j, jaccard } of mutualPairs) {
+        if (jaccard >= jaccardThreshold) {
+            uf.union(i, j);
+            connectedPairCount++;
         }
     }
 
@@ -470,6 +551,12 @@ export function computeBasinInversionBayesian(
                 nodesWithBoundary,
                 boundaryRatio: Math.round(boundaryRatio * 1000) / 1000,
                 mutualInclusionPairs: mutualPairCount,
+                jaccardGating: {
+                    threshold: Math.round(jaccardThreshold * 1000) / 1000,
+                    pairsAbove: connectedPairCount,
+                    pairsBelow: mutualPairCount - connectedPairCount,
+                    splitFound: jaccardThreshold > 0,
+                },
                 medianBoundarySim: T_v,
                 concentration: {
                     mean: Math.round(meanConc * 100) / 100,
@@ -483,7 +570,7 @@ export function computeBasinInversionBayesian(
                 derivedBandwidthLo: null, derivedBandwidthHi: null,
                 ladderSteps: null, stableWindowLength: 0,
                 selectedPeaks: [],
-                valley: T_v != null ? { T_v, valleyDepth: 0, localMu: mu, curvatureThreshold: 0 } : null,
+                valley: T_v != null ? { T_v, valleyDepth: 0, localMu: mu ?? 0, curvatureThreshold: 0 } : null,
                 binnedSamplingDiffers: null, binnedPeakCenters: null,
             },
         },

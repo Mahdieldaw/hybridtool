@@ -511,6 +511,7 @@ export class StepExecutor {
     let preSemanticInterpretation = null;
     let substrate = null;
     let basinInversionResult = null;
+    let bayesianBasinInversionResult = null;
     let clusteringModule = null;
     let cellUnitEmbeddings = null; // Map<string, Float32Array> | null
     const geometryPromise = (async () => {
@@ -711,14 +712,16 @@ export class StepExecutor {
         // 2.7 Basin Inversion (Topographic Analysis)
         // ─────────────────────────────────────────────────────────────────────────
         try {
-          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
           const paraIds = Array.from(geometryParagraphEmbeddings.keys());
           const paraVectors = paraIds.map(id => geometryParagraphEmbeddings.get(id));
           basinInversionResult = computeBasinInversion(paraIds, paraVectors);
-          console.log(`[StepExecutor] Basin inversion complete: ${basinInversionResult.basinCount} basins found at Tv=${basinInversionResult.T_v?.toFixed(3) || 'null'}`);
+          console.log(`[StepExecutor] Basin inversion complete: ${basinInversionResult.basinCount} basins found`);
         } catch (err) {
           console.warn(`[StepExecutor] Basin inversion failed:`, getErrorMessage(err));
         }
+
+        bayesianBasinInversionResult = basinInversionResult;
 
         substrate = buildGeometricSubstrate(
           paragraphResult.paragraphs,
@@ -1080,6 +1083,7 @@ export class StepExecutor {
                     preBuiltPreSemantic: preSemanticInterpretation,
                     preBuiltQueryRelevance: queryRelevance,
                     preBuiltBasinInversion: basinInversionResult,
+                    preBuiltBayesianBasinInversion: bayesianBasinInversionResult,
                     queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
                     turn: context.turn || 0,

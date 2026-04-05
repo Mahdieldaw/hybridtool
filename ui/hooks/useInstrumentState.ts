@@ -6,7 +6,7 @@ export type PipelineLayer =
   | 'competitive-provenance' | 'claim-statements'
   | 'blast-radius' | 'raw-artifacts'
   | 'provenance-comparison' | 'mixed-provenance' | 'traversal-pruning'
-  | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions'
+  | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions' | 'bayesian-basins'
   | 'stmt-classification';
 
 export type SelectedEntity =

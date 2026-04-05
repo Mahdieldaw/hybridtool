@@ -278,6 +278,7 @@ export interface EnrichedClaim extends Claim {
   isConditional: boolean;
   isIsolated: boolean;
   chainDepth: number;
+  queryDistance?: number;
 }
 
 /**
@@ -742,6 +743,8 @@ export interface PassageClaimProfile {
   structuralContributors: number[];
   /** Model indices contributing only minority statements */
   incidentalMentions: number[];
+  /** Cosine distance (1 - similarity) to user query embedding */
+  queryDistance?: number;
 }
 
 export interface PassageRoutedClaim {
@@ -754,6 +757,8 @@ export interface PassageRoutedClaim {
   dominantModel: number | null;
   structuralContributors: number[];
   supporters: number[];
+  /** Cosine distance (1 - similarity) to user query embedding */
+  queryDistance?: number;
 }
 
 export interface PassageClaimRouting {
@@ -774,6 +779,16 @@ export interface PassageClaimRouting {
     densityRatioDistribution: number[];
     totalClaims: number;
     floorCount: number;
+    /** 'dominant-core' = largestBasinRatio > 0.5, periphery filtered before scoring.
+     *  'parallel-cores' = no dominant basin, full corpus scored, basin membership annotated.
+     *  'no-geometry' = no basin data available, full corpus scored (graceful degradation). */
+    corpusMode: 'dominant-core' | 'parallel-cores' | 'no-geometry';
+    /** Paragraph IDs excluded from scoring (empty in parallel-cores / no-geometry mode) */
+    peripheralNodeIds: string[];
+    /** periphery.size / totalNodes — how much was excluded */
+    peripheralRatio: number;
+    /** Basin ratio that drove the decision */
+    largestBasinRatio: number | null;
   };
 }
 
@@ -790,6 +805,8 @@ export interface PassageRoutingResult {
     loadBearingCount: number;
   };
   routing: PassageClaimRouting;
+  /** Per-passage basin annotation (populated only in parallel-cores mode) */
+  basinAnnotations?: Record<string, number>;
   meta: { processingTimeMs: number };
 }
 
@@ -1173,7 +1190,43 @@ export interface BasinInversionResult {
       binnedSamplingDiffers: boolean | null;
       binnedPeakCenters: number[] | null;
     };
+    bayesian?: {
+      method: string;
+      nodesWithBoundary: number;
+      boundaryRatio: number;
+      mutualInclusionPairs: number;
+      jaccardGating?: {
+        threshold: number;
+        pairsAbove: number;
+        pairsBelow: number;
+        splitFound: boolean;
+      };
+      medianBoundarySim: number | null;
+      concentration: { mean: number; min: number; max: number };
+      profiles: Array<{
+        nodeId: string;
+        changePoint: number | null;
+        boundarySim: number | null;
+        posteriorConcentration: number;
+        logBayesFactor: number;
+        inGroupSize: number;
+        totalPeers: number;
+      }>;
+    };
   };
+}
+
+export interface PipelineDiagnosticsStage {
+  status: 'ok' | 'failed' | 'skipped' | 'streaming' | 'queued' | 'active' | 'completed';
+  reason?: string;
+  error?: string;
+  timeMs?: number;
+  [key: string]: any;
+}
+
+export interface PipelineDiagnosticsResult {
+  embeddingBackendFailure: boolean;
+  stages: Record<string, PipelineDiagnosticsStage>;
 }
 
 export interface CognitiveArtifact {
@@ -1185,6 +1238,7 @@ export interface CognitiveArtifact {
     embeddingStatus: "computed" | "failed";
     substrate: PipelineSubstrateGraph;
     basinInversion?: BasinInversionResult;
+    bayesianBasinInversion?: BasinInversionResult;
     preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
     diagnostics?: PipelineDiagnosticsResult | null;
     structuralValidation?: any | null;
@@ -1276,9 +1330,6 @@ export interface AiTurn {
 
   // Shadow data is NOT stored on the turn — it is re-extracted from batch text
   // by buildArtifactForProvider(). See: deterministicPipeline.js
-  //
-  // Traversal state is stored on SingularityPhase.traversalState and
-  // ProviderResponse.traversalState, not here.
 
   /** Per-provider mapping responses with full artifacts for provider-aware resolution */
   mappingResponses?: Record<string, any[]>;

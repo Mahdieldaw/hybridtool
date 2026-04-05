@@ -381,6 +381,7 @@ export const detectConflicts = (
     const out: ConflictPair[] = [];
     for (const e of edges) {
         if (e.type !== "conflicts") continue;
+        if (e.from === e.to) continue;
         const a = claimMap.get(e.from);
         const b = claimMap.get(e.to);
         if (!a || !b) continue;
@@ -403,6 +404,7 @@ export const detectTradeoffs = (
     const out: TradeoffPair[] = [];
     for (const e of edges) {
         if (e.type !== "tradeoff") continue;
+        if (e.from === e.to) continue;
         const a = claimMap.get(e.from);
         const b = claimMap.get(e.to);
         if (!a || !b) continue;
@@ -476,6 +478,7 @@ export const detectEnrichedConflicts = (
         isHighSupport: c.isHighSupport,
     });
     for (const e of conflictEdges) {
+        if (e.from === e.to) continue;
         const a = claimMap.get(e.from);
         const b = claimMap.get(e.to);
         if (!a || !b) continue;

@@ -95,42 +95,44 @@ function Histogram({
 
   const span = rangeMax - rangeMin;
   return (
-    <div className="relative" style={{ height }}>
-      <div className="flex items-end gap-px h-full">
-        {counts.map((count, i) => {
-          const h = (count / maxCount) * 100;
-          const a = (rangeMin + (i / bins) * span).toFixed(3);
-          const b = (rangeMin + ((i + 1) / bins) * span).toFixed(3);
+    <div className="flex flex-col">
+      <div className="relative" style={{ height }}>
+        <div className="flex items-end gap-px h-full">
+          {counts.map((count, i) => {
+            const h = (count / maxCount) * 100;
+            const a = (rangeMin + (i / bins) * span).toFixed(3);
+            const b = (rangeMin + ((i + 1) / bins) * span).toFixed(3);
+            return (
+              <div
+                key={i}
+                className="flex-1 bg-sky-500/50 hover:bg-sky-500/70 rounded-t-sm transition-colors relative group"
+                style={{ height: `${h}%`, minHeight: count > 0 ? 2 : 0 }}
+                title={`[${a}, ${b}): ${count}`}
+              />
+            );
+          })}
+        </div>
+        {markers?.map((m) => {
+          if (!(span > 0)) return null;
+          const pct = ((m.value - rangeMin) / span) * 100;
+          if (pct < 0 || pct > 100) return null;
           return (
             <div
-              key={i}
-              className="flex-1 bg-accent/50 hover:bg-accent/80 rounded-t-sm transition-colors relative group"
-              style={{ height: `${h}%`, minHeight: count > 0 ? 2 : 0 }}
-              title={`[${a}, ${b}): ${count}`}
-            />
+              key={m.label}
+              className="absolute top-0 bottom-0 w-px opacity-80"
+              style={{ left: `${pct}%`, backgroundColor: m.color }}
+              title={`${m.label}: ${m.value.toFixed(4)}`}
+            >
+              <div
+                className="absolute -top-4 left-1 text-[9px] font-mono whitespace-nowrap"
+                style={{ color: m.color }}
+              >
+                {m.label}
+              </div>
+            </div>
           );
         })}
       </div>
-      {markers?.map((m) => {
-        if (!(span > 0)) return null;
-        const pct = ((m.value - rangeMin) / span) * 100;
-        if (pct < 0 || pct > 100) return null;
-        return (
-          <div
-            key={m.label}
-            className="absolute top-0 bottom-0 w-px opacity-80"
-            style={{ left: `${pct}%`, backgroundColor: m.color }}
-            title={`${m.label}: ${m.value.toFixed(4)}`}
-          >
-            <div
-              className="absolute -top-4 left-1 text-[9px] font-mono whitespace-nowrap"
-              style={{ color: m.color }}
-            >
-              {m.label}
-            </div>
-          </div>
-        );
-      })}
       <div className="flex justify-between mt-1 text-[9px] text-text-muted font-mono">
         <span>{rangeMin.toFixed(3)}</span>
         <span>{((rangeMin + rangeMax) / 2).toFixed(3)}</span>
@@ -171,42 +173,44 @@ function BinHistogram({
   }
 
   return (
-    <div className="relative" style={{ height }}>
-      <div className="flex items-end gap-px h-full">
-        {bins.map((count, i) => {
-          const h = (count / maxCount) * 100;
-          const a = (binMin + i * binWidth).toFixed(4);
-          const b = (binMin + (i + 1) * binWidth).toFixed(4);
+    <div className="flex flex-col">
+      <div className="relative" style={{ height }}>
+        <div className="flex items-end gap-px h-full">
+          {bins.map((count, i) => {
+            const h = (count / maxCount) * 100;
+            const a = (binMin + i * binWidth).toFixed(4);
+            const b = (binMin + (i + 1) * binWidth).toFixed(4);
+            return (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm transition-colors hover:opacity-90"
+                style={{ height: `${h}%`, minHeight: count > 0 ? 2 : 0, backgroundColor: binColor(i) }}
+                title={`[${a}, ${b}): ${count}`}
+              />
+            );
+          })}
+        </div>
+        {markers?.map((m) => {
+          if (!(span > 0)) return null;
+          const pct = ((m.value - binMin) / span) * 100;
+          if (pct < 0 || pct > 100) return null;
           return (
             <div
-              key={i}
-              className="flex-1 rounded-t-sm transition-colors hover:opacity-90"
-              style={{ height: `${h}%`, minHeight: count > 0 ? 2 : 0, backgroundColor: binColor(i) }}
-              title={`[${a}, ${b}): ${count}`}
-            />
+              key={m.label}
+              className="absolute top-0 bottom-0 w-px opacity-80"
+              style={{ left: `${pct}%`, backgroundColor: m.color }}
+              title={`${m.label}: ${m.value.toFixed(6)}`}
+            >
+              <div
+                className="absolute -top-4 left-1 text-[9px] font-mono whitespace-nowrap"
+                style={{ color: m.color }}
+              >
+                {m.label}
+              </div>
+            </div>
           );
         })}
       </div>
-      {markers?.map((m) => {
-        if (!(span > 0)) return null;
-        const pct = ((m.value - binMin) / span) * 100;
-        if (pct < 0 || pct > 100) return null;
-        return (
-          <div
-            key={m.label}
-            className="absolute top-0 bottom-0 w-px opacity-80"
-            style={{ left: `${pct}%`, backgroundColor: m.color }}
-            title={`${m.label}: ${m.value.toFixed(6)}`}
-          >
-            <div
-              className="absolute -top-4 left-1 text-[9px] font-mono whitespace-nowrap"
-              style={{ color: m.color }}
-            >
-              {m.label}
-            </div>
-          </div>
-        );
-      })}
       <div className="flex justify-between mt-1 text-[9px] text-text-muted font-mono">
         <span>{binMin.toFixed(3)}</span>
         <span>{((binMin + binMax) / 2).toFixed(3)}</span>
@@ -404,6 +408,8 @@ export function GeometryCard({
   const substrate = artifact?.geometry?.substrate ?? null;
   const nodes: any[] = useMemo(() => substrate?.nodes ?? [], [substrate]);
   const mutualEdges: any[] = useMemo(() => substrate?.mutualEdges ?? [], [substrate]);
+  const status: string = basin?.status ?? 'unknown';
+  const basinCount = basin?.basinCount ?? 0;
 
   // ── Pairwise field stats (from basin inversion — the only place these are surfaced) ──
   const D = basin?.discriminationRange ?? null;
@@ -414,34 +420,7 @@ export function GeometryCard({
   const dColor = D == null ? "text-text-muted" : D >= 0.10 ? "text-emerald-400" : D >= 0.05 ? "text-amber-400" : "text-rose-400";
   const hasHistogram = basin && Array.isArray(basin.histogram) && basin.histogram.length > 0;
 
-  // ── Basin structure ──
-  const basinCount = basin?.basinCount ?? basin?.basins?.length ?? 0;
-  const hasBasinStructure = basin?.status === "ok" && basinCount > 1;
 
-  type BasinRow = { id: string; basinId: number; size: number; ratio: number; trenchDepth: number | null };
-  const basinRows = useMemo<BasinRow[]>(() => {
-    const basins: any[] = basin?.basins ?? [];
-    const total = basin?.nodeCount ?? 0;
-    return basins.map((b: any) => ({
-      id: String(b.basinId),
-      basinId: b.basinId,
-      size: Array.isArray(b.nodeIds) ? b.nodeIds.length : (b.size ?? 0),
-      ratio: total > 0 ? (Array.isArray(b.nodeIds) ? b.nodeIds.length : (b.size ?? 0)) / total : 0,
-      trenchDepth: typeof b.trenchDepth === "number" ? b.trenchDepth : null,
-    }));
-  }, [basin]);
-
-  type BridgeRow = { id: string; a: string; b: string; similarity: number; delta: number | null };
-  const bridgeRows = useMemo<BridgeRow[]>(() => {
-    const pairs: any[] = basin?.bridgePairs ?? [];
-    return pairs.map((p: any, i: number) => ({
-      id: String(i),
-      a: String(p.nodeA ?? p.a ?? ""),
-      b: String(p.nodeB ?? p.b ?? ""),
-      similarity: typeof p.similarity === "number" ? p.similarity : 0,
-      delta: basin?.T_v != null && typeof p.similarity === "number" ? p.similarity - basin.T_v : null,
-    })).sort((a, b) => Math.abs(a.delta ?? 999) - Math.abs(b.delta ?? 999));
-  }, [basin]);
 
   // ── Mutual graph ──
   const nodeIds = useMemo(() => nodes.map((n: any) => String(n.paragraphId ?? "")), [nodes]);
@@ -491,13 +470,14 @@ export function GeometryCard({
       <InterpretiveCallout
         text={(() => {
           const dDesc = D == null ? 'unavailable' : D >= 0.10 ? 'above 0.10 floor' : D >= 0.05 ? 'marginal' : 'below 0.05';
-          const basinDesc = hasBasinStructure
-            ? `${basinCount} basins, valley at T_v=${fmt(basin.T_v, 3)}${basin.valleyDepthSigma != null ? ` (${fmt(basin.valleyDepthSigma, 1)}σ deep)` : ''}`
-            : `${basinCount} basin${basinCount !== 1 ? 's' : ''}, no valley`;
+          const basinDesc = status === "ok" && basinCount > 1
+            ? `Geometric topography is dominated by ${basinCount} distinct basins separated by clear boundaries.`
+            : status === "ok" || status === "no_basin_structure" ? "Geometric topography shows a continuous similarity field without clear categorical basins."
+            : `${basinCount} basin${basinCount !== 1 ? 's' : ''}`;
           const partDesc = participationRate != null ? `${(participationRate * 100).toFixed(0)}% mutual participation` : '';
           return `${fmtInt(nodes.length)} paragraphs, D=${fmt(D, 3)} (${dDesc}). ${basinDesc}. ${partDesc}.`;
         })()}
-        variant={D == null ? 'info' : D >= 0.10 && hasBasinStructure ? 'ok' : D >= 0.05 ? 'warn' : 'error'}
+        variant={D == null ? 'info' : (D >= 0.10 && (status === 'ok' || basinCount > 1)) ? 'ok' : D >= 0.05 ? 'warn' : 'error'}
       />
 
       {/* ── TIER 1: Pairwise Field ── */}
@@ -534,68 +514,6 @@ export function GeometryCard({
         </div>
       </CardSection>
 
-      {/* ── TIER 2: Basin Structure (only if meaningful) ── */}
-      {(hasBasinStructure || (basin?.pctHigh != null)) && (
-        <CardSection title="Basin Structure" badge={{ text: `${basinCount} basin${basinCount !== 1 ? 's' : ''}`, color: hasBasinStructure ? "#34d399" : "#fbbf24" }}>
-          {/* Zone population */}
-          {(basin.pctHigh != null || basin.pctLow != null) && (
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              <div className="bg-white/3 rounded-lg p-2 text-center">
-                <div className="text-[9px] text-text-muted uppercase">High</div>
-                <div className="text-sm font-mono font-semibold text-emerald-400">{basin.pctHigh != null ? `${basin.pctHigh.toFixed(1)}%` : "—"}</div>
-              </div>
-              <div className="bg-white/3 rounded-lg p-2 text-center">
-                <div className="text-[9px] text-text-muted uppercase">Valley</div>
-                <div className="text-sm font-mono font-semibold text-amber-400">{basin.pctValleyZone != null ? `${basin.pctValleyZone.toFixed(1)}%` : "—"}</div>
-              </div>
-              <div className="bg-white/3 rounded-lg p-2 text-center">
-                <div className="text-[9px] text-text-muted uppercase">Low</div>
-                <div className="text-sm font-mono font-semibold text-blue-400">{basin.pctLow != null ? `${basin.pctLow.toFixed(1)}%` : "—"}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Basins table */}
-          {basinRows.length > 1 && (
-            <SortableTable
-              columns={[
-                { key: "basinId", header: "Basin", cell: (r) => <span className="font-mono text-text-muted">{r.basinId}</span> },
-                { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
-                { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
-                { key: "trenchDepth", header: "Trench", sortValue: (r) => r.trenchDepth, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.trenchDepth, 4)}</span> },
-              ]}
-              rows={basinRows}
-              defaultSortKey="size"
-              defaultSortDir="desc"
-            />
-          )}
-
-          {/* Bridge pairs */}
-          {bridgeRows.length > 0 && (
-            <div className="mt-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1">Bridge Pairs Near T_v ({bridgeRows.length})</div>
-              <SortableTable
-                columns={[
-                  { key: "a", header: "Node A", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.a}</span> },
-                  { key: "b", header: "Node B", cell: (r) => <span className="font-mono text-[10px] text-text-muted">{r.b}</span> },
-                  { key: "similarity", header: "Sim", sortValue: (r) => r.similarity, cell: (r) => <span className="font-mono">{fmt(r.similarity, 5)}</span> },
-                  {
-                    key: "delta", header: "Δ T_v", sortValue: (r) => r.delta == null ? 999 : Math.abs(r.delta), cell: (r) => {
-                      const d = r.delta;
-                      const color = d != null && Math.abs(d) < 0.002 ? "text-rose-400" : "text-text-muted";
-                      return <span className={clsx("font-mono", color)}>{d != null ? (d >= 0 ? "+" : "") + fmt(d, 5) : "—"}</span>;
-                    }
-                  },
-                ]}
-                rows={bridgeRows}
-                defaultSortKey="delta"
-                maxRows={10}
-              />
-            </div>
-          )}
-        </CardSection>
-      )}
-
       {/* ── TIER 3: Mutual Recognition Graph ── */}
       {nodes.length > 0 && (
         <CardSection title="Mutual Recognition" badge={{ text: `${fmtInt(mutualEdges.length)} edges`, color: participationRate != null && participationRate > 0.05 ? "#34d399" : "#f87171" }}>
@@ -617,17 +535,20 @@ export function GeometryCard({
           </div>
 
           {/* Degree distribution */}
-          {mutualDegrees.length > 0 && (
-            <div className="mt-2">
-              <Histogram
-                values={mutualDegrees}
-                bins={Math.min(20, Math.max(...mutualDegrees) + 1)}
-                rangeMin={0}
-                rangeMax={Math.max(...mutualDegrees, 1) + 0.5}
-                height={50}
-              />
-            </div>
-          )}
+          {mutualDegrees.length > 0 && (() => {
+            const maxDegree = Math.max(...mutualDegrees);
+            return (
+              <div className="mt-2">
+                <Histogram
+                  values={mutualDegrees}
+                  bins={Math.min(20, maxDegree + 1)}
+                  rangeMin={0}
+                  rangeMax={Math.max(maxDegree, 1) + 0.5}
+                  height={50}
+                />
+              </div>
+            );
+          })()}
 
           {/* Components table (only if >1 component) */}
           {compRows.length > 1 && (
@@ -668,6 +589,252 @@ export function GeometryCard({
   );
 }
 
+
+// ============================================================================
+// BAYESIAN BASIN CARD
+// ============================================================================
+
+export function BayesianBasinCard({ artifact }: { artifact: any }) {
+  const bayesian = artifact?.geometry?.bayesianBasinInversion ?? null;
+  const meta = bayesian?.meta?.bayesian ?? null;
+  const profiles: any[] = meta?.profiles ?? [];
+
+  type ProfileRow = {
+    id: string;
+    nodeId: string;
+    changePoint: number | null;
+    boundarySim: number | null;
+    logBF: number;
+    posteriorConcentration: number;
+    inGroupSize: number;
+    totalPeers: number;
+  };
+
+  const profileRows = useMemo<ProfileRow[]>(() =>
+    profiles.map((p: any, i: number) => ({
+      id: String(i),
+      nodeId: String(p.nodeId ?? ""),
+      changePoint: p.changePoint,
+      boundarySim: p.boundarySim,
+      logBF: p.logBayesFactor ?? 0,
+      posteriorConcentration: p.posteriorConcentration ?? 0,
+      inGroupSize: p.inGroupSize ?? 0,
+      totalPeers: p.totalPeers ?? 0,
+    })),
+    [profiles]
+  );
+
+  // Boundary sim distribution for histogram
+  const boundarySims = useMemo(
+    () => profileRows.filter(r => r.boundarySim != null).map(r => r.boundarySim as number),
+    [profileRows]
+  );
+  const logBFs = useMemo(
+    () => profileRows.map(r => r.logBF),
+    [profileRows]
+  );
+
+  // Basin rows
+  type BRow = { id: string; basinId: number; size: number; ratio: number; trenchDepth: number | null };
+  const basinRows = useMemo<BRow[]>(() => {
+    const basins: any[] = bayesian?.basins ?? [];
+    const total = bayesian?.nodeCount ?? 0;
+    return basins.map((b: any) => ({
+      id: String(b.basinId),
+      basinId: b.basinId,
+      size: Array.isArray(b.nodeIds) ? b.nodeIds.length : 0,
+      ratio: total > 0 ? (Array.isArray(b.nodeIds) ? b.nodeIds.length : 0) / total : 0,
+      trenchDepth: typeof b.trenchDepth === "number" ? b.trenchDepth : null,
+    }));
+  }, [bayesian]);
+
+  if (!bayesian) {
+    return <div className="text-xs text-text-muted italic py-4">Bayesian basin inversion not available. Requires a new query to compute.</div>;
+  }
+
+  const nodesWithBoundary = meta?.nodesWithBoundary ?? 0;
+  const nodeCount = bayesian?.nodeCount ?? 0;
+  const boundaryRatio = meta?.boundaryRatio ?? 0;
+  const mutualPairs = meta?.mutualInclusionPairs ?? 0;
+  const medianBSim = meta?.medianBoundarySim;
+  const conc = meta?.concentration ?? {};
+  const basinCount = bayesian?.basinCount ?? 0;
+  const hasBoundary = nodesWithBoundary > 0;
+  const hasBasins = basinCount > 1;
+  const processingTimeMs = bayesian?.meta?.processingTimeMs;
+  const gating = meta?.jaccardGating ?? null;
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] border border-violet-500/30 text-violet-400 px-1.5 py-0.5 rounded">L1</span>
+        <span className={clsx(
+          "text-[9px] px-1.5 py-0.5 rounded border",
+          hasBasins ? "border-emerald-500/30 text-emerald-400" : "border-amber-500/30 text-amber-400"
+        )}>
+          {bayesian.statusLabel ?? bayesian.status}
+        </span>
+        <span className="text-[9px] text-text-muted font-mono">Bayesian</span>
+        {processingTimeMs != null && (
+          <span className="text-[9px] text-text-muted ml-auto font-mono">{Math.round(processingTimeMs)}ms</span>
+        )}
+      </div>
+
+      <InterpretiveCallout
+        text={`${nodesWithBoundary}/${nodeCount} nodes found change-point boundaries (${(boundaryRatio * 100).toFixed(0)}%). ${mutualPairs} mutual pairs ${gating?.splitFound ? `(Gated at J=${gating.threshold})` : '(No split)'} → ${basinCount} basin${basinCount !== 1 ? 's' : ''}.`}
+        variant={hasBasins ? 'ok' : hasBoundary ? 'warn' : 'info'}
+      />
+
+      {/* ── Change-Point Summary ── */}
+      <CardSection title="Node Detection" badge={{ text: `${nodesWithBoundary}/${nodeCount} boundaries`, color: hasBoundary ? "#a78bfa" : "#6b7280" }}>
+        <div className="grid grid-cols-2 gap-x-4">
+          <div>
+            <StatRow label="Nodes" value={fmtInt(nodeCount)} />
+            <StatRow label="With Boundary" value={fmtInt(nodesWithBoundary)} color={hasBoundary ? "text-violet-400" : undefined} />
+            <StatRow label="Boundary Ratio" value={`${(boundaryRatio * 100).toFixed(1)}%`} />
+          </div>
+          <div>
+            <StatRow label="Median T_v" value={medianBSim != null ? fmt(medianBSim, 4) : "—"} color={medianBSim != null ? "text-emerald-400" : undefined} />
+            <StatRow label="Basins" value={fmtInt(basinCount)} color={hasBasins ? "text-emerald-400" : undefined} />
+          </div>
+        </div>
+      </CardSection>
+
+      {/* ── Structural Gating  ── */}
+      <CardSection title="Structural Gating" badge={gating?.splitFound ? { text: `Split @ J=${fmt(gating.threshold, 2)}`, color: "#10b981" } : { text: "No Split", color: "#6b7280" }}>
+        <div className="grid grid-cols-2 gap-x-4">
+          <div>
+            <StatRow label="Mutual Pairs" value={fmtInt(mutualPairs)} />
+            <StatRow label="Accepted" value={gating ? fmtInt(gating.pairsAbove) : "—"} color={gating?.splitFound ? "text-emerald-400" : undefined} />
+          </div>
+          <div>
+            <StatRow label="Gated (Rejected)" value={gating ? fmtInt(gating.pairsBelow) : "—"} color={gating?.pairsBelow > 0 ? "text-rose-400" : undefined} />
+            <StatRow label="J Threshold" value={gating ? fmt(gating.threshold, 3) : "—"} />
+          </div>
+        </div>
+      </CardSection>
+
+      {/* ── Posterior Concentration ── */}
+      <CardSection title="Posterior Concentration">
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          <div className="bg-white/3 rounded-lg p-2 text-center">
+            <div className="text-[9px] text-text-muted uppercase">Mean</div>
+            <div className="text-sm font-mono font-semibold text-violet-400">{fmt(conc.mean, 2)}</div>
+          </div>
+          <div className="bg-white/3 rounded-lg p-2 text-center">
+            <div className="text-[9px] text-text-muted uppercase">Min</div>
+            <div className="text-sm font-mono font-semibold text-text-muted">{fmt(conc.min, 2)}</div>
+          </div>
+          <div className="bg-white/3 rounded-lg p-2 text-center">
+            <div className="text-[9px] text-text-muted uppercase">Max</div>
+            <div className="text-sm font-mono font-semibold text-text-muted">{fmt(conc.max, 2)}</div>
+          </div>
+        </div>
+      </CardSection>
+
+      {/* ── Log Bayes Factor Distribution ── */}
+      {logBFs.length > 0 && (
+        <CardSection title="Log Bayes Factor" badge={{ text: `${logBFs.filter(v => v > 0).length} positive`, color: "#a78bfa" }}>
+          <Histogram
+            values={logBFs}
+            bins={Math.min(25, Math.max(5, Math.ceil(Math.sqrt(logBFs.length))))}
+            rangeMin={Math.min(...logBFs)}
+            rangeMax={Math.max(...logBFs, 0.1)}
+            markers={[{ label: "0", value: 0, color: "#f87171" }]}
+            height={70}
+          />
+          <div className="text-[9px] text-text-muted mt-1">
+            &gt;0 = boundary beats null model. &lt;0 = continuous field.
+          </div>
+        </CardSection>
+      )}
+
+      {/* ── Boundary Similarity Distribution ── */}
+      {boundarySims.length > 0 && (
+        <CardSection title="Boundary Similarities" badge={{ text: `${boundarySims.length} nodes`, color: "#34d399" }}>
+          <Histogram
+            values={boundarySims}
+            bins={Math.min(20, Math.max(5, Math.ceil(Math.sqrt(boundarySims.length))))}
+            rangeMin={Math.min(...boundarySims)}
+            rangeMax={Math.max(...boundarySims)}
+            markers={medianBSim != null ? [{ label: "median", value: medianBSim, color: "#34d399" }] : undefined}
+            height={70}
+          />
+          <div className="text-[9px] text-text-muted mt-1">
+            Where each node's in-group / out-group boundary sits.
+          </div>
+        </CardSection>
+      )}
+
+      {/* ── Basin Structure ── */}
+      {basinRows.length > 1 && (
+        <CardSection title="Bayesian Basins" badge={{ text: `${basinCount}`, color: "#34d399" }}>
+          <SortableTable
+            columns={[
+              { key: "basinId", header: "Basin", cell: (r) => <span className="font-mono text-text-muted">{r.basinId}</span> },
+              { key: "size", header: "Nodes", sortValue: (r) => r.size, cell: (r) => <span className="font-mono">{r.size}</span> },
+              { key: "ratio", header: "%", sortValue: (r) => r.ratio, cell: (r) => <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span> },
+              { key: "trenchDepth", header: "Trench", sortValue: (r) => r.trenchDepth, cell: (r) => <span className="font-mono text-text-muted">{fmt(r.trenchDepth, 4)}</span> },
+            ]}
+            rows={basinRows}
+            defaultSortKey="size"
+            defaultSortDir="desc"
+          />
+        </CardSection>
+      )}
+
+      {/* ── Per-Node Profiles ── */}
+      {profileRows.length > 0 && (
+        <CardSection title="Node Profiles" badge={{ text: `${profileRows.length}`, color: "#6b7280" }}>
+          <SortableTable
+            columns={[
+              { key: "nodeId", header: "Node", cell: (r) => <span className="font-mono text-[10px] text-text-muted truncate max-w-[100px] inline-block" title={r.nodeId}>{r.nodeId}</span> },
+              {
+                key: "logBF", header: "logBF", sortValue: (r) => r.logBF,
+                cell: (r) => <span className={clsx("font-mono", r.logBF > 0 ? "text-violet-400" : "text-text-muted")}>{fmt(r.logBF, 2)}</span>
+              },
+              {
+                key: "boundarySim", header: "Boundary", sortValue: (r) => r.boundarySim ?? -1,
+                cell: (r) => <span className={clsx("font-mono", r.boundarySim != null ? "text-emerald-400" : "text-text-muted")}>{r.boundarySim != null ? fmt(r.boundarySim, 3) : "—"}</span>
+              },
+              {
+                key: "changePoint", header: "k", sortValue: (r) => r.changePoint ?? -1,
+                cell: (r) => <span className="font-mono text-text-muted">{r.changePoint != null ? r.changePoint : "—"}</span>
+              },
+              {
+                key: "inGroupSize", header: "In-Group", sortValue: (r) => r.inGroupSize,
+                cell: (r) => <span className="font-mono">{r.inGroupSize}<span className="text-text-muted">/{r.totalPeers}</span></span>
+              },
+            ]}
+            rows={profileRows}
+            defaultSortKey="logBF"
+            defaultSortDir="desc"
+            maxRows={20}
+          />
+        </CardSection>
+      )}
+
+      {/* ── KDE Comparison (global stats side-by-side) ── */}
+      {bayesian?.mu != null && (
+        <CardSection title="Global Field (shared with KDE)">
+          <div className="grid grid-cols-2 gap-x-4">
+            <div>
+              <StatRow label="μ" value={fmt(bayesian.mu, 4)} />
+              <StatRow label="σ" value={fmt(bayesian.sigma, 4)} />
+              <StatRow label="P10" value={fmt(bayesian.p10, 4)} />
+            </div>
+            <div>
+              <StatRow label="P90" value={fmt(bayesian.p90, 4)} />
+              <StatRow label="D" value={fmt(bayesian.discriminationRange, 4)} />
+              <StatRow label="T_v (median)" value={fmt(bayesian.T_v, 4)} color={bayesian.T_v != null ? "text-emerald-400" : undefined} />
+            </div>
+          </div>
+        </CardSection>
+      )}
+    </div>
+  );
+}
 
 // ============================================================================
 // REGIONS CARD
@@ -1634,6 +1801,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       modelsWithPassages: p.modelsWithPassages ?? 0,
       totalClaimStatements: p.totalClaimStatements ?? 0,
       meanCoverage: p.meanCoverage ?? 0,
+      queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
     }));
   }, [profiles, claimLabelById]);
 
@@ -1696,6 +1864,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       maxPassageLength: p.maxPassageLength ?? 0,
       loadBearing: !!p.isLoadBearing,
       structContrib: p.structuralContributors?.length ?? 0,
+      queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
     }));
   }, [prClaimProfiles, claimLabelById]);
 
@@ -1812,6 +1981,12 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
             title: "Mean per-paragraph coverage fraction",
             sortValue: (r: any) => r.meanCoverage,
             cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.meanCoverage, 2)}</span>,
+          },
+          {
+            key: "queryDistance", header: "q_dist",
+            title: "Query distance: 1 - cosine similarity to user query. Lower = more relevant.",
+            sortValue: (r: any) => r.queryDistance,
+            cell: (r: any) => <span className="font-mono text-text-muted">{fmt(r.queryDistance, 3)}</span>,
           },
         ]}
         rows={rows}
@@ -1945,15 +2120,16 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 {LANDSCAPE_LABELS[r.position] ?? r.position}
               </span>
             ), sortValue: (r: any) => r.position },
-            { key: "concentration", header: "Conc%", title: "Concentration ratio: fraction of this claim's supporting passages that are exclusive to it (not shared with other claims). 100% = all passages are dedicated.", cell: (r: any) => (
+            { key: "concentration", header: "Conc%", title: "Concentration ratio: fraction of this claim's majority paragraphs that are provided by its dominant model. 100% = all majority support comes from a single model.", cell: (r: any) => (
               <span>{(r.concentration * 100).toFixed(0)}%</span>
             ), sortValue: (r: any) => r.concentration },
             { key: "density", header: "Dens%", title: "Density ratio: fraction of model-aligned judgements (MAJ) that contain multi-sentence passages (length ≥ 2). Higher density = richer argumentation.", cell: (r: any) => (
               <span>{(r.density * 100).toFixed(0)}%</span>
             ), sortValue: (r: any) => r.density },
-            { key: "totalMAJ", header: "MAJ", title: "Total model-aligned judgements: number of model responses that support this claim.", cell: (r: any) => r.totalMAJ, sortValue: (r: any) => r.totalMAJ },
+            { key: "totalMAJ", header: "MAJ", title: "Total majority paragraphs: number of paragraphs where this claim owns >50% of the statements.", cell: (r: any) => r.totalMAJ, sortValue: (r: any) => r.totalMAJ },
             { key: "maxPassageLength", header: "MAXLEN", title: "Maximum passage length: longest contiguous passage (in sentences) found across all supporting model responses.", cell: (r: any) => r.maxPassageLength, sortValue: (r: any) => r.maxPassageLength },
-            { key: "structContrib", header: "SC#", title: "Structural contributors: number of structural factors (e.g. cascade risk, leverage, articulation) that contributed to this claim's routing.", cell: (r: any) => r.structContrib, sortValue: (r: any) => r.structContrib },
+            { key: "structContrib", header: "SC#", title: "Structural contributors: number of models that provide at least one majority paragraph for this claim.", cell: (r: any) => r.structContrib, sortValue: (r: any) => r.structContrib },
+            { key: "queryDistance", header: "q_dist", title: "Query distance: 1 - cosine similarity between claim centroid and user query. Lower = more relevant.", cell: (r: any) => fmt(r.queryDistance, 3), sortValue: (r: any) => r.queryDistance },
             { key: "loadBearing", header: "LB", title: "Load-bearing: whether this claim passed the concentration threshold and preconditions to be routed through the passage layer.", cell: (r: any) => (
               <span className={r.loadBearing ? "text-green-400" : "text-text-muted"}>
                 {r.loadBearing ? "Y" : "–"}

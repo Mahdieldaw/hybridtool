@@ -1,71 +1,52 @@
 import React, { useMemo } from "react";
 import {
-    EnrichedClaim,
+    StructuralAnalysis,
     ProblemStructure,
-    ConflictPair,
-    TradeoffPair,
+    SecondaryPattern,
+    KeystonePatternData,
+    ChainPatternData,
+    DissentPatternData,
+    FragilePatternData,
 } from "../../../shared/contract";
 
 interface StructuralSummaryProps {
-    claims: EnrichedClaim[];
-    conflicts: ConflictPair[];
-    tradeoffs: TradeoffPair[];
+    analysis: StructuralAnalysis;
     problemStructure?: ProblemStructure;
-    modelCount: number;
 }
 
 interface SummaryLine {
-    type: "floor" | "tension" | "tradeoff";
     icon: string;
     text: string;
     color: string;
 }
 
 export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
-    claims,
-    conflicts,
-    tradeoffs,
+    analysis,
     problemStructure,
-    modelCount,
 }) => {
     const lines = useMemo(() => {
         const result: SummaryLine[] = [];
 
-        // Sort claims by support
-        const bySupport = [...claims].sort(
-            (a, b) => b.supporters.length - a.supporters.length
-        );
-        const highSupport = claims.filter((c) => c.isHighSupport);
-
-        // Calculate consensus level (not shown as %, just used for template selection)
-        const topSupport = bySupport[0]?.supporters.length || 0;
-        const consensusRatio = modelCount > 0 ? topSupport / modelCount : 0;
+        // ═══════════════════════════════════════════════════════════════════
+        // LINE 1: PRIMARY SHAPE — what the classification engine decided
+        // ═══════════════════════════════════════════════════════════════════
+        const shapeLine = buildShapeLine(analysis, problemStructure);
+        if (shapeLine) result.push(shapeLine);
 
         // ═══════════════════════════════════════════════════════════════════
-        // LINE 1: THE FLOOR (What's agreed on)
+        // LINE 2: TENSION — from enriched conflicts (ranked by significance)
         // ═══════════════════════════════════════════════════════════════════
-
-        const floorLine = buildFloorLine(
-            bySupport,
-            highSupport,
-            consensusRatio,
-            modelCount,
-            problemStructure
-        );
-        if (floorLine) result.push(floorLine);
-
-        // ═══════════════════════════════════════════════════════════════════
-        // LINE 2: THE TENSION (What's contested)
-        // ═══════════════════════════════════════════════════════════════════
-
-        const tensionLine = buildTensionLine(conflicts, problemStructure);
+        const tensionLine = buildTensionLine(analysis);
         if (tensionLine) result.push(tensionLine);
 
-        const tradeoffLine = buildTradeoffLine(tradeoffs);
-        if (tradeoffLine) result.push(tradeoffLine);
+        // ═══════════════════════════════════════════════════════════════════
+        // LINE 3: SECONDARY PATTERN — the most notable structural nuance
+        // ═══════════════════════════════════════════════════════════════════
+        const patternLine = buildPatternLine(problemStructure?.patterns);
+        if (patternLine) result.push(patternLine);
 
         return result;
-    }, [claims, conflicts, tradeoffs, problemStructure, modelCount]);
+    }, [analysis, problemStructure]);
 
     if (lines.length === 0) {
         return (
@@ -88,144 +69,165 @@ export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FLOOR LINE BUILDER
+// SHAPE LINE — reads directly from the classification engine's output
 // ═══════════════════════════════════════════════════════════════════════════
 
-function buildFloorLine(
-    bySupport: EnrichedClaim[],
-    highSupport: EnrichedClaim[],
-    consensusRatio: number,
-    modelCount: number,
+function buildShapeLine(
+    analysis: StructuralAnalysis,
     structure?: ProblemStructure
 ): SummaryLine | null {
-    if (bySupport.length === 0) return null;
+    const claims = analysis.claimsWithLeverage;
+    if (claims.length === 0) return null;
 
+    const primary = structure?.primary ?? analysis.shape?.primary;
+    if (!primary) return null;
+
+    const bySupport = [...claims].sort(
+        (a, b) => b.supporters.length - a.supporters.length
+    );
     const top1 = bySupport[0];
     const top2 = bySupport[1];
 
-    // Template selection based on consensus level
-    // High consensus (>70% of models agree on top claim)
-    if (consensusRatio > 0.7) {
-        if (highSupport.length >= 2 && top2) {
+    switch (primary) {
+        case "convergent": {
+            const highSupport = claims.filter(c => c.isHighSupport);
+            if (highSupport.length >= 2 && top2) {
+                return {
+                    icon: "✓",
+                    text: `Sources converge on "${top1.label}" and "${top2.label}"`,
+                    color: "text-emerald-400",
+                };
+            }
             return {
-                type: "floor",
                 icon: "✓",
-                text: `Nearly all sources align on "${top1.label}" and "${top2.label}"`,
+                text: `Sources converge around "${top1.label}"`,
                 color: "text-emerald-400",
             };
         }
-        return {
-            type: "floor",
-            icon: "✓",
-            text: `Strong agreement on "${top1.label}"`,
-            color: "text-emerald-400",
-        };
-    }
 
-    // Medium consensus (40-70%)
-    if (consensusRatio > 0.4) {
-        if (top2 && top2.supporters.length >= modelCount * 0.3) {
+        case "forked": {
+            const topConflict = analysis.patterns.conflictInfos?.[0]
+                ?? analysis.patterns.conflicts[0];
+            if (topConflict) {
+                return {
+                    icon: "⚡",
+                    text: `Sources split between "${topConflict.claimA.label}" and "${topConflict.claimB.label}"`,
+                    color: "text-red-400",
+                };
+            }
+            if (top2) {
+                return {
+                    icon: "⚡",
+                    text: `Sources split between "${top1.label}" and "${top2.label}"`,
+                    color: "text-red-400",
+                };
+            }
             return {
-                type: "floor",
-                icon: "◐",
-                text: `Most sources back "${top1.label}", with "${top2.label}" also well-supported`,
-                color: "text-blue-400",
+                icon: "⚡",
+                text: `Genuine disagreement — no dominant position`,
+                color: "text-red-400",
             };
         }
-        return {
-            type: "floor",
-            icon: "◐",
-            text: `About half the sources agree on "${top1.label}"`,
-            color: "text-blue-400",
-        };
-    }
 
-    // Low consensus (<40%)
-    if (!structure || structure.primary === "sparse") {
-        return {
-            type: "floor",
-            icon: "○",
-            text: `Views are scattered — "${top1.label}" has a slight edge but nothing dominates`,
-            color: "text-slate-400",
-        };
-    }
-
-    // Forked or constrained - different framing
-    if (structure && (structure.primary === "forked" || structure.primary === "constrained")) {
-        if (top2) {
+        case "constrained": {
+            const topTradeoff = analysis.patterns.tradeoffs[0];
+            if (topTradeoff) {
+                return {
+                    icon: "⚖️",
+                    text: `"${topTradeoff.claimA.label}" and "${topTradeoff.claimB.label}" — optimizing one hurts the other`,
+                    color: "text-orange-400",
+                };
+            }
             return {
-                type: "floor",
-                icon: "◑",
-                text: `Sources split between "${top1.label}" and "${top2.label}"`,
+                icon: "⚖️",
+                text: `Positions are mutually constraining — tradeoffs dominate`,
+                color: "text-orange-400",
+            };
+        }
+
+        case "parallel":
+            return {
+                icon: "∥",
+                text: `Independent dimensions — positions don't interact directly`,
+                color: "text-purple-400",
+            };
+
+        case "sparse":
+            return {
+                icon: "○",
+                text: top1
+                    ? `Scattered — "${top1.label}" has a slight edge but nothing dominates`
+                    : `Not enough signal to determine structure`,
+                color: "text-slate-400",
+            };
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TENSION LINE — from enriched conflicts or tradeoffs, ranked by significance
+// ═══════════════════════════════════════════════════════════════════════════
+
+function buildTensionLine(analysis: StructuralAnalysis): SummaryLine | null {
+    const shape = analysis.shape?.primary;
+
+    // For forked, the shape line already shows the main conflict — show tradeoff if any
+    if (shape === "forked") {
+        const tradeoff = analysis.patterns.tradeoffs[0];
+        if (tradeoff) {
+            return {
+                icon: "⚖️",
+                text: `Also a tradeoff between "${tradeoff.claimA.label}" and "${tradeoff.claimB.label}"`,
                 color: "text-orange-400",
             };
         }
     }
 
-    // Default low consensus
-    return {
-        type: "floor",
-        icon: "○",
-        text: `No clear consensus — "${top1.label}" leads slightly`,
-        color: "text-slate-400",
-    };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TENSION LINE BUILDER
-// ═══════════════════════════════════════════════════════════════════════════
-
-function buildTensionLine(
-    conflicts: ConflictPair[],
-    structure?: ProblemStructure
-): SummaryLine | null {
-    const highStakes = conflicts.filter((c) => c.isBothConsensus);
-
-    if (highStakes.length > 0) {
-        const main = highStakes[0];
-
-        if (main.dynamics === "symmetric") {
+    // For constrained, the shape line already shows the tradeoff — show conflict if any
+    if (shape === "constrained") {
+        const conflict = analysis.patterns.conflictInfos?.[0];
+        if (conflict) {
+            const dynamics = conflict.dynamics === "symmetric"
+                ? "evenly matched"
+                : "one side ahead";
             return {
-                type: "tension",
+                icon: "↔",
+                text: `Tension between "${conflict.claimA.label}" and "${conflict.claimB.label}" (${dynamics})`,
+                color: "text-amber-400",
+            };
+        }
+    }
+
+    // For convergent/parallel/sparse — show top conflict or tradeoff
+    const enrichedConflict = analysis.patterns.conflictInfos?.[0];
+    if (enrichedConflict) {
+        if (enrichedConflict.isBothHighSupport) {
+            return {
                 icon: "⚡",
-                text: `Genuine disagreement between "${main.claimA.label}" and "${main.claimB.label}" — both have strong backing`,
+                text: `Genuine disagreement: "${enrichedConflict.claimA.label}" vs "${enrichedConflict.claimB.label}" — both well-supported`,
                 color: "text-red-400",
             };
         }
-
-        // Asymmetric - one is winning
-        const stronger = main.claimA.supporterCount > main.claimB.supporterCount
-            ? main.claimA
-            : main.claimB;
-        const weaker = main.claimA.supporterCount > main.claimB.supporterCount
-            ? main.claimB
-            : main.claimA;
-
         return {
-            type: "tension",
-            icon: "⚡",
-            text: `"${stronger.label}" is ahead, but "${weaker.label}" has notable support`,
-            color: "text-orange-400",
-        };
-    }
-
-    // Any conflicts at all (even low-support)
-    if (conflicts.length > 0) {
-        const main = conflicts[0];
-        return {
-            type: "tension",
             icon: "↔",
-            text: `Some tension between "${main.claimA.label}" and "${main.claimB.label}"`,
+            text: `Some tension between "${enrichedConflict.claimA.label}" and "${enrichedConflict.claimB.label}"`,
             color: "text-amber-400",
         };
     }
 
-    // Constrained (tradeoff-like) structure but no explicit conflicts
-    if (structure && structure.primary === "constrained") {
+    const conflict = analysis.patterns.conflicts[0];
+    if (conflict) {
         return {
-            type: "tension",
+            icon: "↔",
+            text: `Some tension between "${conflict.claimA.label}" and "${conflict.claimB.label}"`,
+            color: "text-amber-400",
+        };
+    }
+
+    const tradeoff = analysis.patterns.tradeoffs[0];
+    if (tradeoff) {
+        return {
             icon: "⚖️",
-            text: "Structure is constrained by tradeoffs between positions — you can't fully have all of them.",
+            text: `Tradeoff between "${tradeoff.claimA.label}" and "${tradeoff.claimB.label}"`,
             color: "text-orange-400",
         };
     }
@@ -233,16 +235,87 @@ function buildTensionLine(
     return null;
 }
 
-function buildTradeoffLine(tradeoffs: TradeoffPair[]): SummaryLine | null {
-    if (tradeoffs.length === 0) return null;
+// ═══════════════════════════════════════════════════════════════════════════
+// PATTERN LINE — the most notable secondary structural feature
+// ═══════════════════════════════════════════════════════════════════════════
 
-    const main = tradeoffs[0];
-    return {
-        type: "tradeoff",
-        icon: "⚖️",
-        text: `Tradeoff between "${main.claimA.label}" and "${main.claimB.label}"`,
-        color: "text-orange-400",
-    };
+const PATTERN_PRIORITY: Record<string, number> = {
+    keystone: 0,
+    fragile: 1,
+    dissent: 2,
+    challenged: 3,
+    chain: 4,
+    conditional: 5,
+};
+
+function buildPatternLine(
+    patterns?: SecondaryPattern[]
+): SummaryLine | null {
+    if (!patterns || patterns.length === 0) return null;
+
+    const sorted = [...patterns].sort(
+        (a, b) => (PATTERN_PRIORITY[a.type] ?? 99) - (PATTERN_PRIORITY[b.type] ?? 99)
+    );
+    const top = sorted[0];
+
+    switch (top.type) {
+        case "keystone": {
+            const data = top.data as KeystonePatternData;
+            return {
+                icon: "◆",
+                text: `"${data.keystone.label}" is a keystone — ${data.dependents.length} positions depend on it`,
+                color: "text-purple-400",
+            };
+        }
+        case "fragile": {
+            const data = top.data as FragilePatternData;
+            const f = data.fragilities[0];
+            return {
+                icon: "△",
+                text: `"${f.peak.label}" rests on weak ground ("${f.weakFoundation.label}" — ${(f.weakFoundation.supportRatio * 100).toFixed(0)}% support)`,
+                color: "text-red-400",
+            };
+        }
+        case "dissent": {
+            const data = top.data as DissentPatternData;
+            if (data.strongestVoice) {
+                return {
+                    icon: "◇",
+                    text: `Minority voice: "${data.strongestVoice.label}" — ${data.strongestVoice.whyItMatters}`,
+                    color: "text-amber-400",
+                };
+            }
+            return {
+                icon: "◇",
+                text: `${data.voices.length} minority position${data.voices.length > 1 ? 's' : ''} worth considering`,
+                color: "text-amber-400",
+            };
+        }
+        case "challenged": {
+            return {
+                icon: "⬆",
+                text: `Dominant position under challenge from low-support claims`,
+                color: "text-red-400",
+            };
+        }
+        case "chain": {
+            const data = top.data as ChainPatternData;
+            return {
+                icon: "→",
+                text: `${data.length}-step dependency chain${data.weakLinks.length > 0 ? ` with ${data.weakLinks.length} weak link${data.weakLinks.length > 1 ? 's' : ''}` : ''}`,
+                color: "text-blue-400",
+            };
+        }
+        case "conditional": {
+            return {
+                icon: "⑂",
+                text: `Context-dependent branches — answer depends on your specific situation`,
+                color: "text-emerald-400",
+            };
+        }
+        default:
+            return null;
+    }
 }
 
 export default StructuralSummary;

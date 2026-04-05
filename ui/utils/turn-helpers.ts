@@ -93,7 +93,6 @@ export function applyStreamingTurnUpdate(
       aiTurn.singularity = {
         prompt: existing?.prompt || "",
         output: nextText,
-        traversalState: existing?.traversalState,
         timestamp: Date.now(),
         status,
       };

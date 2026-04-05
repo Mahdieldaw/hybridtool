@@ -56,32 +56,34 @@ function MiniHistogram({
   }
 
   return (
-    <div className="relative" style={{ height }}>
-      <div className="flex items-end gap-px h-full">
-        {counts.map((count, i) => {
-          const h = (count / maxCount) * 100;
-          return (
-            <div
-              key={i}
-              className="flex-1 bg-accent/50 hover:bg-accent/70 rounded-t-sm transition-colors"
-              style={{ height: `${h}%`, minHeight: count > 0 ? 2 : 0 }}
-              title={`${(rangeMin + (i / bins) * span).toFixed(3)}–${(rangeMin + ((i + 1) / bins) * span).toFixed(3)}: ${count}`}
-            />
-          );
-        })}
-      </div>
-      {marker != null && span > 0 && (
-        <div
-          className="absolute top-0 bottom-0 w-px bg-amber-400/80"
-          style={{ left: `${((marker - rangeMin) / span) * 100}%` }}
-        >
-          {markerLabel && (
-            <span className="absolute -top-4 left-1 text-[9px] text-amber-400 font-mono whitespace-nowrap">
-              {markerLabel}
-            </span>
-          )}
+    <div className="flex flex-col">
+      <div className="relative" style={{ height }}>
+        <div className="flex items-end gap-px h-full">
+          {counts.map((count, i) => {
+            const h = (count / maxCount) * 100;
+            return (
+              <div
+                key={i}
+                className="flex-1 bg-sky-500/50 hover:bg-sky-500/70 rounded-t-sm transition-colors"
+                style={{ height: `${h}%`, minHeight: count > 0 ? 2 : 0 }}
+                title={`${(rangeMin + (i / bins) * span).toFixed(3)}–${(rangeMin + ((i + 1) / bins) * span).toFixed(3)}: ${count}`}
+              />
+            );
+          })}
         </div>
-      )}
+        {marker != null && span > 0 && (
+          <div
+            className="absolute top-0 bottom-0 w-px bg-amber-400/80"
+            style={{ left: `${((marker - rangeMin) / span) * 100}%` }}
+          >
+            {markerLabel && (
+              <span className="absolute -top-4 left-1 text-[9px] text-amber-400 font-mono whitespace-nowrap">
+                {markerLabel}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
       <div className="flex justify-between mt-1 text-[9px] text-text-muted font-mono">
         <span>{rangeMin.toFixed(3)}</span>
         <span>{rangeMax.toFixed(3)}</span>
@@ -271,7 +273,7 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
       value: status,
       colorClass: status === 'ok'
         ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
-        : status === 'undifferentiated'
+        : (status === 'undifferentiated' || status === 'no_basin_structure')
           ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
           : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
     });

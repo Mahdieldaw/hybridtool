@@ -13,6 +13,7 @@ import { formatDecisionMapForMd } from "../utils/copy-format-utils";
 import { ParagraphSpaceView } from "./ParagraphSpaceView";
 import {
   GeometryCard,
+  BayesianBasinCard,
   BlastRadiusCard,
   ClaimDensityCard,
   ClaimStatementsCard,
@@ -655,6 +656,57 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
             maxQueryRelevance: g.maxQueryRelevance ?? 0,
           };
         }),
+      });
+    }
+    case 'bayesian-basins': {
+      const bayesian = artifact?.geometry?.bayesianBasinInversion ?? null;
+      const bMeta = bayesian?.meta?.bayesian ?? null;
+      return ser({
+        summary: {
+          status: bayesian?.status,
+          nodeCount: bayesian?.nodeCount,
+          basinCount: bayesian?.basinCount,
+          nodesWithBoundary: bMeta?.nodesWithBoundary,
+          boundaryRatio: bMeta?.boundaryRatio,
+          mutualInclusionPairs: bMeta?.mutualInclusionPairs,
+          medianBoundarySim: bMeta?.medianBoundarySim,
+          concentration: bMeta?.concentration,
+          processingTimeMs: bayesian?.meta?.processingTimeMs,
+        },
+        basins: safeArr(bayesian?.basins).map((b: any) => ({
+          basinId: b.basinId,
+          size: Array.isArray(b.nodeIds) ? b.nodeIds.length : 0,
+          trenchDepth: b.trenchDepth,
+        })),
+        profiles: safeArr(bMeta?.profiles).map((p: any) => ({
+          nodeId: p.nodeId,
+          changePoint: p.changePoint,
+          boundarySim: p.boundarySim,
+          logBayesFactor: p.logBayesFactor,
+          posteriorConcentration: p.posteriorConcentration,
+          inGroupSize: p.inGroupSize,
+          totalPeers: p.totalPeers,
+        })),
+        globalField: {
+          mu: bayesian?.mu,
+          sigma: bayesian?.sigma,
+          p10: bayesian?.p10,
+          p90: bayesian?.p90,
+          discriminationRange: bayesian?.discriminationRange,
+          T_v: bayesian?.T_v,
+        }
+      });
+    }
+    case 'regions': {
+      const ps = artifact?.geometry?.preSemantic;
+      const regions = safeArr(ps?.regions || ps?.regionization?.regions);
+      return ser({
+        count: regions.length,
+        regions: regions.map((r: any) => ({
+          id: r.id,
+          kind: r.kind,
+          nodeCount: safeArr(r.nodeIds).length,
+        })),
       });
     }
     case 'raw-artifacts':
@@ -1600,6 +1652,7 @@ export const DecisionMapSheet = React.memo(() => {
                           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar" ref={el => { if (isTableCollapsed) rightPanelScrollContainerRef.current = el; }}>
                             {([
                               { id: 'geometry', label: 'Geometry', content: <GeometryCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                              { id: 'bayesian-basins', label: 'Bayesian Basins', content: <BayesianBasinCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
@@ -1714,6 +1767,7 @@ export const DecisionMapSheet = React.memo(() => {
                             <div className="overflow-y-auto custom-scrollbar min-h-0" ref={el => { if (!isTableCollapsed) rightPanelScrollContainerRef.current = el; }}>
                               {([
                                 { id: 'geometry', label: 'Geometry', content: <GeometryCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
+                                { id: 'bayesian-basins', label: 'Bayesian Basins', content: <BayesianBasinCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'regions', label: 'Domains / Regions', content: <RegionsCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                   { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },

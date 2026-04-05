@@ -33,6 +33,7 @@ export function buildCognitiveArtifact(
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',
       labels: pipeline?.labels ?? undefined,
       basinInversion: mapper?.basinInversion ?? pipeline?.basinInversion ?? undefined,
+      bayesianBasinInversion: mapper?.bayesianBasinInversion ?? pipeline?.bayesianBasinInversion ?? undefined,
       substrate: {
         nodes: substrateGraph?.nodes ?? [],
         mutualEdges: substrateGraph?.mutualEdges ?? [],

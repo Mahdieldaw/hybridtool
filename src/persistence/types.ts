@@ -93,9 +93,6 @@ export interface AiTurnRecord extends BaseTurnRecord {
   /** Tier 1: Per-turn immutable shadow data */
   shadow?: any;
 
-  /** Tier 1: Per-turn traversal state (top-level overrides) */
-  traversalState?: any;
-
   // Storage metadata
   lastContextSummary?: string;
   pipelineStatus?: string;
@@ -131,8 +128,6 @@ export interface ProviderResponseRecord {
   surveyGates?: any[];
   /** Tier 2: Per-provider mutable survey rationale */
   surveyRationale?: string;
-  /** Tier 2: Per-provider mutable traversal state adjustments */
-  traversalState?: any;
   tokenUsage?: {
     promptTokens: number;
     completionTokens: number;

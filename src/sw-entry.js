@@ -872,11 +872,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         return true;
 
 
-      case "SAVE_TRAVERSAL_STATE":
-        // Traversal removed — no-op for backward compatibility
-        sendResponse({ success: true });
-        return true;
-
       case "GET_FULL_HISTORY": {
         const allSessions = await sm.adapter.getAllSessions() || [];
         const sessions = allSessions.map(r => ({

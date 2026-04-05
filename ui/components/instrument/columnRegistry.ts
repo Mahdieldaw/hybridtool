@@ -285,17 +285,6 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
 
   // ── Statement classification (corpus-level) ──────────────────────────────
   {
-    id: 'sc_claimed',
-    label: 'claimed',
-    accessor: r => r.sc_claimed,
-    type: 'boolean',
-    sortable: true,
-    groupable: true,
-    description: 'Whether this statement is owned by at least one claim (corpus-level classification)',
-    source: 'built-in',
-    category: 'metadata',
-  },
-  {
     id: 'sc_inPassage',
     label: 'sc_pass',
     accessor: r => r.sc_inPassage,
@@ -389,13 +378,13 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     category: 'metadata',
   },
   {
-    id: 'isTableCell',
-    label: 'table',
-    accessor: r => r.isTableCell,
-    type: 'boolean',
-    sortable: true,
-    groupable: true,
-    description: 'Whether this row originates from a table cell-unit (vs prose/list extraction)',
+    id: 'assignedClaims',
+    label: 'Claims',
+    accessor: r => (r.assignedClaimLabels ?? []).join(', '),
+    type: 'text',
+    sortable: false,
+    groupable: false,
+    description: 'Labels of all claims this statement is assigned to',
     source: 'built-in',
     category: 'metadata',
   },
@@ -414,6 +403,14 @@ export const COLUMN_MAP: Map<string, ColumnDef> = new Map(
 // ============================================================================
 
 export const DEFAULT_VIEWS: ViewConfig[] = [
+  {
+    id: 'holistic',
+    label: 'Holistic',
+    columns: ['statementId', 'text', 'model', 'assignedClaims', 'fate'],
+    sortBy: 'statementId',
+    sortDir: 'asc',
+    groupBy: null,
+  },
   {
     id: 'provenance',
     label: 'Provenance',
@@ -483,10 +480,10 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'classification',
     label: 'Classification',
-    columns: ['statementId', 'text', 'model', 'sc_claimed', 'sc_groupIdx', 'sc_landscapePos', 'sc_nearestClaimSim', 'sc_queryRelevance'],
+    columns: ['statementId', 'text', 'model', 'fate', 'sc_groupIdx', 'sc_landscapePos', 'sc_nearestClaimSim', 'sc_queryRelevance'],
     sortBy: 'sc_groupIdx',
     sortDir: 'asc',
-    groupBy: 'sc_claimed',
+    groupBy: 'fate',
   },
 ];
 

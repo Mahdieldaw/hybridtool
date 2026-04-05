@@ -220,8 +220,6 @@ export const singularityProviderAtom = atomWithStorage<string | null>(
   null,
 );
 
-// traversalStateByTurnAtom removed — traversal state now persisted to IndexedDB
-// via SAVE_TRAVERSAL_STATE message (single source of truth on provider_responses).
 
 
 

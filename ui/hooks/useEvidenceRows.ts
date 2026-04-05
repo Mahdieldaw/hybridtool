@@ -63,6 +63,10 @@ export interface EvidenceRow {
   // Table cell-unit metadata
   isTableCell: boolean;
   tableMeta: { rowHeader: string; columnHeader: string; value: string } | null;
+
+  // Holistic assignment (independent of selectedClaimId)
+  assignedClaimIds: string[];
+  assignedClaimLabels: string[];
 }
 
 // ============================================================================
@@ -202,6 +206,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       scLandscapeByStmt,
       scNearestSimByStmt,
       scQrByStmt,
+      claimLabelMap: new Map<string, string>(
+        normalizeArray(a?.semantic?.claims ?? a?.claims).map(c => [String(c?.id ?? ""), String(c?.label ?? c?.id ?? "")])
+      ),
     };
   }, [artifact]);
 
@@ -309,12 +316,24 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     })();
 
     const queryDistance: number | null = (() => {
-      if (!selectedClaimId || !routing) return null;
-      const isolate = Array.isArray(routing?.damageOutliers)
-        ? routing.damageOutliers.find((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+      if (!selectedClaimId) return null;
+      // 1. Try passageRouting profile (new canonical home)
+      const profile = artifact?.passageRouting?.claimProfiles?.[selectedClaimId];
+      if (typeof profile?.queryDistance === 'number') return profile.queryDistance;
+
+      // 2. Fallback to load-bearing routed claims
+      const routed = Array.isArray(artifact?.passageRouting?.routing?.loadBearingClaims)
+        ? artifact.passageRouting.routing.loadBearingClaims.find((c: any) => String(c?.claimId ?? "") === selectedClaimId)
         : null;
-      const q = isolate?.queryDistance;
-      return typeof q === 'number' && Number.isFinite(q) ? q : null;
+      if (typeof routed?.queryDistance === 'number') return routed.queryDistance;
+
+      // 3. Fallback to enriched claims metadata
+      const ec = Array.isArray(artifact?.claims)
+        ? artifact.claims.find((c: any) => String(c?.id ?? "") === selectedClaimId)
+        : null;
+      if (typeof ec?.queryDistance === 'number') return ec.queryDistance;
+
+      return null;
     })();
 
     return statements.map((stmt): EvidenceRow => {
@@ -328,8 +347,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       const scEntry = (globalMaps?.scClaimed.has(stmtId))
         ? (a?.statementClassification?.claimed?.[stmtId] ?? null)
         : null;
+      const assignedClaimIds = Array.isArray(scEntry?.claimIds) ? scEntry.claimIds.map(String) : [];
+      const assignedClaimLabels = assignedClaimIds.map((cid: string) => globalMaps?.claimLabelMap.get(cid) ?? cid);
+
       const fate: EvidenceRow['fate'] = scEntry
-        ? (Array.isArray(scEntry.claimIds) && scEntry.claimIds.length >= 2 ? 'supporting' : 'primary')
+        ? (assignedClaimIds.length >= 2 ? 'supporting' : 'primary')
         : (stmtId ? 'unclaimed' : null);
 
       // Claim-relative fields
@@ -418,6 +440,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
         isTableCell: !!stmt.isTableCell,
         tableMeta: stmt.tableMeta ?? null,
+        assignedClaimIds,
+        assignedClaimLabels,
       };
     });
   }, [artifact, globalMaps, claimMaps, selectedClaimId]);

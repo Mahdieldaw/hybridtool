@@ -65,6 +65,7 @@ export async function computeDerivedFields({
     blastSurfaceResult: null,
     mixedProvenanceResult: null,
     basinInversion: null,
+    bayesianBasinInversion: null,
     queryRelevance: null,
     semanticEdges: [],
     derivedSupportEdges: [],
@@ -122,7 +123,7 @@ export async function computeDerivedFields({
         if (geoRecord?.meta?.basinInversion) {
           result.basinInversion = geoRecord.meta.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
-          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
           const dims = geoRecord.meta.dimensions || 384;
           const paraIds = geoRecord.meta.paragraphIndex;
           const view = new Float32Array(geoRecord.paragraphEmbeddings);
@@ -132,6 +133,7 @@ export async function computeDerivedFields({
           }
           result.basinInversion = computeBasinInversion(paraIds, paraVectors);
         }
+        result.bayesianBasinInversion = result.basinInversion;
       } catch (err) {
         console.warn('[DeterministicPipeline] Basin inversion failed:', getErrorMessage(err));
       }
@@ -378,8 +380,32 @@ export async function computeDerivedFields({
             enrichedClaims,
             validatedConflicts,
             modelCount,
+            basinInversion: result.basinInversion ?? null,
+            regions: preSemantic?.regionization?.regions ?? [],
           });
-          console.log(`[DeterministicPipeline] PassageRouting: ${result.passageRoutingResult.gate.loadBearingCount} load-bearing, ${result.passageRoutingResult.routing.diagnostics.floorCount} floor in ${result.passageRoutingResult.meta.processingTimeMs.toFixed(0)}ms`);
+
+          // ── Phase 2.5: Inject queryDistance into routing (REPLACES missing damageOutliers) ──
+          if (result.passageRoutingResult && queryEmbedding && claimEmbeddings && claimEmbeddings.size > 0) {
+            try {
+              const { cosineSimilarity } = await import('../../clustering/distance');
+              const routing = result.passageRoutingResult;
+              for (const ec of enrichedClaims) {
+                const emb = claimEmbeddings.get(String(ec.id || ''));
+                if (emb) {
+                  const sim = cosineSimilarity(emb, queryEmbedding);
+                  const dist = 1 - sim; // Range [0,2], typically 0 (near) to 0.7 (outlier)
+                  ec.queryDistance = dist;
+                  if (routing.claimProfiles[ec.id]) {
+                    routing.claimProfiles[ec.id].queryDistance = dist;
+                  }
+                  const routed = routing.routing.loadBearingClaims.find(c => c.claimId === ec.id);
+                  if (routed) routed.queryDistance = dist;
+                }
+              }
+            } catch (_) { /* non-fatal embedding failure */ }
+          }
+          const prDiag = result.passageRoutingResult.routing.diagnostics;
+          console.log(`[DeterministicPipeline] PassageRouting: ${result.passageRoutingResult.gate.loadBearingCount} load-bearing, ${prDiag.floorCount} floor, mode=${prDiag.corpusMode} peripheral=${prDiag.peripheralNodeIds.length}/${(prDiag.largestBasinRatio ?? 0).toFixed(2)} in ${result.passageRoutingResult.meta.processingTimeMs.toFixed(0)}ms`);
         }
       } catch (err) {
         console.warn('[DeterministicPipeline] Routing pipeline failed:', getErrorMessage(err));
@@ -498,6 +524,7 @@ export function assembleMapperArtifact({
     blastSurfaceResult,
     mixedProvenanceResult,
     basinInversion,
+    bayesianBasinInversion,
     claimProvenance,
     semanticEdges,
     derivedSupportEdges,
@@ -524,6 +551,7 @@ export function assembleMapperArtifact({
     },
     ...(claimProvenance ? { claimProvenance } : {}),
     ...(basinInversion ? { basinInversion } : {}),
+    ...(bayesianBasinInversion ? { bayesianBasinInversion } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(tableCellAllocation ? {
       tableCellAllocation: {
@@ -580,6 +608,7 @@ export async function computePreSurveyPipeline({
   preBuiltPreSemantic = null,
   preBuiltQueryRelevance = null,
   preBuiltBasinInversion = null,
+  preBuiltBayesianBasinInversion = null,
 
   // ═══ Citation ordering (canonical) ═══
   citationSourceOrder = null, // Record<number, string> | null
@@ -678,7 +707,7 @@ export async function computePreSurveyPipeline({
     const { buildGeometricSubstrate } = await import('../../geometry/substrate');
     const { buildPreSemanticInterpretation } =
       await import('../../geometry/interpretation');
-    const { computeBasinInversion } = await import('../../../shared/geometry/basinInversion');
+    const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
 
     const paraVectors = Array.from(paragraphEmbeddings.values());
     const paraIds = Array.from(paragraphEmbeddings.keys());
@@ -789,6 +818,22 @@ export async function computePreSurveyPipeline({
   // can include it.
   if (!derived.basinInversion && preBuiltBasinInversion) {
     derived.basinInversion = preBuiltBasinInversion;
+  }
+
+  // Bayesian basin inversion (forward pre-built or compute from embeddings)
+  if (!derived.bayesianBasinInversion) {
+    if (preBuiltBayesianBasinInversion) {
+      derived.bayesianBasinInversion = preBuiltBayesianBasinInversion;
+    } else if (paragraphEmbeddings?.size > 0) {
+      try {
+        const { computeBasinInversionBayesian: _bayesian } = await import('../../../shared/geometry/basinInversionBayesian');
+        const _paraIds = Array.from(paragraphEmbeddings.keys());
+        const _paraVecs = _paraIds.map(id => paragraphEmbeddings.get(id));
+        derived.bayesianBasinInversion = _bayesian(_paraIds, _paraVecs);
+      } catch (err) {
+        console.warn('[computePreSurveyPipeline] Bayesian basin inversion failed:', getErrorMessage(err));
+      }
+    }
   }
 
   const elapsed = Date.now() - t0;

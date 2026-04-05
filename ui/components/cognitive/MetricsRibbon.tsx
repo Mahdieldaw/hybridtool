@@ -21,20 +21,12 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
 
     if (!analysis) return null;
 
-    const {
-        claimsWithLeverage: claims = [],
-        patterns,
-        landscape,
-    } = analysis;
+    const confidence = problemStructure?.confidence;
+    const isLowConfidence = confidence ? confidence < 0.5 : false;
 
-    const modelCount = landscape?.modelCount || 0;
     const substrate = artifact?.substrate;
     const paragraphProjection = artifact?.paragraphProjection;
     const paragraphClustering = artifact?.paragraphClustering;
-
-    // Confidence badge
-    const confidence = problemStructure?.confidence;
-    const isLowConfidence = confidence ? confidence < 0.5 : false;
 
     return (
         <div className="bg-surface-raised border border-border-subtle rounded-lg px-4 py-3 h-full">
@@ -66,28 +58,17 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                 </button>
             </div>
 
-            {/* The three summary lines */}
+            {/* Structural summary lines */}
             <StructuralSummary
-                claims={claims}
-                conflicts={patterns?.conflicts || []}
-                tradeoffs={patterns?.tradeoffs || []}
+                analysis={analysis}
                 problemStructure={problemStructure}
-                modelCount={modelCount}
             />
 
-            {/* Expandable details (for power users) */}
+            {/* Expandable details */}
             {showDetails && (
                 <div className="mt-4 pt-3 border-t border-border-subtle text-xs text-text-muted space-y-2">
-                    <div>
-                        <span className="text-text-secondary">Landscape:</span> {claims.length > 15 ? 'Extensive' : 'Focused'} claim set synthesized from {modelCount > 5 ? 'multiple' : 'diverse'} sources
-                    </div>
-                    {patterns?.conflicts && patterns.conflicts.length > 0 && (
-                        <div>
-                            <span className="text-text-secondary">Conflicts:</span> Point-to-point disagreements detected
-                        </div>
-                    )}
                     {problemStructure?.evidence && (
-                        <div className="mt-2">
+                        <div>
                             <span className="text-text-secondary">Evidence:</span>
                             <ul className="mt-1 space-y-0.5 text-[11px]">
                                 {problemStructure.evidence.slice(0, 5).map((e, idx) => (
