@@ -20,6 +20,7 @@ let currentModelId = null;
 let wasmThreadingConfig = { numThreads: 1, proxy: false, mode: "single" };
 let wasmThreadingProbed = false;
 
+
 const DEFAULT_MODEL_ID = "bge-base-en-v1.5";
 const MODEL_ID_RE = /^[a-z0-9._-]+$/i;
 

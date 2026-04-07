@@ -27,7 +27,6 @@ export function buildCognitiveArtifact(
         mapper?.shadow?.statements ??
         [],
       paragraphs: pipeline?.paragraphProjection?.paragraphs ?? [],
-      tableSidecar: pipeline?.shadow?.extraction?.tableSidecar ?? [],
     },
     geometry: {
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',
@@ -77,7 +76,7 @@ export function buildCognitiveArtifact(
     'claims', 'edges', 'conditionals', 'narrative',
     // → geometry
     'diagnostics', 'structuralValidation', 'convergence', 'alignment',
-    'basinInversion', 'preSemantic',
+    'basinInversion', 'bayesianBasinInversion', 'preSemantic',
     // → meta
     'model_count', 'modelCount', 'query', 'turn', 'timestamp',
     // → special / renamed / nested

@@ -47,27 +47,55 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
         const pinnedProviderId = pinnedId || singularityProviderFromMeta;
 
         if (aiTurn.singularity?.output) {
-            const providerId = pinnedProviderId || singularityProviderFromMeta;
-            // Handle leakage fields if they exist on the singularity object (checked as any or if interface supports it)
             const singObj = aiTurn.singularity as any;
 
+            // Default: show the direct slot (current/most-recent provider)
+            let displayText = aiTurn.singularity.output;
+            let displayProvider = singularityProviderFromMeta;
+            let displayLoading = singObj.status === 'streaming' || singObj.status === 'pending';
+            let displayError = singObj.status === 'error';
+            let displayErrorVal = singObj.error || null;
+            let displayLeakage = singObj.leakageDetected || false;
+            let displayLeakageViolations = singObj.leakageViolations || [];
+            let displayTimestamp = aiTurn.singularity.timestamp || Date.now();
+
+            // If the user pinned a different provider, swap in that provider's stored response
+            if (pinnedId && pinnedId !== singularityProviderFromMeta) {
+                const legacy = (aiTurn as any)?.singularityResponses;
+                if (legacy && typeof legacy === 'object') {
+                    const entries = legacy[pinnedId];
+                    const arr = Array.isArray(entries) ? entries : entries ? [entries] : [];
+                    const last = arr.length > 0 ? arr[arr.length - 1] : null;
+                    if (last) {
+                        displayText = String(last.text || '');
+                        displayProvider = pinnedId;
+                        displayLoading = last.status === 'streaming' || last.status === 'pending';
+                        displayError = last.status === 'error';
+                        displayErrorVal = (last.meta as any)?.error || null;
+                        displayTimestamp = last.updatedAt || last.createdAt || Date.now();
+                        const lastMeta: any = last.meta || {};
+                        displayLeakage = lastMeta.leakageDetected || false;
+                        displayLeakageViolations = lastMeta.leakageViolations || [];
+                    }
+                }
+            }
+
             const output: SingularityOutput = {
-                text: aiTurn.singularity.output,
-                providerId: providerId || 'singularity',
-                timestamp: aiTurn.singularity.timestamp || Date.now(),
-                leakageDetected: singObj.leakageDetected || false,
-                leakageViolations: singObj.leakageViolations || [],
+                text: displayText,
+                providerId: displayProvider || 'singularity',
+                timestamp: displayTimestamp,
+                leakageDetected: displayLeakage,
+                leakageViolations: displayLeakageViolations,
             };
 
             return {
                 output,
-                // If we have output, we are generally not loading, unless a status field says so
-                isLoading: singObj.status === 'streaming' || singObj.status === 'pending',
-                isError: singObj.status === 'error',
-                providerId: providerId,
+                isLoading: displayLoading,
+                isError: displayError,
+                providerId: displayProvider,
                 requestedProviderId: pinnedProviderId,
-                rawText: aiTurn.singularity.output,
-                error: singObj.error || null,
+                rawText: displayText,
+                error: displayErrorVal,
                 setPinnedProvider,
             };
         }

@@ -53,9 +53,6 @@ export async function computeDerivedFields({
   // Pre-computed mixed-method provenance (from reconstructCanonicalProvenance)
   mixedProvenanceResult = null,
 
-  // Table cell-unit integration
-  tableSidecar = [],             // TableSidecar
-  cellUnitEmbeddings = null,     // Map<string, Float32Array> | null
 }) {
   const result = {
     claimProvenance: null,
@@ -69,7 +66,6 @@ export async function computeDerivedFields({
     queryRelevance: null,
     semanticEdges: [],
     derivedSupportEdges: [],
-    tableCellAllocation: null,
     passageRoutingResult: null,
     claimDensityResult: null,
     provenanceRefinement: null,
@@ -143,86 +139,6 @@ export async function computeDerivedFields({
   // ── 6. Mixed-method provenance (pre-computed by reconstructCanonicalProvenance) ──
   result.mixedProvenanceResult = mixedProvenanceResult;
 
-  // ── 8. Table cell-unit allocation ──────────────────────────────────
-  try {
-    if (Array.isArray(tableSidecar) && tableSidecar.length > 0 && cellUnitEmbeddings && cellUnitEmbeddings.size > 0 && claimEmbeddings && claimEmbeddings.size > 0) {
-      const { flattenCellUnits, allocateCellUnitsToClaims } = await import('../tableCellAllocation');
-      const cellUnits = flattenCellUnits(tableSidecar);
-      if (cellUnits.length > 0) {
-        result.tableCellAllocation = allocateCellUnitsToClaims(
-          cellUnits,
-          cellUnitEmbeddings,
-          claimEmbeddings,
-          statementEmbeddings || new Map(),
-          enrichedClaims,
-        );
-        console.log(`[DeterministicPipeline] TableCellAllocation: ${result.tableCellAllocation.meta.allocatedCount}/${result.tableCellAllocation.meta.totalCellUnits} allocated in ${result.tableCellAllocation.meta.processingTimeMs.toFixed(0)}ms`);
-
-        // ── 8b. Merge cell-units into shadow corpus + claim assignments ──
-        // Every cell-unit becomes a pseudo-statement so it appears in evidence tables.
-        // Allocated cells get added to their claim's sourceStatementIds.
-        // Unallocated cells remain visible but won't belong to any claim.
-        const alloc = result.tableCellAllocation;
-        for (const cu of alloc.cellUnits) {
-          shadowStatements.push({
-            id: cu.id,
-            modelIndex: cu.modelIndex,
-            text: cu.text,
-            cleanText: cu.text,
-            stance: 'assertive',
-            confidence: 1.0,
-            signals: { sequence: false, tension: false, conditional: false },
-            location: { paragraphIndex: -1, sentenceIndex: -1 },
-            fullParagraph: cu.text,
-            isTableCell: true,
-            tableMeta: { rowHeader: cu.rowHeader, columnHeader: cu.columnHeader, value: cu.value },
-          });
-        }
-
-        // Wire allocated cell-units into their claims' canonical sets + mixed provenance
-        const { cosineSimilarity: cellCos } = await import('../../clustering/distance');
-        let cellsAssigned = 0;
-        for (const ec of enrichedClaims) {
-          const cellIds = alloc.tableCellAllocations.get(ec.id)
-            ?? alloc.tableCellAllocations[ec.id]  // handle serialised object form
-            ?? [];
-          if (cellIds.length > 0) {
-            ec.sourceStatementIds = [...(ec.sourceStatementIds || []), ...cellIds];
-            cellsAssigned += cellIds.length;
-
-            // Inject into mixed provenance so UI shows sim_claim for these cells
-            const mpClaim = result.mixedProvenanceResult?.perClaim?.[ec.id];
-            if (mpClaim && Array.isArray(mpClaim.statements)) {
-              if (!Array.isArray(mpClaim.canonicalStatementIds)) mpClaim.canonicalStatementIds = [];
-              const claimEmb = claimEmbeddings?.get(ec.id);
-              for (const cellId of cellIds) {
-                const cellEmb = cellUnitEmbeddings?.get(cellId);
-                let globalSim = 0;
-                if (claimEmb && cellEmb) {
-                  globalSim = cellCos(cellEmb, claimEmb);
-                }
-                mpClaim.statements.push({
-                  statementId: cellId,
-                  globalSim,
-                  kept: true,
-                  fromSupporterModel: true,
-                  paragraphOrigin: 'table',
-                  paragraphId: null,
-                  zone: 'core',
-                  isTableCell: true,
-                });
-                mpClaim.canonicalStatementIds.push(cellId);
-              }
-            }
-          }
-        }
-        console.log(`[DeterministicPipeline] Merged ${alloc.cellUnits.length} cell-units into shadow corpus (${cellsAssigned} assigned to claims, ${alloc.unallocatedCellUnitIds.length} unassigned)`);
-      }
-    }
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Table cell allocation failed:', getErrorMessage(err));
-  }
-
   // ── Shared data for downstream components ──────────────────────────
   const statementTextsMap = new Map();
   for (const stmt of shadowStatements) {
@@ -292,7 +208,6 @@ export async function computeDerivedFields({
         statementEmbeddings: statementEmbeddings || new Map(),
         totalCorpusStatements: shadowStatements.length,
         statementTexts: statementTextsMap,
-        tableCellAllocations: result.tableCellAllocation?.tableCellAllocations ?? null,
         conflictClaimIds,
       });
       console.log(`[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`);
@@ -528,7 +443,6 @@ export function assembleMapperArtifact({
     claimProvenance,
     semanticEdges,
     derivedSupportEdges,
-    tableCellAllocation,
     passageRoutingResult,
     claimDensityResult,
     provenanceRefinement,
@@ -553,14 +467,6 @@ export function assembleMapperArtifact({
     ...(basinInversion ? { basinInversion } : {}),
     ...(bayesianBasinInversion ? { bayesianBasinInversion } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
-    ...(tableCellAllocation ? {
-      tableCellAllocation: {
-        tableCellAllocations: Object.fromEntries(tableCellAllocation.tableCellAllocations),
-        cellUnitClaims: Object.fromEntries(tableCellAllocation.cellUnitClaims),
-        unallocatedCellUnitIds: tableCellAllocation.unallocatedCellUnitIds,
-        meta: tableCellAllocation.meta,
-      }
-    } : {}),
     ...(passageRoutingResult ? { passageRouting: passageRoutingResult } : {}),
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
     ...(provenanceRefinement ? { provenanceRefinement } : {}),
@@ -612,10 +518,6 @@ export async function computePreSurveyPipeline({
 
   // ═══ Citation ordering (canonical) ═══
   citationSourceOrder = null, // Record<number, string> | null
-
-  // ═══ Table cell-unit integration ═══
-  tableSidecar = [],             // TableSidecar (from shadow extraction)
-  cellUnitEmbeddings = null,     // Map<string, Float32Array> | null
 
   // ═══ Context ═══
   queryText = '',
@@ -807,8 +709,6 @@ export async function computePreSurveyPipeline({
     modelCount,
     queryText,
     mixedProvenanceResult,
-    tableSidecar,
-    cellUnitEmbeddings,
   });
 
   // ── 9b. Forward pre-built basin inversion if computeDerivedFields couldn't compute it ──
@@ -945,8 +845,6 @@ export async function buildArtifactForProvider({
   geoRecord = null,
   claimEmbeddings: inputClaimEmbeddings = null,
   citationSourceOrder = null,
-  tableSidecar = [],
-  cellUnitEmbeddings = null,
   queryText = '',
   modelCount = 1,
   turn = undefined,
@@ -962,8 +860,6 @@ export async function buildArtifactForProvider({
     geoRecord,
     claimEmbeddings: inputClaimEmbeddings,
     citationSourceOrder,
-    tableSidecar,
-    cellUnitEmbeddings,
     queryText,
     modelCount,
     turn,

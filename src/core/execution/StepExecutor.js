@@ -513,7 +513,6 @@ export class StepExecutor {
     let basinInversionResult = null;
     let bayesianBasinInversionResult = null;
     let clusteringModule = null;
-    let cellUnitEmbeddings = null; // Map<string, Float32Array> | null
     const geometryPromise = (async () => {
       const startedAtMs = nowMs();
       try {
@@ -659,37 +658,6 @@ export class StepExecutor {
         await queryEmbeddingPromise;
         await paragraphEmbeddingPromise;
         await statementEmbeddingPromise;
-
-        // ── Cell-unit embeddings (table sidecar) ──────────────────────────
-        cellUnitEmbeddings = null; // reset before computing
-        if (shadowResult.tableSidecar?.length > 0 && generateTextEmbeddings) {
-          try {
-            const { flattenCellUnits } = await import('../tableCellAllocation');
-            const cellUnits = flattenCellUnits(shadowResult.tableSidecar);
-            if (cellUnits.length > 0) {
-              const cellTexts = cellUnits.map(cu => stripInlineMarkdown(cu.text));
-              const cellIds = cellUnits.map(cu => cu.id);
-              const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
-              cellUnitEmbeddings = new Map();
-              for (let ci = 0; ci < cellIds.length; ci++) {
-                const emb = cellBatch.embeddings.get(String(ci));
-                if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
-              }
-              console.log(`[StepExecutor] Embedded ${cellUnitEmbeddings.size} table cell-units`);
-              geometryDiagnostics.stages.cellUnitEmbeddings = {
-                status: 'ok',
-                cellUnits: cellUnits.length,
-                embedded: cellUnitEmbeddings.size,
-              };
-            }
-          } catch (cellEmbErr) {
-            console.warn('[StepExecutor] Cell-unit embedding failed:', getErrorMessage(cellEmbErr));
-            geometryDiagnostics.stages.cellUnitEmbeddings = {
-              status: 'failed',
-              error: getErrorMessage(cellEmbErr),
-            };
-          }
-        }
 
         const firstParagraphEmbedding = geometryParagraphEmbeddings?.values?.().next?.().value;
         if (queryEmbedding && firstParagraphEmbedding && firstParagraphEmbedding.length !== queryEmbedding.length) {
@@ -866,16 +834,10 @@ export class StepExecutor {
               : null;
 
             if (packedStatements || packedParagraphs || queryBuffer) {
-              // Pack cell-unit embeddings if available
-              const packedCellUnits = cellUnitEmbeddings && cellUnitEmbeddings.size > 0
-                ? packEmbeddingMap(cellUnitEmbeddings, dims)
-                : null;
-
               options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
                 ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
                 ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
                 ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
-                ...(packedCellUnits ? { cellUnitEmbeddings: packedCellUnits.buffer } : {}),
                 meta: {
                   embeddingModelId: DEFAULT_CONFIG.modelId,
                   dimensions: dims,
@@ -884,7 +846,6 @@ export class StepExecutor {
                   hasQuery: Boolean(queryBuffer),
                   ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
                   ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
-                  ...(packedCellUnits ? { cellUnitCount: packedCellUnits.index.length, cellUnitIndex: packedCellUnits.index } : {}),
                   embeddingVersion: 2,
                   timestamp: Date.now(),
                 },
@@ -1087,8 +1048,6 @@ export class StepExecutor {
                     queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
                     turn: context.turn || 0,
-                    tableSidecar: shadowResult.tableSidecar || [],
-                    cellUnitEmbeddings: cellUnitEmbeddings || null,
                   });
 
                   const { enrichedClaims, claimRouting, claimEmbeddings, claimDensityScores } = preSurvey;
@@ -1316,14 +1275,10 @@ export class StepExecutor {
 
                   console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(mapperArtifact.edges?.length || 0)} edges`);
                 } catch (err) {
-                  console.error('[StepExecutor] Mapper artifact build failed:', err);
-                  console.debug('Context:', {
-                    originalPrompt: payload.originalPrompt,
-                    turn: context.turn,
-                    citationCount: citationOrder.length,
-                    error: getErrorMessage(err)
-                  });
-                  throw err;
+                  console.error('[StepExecutor] Pre-survey pipeline failed (recoverable via regenerate-embeddings):', getErrorMessage(err));
+                  // Don't throw — let the turn complete with raw text.
+                  // Batch responses are already persisted, so regenerate-embeddings
+                  // can rebuild the full pipeline from saved data + fresh embeddings.
                 }
 
               } else {
@@ -1395,12 +1350,16 @@ export class StepExecutor {
 
             // Persist semantic mapper's thread position for the next extend turn.
             // If survey mapper runs it will overwrite this with the more recent cursor.
-            if (providerThreadMeta && Object.keys(providerThreadMeta).length > 0) {
-              await options.persistenceCoordinator.persistProviderContexts(
-                context.sessionId,
-                { [payload.mappingProvider]: { text: '', meta: providerThreadMeta } },
-                "batch",
-              );
+            try {
+              if (providerThreadMeta && Object.keys(providerThreadMeta).length > 0) {
+                await options.persistenceCoordinator.persistProviderContexts(
+                  context.sessionId,
+                  { [payload.mappingProvider]: { text: '', meta: providerThreadMeta } },
+                  "batch",
+                );
+              }
+            } catch (ctxErr) {
+              console.warn('[StepExecutor] Provider context persistence failed (non-blocking):', getErrorMessage(ctxErr));
             }
 
             resolve({

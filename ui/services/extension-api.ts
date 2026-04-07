@@ -324,6 +324,13 @@ class ExtensionAPI {
   async refreshAuthStatus(): Promise<Record<string, boolean>> {
     return this.queryBackend<Record<string, boolean>>({ type: REFRESH_AUTH_STATUS });
   }
+
+  async corpusSearch(aiTurnId: string, queryText: string): Promise<any> {
+    return this.queryBackend<any>({
+      type: "CORPUS_SEARCH",
+      payload: { aiTurnId, queryText },
+    });
+  }
 }
 
 const api = new ExtensionAPI();

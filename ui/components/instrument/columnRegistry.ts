@@ -345,6 +345,17 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
 
   // ── Metadata ───────────────────────────────────────────────────────────────
   {
+    id: 'isTableCell',
+    label: 'table?',
+    accessor: r => r.isTableCell,
+    type: 'boolean',
+    sortable: true,
+    groupable: true,
+    description: 'Whether this statement originated from a table cell',
+    source: 'built-in',
+    category: 'metadata',
+  },
+  {
     id: 'fate',
     label: 'fate',
     accessor: r => r.fate,

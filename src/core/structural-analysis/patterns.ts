@@ -74,7 +74,7 @@ export const detectDissentPattern = (
         }
     }
     const edgeCases = claims.filter((c: EnrichedClaim) =>
-        c.type === 'conditional' &&
+        c.isConditional &&
         c.supportRatio < 0.4 &&
         !dissentVoices.some((v: DissentPatternData['voices'][number]) => v.id === c.id)
     );
@@ -234,13 +234,13 @@ export const detectConditionalPattern = (
     claims: EnrichedClaim[],
     edges: Edge[]
 ): SecondaryPattern | null => {
-    const conditionalClaims = claims.filter(c => c.type === 'conditional');
+    const conditionalClaims = claims.filter(c => c.isConditional);
     if (conditionalClaims.length < 2) return null;
     const conditions = conditionalClaims.map(c => {
-        const branches = edges
-            .filter(e => e.from === c.id && e.type === 'prerequisite')
-            .map(e => e.to);
-        return { id: c.id, label: c.label, branches };
+        const gates = edges
+            .filter(e => e.to === c.id && e.type === 'prerequisite')
+            .map(e => e.from);
+        return { id: c.id, label: c.label, branches: gates };
     }).filter(c => c.branches.length > 0);
     if (conditions.length === 0) return null;
     return {

@@ -269,7 +269,8 @@ function buildPatternLine(
         }
         case "fragile": {
             const data = top.data as FragilePatternData;
-            const f = data.fragilities[0];
+            const f = data.fragilities?.[0];
+            if (!f) return null;
             return {
                 icon: "△",
                 text: `"${f.peak.label}" rests on weak ground ("${f.weakFoundation.label}" — ${(f.weakFoundation.supportRatio * 100).toFixed(0)}% support)`,

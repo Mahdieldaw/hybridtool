@@ -29,11 +29,16 @@ export const ModelGrid: React.FC<ModelGridProps> = ({
     return indices.length > 0 ? indices : [0];
   }, [artifact]);
 
+  // Always use a single row — each column scrolls independently so all models
+  // are visible at once without having to scroll past the longest response.
   const gridClass = useMemo(() => {
     const n = modelIndices.length;
     if (n === 1) return 'grid-cols-1';
     if (n === 2) return 'grid-cols-2';
-    return 'grid-cols-3';
+    if (n === 3) return 'grid-cols-3';
+    if (n === 4) return 'grid-cols-4';
+    if (n === 5) return 'grid-cols-5';
+    return 'grid-cols-6';
   }, [modelIndices]);
 
   if (!artifact?.shadow?.paragraphs?.length) {

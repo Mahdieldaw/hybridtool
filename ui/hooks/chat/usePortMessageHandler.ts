@@ -667,6 +667,24 @@ export function usePortMessageHandler(enabled: boolean = true) {
                       output: outputText,
                       timestamp: now,
                     } as any;
+                    // Update singularityResponses (mirrors mappingResponses pattern)
+                    try {
+                      const entry = {
+                        providerId: normalizedId,
+                        text: outputText,
+                        status: String(data?.status || "completed"),
+                        createdAt: now,
+                        updatedAt: now,
+                        meta: data?.meta || {},
+                        responseIndex: 0,
+                      };
+                      const next = { ...(aiTurn as any).singularityResponses } as any;
+                      // Upsert: one entry per provider (overwrite on retry)
+                      next[normalizedId] = [entry];
+                      (aiTurn as any).singularityResponses = next;
+                      if (!(aiTurn as any)?.meta) (aiTurn as any).meta = {};
+                      (aiTurn as any).meta.singularity = normalizedId;
+                    } catch { }
                     aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
                   }
 

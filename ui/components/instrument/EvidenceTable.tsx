@@ -151,6 +151,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   fate: 96,
   stance: 88,
   isExclusive: 72,
+  isTableCell: 60,
 };
 
 function defaultColWidth(id: string): number {

@@ -40,8 +40,6 @@ export interface BlastSurfaceInput {
     totalCorpusStatements: number;
     /** Statement ID → text. Required for noun-survival degradation cost. */
     statementTexts?: Map<string, string>;
-    /** claimId → cellUnitId[]. From table cell allocation. */
-    tableCellAllocations?: Map<string, string[]> | null;
     /** Claim IDs involved in conflict edges (from mapper). Used to narrow speculative fate test. */
     conflictClaimIds?: Set<string> | null;
 }
@@ -56,7 +54,6 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         claims,
         statementEmbeddings, totalCorpusStatements,
         statementTexts,
-        tableCellAllocations,
     } = input;
 
     // 1. Build canonical sets and exclusive IDs from the patched claims
@@ -179,14 +176,12 @@ export function computeBlastSurface(input: BlastSurfaceInput): BlastSurfaceResul
         const type1Count = canonicalSet.size - exclusiveIds.length;
         const type2Count = deletionIds.length;
         const type3Count = degradationIds.length;
-        const allocatedCellUnitCount = tableCellAllocations?.get?.(claimId)?.length ?? 0;
 
         const layerC: BlastSurfaceLayerC = {
             canonicalCount: canonicalSet.size,
             nonExclusiveCount: type1Count,
             exclusiveNonOrphanCount: type2Count,
             exclusiveOrphanCount: type3Count,
-            allocatedCellUnits: allocatedCellUnitCount,
         };
 
         // ── Risk Vector ───────────────────────────────────────────────────

@@ -22,24 +22,11 @@ import { stripInlineMarkdown } from '../clustering/embeddings';
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface TableCellUnit {
+export interface TableCellMeta {
     rowHeader: string;
     columnHeader: string;
     value: string;
-    /** Synthesized statement: "rowHeader — columnHeader: value" */
-    text: string;
 }
-
-export interface TableSidecarEntry {
-    modelIndex: number;
-    /** Zero-based paragraph index within the model's content (after table removal) */
-    paragraphOffset: number;
-    headers: string[];
-    rows: string[][];
-    cells: TableCellUnit[];
-}
-
-export type TableSidecar = TableSidecarEntry[];
 
 export interface ShadowStatement {
     id: string;                    // "s_0", "s_1", ...
@@ -59,6 +46,9 @@ export interface ShadowStatement {
     location: ShadowStatementLocation;
     fullParagraph: string;         // For context/evidence
 
+    isTableCell?: boolean;
+    tableMeta?: TableCellMeta;
+
     geometricCoordinates?: {
         paragraphId: string;
         regionId: string | null;
@@ -73,7 +63,6 @@ export interface ShadowStatementLocation {
 
 export interface ShadowExtractionResult {
     statements: ShadowStatement[];
-    tableSidecar: TableSidecar;
     meta: {
         totalStatements: number;
         byModel: Record<number, number>;
@@ -189,30 +178,42 @@ function isSubstantive(cleanText: string, rawText?: string): boolean {
  * Extract markdown tables from content.
  * Tables are removed from content and returned as structured sidecar entries.
  */
-function extractTables(
-    content: string,
-    modelIndex: number
-): { cleanedContent: string; tables: TableSidecarEntry[] } {
+interface TableCell {
+    text: string;       // "rowHeader — columnHeader: value"
+    rowHeader: string;
+    columnHeader: string;
+    value: string;
+}
+
+/**
+ * Split content into segments, preserving table positions inline.
+ * Tables become arrays of TableCell; prose stays as raw text.
+ */
+function splitTablesAndProse(
+    content: string
+): Array<{ type: 'prose'; text: string } | { type: 'table'; cells: TableCell[] }> {
     const lines = content.split('\n');
-    const tables: TableSidecarEntry[] = [];
-    const outputLines: string[] = [];
+    const segments: Array<{ type: 'prose'; text: string } | { type: 'table'; cells: TableCell[] }> = [];
     let i = 0;
+    let proseLines: string[] = [];
+
+    const flushProse = () => {
+        const text = proseLines.join('\n');
+        if (text.trim().length > 0) segments.push({ type: 'prose', text });
+        proseLines = [];
+    };
 
     while (i < lines.length) {
         const line = lines[i];
-        // Check if this looks like a table row
         if (/^\|.*\|$/.test(line.trim())) {
-            // Collect contiguous table lines
             const tableLines: string[] = [];
             while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) {
                 tableLines.push(lines[i]);
                 i++;
             }
 
-            // Validate: need at least 2 rows and one separator row
             const hasSeparator = tableLines.some(l => /^\|[\s\-:|]+\|$/.test(l.trim()));
             if (tableLines.length >= 2 && hasSeparator) {
-                // Parse table
                 const nonSeparator = tableLines.filter(l => !/^\|[\s\-:|]+\|$/.test(l.trim()));
                 if (nonSeparator.length >= 1) {
                     const parseRow = (l: string) =>
@@ -222,7 +223,7 @@ function extractTables(
                     const headers = parseRow(nonSeparator[0]);
                     const dataRows = nonSeparator.slice(1).map(parseRow);
 
-                    const cells: TableCellUnit[] = [];
+                    const cells: TableCell[] = [];
                     for (const row of dataRows) {
                         const rowHeader = row[0] ?? '';
                         for (let c = 1; c < headers.length; c++) {
@@ -230,37 +231,33 @@ function extractTables(
                             const value = row[c] ?? '';
                             if (value) {
                                 cells.push({
+                                    text: `${rowHeader} \u2014 ${colHeader}: ${value}`,
                                     rowHeader,
                                     columnHeader: colHeader,
                                     value,
-                                    text: `${rowHeader} \u2014 ${colHeader}: ${value}`,
                                 });
                             }
                         }
                     }
 
-                    tables.push({
-                        modelIndex,
-                        paragraphOffset: outputLines.filter(l => l === '').length,
-                        headers,
-                        rows: dataRows,
-                        cells,
-                    });
-                    // Replace table with blank separator so paragraph splitting still works
-                    outputLines.push('');
-                    continue;
+                    if (cells.length > 0) {
+                        flushProse();
+                        segments.push({ type: 'table', cells });
+                        continue;
+                    }
                 }
             }
 
-            // Not a valid table — keep lines
-            outputLines.push(...tableLines);
+            // Not a valid table — keep as prose
+            proseLines.push(...tableLines);
         } else {
-            outputLines.push(line);
+            proseLines.push(line);
             i++;
         }
     }
 
-    return { cleanedContent: outputLines.join('\n'), tables };
+    flushProse();
+    return segments;
 }
 
 type ContentBlock =
@@ -318,7 +315,6 @@ export function extractShadowStatements(
     const CANDIDATE_LIMIT = 10_000;
 
     const statements: ShadowStatement[] = [];
-    const tableSidecar: TableSidecar = [];
     let idCounter = 0;
     let candidatesProcessed = 0;
     let candidatesExcluded = 0;
@@ -327,125 +323,165 @@ export function extractShadowStatements(
     let truncatedAtModel: number | null = null;
 
     for (const response of responses) {
-        // 1. Extract tables first, remove them from content
-        const { cleanedContent, tables } = extractTables(response.content, response.modelIndex);
-        tableSidecar.push(...tables);
-
-        // 2. Split into content blocks (list items vs prose paragraphs)
-        const rawBlocks = cleanedContent.split(/\n\n+/).filter(b => b.trim().length > 0);
+        // 1. Split content into prose segments and inline table segments
+        const segments = splitTablesAndProse(response.content);
 
         let pIdx = 0;
         let hitLimit = false;
 
-        for (const rawBlock of rawBlocks) {
-            const blocks = splitContentBlocks(rawBlock);
+        for (const segment of segments) {
+            if (segment.type === 'table') {
+                // Each table cell becomes its own single-statement paragraph
+                for (const cell of segment.cells) {
+                    sentencesProcessed++;
+                    if (sentencesProcessed > SENTENCE_LIMIT) {
+                        truncated = true;
+                        truncatedAtModel = response.modelIndex;
+                        hitLimit = true;
+                        break;
+                    }
 
-            for (const block of blocks) {
-                if (block.type === 'list') {
-                    // List items → direct statements (skip sentence splitting)
-                    for (let sIdx = 0; sIdx < block.items.length; sIdx++) {
-                        sentencesProcessed++;
-                        if (sentencesProcessed > SENTENCE_LIMIT) {
-                            truncated = true;
-                            truncatedAtModel = response.modelIndex;
-                            hitLimit = true;
-                            break;
+                    candidatesProcessed++;
+
+                    statements.push({
+                        id: `s_${idCounter++}`,
+                        modelIndex: response.modelIndex,
+                        text: cell.text,
+                        cleanText: cell.text,
+                        stance: 'assertive' as Stance,
+                        confidence: 1.0,
+                        signals: { sequence: false, tension: false, conditional: false },
+                        location: { paragraphIndex: pIdx, sentenceIndex: 0 },
+                        fullParagraph: cell.text,
+                        isTableCell: true,
+                        tableMeta: { rowHeader: cell.rowHeader, columnHeader: cell.columnHeader, value: cell.value },
+                    });
+
+                    if (statements.length >= CANDIDATE_LIMIT) {
+                        truncated = true;
+                        truncatedAtModel = response.modelIndex;
+                        hitLimit = true;
+                        break;
+                    }
+
+                    pIdx++;
+                }
+                if (hitLimit) break;
+                continue;
+            }
+
+            // Prose segment — split into paragraph blocks (double newline)
+            const rawBlocks = segment.text.split(/\n\n+/).filter(b => b.trim().length > 0);
+
+            for (const rawBlock of rawBlocks) {
+                const blocks = splitContentBlocks(rawBlock);
+
+                for (const block of blocks) {
+                    if (block.type === 'list') {
+                        // List items → direct statements (skip sentence splitting)
+                        for (let sIdx = 0; sIdx < block.items.length; sIdx++) {
+                            sentencesProcessed++;
+                            if (sentencesProcessed > SENTENCE_LIMIT) {
+                                truncated = true;
+                                truncatedAtModel = response.modelIndex;
+                                hitLimit = true;
+                                break;
+                            }
+
+                            const rawItem = block.items[sIdx];
+                            const cleanText = cleanTextForProcessing(rawItem);
+
+                            if (!isSubstantive(cleanText, rawItem)) continue;
+
+                            candidatesProcessed++;
+                            const { stance, confidence: rawConfidence } = classifyStance(cleanText);
+                            const exclusion = isExcluded(cleanText, stance, { isListItem: true });
+                            if (exclusion.excluded) {
+                                candidatesExcluded++;
+                                continue;
+                            }
+                            const confidence = rawConfidence * exclusion.confidenceMultiplier;
+                            const signals = detectSignals(cleanText);
+
+                            statements.push({
+                                id: `s_${idCounter++}`,
+                                modelIndex: response.modelIndex,
+                                text: rawItem,
+                                cleanText,
+                                stance,
+                                confidence,
+                                signals,
+                                location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
+                                fullParagraph: rawItem,
+                            });
+
+                            if (statements.length >= CANDIDATE_LIMIT) {
+                                truncated = true;
+                                truncatedAtModel = response.modelIndex;
+                                hitLimit = true;
+                                break;
+                            }
                         }
+                    } else {
+                        // Prose block → sentence split
+                        const paragraph = block.content;
+                        const sentences = splitIntoSentences(paragraph);
 
-                        const rawItem = block.items[sIdx];
-                        const cleanText = cleanTextForProcessing(rawItem);
+                        for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
+                            sentencesProcessed++;
+                            if (sentencesProcessed > SENTENCE_LIMIT) {
+                                truncated = true;
+                                truncatedAtModel = response.modelIndex;
+                                hitLimit = true;
+                                break;
+                            }
 
-                        if (!isSubstantive(cleanText, rawItem)) continue;
+                            const rawSentence = sentences[sIdx];
+                            const cleanText = cleanTextForProcessing(rawSentence);
 
-                        candidatesProcessed++;
-                        const { stance, confidence: rawConfidence } = classifyStance(cleanText);
-                        const exclusion = isExcluded(cleanText, stance, { isListItem: true });
-                        if (exclusion.excluded) {
-                            candidatesExcluded++;
-                            continue;
-                        }
-                        const confidence = rawConfidence * exclusion.confidenceMultiplier;
-                        const signals = detectSignals(cleanText);
+                            if (!isSubstantive(cleanText, rawSentence)) continue;
 
-                        statements.push({
-                            id: `s_${idCounter++}`,
-                            modelIndex: response.modelIndex,
-                            text: rawItem,
-                            cleanText,
-                            stance,
-                            confidence,
-                            signals,
-                            location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
-                            fullParagraph: rawItem,
-                        });
+                            candidatesProcessed++;
+                            const { stance, confidence: rawConfidence } = classifyStance(cleanText);
+                            const exclusion = isExcluded(cleanText, stance);
+                            if (exclusion.excluded) {
+                                candidatesExcluded++;
+                                continue;
+                            }
+                            const confidence = rawConfidence * exclusion.confidenceMultiplier;
+                            const signals = detectSignals(cleanText);
 
-                        if (statements.length >= CANDIDATE_LIMIT) {
-                            truncated = true;
-                            truncatedAtModel = response.modelIndex;
-                            hitLimit = true;
-                            break;
+                            statements.push({
+                                id: `s_${idCounter++}`,
+                                modelIndex: response.modelIndex,
+                                text: rawSentence,
+                                cleanText,
+                                stance,
+                                confidence,
+                                signals,
+                                location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
+                                fullParagraph: paragraph,
+                            });
+
+                            if (statements.length >= CANDIDATE_LIMIT) {
+                                truncated = true;
+                                truncatedAtModel = response.modelIndex;
+                                hitLimit = true;
+                                break;
+                            }
                         }
                     }
-                } else {
-                    // Prose block → sentence split
-                    const paragraph = block.content;
-                    const sentences = splitIntoSentences(paragraph);
 
-                    for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
-                        sentencesProcessed++;
-                        if (sentencesProcessed > SENTENCE_LIMIT) {
-                            truncated = true;
-                            truncatedAtModel = response.modelIndex;
-                            hitLimit = true;
-                            break;
-                        }
-
-                        const rawSentence = sentences[sIdx];
-                        const cleanText = cleanTextForProcessing(rawSentence);
-
-                        if (!isSubstantive(cleanText, rawSentence)) continue;
-
-                        candidatesProcessed++;
-                        const { stance, confidence: rawConfidence } = classifyStance(cleanText);
-                        const exclusion = isExcluded(cleanText, stance);
-                        if (exclusion.excluded) {
-                            candidatesExcluded++;
-                            continue;
-                        }
-                        const confidence = rawConfidence * exclusion.confidenceMultiplier;
-                        const signals = detectSignals(cleanText);
-
-                        statements.push({
-                            id: `s_${idCounter++}`,
-                            modelIndex: response.modelIndex,
-                            text: rawSentence,
-                            cleanText,
-                            stance,
-                            confidence,
-                            signals,
-                            location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
-                            fullParagraph: paragraph,
-                        });
-
-                        if (statements.length >= CANDIDATE_LIMIT) {
-                            truncated = true;
-                            truncatedAtModel = response.modelIndex;
-                            hitLimit = true;
-                            break;
-                        }
-                    }
+                    if (hitLimit) break;
+                    pIdx++;
                 }
 
                 if (hitLimit) break;
-                pIdx++;
             }
 
             if (hitLimit) break;
         }
 
-        // Complete current model before stopping (do NOT break mid-model here)
-        // The hitLimit flag stops inner loops; outer model loop continues to next model
-        // unless we've already truncated (to avoid wasted work on remaining models)
         if (truncated) {
             console.warn(
                 `[ShadowExtractor] Hit limit (sentences=${SENTENCE_LIMIT}, candidates=${CANDIDATE_LIMIT}), ` +
@@ -468,7 +504,6 @@ export function extractShadowStatements(
 
     return {
         statements,
-        tableSidecar,
         meta,
     };
 }

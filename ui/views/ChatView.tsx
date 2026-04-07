@@ -9,7 +9,6 @@ import {
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
   chatInputHeightAtom,
-  readingPanelOpenAtom,
   __scaffold__editorialSurfaceOpenAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
@@ -32,10 +31,6 @@ const DecisionMapSheet = safeLazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
 );
 
-const ReadingPanel = safeLazy(() =>
-  import("../components/reading/ReadingPanel").then(m => ({ default: m.ReadingPanel }))
-);
-
 const EditorialSurface = safeLazy(() =>
   import("../components/editorial/EditorialSurface").then(m => ({ default: m.EditorialSurface }))
 );
@@ -54,8 +49,6 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-  const isReadingPanelOpen = useAtomValue(readingPanelOpenAtom);
-  const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
   const isEditorialOpen = useAtomValue(__scaffold__editorialSurfaceOpenAtom);
   const setEditorialOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
 
@@ -68,8 +61,6 @@ export default function ChatView() {
       if (e.key === 'Escape') {
         if (isEditorialOpen) {
           setEditorialOpen(null);
-        } else if (isReadingPanelOpen) {
-          setReadingPanelOpen(null);
         } else if (isDecisionMapOpen) {
           setDecisionMapOpen(null);
         } else if (isSplitOpen) {
@@ -79,7 +70,7 @@ export default function ChatView() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isEditorialOpen, isReadingPanelOpen, isDecisionMapOpen, isSplitOpen, setEditorialOpen, setReadingPanelOpen, setDecisionMapOpen, setActiveSplitPanel]);
+  }, [isEditorialOpen, isDecisionMapOpen, isSplitOpen, setEditorialOpen, setDecisionMapOpen, setActiveSplitPanel]);
 
   const itemContent = useMemo(
     () => (_index: number, turnId: string) => {
@@ -224,17 +215,6 @@ export default function ChatView() {
       <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
         <Suspense fallback={null}>
           <EditorialSurface />
-        </Suspense>
-      </div>
-    );
-  }
-
-  // Reading panel gets a fully isolated view — hide everything else
-  if (isReadingPanelOpen) {
-    return (
-      <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
-        <Suspense fallback={null}>
-          <ReadingPanel />
         </Suspense>
       </div>
     );

@@ -481,14 +481,21 @@ class FaultTolerantOrchestrator {
       })();
     });
 
-    Promise.all(providerPromises).then((settledResults) => {
+    Promise.all(providerPromises).then(async (settledResults) => {
       settledResults.forEach((item) => {
         if (item.status === "fulfilled") results.set(item.providerId, item.value);
         else errors.set(item.providerId, item.reason);
       });
-      onAllComplete(results, errors);
+      await onAllComplete(results, errors);
       this.activeRequests.delete(sessionId);
       if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
+    }).catch((err) => {
+      console.error('[FaultTolerantOrchestrator] onAllComplete threw:', err);
+      this.activeRequests.delete(sessionId);
+      if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
+      if (typeof options.onError === 'function') {
+        try { options.onError(err); } catch (_) {}
+      }
     });
   }
 
@@ -852,6 +859,76 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             timestamp: meta.timestamp || null,
           };
           sendResponse({ success: true, data: payload });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+
+      case "CORPUS_SEARCH":
+        (async () => {
+          const { aiTurnId, queryText } = message.payload || {};
+          if (!aiTurnId || !queryText) {
+            sendResponse({ success: false, error: "Missing aiTurnId or queryText" });
+            return;
+          }
+
+          const geoRecord = await sm.loadEmbeddings(aiTurnId);
+          if (!geoRecord?.paragraphEmbeddings || !geoRecord?.meta?.paragraphIndex?.length || !geoRecord?.meta?.dimensions) {
+            sendResponse({ success: true, data: { results: [], reason: "no_embeddings" } });
+            return;
+          }
+
+          const { unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
+          const { generateTextEmbeddings, structuredTruncate } = await import('./clustering');
+          const { DEFAULT_CONFIG } = await import('./clustering');
+          const { searchCorpus } = await import('./core/corpusSearch');
+
+          const dims = geoRecord.meta.dimensions;
+          const paragraphEmbeddings = unpackEmbeddingMap(
+            geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, dims,
+          );
+
+          // Build paragraph metadata from the index
+          // Index entries are paragraph IDs like "p_0", "p_1", etc.
+          // We need modelIndex + paragraphIndex — load the turn to get shadow paragraphs
+          const turnRaw = await sm.adapter.get("turns", aiTurnId);
+          const shadowParagraphs = turnRaw?.mapping?.artifact?.shadow?.paragraphs || [];
+          const paraLookup = new Map();
+          for (const p of shadowParagraphs) {
+            paraLookup.set(p.id, p);
+          }
+
+          const paragraphMeta = geoRecord.meta.paragraphIndex.map((pid) => {
+            const p = paraLookup.get(pid);
+            return {
+              id: pid,
+              modelIndex: p?.modelIndex ?? 0,
+              paragraphIndex: p?.paragraphIndex ?? 0,
+            };
+          });
+
+          // Embed the query
+          const truncated = structuredTruncate(queryText.trim(), 1200);
+          const prefixed = truncated.toLowerCase().startsWith('represent this sentence')
+            ? truncated
+            : `Represent this sentence for searching relevant passages: ${truncated}`;
+          const queryBatch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG);
+          const queryEmbedding = queryBatch.embeddings.get('0');
+          if (!queryEmbedding) {
+            sendResponse({ success: false, error: "Query embedding failed" });
+            return;
+          }
+
+          const hits = searchCorpus(queryEmbedding, paragraphEmbeddings, paragraphMeta, 50);
+
+          // Enrich hits with paragraph text
+          const results = hits.map((h) => {
+            const p = paraLookup.get(h.paragraphId);
+            return {
+              ...h,
+              text: (p?._fullParagraph || '').slice(0, 800),
+            };
+          });
+
+          sendResponse({ success: true, data: { results } });
         })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 
@@ -1353,14 +1430,12 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
 
     // ── B.1 Always re-extract shadow from batch (ground truth for current code) ──
     // Never trust stored shadow statements — extraction rules may have changed.
-    let tableSidecar = [];
     if (batchSources.length > 0) {
       const { extractShadowStatements, projectParagraphs } = await import("./shadow");
       const shadowResult = extractShadowStatements(batchSources);
       shadowStatements = shadowResult.statements;
       shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
-      tableSidecar = shadowResult.tableSidecar || [];
-      console.log(`[Regenerate] Fresh extraction: ${shadowStatements.length} stmts, ${shadowParagraphs.length} paras, ${tableSidecar.length} tables`);
+      console.log(`[Regenerate] Fresh extraction: ${shadowStatements.length} stmts, ${shadowParagraphs.length} paras`);
     }
     if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
       return { success: false, error: "No shadow statements for embedding generation" };
@@ -1468,49 +1543,6 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
         ? new Float32Array(geoRecord.queryEmbedding)
         : null;
 
-    // ── D. Load or generate cell-unit embeddings ──
-    let cellUnitEmbeddings = null;
-    if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
-      // Load from cache
-      cellUnitEmbeddings = unpackEmbeddingMap(
-        geoRecord.cellUnitEmbeddings,
-        geoRecord.meta.cellUnitIndex,
-        geoRecord.meta.dimensions
-      );
-    } else if (tableSidecar.length > 0) {
-      // Generate + persist
-      try {
-        const { flattenCellUnits } = await import("./core/tableCellAllocation");
-        const cellUnits = flattenCellUnits(tableSidecar);
-        if (cellUnits.length > 0) {
-          const cellTexts = cellUnits.map((cu) => stripInlineMarkdown(cu.text));
-          const cellIds = cellUnits.map((cu) => cu.id);
-          const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
-          cellUnitEmbeddings = new Map();
-          for (let ci = 0; ci < cellIds.length; ci++) {
-            const emb = cellBatch.embeddings.get(String(ci));
-            if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
-          }
-          // Persist to geo record
-          if (cellUnitEmbeddings.size > 0) {
-            const packedCells = packEmbeddingMap(cellUnitEmbeddings, dims);
-            const existingRecord = await sm.loadEmbeddings(aiTurnId);
-            if (existingRecord) {
-              existingRecord.cellUnitEmbeddings = packedCells.buffer;
-              existingRecord.meta = existingRecord.meta || {};
-              existingRecord.meta.cellUnitIndex = packedCells.index;
-              existingRecord.meta.cellUnitCount = packedCells.index.length;
-              await sm.adapter.putBinary("embeddings", existingRecord);
-              geoRecord = existingRecord;
-            }
-          }
-          console.log(`[Regenerate] Embedded + cached ${cellUnitEmbeddings.size} table cell-units`);
-        }
-      } catch (cellErr) {
-        console.warn("[Regenerate] Cell-unit embedding failed:", cellErr?.message || String(cellErr));
-      }
-    }
-
     // ══════════════════════════════════════════════════════════════
     // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
     // ══════════════════════════════════════════════════════════════
@@ -1535,8 +1567,6 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
       queryText,
       modelCount,
-      tableSidecar,
-      cellUnitEmbeddings,
     });
 
     const {
@@ -1639,6 +1669,122 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       }
     } catch (editorialErr) {
       console.warn("[Regenerate] Editorial restore (non-blocking):", editorialErr?.message || editorialErr);
+    }
+
+    // ── Generate editorial AST if not restored from persistence ──────
+    if (!cognitiveArtifact.editorialAST && mapperArtifact.claimDensity && mapperArtifact.passageRouting && mapperArtifact.statementClassification) {
+      try {
+        const orchestrator = services.get('orchestrator');
+        if (orchestrator) {
+          const { buildSourceContinuityMap } = await import("./core/passageRouting");
+          const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
+            await import("./ConciergeService/editorialMapper");
+
+          const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
+          const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
+            mapperArtifact.claimDensity,
+            mapperArtifact.passageRouting,
+            mapperArtifact.statementClassification,
+            { paragraphs: Array.isArray(shadowParagraphs) ? shadowParagraphs : [] },
+            enrichedClaims,
+            mapperArtifact.citationSourceOrder || {},
+            continuityMap,
+          );
+
+          const validPassageKeys = new Set(idxPassages.map(p => p.passageKey));
+          const validUnclaimedKeys = new Set(idxUnclaimed.map(u => u.groupKey));
+
+          const concentrations = idxPassages.map(p => p.concentrationRatio);
+          const landscapeComp = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
+          idxPassages.forEach(p => { landscapeComp[p.landscapePosition]++; });
+
+          const editorialPrompt = buildEditorialPrompt(
+            queryText,
+            idxPassages,
+            idxUnclaimed,
+            {
+              passageCount: idxPassages.length,
+              claimCount: enrichedClaims.length,
+              conflictCount: mapperArtifact.passageRouting?.routing?.conflictClusters?.length ?? 0,
+              concentrationSpread: {
+                min: concentrations.length ? Math.min(...concentrations) : 0,
+                max: concentrations.length ? Math.max(...concentrations) : 0,
+                mean: concentrations.length ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length : 0,
+              },
+              landscapeComposition: landscapeComp,
+            },
+          );
+
+          // Thread continuation: prefer mapping cursor (semantic mapper's thread),
+          // fall back to batch cursor, fall back to fresh conversation.
+          const editorialProviderContexts = (() => {
+            const mappingMeta = mappingResp?.meta;
+            if (mappingMeta && typeof mappingMeta === 'object' && Object.keys(mappingMeta).length > 0) {
+              return { [providerId]: { meta: mappingMeta, continueThread: true } };
+            }
+            const batchResp = responsesForTurn.find(
+              (r) => r && r.responseType === 'batch' && normalizeProvId(r.providerId) === normalizeProvId(providerId)
+            );
+            const batchMeta = batchResp?.meta;
+            if (batchMeta && typeof batchMeta === 'object' && Object.keys(batchMeta).length > 0) {
+              return { [providerId]: { meta: batchMeta, continueThread: true } };
+            }
+            return {};
+          })();
+
+          const editorialResult = await new Promise((res) => {
+            orchestrator.executeParallelFanout(
+              editorialPrompt,
+              [providerId],
+              {
+                sessionId: `regen-editorial-${aiTurnId}`,
+                useThinking: false,
+                providerContexts: editorialProviderContexts,
+                onPartial: () => {},
+                onAllComplete: async (results) => {
+                  const result = results?.get?.(providerId);
+                  if (result?.text) res({ text: result.text, meta: result.meta });
+                  else res({ text: '' });
+                },
+                onError: () => res({ text: '' }),
+              },
+            );
+          });
+
+          if (editorialResult?.text) {
+            const parsed = parseEditorialOutput(editorialResult.text, validPassageKeys, validUnclaimedKeys);
+            if (parsed.success && parsed.ast) {
+              cognitiveArtifact.editorialAST = parsed.ast;
+              console.log(`[Regenerate] Editorial generated: ${parsed.ast.threads.length} thread(s)`);
+
+              // Persist so future regens don't need another LLM call
+              if (sm?.adapter) {
+                try {
+                  const now = Date.now();
+                  await sm.adapter.put('provider_responses', {
+                    id: `pr-${aiTurnId}-${providerId}-editorial-0-${now}`,
+                    sessionId: responsesForTurn[0]?.sessionId || '',
+                    aiTurnId,
+                    providerId,
+                    responseType: 'editorial',
+                    responseIndex: 0,
+                    text: editorialResult.text,
+                    status: 'completed',
+                    meta: editorialResult.meta || {},
+                    createdAt: now,
+                    updatedAt: now,
+                    completedAt: now,
+                  });
+                } catch (_) {}
+              }
+            } else {
+              console.warn("[Regenerate] Editorial parse failed:", parsed.errors);
+            }
+          }
+        }
+      } catch (editorialGenErr) {
+        console.warn("[Regenerate] Editorial generation (non-blocking):", editorialGenErr?.message || editorialGenErr);
+      }
     }
 
     return {

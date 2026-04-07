@@ -95,7 +95,8 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
         if (providerHasStoredResponse(pid)) {
             singularityState.setPinnedProvider(pid);
         } else {
-            // New compute, will auto-pin via parent
+            // Clear stale pin so the incoming response shows via direct slot
+            singularityState.setPinnedProvider('');
             onRecompute({ providerId: pid });
         }
         setShowRegenMenu(false);

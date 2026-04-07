@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { m, AnimatePresence, LazyMotion, domAnimation } from 'framer-motion';
-import { __scaffold__editorialSurfaceOpenAtom, __scaffold__editorialStateFamily } from '../../state/atoms';
+import { __scaffold__editorialSurfaceOpenAtom, __scaffold__editorialStateFamily, currentSessionIdAtom } from '../../state/atoms';
 import { useArtifactResolution } from '../../hooks/useArtifactResolution';
 import { usePassageHighlight } from '../reading/usePassageHighlight';
 import { ClaimRibbon } from '../reading/ClaimRibbon';
@@ -9,15 +9,28 @@ import { ModelGrid } from '../reading/ModelGrid';
 import { CopyButton } from '../CopyButton';
 import { EditorialPreview } from './EditorialPreview';
 import { EditorialDocument } from './EditorialDocument';
+import { CorpusSearchPanel } from './CorpusSearchPanel';
 import type { EditorialAST } from '../../../shared/contract';
 import { resolveProviderIdFromCitationOrder, getProviderName } from '../../utils/provider-helpers';
 
 export const EditorialSurface: React.FC = () => {
   const [openState, setOpenState] = useAtom(__scaffold__editorialSurfaceOpenAtom);
   const turnId = openState?.turnId ?? '';
+
+  // Auto-close on session change (same pattern as SplitPaneRightPanel)
+  const sessionId = useAtomValue(currentSessionIdAtom);
+  const lastSessionIdRef = useRef<string | null>(sessionId);
+  useEffect(() => {
+    const prev = lastSessionIdRef.current;
+    lastSessionIdRef.current = sessionId;
+    if (prev !== sessionId && openState) {
+      setOpenState(null);
+    }
+  }, [sessionId, openState, setOpenState]);
   const [surfaceState, setSurfaceState] = useAtom(__scaffold__editorialStateFamily(turnId));
   const { artifact, citationSourceOrder } = useArtifactResolution(turnId);
   const [focusedClaimId, setFocusedClaimId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const highlightMap = usePassageHighlight(artifact, focusedClaimId);
   const columnScrollRef = useRef<number>(0);
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -154,6 +167,16 @@ export const EditorialSurface: React.FC = () => {
                 />
               </div>
               <div className="flex items-center shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(s => !s)}
+                  className={`p-3 rounded-full transition-colors ${searchOpen ? 'text-brand-400 bg-brand-500/10' : 'text-text-muted hover:text-text-primary hover:bg-white/5'}`}
+                  aria-label="Search corpus"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </button>
                 <CopyButton
                   text={corpusText}
                   label="Copy corpus by passage"
@@ -174,6 +197,14 @@ export const EditorialSurface: React.FC = () => {
               </button>
               </div>
             </div>
+
+            {/* Corpus search panel */}
+            {searchOpen && (
+              <CorpusSearchPanel
+                aiTurnId={turnId}
+                citationSourceOrder={citationSourceOrder}
+              />
+            )}
 
             {/* Preview (State 2): auto-appears above columns when AST arrives */}
             {surfaceState === 'preview' && editorialAST && (

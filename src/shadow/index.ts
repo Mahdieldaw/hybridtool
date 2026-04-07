@@ -30,6 +30,7 @@ export type {
 export type {
     ShadowStatement,
     ShadowExtractionResult,
+    TableCellMeta,
 } from './ShadowExtractor';
 
 export type {

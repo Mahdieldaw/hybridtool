@@ -346,9 +346,6 @@ export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null)
 export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
 
 
-/** When non-null, the multi-model reading panel is open for this turn. */
-export const readingPanelOpenAtom = atom<{ turnId: string } | null>(null);
-
 /**
  * SCAFFOLDING — temporary atom for editorial surface development.
  * Will be reconciled when editorial surface promotes to primary path.

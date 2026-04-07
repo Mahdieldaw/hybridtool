@@ -152,10 +152,17 @@ export const analyzeGraph = (claimIds: string[], edges: Edge[], claims: Enriched
 
     const sortedByOutDegree = Array.from(outDegree.entries()).sort((a, b) => b[1] - a[1]);
     const [topId, topOut] = sortedByOutDegree[0] || [null, 0];
-    const secondOut = sortedByOutDegree[1]?.[1] ?? 0;
 
-    const hubDominance = secondOut > 0 ? topOut / secondOut : (topOut > 0 ? 10 : 0);
-    const hubClaim = hubDominance >= 1.5 && topOut >= 2 ? topId : null;
+    // z-score over out-degree distribution — self-calibrating, no magic thresholds
+    const outDegreeValues = Array.from(outDegree.values());
+    const degN = outDegreeValues.length;
+    const mu = degN > 0 ? outDegreeValues.reduce((s, v) => s + v, 0) / degN : 0;
+    const sigma = degN > 1
+        ? Math.sqrt(outDegreeValues.reduce((s, v) => s + (v - mu) ** 2, 0) / (degN - 1))
+        : 0;
+
+    const hubDominance = sigma > 0 ? (topOut - mu) / sigma : 0;
+    const hubClaim = sigma > 0 && topOut > mu + sigma ? topId : null;
 
     const articulationPoints = findArticulationPoints(claimIds, edges);
 

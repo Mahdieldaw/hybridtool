@@ -6,7 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, readingPanelOpenAtom, __scaffold__editorialSurfaceOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, __scaffold__editorialSurfaceOpenAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -53,7 +53,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
-    const setReadingPanelOpen = useSetAtom(readingPanelOpenAtom);
     const setEditorialSurfaceOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
@@ -221,14 +220,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     >
                         <span>Debug</span>
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => setReadingPanelOpen({ turnId: aiTurn.id })}
-                        className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
-                        aria-label="Open multi-model reading surface"
-                    >
-                        <span>Read</span>
-                    </button>
                     {mappingArtifact?.editorialAST && (
                         <button
                             type="button"
@@ -279,9 +270,9 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         </div>
 
                         {problemStructure && (
-                            <div className="min-w-0 h-full flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50">
-                                <div className="flex flex-col items-center gap-2">
-                                    <div className="text-[10px] uppercase tracking-widest text-text-muted font-bold">
+                            <div className="min-w-0 h-full flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50 overflow-hidden">
+                                <div className="flex flex-col items-center gap-2 min-w-0 max-w-full">
+                                    <div className="text-[10px] uppercase tracking-widest text-text-muted font-bold truncate max-w-full">
                                         Structural Topology
                                     </div>
                                     <StructureGlyph
@@ -292,7 +283,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                         height={120}
                                         onClick={() => setDecisionMapOpen({ turnId: aiTurn.id, tab: 'graph' })}
                                     />
-                                    <div className="text-[11px] text-text-muted italic">
+                                    <div className="text-[11px] text-text-muted italic truncate max-w-full text-center">
                                         {problemStructure.confidence > 0.7
                                             ? `High confidence ${problemStructure.primary} pattern detected`
                                             : `Emerging ${problemStructure.primary} structure`}
@@ -313,6 +304,30 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     isLoading={isTransitioning}
                     copyAllText={copyAllText}
                 />
+            ) : (!isRoundActive && isPipelineComplete && mappingArtifact) ? (
+                <div className="animate-in fade-in duration-500">
+                    <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle gap-4">
+                        <div className="text-3xl">🧩</div>
+                        <div className="text-text-secondary font-medium">
+                            Singularity step was not reached
+                        </div>
+                        <div className="text-xs text-text-muted text-center">
+                            Pipeline data is available. Select a provider to generate the synthesis.
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-2 mt-2">
+                            {LLM_PROVIDERS_CONFIG.map((provider) => (
+                                <button
+                                    key={provider.id}
+                                    onClick={() => triggerAndSwitch({ providerId: provider.id })}
+                                    className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:border-brand-500/50 text-xs font-medium text-text-secondary hover:text-text-primary transition-all flex items-center gap-2"
+                                >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-border-subtle" />
+                                    {provider.name}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
             ) : (
                 <div className="animate-in fade-in duration-500">
                     <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">

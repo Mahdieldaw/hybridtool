@@ -384,8 +384,6 @@ export interface BlastSurfaceLayerC {
   exclusiveNonOrphanCount: number;
   /** Exclusive orphan statements (Type 3) — skeletonized on prune, never removed */
   exclusiveOrphanCount: number;
-  /** Table cell-units allocated to this claim (contributes to evidence mass, not twin map) */
-  allocatedCellUnits?: number;
 }
 
 /** Risk vector: three orthogonal axes of pruning damage, derived from the canonical fate table. */

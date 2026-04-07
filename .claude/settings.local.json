@@ -35,6 +35,9 @@
       "Bash(cd \"C:\\\\Users\\\\Mahdi\\\\Desktop\\\\hybrid\" && npx jest src/core/provider-health-tracker.test.ts --no-coverage 2>&1 | tail -20)",
       "Bash(grep:*)",
       "CLAUDE_CODE_DISABLE_1M_CONTEXT=1"
+   ],
+    "deny": [
+      "Agent"
     ]
   }
 }

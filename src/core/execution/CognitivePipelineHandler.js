@@ -151,10 +151,29 @@ export class CognitivePipelineHandler {
             if (!handoffV2Enabled || turnInCurrentInstance === 1) {
               // Default path (flag off) OR Turn 1: plain buildConciergePrompt
               conciergePromptType = "full";
+
+              // Build evidence substrate: editorial threads + mapping response
+              let evidenceSubstrate = '';
+              try {
+                const { buildEvidenceSubstrate } = await import('../../ConciergeService/evidenceSubstrate');
+                const cso = mappingArtifact?.meta?.citationSourceOrder || {};
+                evidenceSubstrate = buildEvidenceSubstrate(
+                  mappingArtifact,
+                  mappingResult?.text || "",
+                  cso,
+                );
+                if (evidenceSubstrate) {
+                  console.log(`[CognitiveHandler] Built evidence substrate: ${evidenceSubstrate.length} chars`);
+                }
+              } catch (substrateErr) {
+                console.warn('[CognitiveHandler] Evidence substrate build failed:', substrateErr);
+              }
+
               const conciergePromptSeedBase = {
                 isFirstTurn: true,
                 activeWorkflow: conciergeState?.activeWorkflow || undefined,
                 priorContext: undefined,
+                ...(evidenceSubstrate ? { evidenceSubstrate } : {}),
               };
 
               conciergePromptSeed =
@@ -541,55 +560,13 @@ export class CognitivePipelineHandler {
               // Extract shadow + tables once; load cell-unit embeddings from cache
               let shadowStatements = null;
               let shadowParagraphs = null;
-              let tableSidecar = [];
-              let cellUnitEmbeddings = null;
               try {
                 const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
                 const shadowResult = extractShadowStatements(batchSources);
                 shadowStatements = shadowResult.statements;
                 shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
-                tableSidecar = shadowResult.tableSidecar || [];
-                // Load cell-unit embeddings from cache, or backfill if old turn
-                if (geoRecord?.cellUnitEmbeddings && geoRecord?.meta?.cellUnitIndex?.length > 0) {
-                  const { unpackEmbeddingMap } = await import('../../persistence/embeddingCodec');
-                  cellUnitEmbeddings = unpackEmbeddingMap(
-                    geoRecord.cellUnitEmbeddings,
-                    geoRecord.meta.cellUnitIndex,
-                    geoRecord.meta.dimensions
-                  );
-                  console.log(`[CognitiveHandler] Loaded ${cellUnitEmbeddings.size} cell-unit embeddings from cache`);
-                } else if (tableSidecar.length > 0) {
-                  // Backfill: old turn has no cached cell-unit embeddings — generate + persist
-                  const { flattenCellUnits } = await import('../tableCellAllocation');
-                  const { generateTextEmbeddings, stripInlineMarkdown, DEFAULT_CONFIG } = await import('../../clustering');
-                  const cellUnits = flattenCellUnits(tableSidecar);
-                  if (cellUnits.length > 0) {
-                    const cellTexts = cellUnits.map(cu => stripInlineMarkdown(cu.text));
-                    const cellIds = cellUnits.map(cu => cu.id);
-                    const cellBatch = await generateTextEmbeddings(cellTexts, DEFAULT_CONFIG);
-                    cellUnitEmbeddings = new Map();
-                    for (let ci = 0; ci < cellIds.length; ci++) {
-                      const emb = cellBatch.embeddings.get(String(ci));
-                      if (emb) cellUnitEmbeddings.set(cellIds[ci], emb);
-                    }
-                    // Persist to geoRecord so next open uses cache
-                    if (cellUnitEmbeddings.size > 0 && geoRecord) {
-                      const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
-                      const dims = geoRecord.meta?.dimensions || cellUnitEmbeddings.values().next().value?.length;
-                      if (dims) {
-                        const packed = packEmbeddingMap(cellUnitEmbeddings, dims);
-                        geoRecord.cellUnitEmbeddings = packed.buffer;
-                        geoRecord.meta = geoRecord.meta || {};
-                        geoRecord.meta.cellUnitIndex = packed.index;
-                        geoRecord.meta.cellUnitCount = packed.index.length;
-                        await this.sessionManager.adapter.putBinary('embeddings', geoRecord);
-                      }
-                    }
-                    console.log(`[CognitiveHandler] Backfilled ${cellUnitEmbeddings.size} cell-unit embeddings`);
-                  }
-                }
-              } catch (cellErr) {
-                console.warn('[CognitiveHandler] Shadow/cell-unit load failed:', cellErr?.message || String(cellErr));
+              } catch (shadowErr) {
+                console.warn('[CognitiveHandler] Shadow extraction failed:', shadowErr?.message || String(shadowErr));
               }
 
               const { buildCitationSourceOrder: buildCSO } = await import('../../../shared/provider-config');
@@ -605,8 +582,6 @@ export class CognitivePipelineHandler {
                 citationSourceOrder: buildCSO(canonicalOrder),
                 queryText: originalPrompt,
                 modelCount,
-                tableSidecar,
-                cellUnitEmbeddings,
               });
               mappingArtifact = buildResult.cognitiveArtifact;
               console.log(`[CognitiveHandler] Rebuilt artifact via buildArtifactForProvider: ${buildResult.enrichedClaims.length} claims`);
@@ -620,6 +595,38 @@ export class CognitivePipelineHandler {
           throw new Error(`Mapping artifact missing for turn ${aiTurnId}. buildArtifactForProvider likely failed — check embeddings persistence.`);
         }
 
+        // Restore editorialAST from persisted editorial response (not part of deterministic rebuild)
+        if (!mappingArtifact.editorialAST) {
+          const editorialResponse = (priorResponses || [])
+            .filter((r) => r && r.responseType === "editorial" && r.text?.trim())
+            .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0];
+          if (editorialResponse?.text) {
+            try {
+              const { parseEditorialOutput } = await import('../../ConciergeService/editorialMapper');
+              // Collect valid passage/unclaimed keys from the artifact
+              const validPassageKeys = new Set();
+              const densityProfiles = mappingArtifact?.claimDensity?.profiles ?? {};
+              for (const [claimId, profile] of Object.entries(densityProfiles)) {
+                for (const p of (profile?.passages || [])) {
+                  validPassageKeys.add(`${claimId}:${p.modelIndex}:${p.startParagraphIndex}`);
+                }
+              }
+              const validUnclaimedKeys = new Set();
+              for (const group of (mappingArtifact?.statementClassification?.unclaimedGroups ?? [])) {
+                const fp = group.paragraphs?.[0];
+                if (fp) validUnclaimedKeys.add(`unclaimed:${group.nearestClaimId}:${fp.modelIndex}:${fp.paragraphIndex}`);
+              }
+              const parsed = parseEditorialOutput(editorialResponse.text, validPassageKeys, validUnclaimedKeys);
+              if (parsed.success && parsed.ast) {
+                mappingArtifact.editorialAST = parsed.ast;
+                console.log(`[CognitiveHandler] Restored editorialAST: ${parsed.ast.threads.length} thread(s)`);
+              }
+            } catch (editorialErr) {
+              console.warn('[CognitiveHandler] Editorial AST restoration failed (non-blocking):', editorialErr);
+            }
+          }
+        }
+
         const context = {
           sessionId: effectiveSessionId,
           canonicalAiTurnId: aiTurnId,
@@ -627,17 +634,38 @@ export class CognitivePipelineHandler {
           userMessage: originalPrompt,
         };
 
+        // Build evidence substrate from artifact (editorial threads + mapping response)
+        let conciergePrompt = null;
+        try {
+          const { buildEvidenceSubstrate } = await import('../../ConciergeService/evidenceSubstrate');
+          const cso = mappingArtifact?.meta?.citationSourceOrder || {};
+          const evidenceSubstrate = buildEvidenceSubstrate(
+            mappingArtifact,
+            latestMappingText,
+            cso,
+          );
+
+          if (evidenceSubstrate) {
+            const ConciergeModule = await import('../../ConciergeService/ConciergeService');
+            const ConciergeService = ConciergeModule?.ConciergeService;
+            if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
+              conciergePrompt = ConciergeService.buildConciergePrompt(
+                originalPrompt,
+                { evidenceSubstrate },
+              );
+              console.log(`[CognitiveHandler] Built concierge prompt with evidence substrate (${evidenceSubstrate.length} chars)`);
+            }
+          }
+        } catch (substrateErr) {
+          console.warn('[CognitiveHandler] Evidence substrate build failed in continuation:', substrateErr);
+        }
+
         const executorOptions = {
           streamingManager,
           persistenceCoordinator: this.persistenceCoordinator,
           contextManager,
           sessionManager: this.sessionManager
         };
-        if (isRecompute) {
-          executorOptions.frozenSingularityPromptType = frozenSingularityPromptType;
-          executorOptions.frozenSingularityPromptSeed = frozenSingularityPromptSeed;
-          executorOptions.frozenSingularityPrompt = frozenSingularityPrompt;
-        }
 
         const stepId = `singularity-${preferredProvider}-${Date.now()}`;
         const step = {
@@ -649,8 +677,11 @@ export class CognitivePipelineHandler {
             originalPrompt,
             mappingText: latestMappingText,
             mappingMeta: latestMappingMeta,
+            providerContexts: {
+              [preferredProvider]: { meta: {}, continueThread: false },
+            },
             useThinking: payload.useThinking || false,
-            conciergePromptSeed: frozenSingularityPromptSeed || null,
+            ...(conciergePrompt ? { conciergePrompt } : {}),
           },
         };
 
