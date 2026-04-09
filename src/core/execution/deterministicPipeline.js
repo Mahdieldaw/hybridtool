@@ -42,6 +42,7 @@ export async function computeDerivedFields({
   preSemantic = null,
   regions = [],
   geoRecord = null,        // raw packed data for basin inversion
+  basinInversion = null,   // pre-computed basin inversion
 
   // Pre-computed (optional — if provided, skip recomputation)
   existingQueryRelevance = null,
@@ -116,7 +117,9 @@ export async function computeDerivedFields({
     // ── 11. Basin inversion (reads only geoRecord — fully independent) ─
     (async () => {
       try {
-        if (geoRecord?.meta?.basinInversion) {
+        if (basinInversion) {
+          result.basinInversion = basinInversion;
+        } else if (geoRecord?.meta?.basinInversion) {
           result.basinInversion = geoRecord.meta.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
           const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
@@ -156,17 +159,28 @@ export async function computeDerivedFields({
   // ── Claim density (paragraph-level evidence concentration) ──────────
   // Runs AFTER mixed provenance + table cell allocation so sourceStatementIds
   // are final. Pure L1: set membership + integer arithmetic on paragraph indices.
+  let periphery = null;
   try {
+    const { identifyPeriphery } = await import('../../geometry/interpretation/periphery');
+    const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
+    const preSemanticRegions = geoRecord?.meta?.preSemanticInterpretation?.regions || result.preSemantic?.regions;
+    periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
+
     const { computeClaimDensity } = await import('../claimDensity');
-    result.claimDensityResult = computeClaimDensity(enrichedClaims, shadowParagraphs, modelCount);
+    result.claimDensityResult = computeClaimDensity(
+      enrichedClaims,
+      shadowParagraphs,
+      modelCount,
+      periphery.peripheralNodeIds
+    );
     console.log(`[DeterministicPipeline] ClaimDensity: ${Object.keys(result.claimDensityResult.profiles).length} profiles in ${result.claimDensityResult.meta.processingTimeMs.toFixed(0)}ms`);
   } catch (err) {
     console.warn('[DeterministicPipeline] Claim density failed:', getErrorMessage(err));
   }
 
-  // ── 2b. Claim provenance (ownership / exclusivity) ─────────────────
-  // Runs AFTER mixed provenance (step 7 replaces sourceStatementIds with
-  // canonical sets) and table cell allocation (step 8 appends tc_* IDs).
+  // ── Claim provenance (ownership / exclusivity) ─────────────────
+  // Runs AFTER mixed provenance (replaces sourceStatementIds with
+  // canonical sets).
   // This ensures ownership counts match what blast surface will see.
   try {
     const { computeStatementOwnership, computeClaimExclusivity } = await import('../../ConciergeService/claimProvenance');
@@ -184,7 +198,7 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Claim provenance failed:', getErrorMessage(err));
   }
 
-  // ── 9. Blast surface (provenance-derived) ───────────────────────────
+  // ── Blast surface (provenance-derived) ───────────────────────────
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
       const { computeBlastSurface } = await import('../blast-radius/blastSurface');
@@ -216,7 +230,7 @@ export async function computeDerivedFields({
     console.warn('[DeterministicPipeline] Blast surface failed:', getErrorMessage(err));
   }
 
-  // ── 14. Semantic edge normalization (synchronous, needed by Group B) ─
+  // ── Semantic edge normalization (synchronous, needed by Group B) ─
   const EDGE_SUPPORTS = 'supports';
   const EDGE_CONFLICTS = 'conflicts';
   const EDGE_PREREQUISITE = 'prerequisite';
@@ -270,7 +284,7 @@ export async function computeDerivedFields({
 
   // ── Group B: Post-provenance parallel steps ───────────────────────
   await Promise.all([
-    // ── 15. Routing pipeline ──────────────────────────────────────────
+    // ── Routing pipeline ──────────────────────────────────────────
     (async () => {
       try {
         if (enrichedClaims.length === 0) return;
@@ -295,30 +309,17 @@ export async function computeDerivedFields({
             enrichedClaims,
             validatedConflicts,
             modelCount,
-            basinInversion: result.basinInversion ?? null,
-            regions: preSemantic?.regionization?.regions ?? [],
+            periphery: periphery || {
+              corpusMode: 'no-geometry',
+              peripheralNodeIds: new Set(),
+              peripheralRatio: 0,
+              largestBasinRatio: null,
+              basinByNodeId: {},
+            },
+            queryEmbedding: queryEmbedding ?? undefined,
+            claimEmbeddings: claimEmbeddings ?? undefined,
           });
 
-          // ── Phase 2.5: Inject queryDistance into routing (REPLACES missing damageOutliers) ──
-          if (result.passageRoutingResult && queryEmbedding && claimEmbeddings && claimEmbeddings.size > 0) {
-            try {
-              const { cosineSimilarity } = await import('../../clustering/distance');
-              const routing = result.passageRoutingResult;
-              for (const ec of enrichedClaims) {
-                const emb = claimEmbeddings.get(String(ec.id || ''));
-                if (emb) {
-                  const sim = cosineSimilarity(emb, queryEmbedding);
-                  const dist = 1 - sim; // Range [0,2], typically 0 (near) to 0.7 (outlier)
-                  ec.queryDistance = dist;
-                  if (routing.claimProfiles[ec.id]) {
-                    routing.claimProfiles[ec.id].queryDistance = dist;
-                  }
-                  const routed = routing.routing.loadBearingClaims.find(c => c.claimId === ec.id);
-                  if (routed) routed.queryDistance = dist;
-                }
-              }
-            } catch (_) { /* non-fatal embedding failure */ }
-          }
           const prDiag = result.passageRoutingResult.routing.diagnostics;
           console.log(`[DeterministicPipeline] PassageRouting: ${result.passageRoutingResult.gate.loadBearingCount} load-bearing, ${prDiag.floorCount} floor, mode=${prDiag.corpusMode} peripheral=${prDiag.peripheralNodeIds.length}/${(prDiag.largestBasinRatio ?? 0).toFixed(2)} in ${result.passageRoutingResult.meta.processingTimeMs.toFixed(0)}ms`);
         }
@@ -705,6 +706,7 @@ export async function computePreSurveyPipeline({
     preSemantic,
     regions,
     geoRecord,
+    basinInversion: preBuiltBasinInversion, // Pass pre-built geometry directly
     existingQueryRelevance: queryRelevance,
     modelCount,
     queryText,
@@ -883,5 +885,98 @@ export async function buildArtifactForProvider({
     substrate: preSurvey.substrate,
     preSemantic: preSurvey.preSemantic,
     queryRelevance: preSurvey.queryRelevance,
+  };
+}
+
+export async function computeProbeGeometry({
+  modelIndex,
+  content,
+  embeddingConfig = null,
+}) {
+  const text = String(content || '').trim();
+  if (!text) {
+    return {
+      shadowStatements: [],
+      shadowParagraphs: [],
+      statementEmbeddings: new Map(),
+      paragraphEmbeddings: new Map(),
+      packed: null,
+      substrate: null,
+      preSemantic: null,
+    };
+  }
+
+  const [{ extractShadowStatements, projectParagraphs }, clustering, { buildGeometricSubstrate }, { buildPreSemanticInterpretation }, { packEmbeddingMap }] =
+    await Promise.all([
+      import('../../shadow'),
+      import('../../clustering'),
+      import('../../geometry/substrate'),
+      import('../../geometry/interpretation'),
+      import('../../persistence/embeddingCodec'),
+    ]);
+
+  const { DEFAULT_CONFIG, generateStatementEmbeddings, generateEmbeddings } = clustering;
+  const config = embeddingConfig || DEFAULT_CONFIG;
+  const shadowResult = extractShadowStatements([{ modelIndex, content: text }]);
+  const shadowParagraphResult = projectParagraphs(shadowResult.statements);
+  const rawStatements = shadowResult.statements || [];
+  const rawParagraphs = shadowParagraphResult.paragraphs || [];
+  const statementIdMap = new Map();
+  const statements = rawStatements.map((s, idx) => {
+    const nextId = `probe_s_${modelIndex}_${idx}`;
+    statementIdMap.set(s.id, nextId);
+    return { ...s, id: nextId };
+  });
+  const paragraphs = rawParagraphs.map((p, idx) => ({
+    ...p,
+    id: `probe_p_${modelIndex}_${idx}`,
+    statementIds: (p.statementIds || []).map((sid) => statementIdMap.get(sid) || sid),
+  }));
+
+  if (statements.length === 0 || paragraphs.length === 0) {
+    return {
+      shadowStatements: statements,
+      shadowParagraphs: paragraphs,
+      statementEmbeddings: new Map(),
+      paragraphEmbeddings: new Map(),
+      packed: null,
+      substrate: null,
+      preSemantic: null,
+    };
+  }
+
+  const [statementResult, paragraphResult] = await Promise.all([
+    generateStatementEmbeddings(statements, config),
+    generateEmbeddings(paragraphs, statements, config),
+  ]);
+
+  const substrate = buildGeometricSubstrate(paragraphs, paragraphResult.embeddings);
+  const preSemantic = buildPreSemanticInterpretation(substrate, paragraphs, paragraphResult.embeddings);
+
+  const packedStatements = packEmbeddingMap(statementResult.embeddings, statementResult.dimensions);
+  const packedParagraphs = packEmbeddingMap(paragraphResult.embeddings, paragraphResult.dimensions);
+
+  return {
+    shadowStatements: statements,
+    shadowParagraphs: paragraphs,
+    statementEmbeddings: statementResult.embeddings,
+    paragraphEmbeddings: paragraphResult.embeddings,
+    packed: {
+      statementEmbeddings: packedStatements.buffer,
+      paragraphEmbeddings: packedParagraphs.buffer,
+      meta: {
+        embeddingModelId: config.modelId,
+        dimensions: paragraphResult.dimensions,
+        statementCount: packedStatements.index.length,
+        paragraphCount: packedParagraphs.index.length,
+        statementIndex: packedStatements.index,
+        paragraphIndex: packedParagraphs.index,
+        hasStatements: packedStatements.index.length > 0,
+        hasParagraphs: packedParagraphs.index.length > 0,
+        timestamp: Date.now(),
+      },
+    },
+    substrate,
+    preSemantic,
   };
 }

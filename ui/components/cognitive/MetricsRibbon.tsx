@@ -133,7 +133,12 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
 }) => {
     const [showDetails, setShowDetails] = useState(false);
 
-    if (!analysis) return null;
+    const dual = useMemo(
+        () => analysis ? computeDualSignals(analysis, artifact) : null,
+        [analysis, artifact],
+    );
+
+    if (!analysis || !dual) return null;
 
     const confidence = problemStructure?.confidence;
     const isLowConfidence = confidence != null ? confidence < 0.5 : false;
@@ -141,11 +146,6 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
     const substrate = artifact?.substrate;
     const paragraphProjection = artifact?.paragraphProjection;
     const paragraphClustering = artifact?.paragraphClustering;
-
-    const dual = useMemo(
-        () => computeDualSignals(analysis, artifact),
-        [analysis, artifact],
-    );
 
     const hasAnyGeo = dual.geoConflicts !== null || dual.passageBacked !== null || dual.geoHubId !== null || dual.regionCount !== null;
 

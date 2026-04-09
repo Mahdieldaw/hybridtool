@@ -30,7 +30,7 @@ export const EditorialSurface: React.FC = () => {
   const [surfaceState, setSurfaceState] = useAtom(__scaffold__editorialStateFamily(turnId));
   const { artifact, citationSourceOrder } = useArtifactResolution(turnId);
   const [focusedClaimId, setFocusedClaimId] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(true);
   const highlightMap = usePassageHighlight(artifact, focusedClaimId);
   const columnScrollRef = useRef<number>(0);
   const gridContainerRef = useRef<HTMLDivElement>(null);

@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useAtom } from 'jotai';
 import { useCorpusSearch } from '../../hooks/useCorpusSearch';
-import type { CorpusSearchHit } from '../../hooks/useCorpusSearch';
+import type { CorpusSearchHit, ProbeSearchResult } from '../../hooks/useCorpusSearch';
 import { resolveProviderIdFromCitationOrder, getProviderName } from '../../utils/provider-helpers';
+import { probeProvidersEnabledAtom } from '../../state/atoms';
 
 interface CorpusSearchPanelProps {
   aiTurnId: string;
@@ -19,8 +21,11 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
   citationSourceOrder,
 }) => {
   const [query, setQuery] = useState('');
+  const [probeProvidersEnabled, setProbeProvidersEnabled] = useAtom(probeProvidersEnabledAtom);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { results, isSearching, error, search, clear } = useCorpusSearch(aiTurnId);
+  const { results, isSearching, error, search, clear, probeResults, isProbing } = useCorpusSearch(aiTurnId);
+  const controlsDisabled = isSearching || isProbing;
+  const hasEnabledProbeProvider = probeProvidersEnabled.gemini || probeProvidersEnabled.qwen;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -37,6 +42,14 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
     setQuery('');
     clear();
     inputRef.current?.focus();
+  };
+
+  const handleToggleProvider = (providerId: 'gemini' | 'qwen') => {
+    if (controlsDisabled) return;
+    setProbeProvidersEnabled((prev) => ({
+      ...prev,
+      [providerId]: !prev[providerId],
+    }));
   };
 
   const resolveModelName = (modelIndex: number): string => {
@@ -59,8 +72,30 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search corpus..."
           className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none"
-          disabled={isSearching}
+          disabled={controlsDisabled}
         />
+        {(['gemini', 'qwen'] as const).map((providerId) => {
+          const isEnabled = probeProvidersEnabled[providerId];
+          return (
+            <button
+              key={providerId}
+              type="button"
+              onClick={() => handleToggleProvider(providerId)}
+              disabled={controlsDisabled}
+              aria-pressed={isEnabled}
+              aria-label={`${providerId} probe ${isEnabled ? 'on' : 'off'}`}
+              className={[
+                'shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                controlsDisabled ? 'cursor-not-allowed' : 'cursor-pointer',
+                isEnabled
+                  ? 'border-brand-400/40 bg-brand-400/15 text-brand-200'
+                  : 'border-white/10 bg-white/[0.03] text-text-muted opacity-50',
+              ].join(' ')}
+            >
+              {providerId === 'gemini' ? 'Gemini' : 'Qwen'}
+            </button>
+          );
+        })}
         {query && (
           <button
             type="button"
@@ -83,37 +118,77 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
         <div className="px-4 pb-2 text-xs text-intent-warning">{error}</div>
       )}
 
-      {/* Results */}
-      {results.length > 0 && (
-        <div className="max-h-[320px] overflow-y-auto border-t border-white/5">
-          {results.map((hit: CorpusSearchHit, i: number) => (
+      <div className="border-t border-white/5">
+        <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wide text-text-muted">Probe Responses</span>
+          {isProbing && <span className="text-[10px] text-brand-300">generating...</span>}
+        </div>
+        <div className="max-h-[220px] overflow-y-auto">
+          {probeResults.length === 0 && (isProbing || (query.trim() && hasEnabledProbeProvider)) && (
+            <div className="px-4 py-3 text-xs text-text-muted">
+              {isProbing ? 'Generating probe responses...' : 'No probe responses yet'}
+            </div>
+          )}
+          {probeResults.map((probe: ProbeSearchResult) => (
             <div
-              key={hit.paragraphId}
-              className="px-4 py-2.5 border-b border-white/5 last:border-b-0 hover:bg-white/[0.03] transition-colors"
+              key={`probe-${probe.modelIndex}`}
+              className="px-4 py-2.5 border-b border-white/5 last:border-b-0"
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${simBadgeColor(hit.normalizedSim)}`}>
-                  {hit.normalizedSim.toFixed(2)}
-                </span>
-                <span className="text-[11px] text-text-muted">
-                  {resolveModelName(hit.modelIndex)}
-                </span>
-                <span className="text-[10px] text-text-muted/50">
-                  #{i + 1}
-                </span>
+                <span className="text-[11px] text-text-muted">{probe.modelName}</span>
+                <span className="text-[10px] text-text-muted/50">#{probe.modelIndex}</span>
+                {probe.isStreaming && <span className="text-[10px] text-brand-300">streaming</span>}
               </div>
-              <p className="text-xs text-text-secondary leading-relaxed line-clamp-3">
-                {hit.text || '(empty)'}
+              <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">
+                {probe.text || '(waiting...)'}
               </p>
+              {probe.paragraphs.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {probe.paragraphs.map((p, idx) => (
+                    <p key={`probe-${probe.modelIndex}-p-${idx}`} className="text-[11px] text-text-muted leading-relaxed line-clamp-2">
+                      {p}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
-      )}
+      </div>
 
-      {/* Empty state after search */}
-      {!isSearching && results.length === 0 && query && !error && (
-        <div className="px-4 pb-3 text-xs text-text-muted">No results</div>
-      )}
+      <div className="border-t border-white/5">
+        <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02]">
+          <span className="text-[11px] uppercase tracking-wide text-text-muted">Corpus NN Results</span>
+        </div>
+        {results.length > 0 && (
+          <div className="max-h-[320px] overflow-y-auto">
+            {results.map((hit: CorpusSearchHit, i: number) => (
+              <div
+                key={hit.paragraphId}
+                className="px-4 py-2.5 border-b border-white/5 last:border-b-0 hover:bg-white/[0.03] transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${simBadgeColor(hit.normalizedSim)}`}>
+                    {hit.normalizedSim.toFixed(2)}
+                  </span>
+                  <span className="text-[11px] text-text-muted">
+                    {resolveModelName(hit.modelIndex)}
+                  </span>
+                  <span className="text-[10px] text-text-muted/50">
+                    #{i + 1}
+                  </span>
+                </div>
+                <p className="text-xs text-text-secondary leading-relaxed line-clamp-3">
+                  {hit.text || '(empty)'}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+        {!isSearching && results.length === 0 && query.trim() && !error && (
+          <div className="px-4 pb-3 text-xs text-text-muted">No corpus NN results</div>
+        )}
+      </div>
     </div>
   );
 };

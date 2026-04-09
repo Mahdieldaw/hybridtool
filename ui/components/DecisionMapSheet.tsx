@@ -20,6 +20,7 @@ import {
   PassageOwnershipCard,
   RegionsCard,
   StatementClassificationCard,
+  PeripheralNodeCard,
 } from "./instrument/LayerCards";
 import { useInstrumentState } from "../hooks/useInstrumentState";
 import type { PipelineLayer } from "../hooks/useInstrumentState";
@@ -707,6 +708,60 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
           kind: r.kind,
           nodeCount: safeArr(r.nodeIds).length,
         })),
+      });
+    }
+    case 'periphery' as any: {
+      const diag = artifact?.passageRouting?.routing?.diagnostics;
+      const actualExcludedIds = new Set(safeArr(diag?.peripheralNodeIds));
+      const paragraphs = safeArr(artifact?.shadow?.paragraphs);
+
+      const basins = safeArr(artifact?.geometry?.basinInversion?.basins);
+      let largestBasinId = null;
+      if (basins.length > 0) {
+        let best = basins[0];
+        for (const b of basins) if (b.nodeIds.length > best.nodeIds.length) best = b;
+        largestBasinId = best.basinId;
+      }
+
+      const regions = artifact?.geometry?.preSemantic?.regions || artifact?.geometry?.preSemantic?.regionization?.regions || [];
+      const gapSingletons = new Set(safeArr(regions)
+        .filter((r: any) => r.kind === 'gap' && safeArr(r.nodeIds).length === 1)
+        .map((r: any) => String(r.nodeIds[0])));
+
+      // Exhaustive list for diagnostic mapping
+      const allOutlierIds = new Set<string>();
+      basins.filter(b => b.basinId !== largestBasinId).forEach(b => safeArr(b.nodeIds).forEach(id => allOutlierIds.add(String(id))));
+      gapSingletons.forEach(id => allOutlierIds.add(id));
+
+      const basinByNodeId = diag?.basinByNodeId ?? {};
+
+      const mapped = Array.from(allOutlierIds).map(id => {
+        const p = paragraphs.find(x => String(x.id) === id);
+        const bid = basinByNodeId[id];
+        const isBasin = bid != null && bid !== largestBasinId;
+        const isGap = gapSingletons.has(id);
+        const excluded = actualExcludedIds.has(id);
+        
+        const types = [];
+        if (isBasin) types.push("Basin Outlier");
+        if (isGap) types.push("Region Outlier (Gap)");
+
+        return {
+          id,
+          index: p?.paragraphIndex,
+          status: excluded ? "Excluded" : "Core Protected",
+          type: types.join(" & "),
+          origin: bid != null ? `basin b_${bid}` : "gap singleton",
+          text: p?._fullParagraph || p?.text || '',
+        };
+      });
+
+      return ser({
+        corpusMode: diag?.corpusMode,
+        peripheralRatio: diag?.peripheralRatio,
+        actualExcludedCount: actualExcludedIds.size,
+        totalPotentialOutliers: allOutlierIds.size,
+        nodes: mapped,
       });
     }
     case 'raw-artifacts':
@@ -1657,6 +1712,7 @@ export const DecisionMapSheet = React.memo(() => {
                               { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                               { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
+                              { id: 'periphery', label: 'Peripheral Nodes', content: <PeripheralNodeCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'stmt-classification', label: 'Statement Classification', content: <StatementClassificationCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },
@@ -1772,6 +1828,7 @@ export const DecisionMapSheet = React.memo(() => {
                                   { id: 'claim-statements', label: 'Claim Statements', content: <ClaimStatementsCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'blast-radius', label: 'Blast Radius', content: <BlastRadiusCard artifact={mappingArtifactWithCitations} selectedEntity={selectedEntity} /> },
                                 { id: 'claim-density', label: 'Claim Density', content: <ClaimDensityCard artifact={mappingArtifactWithCitations} /> },
+                                { id: 'periphery', label: 'Peripheral Nodes', content: <PeripheralNodeCard artifact={mappingArtifactWithCitations} /> },
                               { id: 'passage-ownership', label: 'Passage Ownership', content: <PassageOwnershipCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'stmt-classification', label: 'Statement Classification', content: <StatementClassificationCard artifact={mappingArtifactWithCitations} /> },
                                 { id: 'cross-signal', label: 'Cross-Signal Scatter', content: <CrossSignalComparePanel artifact={mappingArtifactWithCitations} /> },

@@ -124,7 +124,7 @@ export class GeminiAdapter {
         console.log(`[GeminiAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
         await authManager.markUnauthenticated(this.id);
 
-        if (error?.code === 'noGeminiAccess') {
+        if ((error?.type ?? error?.code) === 'noGeminiAccess') {
           error.message = 'Your Google account does not have Gemini access.';
         }
 
@@ -289,7 +289,7 @@ export class GeminiAdapter {
         console.log(`[GeminiAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
         await authManager.markUnauthenticated(this.id);
 
-        if (error?.code === 'noGeminiAccess') {
+        if ((error?.type ?? error?.code) === 'noGeminiAccess') {
           error.message = 'Your Google account does not have Gemini access.';
         }
 
@@ -416,7 +416,7 @@ export class GeminiAdapter {
   }
 
   _isGeminiAuthError(error) {
-    const code = error?.code;
-    return code === 'login' || code === 'noGeminiAccess' || code === 'badToken';
+    const authCode = error?.type ?? error?.code;
+    return authCode === 'login' || authCode === 'noGeminiAccess' || authCode === 'badToken';
   }
 }

@@ -5,11 +5,13 @@
 
 import { persistenceMonitor } from "../core/PersistenceMonitor";
 import {
+  classifyError,
   isProviderAuthError as _isProviderAuthError,
   isDefinitiveAuthError as _isDefinitiveAuthError,
   isRateLimitError as _isRateLimitError,
   isNetworkError as _isNetworkError,
 } from "../core/error-classifier";
+import { getPolicy } from "../core/retry-policy";
 
 // ============================================================
 // Inline types to avoid contract.ts dependencies
@@ -371,21 +373,7 @@ export class ErrorHandler {
   }
 
   setupProviderStrategies(): void {
-    this.retryPolicies.set("PROVIDER_AUTH", {
-      maxRetries: 1,
-      baseDelay: 500,
-      maxDelay: 2000,
-      backoffMultiplier: 2,
-      jitter: false,
-    });
-
-    this.retryPolicies.set("PROVIDER_RATE_LIMIT", {
-      maxRetries: 2,
-      baseDelay: 5000,
-      maxDelay: 30000,
-      backoffMultiplier: 2,
-      jitter: true,
-    });
+    this.retryPolicies.set("PROVIDER_RATE_LIMIT", getPolicy("RATE_LIMIT").toLegacyShape());
   }
 
   setupDefaultStrategies(): void {
@@ -492,13 +480,7 @@ export class ErrorHandler {
   }
 
   setupDefaultRetryPolicies(): void {
-    this.retryPolicies.set("STANDARD", {
-      maxRetries: 3,
-      baseDelay: 1000,
-      maxDelay: 10000,
-      backoffMultiplier: 2,
-      jitter: true,
-    });
+    this.retryPolicies.set("STANDARD", getPolicy("NETWORK").toLegacyShape());
 
     this.retryPolicies.set("CRITICAL", {
       maxRetries: 5,
@@ -508,13 +490,7 @@ export class ErrorHandler {
       jitter: true,
     });
 
-    this.retryPolicies.set("CONSERVATIVE", {
-      maxRetries: 2,
-      baseDelay: 2000,
-      maxDelay: 15000,
-      backoffMultiplier: 3,
-      jitter: false,
-    });
+    this.retryPolicies.set("CONSERVATIVE", getPolicy("NETWORK_CONSERVATIVE").toLegacyShape());
   }
 
   async handleError(
@@ -667,6 +643,11 @@ export class ErrorHandler {
 
         return await operation(context);
       } catch (error) {
+        const classified = classifyError(error);
+        if (!classified.retryable) {
+          console.warn(`[ErrorHandler] Non-retryable error in ${policyName}; aborting retry loop`);
+          throw error;
+        }
         lastError = error;
         console.warn(
           `❌ Attempt ${attempt + 1} failed:`,

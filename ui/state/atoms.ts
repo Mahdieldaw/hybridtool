@@ -214,6 +214,13 @@ export const mappingProviderAtom = atomWithStorage<string | null>(
   "htos_mapping_provider",
   null,
 );
+export const probeProvidersEnabledAtom = atomWithStorage<{ gemini: boolean; qwen: boolean }>(
+  "htos_probe_providers_enabled",
+  {
+    gemini: true,
+    qwen: true,
+  },
+);
 
 export const singularityProviderAtom = atomWithStorage<string | null>(
   "htos_singularity_provider",
@@ -493,4 +500,3 @@ export function cleanupTurnAtoms(
     providerArtifactFamily.remove(pair);
   }
 }
-

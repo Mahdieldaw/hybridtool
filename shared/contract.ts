@@ -12,7 +12,19 @@ export type ProviderResponseType =
   | "batch"
   | "mapping"
   | "editorial"
-  | "singularity";
+  | "singularity"
+  | "probe";
+
+export interface ProbeResult {
+  modelIndex: number;
+  modelName: string;
+  text: string;
+  paragraphs: string[];
+  embeddings?: {
+    paragraphIds: string[];
+    dimensions: number;
+  };
+}
 
 export interface SingularityOutput {
   text: string;
@@ -552,6 +564,8 @@ export interface ClaimDensityProfile {
   maxPassageLength: number;
   /** Paragraphs where coverage > 0.5 */
   majorityParagraphCount: number;
+  /** Mean coverage across paragraphs in the longest contiguous majority-support run */
+  meanCoverageInLongestRun: number;
   /** Distinct models containing this claim */
   modelSpread: number;
   /** Distinct models containing a passage of length >= 2 */
@@ -733,6 +747,8 @@ export interface PassageClaimProfile {
   densityRatio: number;
   /** Longest passage across all models (from density profile) */
   maxPassageLength: number;
+  /** Mean coverage across paragraphs in the longest contiguous majority run */
+  meanCoverageInLongestRun: number;
   /** Two-axis landscape position */
   landscapePosition: LandscapePosition;
   /** Passes at least one gate (concentration outlier OR MAXLEN ≥ 2) */
@@ -752,6 +768,7 @@ export interface PassageRoutedClaim {
   landscapePosition: LandscapePosition;
   concentrationRatio: number;
   densityRatio: number;
+  meanCoverageInLongestRun: number;
   dominantModel: number | null;
   structuralContributors: number[];
   supporters: number[];

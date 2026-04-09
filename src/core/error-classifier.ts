@@ -29,6 +29,21 @@ function getMessage(error: ErrorCandidate | null): string | undefined {
   return typeof error?.message === "string" ? error.message : undefined;
 }
 
+function getStatus(error: ErrorCandidate | null): number | null {
+  if (!error) return null;
+  const statusRaw =
+    error.status ??
+    error.statusCode ??
+    (isRecord(error.response) ? error.response.status : undefined);
+  const status =
+    typeof statusRaw === "number"
+      ? statusRaw
+      : typeof statusRaw === "string"
+        ? Number(statusRaw)
+        : NaN;
+  return Number.isFinite(status) ? status : null;
+}
+
 function getNestedType(error: ErrorCandidate | null): unknown {
   const directError = error?.error;
   if (isRecord(directError) && "type" in directError) return directError.type;
@@ -121,15 +136,8 @@ export function classifyError(error: unknown): ProviderError {
     };
   }
 
-  if (e && (e.status || e.statusCode)) {
-    const statusRaw = e.status || e.statusCode;
-    const status =
-      typeof statusRaw === "number"
-        ? statusRaw
-        : typeof statusRaw === "string"
-          ? Number(statusRaw)
-          : NaN;
-
+  const status = getStatus(e);
+  if (status !== null) {
     if (status === 429) {
       const retryAfterMs =
         parseRetryAfter(e) || parseRateLimitResetMsFromMessage(e) || 60000;
@@ -145,12 +153,20 @@ export function classifyError(error: unknown): ProviderError {
       };
     }
 
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       return {
         type: "auth_expired",
         message: "Authentication expired. Please log in again.",
         retryable: false,
         requiresReauth: true,
+      };
+    }
+
+    if (status === 403) {
+      return {
+        type: "unknown",
+        message: "Provider rejected the request. Retrying may help.",
+        retryable: false,
       };
     }
 
@@ -209,6 +225,16 @@ export function classifyError(error: unknown): ProviderError {
       type: "network",
       message: "Network connection failed.",
       retryable: true,
+    };
+  }
+
+  const authMessage = typeof e?.message === "string" ? e.message : null;
+  if (authMessage && AUTH_ERROR_PATTERNS.some((p) => p.test(authMessage))) {
+    return {
+      type: "auth_expired",
+      message: "Authentication expired. Please log in again.",
+      retryable: false,
+      requiresReauth: true,
     };
   }
 
@@ -362,6 +388,8 @@ export function isProviderAuthError(error: unknown): boolean {
   const e = asErrorCandidate(error);
   if (e?.name === "ProviderAuthError") return true;
   if (e?.code === "AUTH_REQUIRED") return true;
+  const status = getStatus(e);
+  if (status === 401 || status === 403) return true;
   return classifyError(error).type === "auth_expired";
 }
 
@@ -374,13 +402,7 @@ export function isDefinitiveAuthError(error: unknown): boolean {
   if (e?.name === "ProviderAuthError") return true;
   if (e?.code === "AUTH_REQUIRED") return true;
 
-  const statusRaw = e?.status ?? e?.statusCode
-    ?? (isRecord(e?.response) ? (e!.response as Record<string, unknown>).status : undefined);
-  const status = typeof statusRaw === "number"
-    ? statusRaw
-    : typeof statusRaw === "string"
-      ? Number(statusRaw)
-      : NaN;
+  const status = getStatus(e);
   if (status === 401) return true;
   // 403 deliberately excluded — ambiguous
 

@@ -9,6 +9,7 @@ import {
   RENAME_SESSION,
 
   REFRESH_AUTH_STATUS,
+  PROBE_QUERY,
 } from "../../shared/messaging";
 
 import type { HistorySessionSummary, HistoryApiResponse } from "../types";
@@ -329,6 +330,13 @@ class ExtensionAPI {
     return this.queryBackend<any>({
       type: "CORPUS_SEARCH",
       payload: { aiTurnId, queryText },
+    });
+  }
+
+  async probeQuery(aiTurnId: string, queryText: string, nnParagraphs: string[], enabledProviders: string[]): Promise<void> {
+    await this.sendPortMessage({
+      type: PROBE_QUERY,
+      payload: { aiTurnId, queryText, nnParagraphs, enabledProviders },
     });
   }
 }

@@ -5,6 +5,9 @@
  * Updated for api.qianwen.com endpoints (2024+)
  */
 
+import { retryWithPolicy } from "../core/retry-orchestrator";
+import { ProviderDNRGate } from "../core/dnr-utils.js";
+
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -33,11 +36,18 @@ export class QwenProviderError extends Error {
   }
 }
 
+export class ServerTransientError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "ServerTransientError";
+    this.status = details.status ?? 500;
+    this.details = details;
+  }
+}
+
 // =============================================================================
 // QWEN SESSION API
 // =============================================================================
-import { ProviderDNRGate } from "../core/dnr-utils.js";
-
 export class QwenSessionApi {
   constructor({ fetchImpl = fetch } = {}) {
     this._logs = true;
@@ -186,7 +196,7 @@ export class QwenSessionApi {
     }
 
     // Helper to perform conversation POST and return response
-    const doConversationPost = async (bodyObj) => {
+    const doConversationPost = async (bodyObj, { throwOn500 = false } = {}) => {
       const headers = {
         "Accept": "text/event-stream",
         "Accept-Language": "en-US,en;q=0.9",
@@ -197,7 +207,7 @@ export class QwenSessionApi {
         "X-DeviceId": this._getDeviceId(),
       };
 
-      return this.fetch(`${QWEN_API_BASE}/dialog/conversation`, {
+      const response = await this.fetch(`${QWEN_API_BASE}/dialog/conversation`, {
         method: "POST",
         signal,
         credentials: "include",
@@ -205,6 +215,14 @@ export class QwenSessionApi {
         headers,
         body: JSON.stringify(bodyObj),
       });
+      if (throwOn500 && response.status === 500) {
+        const responseText = await response.text().catch(() => "");
+        throw new ServerTransientError("Conversation POST returned 500", {
+          status: 500,
+          responseText,
+        });
+      }
+      return response;
     };
 
     // Build request body matching new API format
@@ -234,48 +252,34 @@ export class QwenSessionApi {
       topicId: this._generateId(),
     };
     let response;
-    const MAX_RETRIES = 3;
-    let retryCount = 0;
-
-    // Initial request with 500-retry logic
-    while (retryCount < MAX_RETRIES) {
-      try {
-        response = await doConversationPost(requestBody);
-
-        if (response.status === 500) {
-          retryCount++;
-          const errorBody = await response.text().catch(() => "");
-          if (retryCount >= MAX_RETRIES) {
-            // Fall through to existing error handling or needAddSession if applicable (though 500 is usually transient)
-            // But we removed 500 from needAddSession, so it will hit the final error throw.
-            break;
-          }
-          const delay = 500 * Math.pow(2, retryCount); // Exponential backoff
-          console.warn(`[QwenProvider] 500 error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`, errorBody);
-          await new Promise(r => setTimeout(r, delay));
-          continue;
-        }
-
-        break; // Success or non-500 error
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const isNetworkError = (e instanceof TypeError) ||
-          msg.includes("Failed to fetch") ||
-          msg.includes("NetworkError") ||
-          msg.includes("Network request failed");
-        if (isNetworkError && retryCount < MAX_RETRIES - 1) {
-          retryCount++;
-          const delay = 500 * Math.pow(2, retryCount);
-          console.warn(`[QwenProvider] Network error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
-          continue;
-        }
+    try {
+      response = await retryWithPolicy(
+        () => doConversationPost(requestBody, { throwOn500: true }),
+        {
+          providerId: "qwen",
+          stage: "conversation",
+          model,
+          signal,
+        },
+        "NETWORK",
+      );
+    } catch (e) {
+      if (e instanceof ServerTransientError) {
+        const detail = e.details?.responseText
+          ? `Conversation failed ${e.status}: ${e.details.responseText}`
+          : `Conversation failed ${e.status}`;
+        this._throw("unknown", detail);
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      const isNetworkError =
+        e instanceof TypeError ||
+        msg.includes("Failed to fetch") ||
+        msg.includes("NetworkError") ||
+        msg.includes("Network request failed");
+      if (isNetworkError) {
         this._throw("network", `Conversation POST failed: ${msg}`);
       }
-    }
-
-    if (!response) {
-      throw this._createError("network", "Conversation POST failed.");
+      throw e;
     }
 
     // If server indicates not authorized / requires session (or non-200), create session then retry

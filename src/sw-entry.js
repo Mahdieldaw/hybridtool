@@ -871,39 +871,127 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           const geoRecord = await sm.loadEmbeddings(aiTurnId);
-          if (!geoRecord?.paragraphEmbeddings || !geoRecord?.meta?.paragraphIndex?.length || !geoRecord?.meta?.dimensions) {
-            sendResponse({ success: true, data: { results: [], reason: "no_embeddings" } });
-            return;
-          }
-
           const { unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
           const { generateTextEmbeddings, structuredTruncate } = await import('./clustering');
           const { DEFAULT_CONFIG } = await import('./clustering');
           const { searchCorpus } = await import('./core/corpusSearch');
 
-          const dims = geoRecord.meta.dimensions;
-          const paragraphEmbeddings = unpackEmbeddingMap(
-            geoRecord.paragraphEmbeddings, geoRecord.meta.paragraphIndex, dims,
-          );
-
-          // Build paragraph metadata from the index
-          // Index entries are paragraph IDs like "p_0", "p_1", etc.
-          // We need modelIndex + paragraphIndex — load the turn to get shadow paragraphs
           const turnRaw = await sm.adapter.get("turns", aiTurnId);
-          const shadowParagraphs = turnRaw?.mapping?.artifact?.shadow?.paragraphs || [];
+          let shadowParagraphs = turnRaw?.mapping?.artifact?.shadow?.paragraphs || [];
+          console.log(`[CORPUS_SEARCH] DB shadow paragraphs: ${shadowParagraphs.length}, artifact exists: ${!!turnRaw?.mapping?.artifact}`);
+
+          if (!shadowParagraphs || shadowParagraphs.length === 0) {
+            console.log('[CORPUS_SEARCH] No DB shadow paragraphs — rebuilding from batch responses...');
+            try {
+              let responsesForTurn = [];
+              if (sm.adapter?.getResponsesByTurnId) {
+                responsesForTurn = await sm.adapter.getResponsesByTurnId(aiTurnId) || [];
+                console.log(`[CORPUS_SEARCH] Loaded ${responsesForTurn.length} responses for turn`);
+              } else {
+                console.warn('[CORPUS_SEARCH] adapter.getResponsesByTurnId not available!');
+              }
+              const allBatchResps = responsesForTurn
+                .filter((r) => r && r.responseType === "batch" && r.providerId && String(r.text || "").trim())
+                .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+              console.log(`[CORPUS_SEARCH] Batch responses found: ${allBatchResps.length}`);
+
+              const seenBatchProviders = new Map();
+              for (const r of allBatchResps) {
+                const pid = String(r.providerId || "").trim().toLowerCase();
+                if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
+              }
+              console.log(`[CORPUS_SEARCH] Unique batch providers: ${Array.from(seenBatchProviders.keys()).join(', ')}`);
+
+              if (seenBatchProviders.size > 0) {
+                const { canonicalCitationOrder } = await import("../shared/provider-config");
+                const canonicalOrder = canonicalCitationOrder(Array.from(seenBatchProviders.keys()));
+
+                const batchSources = canonicalOrder.map((pid, idx) => {
+                  const r = seenBatchProviders.get(pid);
+                  return { modelIndex: idx + 1, content: String(r?.text || "") };
+                }).filter(s => s.content);
+
+                if (batchSources.length > 0) {
+                  const { extractShadowStatements, projectParagraphs } = await import('./shadow');
+                  const shadowResult = extractShadowStatements(batchSources);
+                  shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs || [];
+                  console.log(`[CORPUS_SEARCH] Rebuilt ${shadowParagraphs.length} paragraphs from ${batchSources.length} batch sources`);
+                  if (shadowParagraphs.length > 0) {
+                    const sampleIds = shadowParagraphs.slice(0, 5).map(p => `${p.id}(m${p.modelIndex})`);
+                    console.log(`[CORPUS_SEARCH] Sample rebuilt IDs: ${sampleIds.join(', ')}`);
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('[CORPUS_SEARCH] rebuild shadow paragraphs failed:', err);
+            }
+          }
+
           const paraLookup = new Map();
           for (const p of shadowParagraphs) {
             paraLookup.set(p.id, p);
           }
 
-          const paragraphMeta = geoRecord.meta.paragraphIndex.map((pid) => {
-            const p = paraLookup.get(pid);
-            return {
-              id: pid,
-              modelIndex: p?.modelIndex ?? 0,
-              paragraphIndex: p?.paragraphIndex ?? 0,
-            };
-          });
+          // Diagnostic: show embedding index IDs vs paraLookup IDs
+          const embeddingParaIds = geoRecord?.meta?.paragraphIndex || [];
+          const matchCount = embeddingParaIds.filter(id => paraLookup.has(id)).length;
+          console.log(`[CORPUS_SEARCH] paraLookup size: ${paraLookup.size}, embedding index IDs: ${embeddingParaIds.length}, matched: ${matchCount}/${embeddingParaIds.length}`);
+          if (embeddingParaIds.length > 0 && matchCount === 0) {
+            const sampleEmbIds = embeddingParaIds.slice(0, 5);
+            const sampleParaIds = Array.from(paraLookup.keys()).slice(0, 5);
+            console.warn(`[CORPUS_SEARCH] ID MISMATCH — embedding IDs: [${sampleEmbIds}] vs paraLookup IDs: [${sampleParaIds}]`);
+          }
+          const paragraphEmbeddings = new Map();
+          const paragraphMeta = [];
+          const paragraphMetaSeen = new Set();
+          const appendEmbeddingRecord = (record, probeMeta = null) => {
+            if (!record?.paragraphEmbeddings || !record?.meta?.paragraphIndex?.length || !record?.meta?.dimensions) return;
+            const dims = record.meta.dimensions;
+            const unpacked = unpackEmbeddingMap(record.paragraphEmbeddings, record.meta.paragraphIndex, dims);
+            for (const [pid, vec] of unpacked.entries()) {
+              paragraphEmbeddings.set(pid, vec);
+              if (paragraphMetaSeen.has(pid)) continue;
+              paragraphMetaSeen.add(pid);
+              const p = paraLookup.get(pid);
+              paragraphMeta.push({
+                id: pid,
+                modelIndex: p?.modelIndex ?? probeMeta?.modelIndex ?? 0,
+                paragraphIndex: p?.paragraphIndex ?? paragraphMeta.length,
+              });
+            }
+          };
+
+          appendEmbeddingRecord(geoRecord);
+
+          const probeRecords = await sm.adapter.getByIndex("metadata", "byEntityId", aiTurnId).catch(() => []);
+          for (const rec of probeRecords || []) {
+            if (rec?.type !== 'probe_geo_record') continue;
+            const probeValue = rec?.value || {};
+            const embeddingId = probeValue?.embeddingId || rec?.key;
+            if (!embeddingId) continue;
+            const probeEmbeddingRecord = await sm.adapter.get("embeddings", embeddingId).catch(() => null);
+            if (!probeEmbeddingRecord) continue;
+            const probeParagraphIds = Array.isArray(probeValue?.paragraphIds) ? probeValue.paragraphIds : [];
+            const probeParagraphs = Array.isArray(probeValue?.paragraphs) ? probeValue.paragraphs : [];
+            for (let i = 0; i < probeParagraphIds.length; i++) {
+              const pid = probeParagraphIds[i];
+              if (!pid || paraLookup.has(pid)) continue;
+              paraLookup.set(pid, {
+                id: pid,
+                modelIndex: Number(probeValue?.modelIndex) || 0,
+                paragraphIndex: i,
+                _fullParagraph: String(probeParagraphs[i] || ''),
+              });
+            }
+            appendEmbeddingRecord(probeEmbeddingRecord, {
+              modelIndex: Number(probeValue?.modelIndex) || 0,
+            });
+          }
+
+          if (paragraphEmbeddings.size === 0 || paragraphMeta.length === 0) {
+            sendResponse({ success: true, data: { results: [], reason: "no_embeddings" } });
+            return;
+          }
 
           // Embed the query
           const truncated = structuredTruncate(queryText.trim(), 1200);
@@ -922,9 +1010,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           // Enrich hits with paragraph text
           const results = hits.map((h) => {
             const p = paraLookup.get(h.paragraphId);
+            let text = p?._fullParagraph || '';
+            if (!text && p?.statements && Array.isArray(p.statements)) {
+              text = p.statements.map((s) => s.text).join(' ');
+            }
             return {
               ...h,
-              text: (p?._fullParagraph || '').slice(0, 800),
+              text: text.slice(0, 800),
             };
           });
 

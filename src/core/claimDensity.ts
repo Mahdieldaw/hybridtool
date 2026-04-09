@@ -32,6 +32,7 @@ export function computeClaimDensity(
   enrichedClaims: MinimalClaim[],
   shadowParagraphs: ShadowParagraph[],
   totalModelCount: number,
+  peripheralNodeIds: Set<string> = new Set(),
 ): ClaimDensityResult {
   const t0 = performance.now();
 
@@ -95,20 +96,22 @@ export function computeClaimDensity(
       arr.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
     }
 
-    // Detect contiguous runs (passages)
+    // Detect contiguous runs (passages) — STRICT: only majority paragraphs count
+    // PLUS GEOMETRIC CORE: only non-peripheral paragraphs count
     const passages: PassageEntry[] = [];
     for (const [modelIndex, sorted] of byModel) {
+      const strictCore = sorted.filter(pc => pc.coverage > 0.5 && !peripheralNodeIds.has(pc.paragraphId));
       let runStart = 0;
-      for (let i = 1; i <= sorted.length; i++) {
-        const isBreak = i === sorted.length ||
-          sorted[i].paragraphIndex !== sorted[i - 1].paragraphIndex + 1;
+      for (let i = 1; i <= strictCore.length; i++) {
+        const isBreak = i === strictCore.length ||
+          strictCore[i].paragraphIndex !== strictCore[i - 1].paragraphIndex + 1;
         if (isBreak) {
-          const runParas = sorted.slice(runStart, i);
+          const runParas = strictCore.slice(runStart, i);
           const avgCoverage = runParas.reduce((s, p) => s + p.coverage, 0) / runParas.length;
           passages.push({
             modelIndex,
-            startParagraphIndex: sorted[runStart].paragraphIndex,
-            endParagraphIndex: sorted[i - 1].paragraphIndex,
+            startParagraphIndex: strictCore[runStart].paragraphIndex,
+            endParagraphIndex: strictCore[i - 1].paragraphIndex,
             length: i - runStart,
             avgCoverage,
           });
@@ -120,9 +123,23 @@ export function computeClaimDensity(
     // Derived aggregates
     const paragraphCount = paragraphCoverage.length;
     const passageCount = passages.length;
-    const maxPassageLength = passages.reduce((max, p) => Math.max(max, p.length), 0);
     const majorityParagraphCount = paragraphCoverage.filter(pc => pc.coverage > 0.5).length;
     const modelSpread = byModel.size;
+
+    // Longitudinal stats for the "Max Run"
+    let maxPassageLength = 0;
+    let meanCoverageInLongestRun = 0;
+    for (const p of passages) {
+      if (p.length > maxPassageLength) {
+        maxPassageLength = p.length;
+        meanCoverageInLongestRun = p.avgCoverage;
+      } else if (p.length === maxPassageLength && p.length > 0) {
+        // High-purity tie-breaker
+        if (p.avgCoverage > meanCoverageInLongestRun) {
+          meanCoverageInLongestRun = p.avgCoverage;
+        }
+      }
+    }
 
     // Models with at least one passage of length >= 2
     const modelsWithPassagesSet = new Set<number>();
@@ -141,6 +158,7 @@ export function computeClaimDensity(
       passageCount,
       maxPassageLength,
       majorityParagraphCount,
+      meanCoverageInLongestRun,
       modelSpread,
       modelsWithPassages,
       totalClaimStatements,

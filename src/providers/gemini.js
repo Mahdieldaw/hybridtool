@@ -7,9 +7,14 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { ArtifactProcessor } from "../../shared/artifact-processor";
+import { retryWithPolicy } from "../core/retry-orchestrator";
+import { getPolicy } from "../core/retry-policy";
 
 // Provider-specific debug flag (off by default)
 const GEMINI_DEBUG = false;
+const GEMINI_COLD_START_POLICY = getPolicy("COLD_START");
+const GEMINI_COLD_EVENT_WINDOW_MS =
+  GEMINI_COLD_START_POLICY.delayOverrides?.cold_event_window ?? 10000;
 
 /**
  * Gemini stream stall detection timeouts (defaults are tuned to avoid false positives):
@@ -120,6 +125,17 @@ export class GeminiProviderError extends Error {
   }
 }
 
+export class ColdStartDetectedError extends Error {
+  constructor({ stage, elapsedMs, model, details = {} } = {}) {
+    super(`Gemini cold start detected at ${stage || "stream"}`);
+    this.name = "ColdStartDetectedError";
+    this.stage = stage || "stream";
+    this.elapsedMs = elapsedMs;
+    this.model = model;
+    this.details = details;
+  }
+}
+
 // =============================================================================
 // GEMINI SESSION API
 // =============================================================================
@@ -144,8 +160,6 @@ export class GeminiSessionApi {
    * Send prompt to Gemini AI and handle response
    * @param {string} prompt - The prompt text
    * @param {{ token?: {at: string, bl: string} | null, cursor?: any[], model?: string, signal?: AbortSignal }} options - Request options
-   * @param {boolean} retrying - Token-refresh retry flag (prevents infinite token refresh loops)
-   * @param {number} coldStartRetries - Cold-start retry counter (tracks backend initialization retries)
    */
   async ask(
     prompt,
@@ -155,8 +169,46 @@ export class GeminiSessionApi {
       model = "gemini-flash",
       signal,
     } = {},
+  ) {
+    let attemptToken = token;
+    try {
+      return await retryWithPolicy(
+        () => {
+          const currentToken = attemptToken;
+          attemptToken = null;
+          return this._askCore(prompt, { token: currentToken, cursor, model, signal });
+        },
+        {
+          providerId: "gemini",
+          stage: "ask",
+          model,
+          signal,
+        },
+        "COLD_START",
+      );
+    } catch (error) {
+      if (error instanceof ColdStartDetectedError) {
+        this._throw("unknown", {
+          message: `Gemini cold start retries exhausted at ${error.stage}`,
+          stage: error.stage,
+          elapsedMs: error.elapsedMs,
+          model: error.model,
+          details: error.details,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async _askCore(
+    prompt,
+    {
+      token = null,
+      cursor = ["", "", ""],
+      model = "gemini-flash",
+      signal,
+    } = {},
     retrying = false,
-    coldStartRetries = 0,
   ) {
     // Use prefetched token if available
     if (!token && this.sharedState?.prefetchedToken) {
@@ -228,8 +280,7 @@ export class GeminiSessionApi {
       if (retrying) {
         this._throw("badToken", msg);
       }
-      // Preserve cold-start retry count across token refreshes
-      return this.ask(prompt, { token: null, cursor, model, signal }, true, coldStartRetries);
+      return this._askCore(prompt, { token: null, cursor, model, signal }, true);
     };
 
     if (response.status !== 200) {
@@ -268,8 +319,6 @@ export class GeminiSessionApi {
       let lastMeaningfulTextLen = 0;
       let nullSpamWindowStart = Date.now();
       let nullSpamCount = 0;
-
-      const COLD_START_RETRY_DELAY_MS = 10000;
       let coldStartSeenAt = 0;
       const hasMeaningfulTextNow = () =>
         !!(u && typeof u.text === "string" && u.text.trim().length > 0);
@@ -305,7 +354,15 @@ export class GeminiSessionApi {
               ]);
             } catch (e) {
               if (String(e)?.includes("READ_GAP_TIMEOUT")) {
-                abortWith("streamTimeout", { stage: "read_gap", timeoutMs: READ_GAP_TIMEOUT_MS });
+                if (coldStartSeenAt && !hasMeaningfulTextNow()) {
+                  abortWith("coldStart", {
+                    stage: "read_gap",
+                    timeoutMs: READ_GAP_TIMEOUT_MS,
+                    elapsedMs: Date.now() - coldStartSeenAt,
+                  });
+                } else {
+                  abortWith("streamTimeout", { stage: "read_gap", timeoutMs: READ_GAP_TIMEOUT_MS });
+                }
               }
               throw e;
             } finally {
@@ -426,9 +483,10 @@ export class GeminiSessionApi {
 
               if (coldStartSeenAt && !hasMeaningfulTextNow()) {
                 const now = Date.now();
-                if (now - coldStartSeenAt >= COLD_START_RETRY_DELAY_MS) {
+                if (now - coldStartSeenAt >= GEMINI_COLD_EVENT_WINDOW_MS) {
                   abortWith("coldStart", {
-                    delayMs: COLD_START_RETRY_DELAY_MS,
+                    stage: "cold_event_window",
+                    delayMs: GEMINI_COLD_EVENT_WINDOW_MS,
                     elapsedMs: now - coldStartSeenAt,
                   });
                 }
@@ -461,16 +519,12 @@ export class GeminiSessionApi {
       if (this.isOwnError(e)) throw e;
       const hint = Object(abortHint);
       if (hint.type === "coldStart") {
-        const MAX_COLD_START_RETRIES = 3;
-        if (coldStartRetries >= MAX_COLD_START_RETRIES) {
-          this._throw("unknown", `Max cold start retries (${MAX_COLD_START_RETRIES}) exceeded`);
-        }
-        return this.ask(
-          prompt,
-          { token: null, cursor, model, signal },
-          false,
-          coldStartRetries + 1,
-        );
+        throw new ColdStartDetectedError({
+          stage: hint.details?.stage || "stream",
+          elapsedMs: hint.details?.elapsedMs,
+          model,
+          details: hint.details,
+        });
       }
       if (hint.type) this._throw(hint.type, hint.details);
       this._throw("failedToReadResponse", { step: "data", error: e });
@@ -490,23 +544,11 @@ export class GeminiSessionApi {
     const hasMeaningfulText = !!(u && typeof u.text === "string" && u.text.trim().length > 0);
 
     if (hasColdStartSignature && !hasMeaningfulText) {
-      const MAX_COLD_START_RETRIES = 3;
-
-      if (coldStartRetries >= MAX_COLD_START_RETRIES) {
-        this._throw("unknown", `Max cold start retries (${MAX_COLD_START_RETRIES}) exceeded`);
-      }
-
-      console.warn(
-        `[Gemini] Cold start detected: [["e",4,...]] - retrying (attempt ${coldStartRetries + 1}/${MAX_COLD_START_RETRIES})`
-      );
-
-      // Retry with fresh token and incremented cold-start counter
-      return this.ask(
-        prompt,
-        { token: null, cursor, model, signal },
-        false, // Reset token-refresh flag
-        coldStartRetries + 1 // Increment cold-start counter
-      );
+      throw new ColdStartDetectedError({
+        stage: "payload_signature",
+        model,
+        details: { signature: ["e", 4] },
+      });
     }
     // ========================================================================
 

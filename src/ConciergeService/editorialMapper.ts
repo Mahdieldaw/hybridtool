@@ -35,6 +35,7 @@ export interface IndexedPassage {
   text: string;
   concentrationRatio: number;
   densityRatio: number;
+  meanCoverageInLongestRun: number;
   landscapePosition: LandscapePosition;
   isLoadBearing: boolean;
   isSoleSource: boolean;
@@ -127,6 +128,7 @@ export function buildPassageIndex(
         text: textParts.join('\n\n'),
         concentrationRatio: claimProfile.concentrationRatio,
         densityRatio: claimProfile.densityRatio,
+        meanCoverageInLongestRun: claimProfile.meanCoverageInLongestRun ?? 0,
         landscapePosition: claimProfile.landscapePosition,
         isLoadBearing: claimProfile.isLoadBearing,
         isSoleSource: (claimProfile.structuralContributors?.length ?? 0) === 1,
@@ -248,7 +250,7 @@ ${userQuery}`);
 - Model: ${p.modelName} (index ${p.modelIndex})
 - Claim: "${p.claimLabel}" (${p.claimId})
 - Landscape: ${LANDSCAPE_LABELS[p.landscapePosition]}
-- Concentration: ${p.concentrationRatio.toFixed(3)}, Density: ${p.densityRatio.toFixed(3)}
+- Concentration: ${p.concentrationRatio.toFixed(3)}, Density: ${p.densityRatio.toFixed(3)}, μRunCovg: ${p.meanCoverageInLongestRun.toFixed(3)}
 - Load-bearing: ${p.isLoadBearing}${sole}${conflict}${extent}${contStr}
 
 ${p.text}`;

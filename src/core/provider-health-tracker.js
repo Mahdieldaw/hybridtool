@@ -13,7 +13,7 @@
  * - rateLimitUntil: dynamic timestamp for 429 exponential back-off
  */
 
-import { isProviderAuthError, isRateLimitError } from './error-classifier';
+import { isDefinitiveAuthError, isRateLimitError } from './error-classifier';
 
 // Exponential back-off for rate limits: 5s → 10s → 20s → 40s, capped at 60s
 const RATE_LIMIT_BACKOFF_BASE_MS = 5000;
@@ -107,7 +107,7 @@ export class ProviderHealthTracker {
     const now = Date.now();
 
     // ── Auth failure (401/403) — sticky, requires manual clear ──────────────
-    if (error && isProviderAuthError(error)) {
+    if (error && isDefinitiveAuthError(error)) {
       s.authInvalid = true;
       s.circuit = 'open';
       s.openedAt = now;

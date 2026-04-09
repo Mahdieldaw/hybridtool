@@ -2,7 +2,10 @@ import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 
+import { authManager } from '../auth-manager.js';
 import { classifyError } from '../error-classifier';
+import { runWithProviderHealth } from '../providerHealthGate';
+import { logRetryEvent } from '../retry-telemetry';
 import {
   errorHandler,
   isProviderAuthError,
@@ -26,6 +29,37 @@ export class StepExecutor {
     // MapperService deprecated; mapping handled by new semantic mapper pipeline
     // ResponseProcessor removed; providers produce normalized { text } already
     this.healthTracker = healthTracker;
+  }
+
+  _checkProviderHealth(providerId) {
+    const check = this.healthTracker?.shouldAttempt?.(providerId);
+    return check || { allowed: true };
+  }
+
+  _finalizeProviderResult(providerId, status, error, stage) {
+    if (status === 'success') {
+      try {
+        this.healthTracker.recordSuccess(providerId);
+      } catch (_) { }
+      return null;
+    }
+
+    const classified = classifyError(error);
+    try {
+      this.healthTracker.recordFailure(providerId, error);
+    } catch (_) { }
+    try {
+      logRetryEvent({
+        providerId,
+        stage,
+        attempt: 1,
+        max: 1,
+        errorType: classified?.type || 'unknown',
+        elapsedMs: 0,
+        delayMs: classified?.retryAfterMs || 0,
+      });
+    } catch (_) { }
+    return classified;
   }
 
   async executePromptStep(step, context, options) {
@@ -67,8 +101,7 @@ export class StepExecutor {
     const activeProviders = [];
     try {
       for (const pid of providers) {
-        const bypassCircuit = options?.isRecompute === true;
-        const check = bypassCircuit ? { allowed: true } : this.healthTracker.shouldAttempt(pid);
+        const check = this._checkProviderHealth(pid);
         if (!check.allowed) {
           providerStatuses.push({
             providerId: pid,
@@ -178,11 +211,13 @@ export class StepExecutor {
 
           if (resultWrapper && resultWrapper.status === "rejected") {
             const err = resultWrapper.reason;
-            const classified = classifyError(err);
+            let classified = classifyError(err);
             try {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
-                this.healthTracker.recordFailure(providerId, err);
+                classified =
+                  this._finalizeProviderResult(providerId, 'failure', err, 'batch') ||
+                  classified;
               }
             } catch (_) { }
 
@@ -211,7 +246,7 @@ export class StepExecutor {
           try {
             if (!completedProviders.has(providerId)) {
               completedProviders.add(providerId);
-              this.healthTracker.recordSuccess(providerId);
+              this._finalizeProviderResult(providerId, 'success', null, 'batch');
             }
           } catch (_) { }
 
@@ -269,7 +304,7 @@ export class StepExecutor {
             try {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
-                this.healthTracker.recordSuccess(providerId);
+                this._finalizeProviderResult(providerId, 'success', null, 'batch');
               }
               const entry = providerStatuses.find((s) => s.providerId === providerId);
               if (entry) {
@@ -282,7 +317,7 @@ export class StepExecutor {
 
           errors.forEach((error, providerId) => {
             const providerResponse = error?.providerResponse;
-            const classified = classifyError(error);
+            let classified = classifyError(error);
             formattedResults[providerId] = {
               providerId: providerId,
               text: "",
@@ -302,7 +337,9 @@ export class StepExecutor {
             try {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
-                this.healthTracker.recordFailure(providerId, error);
+                classified =
+                  this._finalizeProviderResult(providerId, 'failure', error, 'batch') ||
+                  classified;
               }
               const entry = providerStatuses.find((s) => s.providerId === providerId);
               if (entry) {
@@ -974,7 +1011,11 @@ export class StepExecutor {
       return undefined;
     })();
 
-    return new Promise((resolve, reject) => {
+    return runWithProviderHealth(
+      this.healthTracker,
+      payload.mappingProvider,
+      'Mapping',
+      async () => new Promise((resolve, reject) => {
       this.orchestrator.executeParallelFanout(
         mappingPrompt,
         [payload.mappingProvider],
@@ -1212,7 +1253,11 @@ export class StepExecutor {
                       );
 
                       // Fire LLM call (same pattern as survey mapper)
-                      const editorialResult = await new Promise((res) => {
+                      const editorialResult = await runWithProviderHealth(
+                        this.healthTracker,
+                        payload.mappingProvider,
+                        'Editorial',
+                        () => new Promise((resolveEditorial, rejectEditorial) => {
                         this.orchestrator.executeParallelFanout(
                           editorialPrompt,
                           [payload.mappingProvider],
@@ -1223,14 +1268,21 @@ export class StepExecutor {
                               ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
                               : mappingProviderContexts,
                             onPartial: () => {},
-                            onAllComplete: async (results) => {
+                            onAllComplete: async (results, errors) => {
                               const result = results?.get?.(payload.mappingProvider);
-                              if (result?.text) res({ text: result.text, meta: result.meta });
-                              else res({ text: '' });
+                              const err = errors?.get?.(payload.mappingProvider);
+                              if (result?.text) resolveEditorial({ text: result.text, meta: result.meta });
+                              else if (err) rejectEditorial(err);
+                              else resolveEditorial({ text: '' });
                             },
-                            onError: () => res({ text: '' }),
+                            onError: (e) => rejectEditorial(e),
                           },
                         );
+                        }),
+                        { nonBlocking: true },
+                      ).catch((err) => {
+                        console.warn('[StepExecutor] Editorial model (non-blocking):', err?.message || err);
+                        return { text: '' };
                       });
 
                       if (editorialResult?.text) {
@@ -1304,10 +1356,11 @@ export class StepExecutor {
               if (providerError) {
                 reject(providerError);
               } else {
+                const emptyErr = new Error(
+                  `Mapping provider ${payload.mappingProvider} returned empty response`,
+                );
                 reject(
-                  new Error(
-                    `Mapping provider ${payload.mappingProvider} returned empty response`,
-                  ),
+                  emptyErr,
                 );
               }
               return;
@@ -1374,7 +1427,8 @@ export class StepExecutor {
           },
         },
       );
-    });
+      }),
+    );
   }
   async _resolveSourceData(payload, context, previousResults, options) {
     const { sessionManager } = options;
@@ -1680,22 +1734,31 @@ export class StepExecutor {
       });
     };
 
+    const wrappedRunRequest = (pid) =>
+      runWithProviderHealth(this.healthTracker, pid, stepType, () => runRequest(pid));
+
     // 5. Auth Fallback Wrapper
     try {
-      return await runRequest(providerId);
+      return await wrappedRunRequest(providerId);
     } catch (error) {
       if (isProviderAuthError(error)) {
         console.warn(`[StepExecutor] ${stepType} failed with auth error for ${providerId}, attempting fallback...`);
         const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
         if (fallbackStrategy) {
           try {
-            const fallbackProvider = await fallbackStrategy(
+            const providerRegistry = this.orchestrator?.registry?.get?.('providerRegistry');
+            const availableProviders = providerRegistry?.listProviders?.() || [];
+            const fallbackResolution = await fallbackStrategy(
               stepType.toLowerCase(),
-              { failedProviderId: providerId }
+              { failedProvider: providerId, availableProviders, authManager }
             );
+            const fallbackProvider =
+              typeof fallbackResolution === 'string'
+                ? fallbackResolution
+                : fallbackResolution?.fallbackProvider;
             if (fallbackProvider) {
               console.log(`[StepExecutor] Executing ${stepType} with fallback provider: ${fallbackProvider}`);
-              return await runRequest(fallbackProvider);
+              return await wrappedRunRequest(fallbackProvider);
             }
           } catch (fallbackError) {
             console.warn(`[StepExecutor] Fallback failed: `, fallbackError);

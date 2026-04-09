@@ -34,7 +34,7 @@ import api from "../../services/extension-api";
 import type { TurnMessage, UserTurn, AiTurnWithUI } from "../../types";
 import type { ProviderKey } from "../../../shared/contract";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
-import { DEFAULT_THREAD } from "../../../shared/messaging";
+import { DEFAULT_THREAD, PROBE_CHUNK, PROBE_COMPLETE, PROBE_SESSION_START } from "../../../shared/messaging";
 
 const PORT_DEBUG_UI = false;
 
@@ -168,6 +168,38 @@ export function usePortMessageHandler(enabled: boolean = true) {
       }
 
       switch (message.type) {
+        case PROBE_SESSION_START: {
+          try {
+            window.dispatchEvent(
+              new CustomEvent("corpus-probe-session-start", { detail: message }),
+            );
+          } catch (e) {
+            console.warn("[Port] Failed to dispatch probe session start event", e);
+          }
+          break;
+        }
+
+        case PROBE_CHUNK: {
+          try {
+            window.dispatchEvent(
+              new CustomEvent("corpus-probe-chunk", { detail: message }),
+            );
+          } catch (e) {
+            console.warn("[Port] Failed to dispatch probe chunk event", e);
+          }
+          break;
+        }
+
+        case PROBE_COMPLETE: {
+          try {
+            window.dispatchEvent(
+              new CustomEvent("corpus-probe-complete", { detail: message }),
+            );
+          } catch (e) {
+            console.warn("[Port] Failed to dispatch probe complete event", e);
+          }
+          break;
+        }
 
         case "CHEWED_SUBSTRATE_DEBUG": {
           console.log("[ChewedSubstrate]", message);

@@ -3,7 +3,7 @@
 import { WorkflowEngine } from "./workflow-engine.js";
 import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
 import { authManager } from './auth-manager.js';
-import { DEFAULT_THREAD } from '../../shared/messaging.js';
+import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging.js';
 // Note: ContextResolver is now available via services; we don't import it directly here
 
 /**
@@ -36,6 +36,7 @@ export class ConnectionHandler {
     this.lifecycleManager = null;
     this.backendInitPromise = null;
     this._activeRecomputes = new Set();
+    this._probePersistenceQueues = new Map();
   }
 
   /**
@@ -295,6 +296,9 @@ export class ConnectionHandler {
               await this.workflowEngine.handleContinueCognitiveRequest(message.payload);
             }
             break;
+          case "PROBE_QUERY":
+            await this._handleProbeQuery(message);
+            break;
 
           default:
             console.warn(
@@ -306,6 +310,321 @@ export class ConnectionHandler {
         this._sendError(message, error);
       }
     };
+  }
+
+  _buildProbePrompt(queryText, nnParagraphs) {
+    const contextBlock = (Array.isArray(nnParagraphs) ? nnParagraphs : [])
+      .map((p, idx) => `${idx + 1}. ${String(p || '').trim()}`)
+      .filter(Boolean)
+      .join('\n');
+
+    return [
+      'You are a probe model augmenting a search corpus.',
+      `User Query: ${String(queryText || '').trim()}`,
+      '',
+      'Nearest-neighbor corpus paragraphs:',
+      contextBlock || '(none)',
+      '',
+      'Return concise analytical paragraphs that expand or challenge the corpus context.',
+    ].join('\n');
+  }
+
+  _providerDisplayName(providerId) {
+    const pid = String(providerId || '').toLowerCase();
+    if (pid === 'gemini') return 'Gemini';
+    if (pid === 'qwen') return 'Qwen';
+    return providerId;
+  }
+
+  _buildFreshProbeContexts(providerIds) {
+    return Object.fromEntries((providerIds || []).map((providerId) => [
+      providerId,
+      { meta: {}, continueThread: false },
+    ]));
+  }
+
+  _postProbeSessionStart(aiTurnId, providerIds, indices) {
+    this.port?.postMessage({
+      type: PROBE_SESSION_START,
+      aiTurnId,
+      probeCount: Array.isArray(providerIds) ? providerIds.length : 0,
+      providerIds: Array.isArray(providerIds) ? providerIds : [],
+      modelIndices: Array.isArray(providerIds)
+        ? providerIds.map((providerId) => ({
+          providerId,
+          modelIndex: indices?.get(providerId) || 0,
+        }))
+        : [],
+    });
+  }
+
+  async _enqueueProbePersistence(aiTurnId, task) {
+    const previous = this._probePersistenceQueues.get(aiTurnId) || Promise.resolve();
+    const current = previous
+      .catch(() => undefined)
+      .then(task);
+    this._probePersistenceQueues.set(aiTurnId, current);
+    try {
+      return await current;
+    } finally {
+      if (this._probePersistenceQueues.get(aiTurnId) === current) {
+        this._probePersistenceQueues.delete(aiTurnId);
+      }
+    }
+  }
+
+  async _nextProbeModelIndices(aiTurnId, providerIds) {
+    const adapter = this.services?.sessionManager?.adapter;
+    const turn = await adapter.get('turns', aiTurnId);
+    const responses = await adapter.getResponsesByTurnId(aiTurnId);
+    const used = new Set();
+
+    const mappingOrder = turn?.mapping?.artifact?.citationSourceOrder || turn?.mapping?.citationSourceOrder || {};
+    for (const [k] of Object.entries(mappingOrder || {})) {
+      const n = Number(k);
+      if (Number.isFinite(n) && n > 0) used.add(n);
+    }
+
+    for (const r of responses || []) {
+      const n = Number(r?.meta?.modelIndex);
+      if (Number.isFinite(n) && n > 0) used.add(n);
+    }
+
+    const shadowParagraphs = turn?.mapping?.artifact?.shadow?.paragraphs || [];
+    for (const p of shadowParagraphs) {
+      const n = Number(p?.modelIndex);
+      if (Number.isFinite(n) && n > 0) used.add(n);
+    }
+
+    const indices = new Map();
+    let cursor = used.size > 0 ? Math.max(...Array.from(used)) + 1 : 1;
+    for (const pid of providerIds) {
+      indices.set(pid, cursor++);
+    }
+
+    return { indices, turn, responses };
+  }
+
+  async _persistProbeResult({
+    aiTurnId,
+    providerId,
+    modelIndex,
+    text,
+    geometryResult,
+    now,
+  }) {
+    const adapter = this.services?.sessionManager?.adapter;
+    const turn = await adapter.get('turns', aiTurnId);
+    if (!turn) return;
+
+    const sessionId = turn.sessionId || '';
+    const existingResponses = await adapter.getResponsesByTurnId(aiTurnId);
+    const sameProvider = (existingResponses || []).filter((r) => r?.providerId === providerId && r?.responseType === 'probe');
+    const nextResponseIndex = sameProvider.length > 0
+      ? Math.max(...sameProvider.map((r) => Number(r?.responseIndex) || 0)) + 1
+      : 0;
+
+    const citationSourceOrder = {
+      ...(turn?.mapping?.artifact?.citationSourceOrder || turn?.mapping?.citationSourceOrder || {}),
+      [modelIndex]: providerId,
+    };
+
+    const paragraphTexts = (geometryResult?.shadowParagraphs || []).map((p) => p?._fullParagraph || '').filter(Boolean);
+    const probeResponseId = `pr-${sessionId}-${aiTurnId}-${providerId}-probe-${nextResponseIndex}-${now}`;
+    await adapter.put('provider_responses', {
+      id: probeResponseId,
+      sessionId,
+      aiTurnId,
+      providerId,
+      responseType: 'probe',
+      responseIndex: nextResponseIndex,
+      text: text || '',
+      status: 'completed',
+      meta: {
+        modelIndex,
+        modelName: this._providerDisplayName(providerId),
+        paragraphCount: paragraphTexts.length,
+        paragraphTexts,
+      },
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now,
+    });
+
+    const embeddingsId = `probe:${aiTurnId}:${modelIndex}`;
+    if (geometryResult?.packed?.paragraphEmbeddings && geometryResult?.packed?.meta) {
+      await adapter.putBinary('embeddings', {
+        id: embeddingsId,
+        aiTurnId: embeddingsId,
+        statementEmbeddings: geometryResult.packed.statementEmbeddings,
+        paragraphEmbeddings: geometryResult.packed.paragraphEmbeddings,
+        meta: {
+          ...geometryResult.packed.meta,
+          parentTurnId: aiTurnId,
+          modelIndex,
+          providerId,
+          probe: true,
+        },
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await adapter.put('metadata', {
+      key: embeddingsId,
+      entityId: aiTurnId,
+      sessionId,
+      type: 'probe_geo_record',
+      providerId,
+      modelIndex,
+      value: {
+        embeddingId: embeddingsId,
+        providerId,
+        modelIndex,
+        paragraphs: paragraphTexts,
+        paragraphIds: geometryResult?.packed?.meta?.paragraphIndex || [],
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const updatedTurn = {
+      ...turn,
+      updatedAt: now,
+      mapping: {
+        ...(turn.mapping || {}),
+        artifact: {
+          ...(turn.mapping?.artifact || {}),
+          citationSourceOrder,
+        },
+      },
+    };
+    await adapter.put('turns', updatedTurn);
+  }
+
+  async _handleProbeQuery(message) {
+    const { aiTurnId, queryText, nnParagraphs, enabledProviders } = message?.payload || {};
+    if (!aiTurnId || !String(queryText || '').trim()) return;
+
+    const orchestrator = this.services?.orchestrator;
+    const providerRegistry = this.services?.providerRegistry;
+    const sessionManager = this.services?.sessionManager;
+    if (!orchestrator || !providerRegistry || !sessionManager?.adapter) return;
+
+    const requestedProviders = Array.isArray(enabledProviders) && enabledProviders.length > 0
+      ? Array.from(new Set(enabledProviders.map((providerId) => String(providerId || '').toLowerCase()).filter(Boolean)))
+      : [];
+    const probeProviders = requestedProviders.filter((pid) => providerRegistry.isAvailable(pid));
+    if (probeProviders.length === 0) {
+      this._postProbeSessionStart(aiTurnId, [], new Map());
+      return;
+    }
+
+    const { indices } = await this._nextProbeModelIndices(aiTurnId, probeProviders);
+    const providerContexts = this._buildFreshProbeContexts(probeProviders);
+    this._postProbeSessionStart(aiTurnId, probeProviders, indices);
+
+    const prompt = this._buildProbePrompt(queryText, nnParagraphs);
+    const pending = new Set(probeProviders);
+    const probeAccumulated = new Map(); // track full text per provider to compute deltas
+
+    await new Promise((resolve) => {
+      orchestrator.executeParallelFanout(prompt, probeProviders, {
+        sessionId: `probe-${aiTurnId}-${Date.now()}`,
+        useThinking: false,
+        providerContexts,
+        onPartial: (providerId, chunk) => {
+          const modelIndex = indices.get(providerId) || 0;
+          const rawText = typeof chunk === 'string' ? chunk : (chunk?.text || '');
+          // Compute delta: if the new text starts with what we already sent,
+          // it's a full-replacement provider (like Qwen) — only send the new suffix.
+          const previousText = probeAccumulated.get(providerId) || '';
+          let delta = rawText;
+          if (rawText.length > previousText.length && rawText.startsWith(previousText)) {
+            // Full-replacement: extract only the new portion
+            delta = rawText.slice(previousText.length);
+          }
+          probeAccumulated.set(providerId, rawText.length > previousText.length ? rawText : previousText + rawText);
+          if (!delta) return; // nothing new
+          this.port?.postMessage({
+            type: 'PROBE_CHUNK',
+            aiTurnId,
+            modelIndex,
+            modelName: this._providerDisplayName(providerId),
+            providerId,
+            chunk: delta,
+          });
+        },
+        onProviderComplete: (providerId, resultWrapper) => {
+          const modelIndex = indices.get(providerId) || 0;
+          (async () => {
+            try {
+              let text = '';
+              if (resultWrapper?.status === 'fulfilled') {
+                text = String(resultWrapper?.value?.text || '').trim();
+              } else {
+                text = '';
+              }
+
+              const { computeProbeGeometry } = await import('./execution/deterministicPipeline');
+              const geometryResult = await computeProbeGeometry({
+                modelIndex,
+                content: text,
+              });
+              const now = Date.now();
+              await this._enqueueProbePersistence(aiTurnId, () => this._persistProbeResult({
+                aiTurnId,
+                providerId,
+                modelIndex,
+                text,
+                geometryResult,
+                now,
+              }));
+
+              this.port?.postMessage({
+                type: 'PROBE_COMPLETE',
+                aiTurnId,
+                result: {
+                  modelIndex,
+                  modelName: this._providerDisplayName(providerId),
+                  providerId,
+                  text,
+                  paragraphs: (geometryResult?.shadowParagraphs || []).map((p) => p?._fullParagraph || '').filter(Boolean),
+                  embeddings: geometryResult?.packed?.meta
+                    ? {
+                      paragraphIds: geometryResult.packed.meta.paragraphIndex || [],
+                      dimensions: geometryResult.packed.meta.dimensions || 0,
+                    }
+                    : undefined,
+                },
+              });
+            } catch (error) {
+              this.port?.postMessage({
+                type: 'PROBE_COMPLETE',
+                aiTurnId,
+                result: {
+                  modelIndex,
+                  modelName: this._providerDisplayName(providerId),
+                  providerId,
+                  text: '',
+                  paragraphs: [],
+                },
+                error: error?.message || String(error),
+              });
+            } finally {
+              pending.delete(providerId);
+              if (pending.size === 0) resolve();
+            }
+          })();
+        },
+        onAllComplete: () => {
+          if (pending.size === 0) resolve();
+        },
+        onError: () => {
+          resolve();
+        },
+      });
+    });
   }
 
   async _handleRetryProviders(message) {

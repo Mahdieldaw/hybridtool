@@ -21,7 +21,6 @@
  */
 
 import type {
-  BasinInversionResult,
   ClaimDensityResult,
   PassageClaimProfile,
   PassageClaimRouting,
@@ -29,10 +28,13 @@ import type {
   PassageRoutingResult,
   ValidatedConflict,
 } from '../../shared/contract';
+import { cosineSimilarity } from '../clustering/distance';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Input
 // ─────────────────────────────────────────────────────────────────────────
+
+import type { PeripheryResult } from '../geometry/interpretation/periphery';
 
 interface MinimalEnrichedClaim {
   id: string;
@@ -42,21 +44,14 @@ interface MinimalEnrichedClaim {
   supportRatio?: number;
 }
 
-/** Region from preSemantic.regionization — only the fields we need */
-interface MinimalRegion {
-  kind: 'basin' | 'gap';
-  nodeIds: string[];
-}
-
 export interface PassageRoutingInput {
   claimDensityResult: ClaimDensityResult;
   enrichedClaims: MinimalEnrichedClaim[];
   validatedConflicts: ValidatedConflict[];
   modelCount: number;
-  /** Basin inversion result — drives core/periphery identification */
-  basinInversion?: BasinInversionResult | null;
-  /** Pre-semantic regions — gap singletons supplement basin periphery */
-  regions?: MinimalRegion[];
+  periphery: PeripheryResult;
+  queryEmbedding?: Float32Array;
+  claimEmbeddings?: Map<string, Float32Array>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -81,107 +76,12 @@ function sigma(nums: number[], mu: number): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Core/periphery identification
-// ─────────────────────────────────────────────────────────────────────────
-
-type CorpusMode = 'dominant-core' | 'parallel-cores' | 'no-geometry';
-
-interface PeripheryResult {
-  corpusMode: CorpusMode;
-  /** Paragraph IDs to exclude from scoring (empty unless dominant-core) */
-  peripheralNodeIds: Set<string>;
-  peripheralRatio: number;
-  largestBasinRatio: number | null;
-  /** In parallel-cores mode, maps paragraphId → basinId for editorial annotation */
-  basinByNodeId: Record<string, number>;
-}
-
-function identifyPeriphery(
-  basinInversion: BasinInversionResult | null | undefined,
-  regions: MinimalRegion[] | undefined,
-): PeripheryResult {
-  const empty: PeripheryResult = {
-    corpusMode: 'no-geometry',
-    peripheralNodeIds: new Set(),
-    peripheralRatio: 0,
-    largestBasinRatio: null,
-    basinByNodeId: {},
-  };
-
-  if (!basinInversion || basinInversion.status !== 'ok' || !basinInversion.basins?.length) {
-    return empty;
-  }
-
-  const ratio = basinInversion.largestBasinRatio;
-  if (ratio == null) return empty;
-
-  const totalNodes = basinInversion.nodeCount;
-  if (totalNodes === 0) return empty;
-
-  // ── Parallel-cores: no dominant basin ───────────────────────────────
-  if (ratio <= 0.5) {
-    return {
-      corpusMode: 'parallel-cores',
-      peripheralNodeIds: new Set(),
-      peripheralRatio: 0,
-      largestBasinRatio: ratio,
-      basinByNodeId: basinInversion.basinByNodeId ?? {},
-    };
-  }
-
-  // ── Dominant-core: identify the largest basin ──────────────────────
-  let largestBasin = basinInversion.basins[0];
-  for (const b of basinInversion.basins) {
-    if (b.nodeIds.length > largestBasin.nodeIds.length) {
-      largestBasin = b;
-    }
-  }
-
-  const coreNodeIds = new Set(largestBasin.nodeIds);
-
-  // Basin periphery: every node NOT in the largest basin
-  const peripheralNodeIds = new Set<string>();
-  for (const b of basinInversion.basins) {
-    if (b.basinId === largestBasin.basinId) continue;
-    for (const nodeId of b.nodeIds) {
-      peripheralNodeIds.add(nodeId);
-    }
-  }
-
-  // Gap singletons: nodes in gap regions with only 1 node that aren't already in the core
-  if (regions) {
-    for (const r of regions) {
-      if (r.kind === 'gap' && r.nodeIds.length === 1) {
-        const nodeId = r.nodeIds[0];
-        if (!coreNodeIds.has(nodeId)) {
-          peripheralNodeIds.add(nodeId);
-        }
-      }
-    }
-  }
-
-  const peripheralRatio = totalNodes > 0 ? peripheralNodeIds.size / totalNodes : 0;
-
-  return {
-    corpusMode: 'dominant-core',
-    peripheralNodeIds,
-    peripheralRatio,
-    largestBasinRatio: ratio,
-    basinByNodeId: basinInversion.basinByNodeId ?? {},
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Core computation
-// ─────────────────────────────────────────────────────────────────────────
-
 export function computePassageRouting(input: PassageRoutingInput): PassageRoutingResult {
   const t0 = performance.now();
-  const { claimDensityResult, enrichedClaims, validatedConflicts, basinInversion, regions } = input;
+  const { claimDensityResult, enrichedClaims, validatedConflicts, periphery, queryEmbedding, claimEmbeddings } = input;
   const profiles = claimDensityResult.profiles;
 
   // ── 0. Identify core vs. periphery ────────────────────────────────
-  const periphery = identifyPeriphery(basinInversion ?? null, regions);
   const filterPeripheral = periphery.corpusMode === 'dominant-core' && periphery.peripheralNodeIds.size > 0;
 
   // ── A. Structural contributor classification + concentration/density ──
@@ -190,6 +90,16 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
   for (const claim of enrichedClaims) {
     const id = String(claim.id);
     const profile = profiles[id];
+    // ── Pre-calculate queryDistance if available ──
+    let queryDistance: number | undefined;
+    if (queryEmbedding && claimEmbeddings && claimEmbeddings.has(id)) {
+      const emb = claimEmbeddings.get(id);
+      if (emb) {
+        queryDistance = 1 - cosineSimilarity(emb, queryEmbedding);
+        (claim as any).queryDistance = queryDistance; // Attach to original object as requested downstream
+      }
+    }
+
     if (!profile) {
       // No density profile — classify as floor
       claimProfiles[id] = {
@@ -200,10 +110,12 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
         concentrationRatio: 0,
         densityRatio: 0,
         maxPassageLength: 0,
+        meanCoverageInLongestRun: 0,
         landscapePosition: 'floor',
         isLoadBearing: false,
         structuralContributors: [],
         incidentalMentions: [],
+        ...(queryDistance !== undefined ? { queryDistance } : {}),
       };
       continue;
     }
@@ -250,32 +162,10 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
     const concentrationRatio = totalMAJ > 0 ? dominantMAJ / totalMAJ : 0;
 
     // C. Density ratio — max passage length of dominant model / dominant MAJ
-    //    Passages also filtered to core-only paragraphs
     let maxPassageLengthOfDominant = 0;
-    let maxPassageLengthOverall = 0;
-    if (dominantModel !== null) {
-      for (const passage of profile.passages) {
-        // Count how many paragraphs in this passage survive after peripheral removal
-        const passageLength = filterPeripheral
-          ? countCorePassageLength(passage, profile.paragraphCoverage, periphery.peripheralNodeIds)
-          : passage.length;
-
-        if (passageLength > maxPassageLengthOverall) {
-          maxPassageLengthOverall = passageLength;
-        }
-        if (passage.modelIndex === dominantModel && passageLength > maxPassageLengthOfDominant) {
-          maxPassageLengthOfDominant = passageLength;
-        }
-      }
-    } else {
-      // No dominant model — still compute maxPassageLength for gate B
-      for (const passage of profile.passages) {
-        const passageLength = filterPeripheral
-          ? countCorePassageLength(passage, profile.paragraphCoverage, periphery.peripheralNodeIds)
-          : passage.length;
-        if (passageLength > maxPassageLengthOverall) {
-          maxPassageLengthOverall = passageLength;
-        }
+    for (const passage of profile.passages) {
+      if (passage.modelIndex === dominantModel && passage.length > maxPassageLengthOfDominant) {
+        maxPassageLengthOfDominant = passage.length;
       }
     }
     const densityRatio = dominantMAJ > 0 ? maxPassageLengthOfDominant / dominantMAJ : 0;
@@ -287,11 +177,13 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
       dominantMAJ,
       concentrationRatio,
       densityRatio,
-      maxPassageLength: maxPassageLengthOverall > 0 ? maxPassageLengthOverall : profile.maxPassageLength,
+      maxPassageLength: profile.maxPassageLength,
+      meanCoverageInLongestRun: profile.meanCoverageInLongestRun,
       landscapePosition: 'floor', // provisional — set after gate computation
       isLoadBearing: false,       // provisional
       structuralContributors,
       incidentalMentions,
+      ...(queryDistance !== undefined ? { queryDistance } : {}),
     };
   }
 
@@ -393,9 +285,11 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
         landscapePosition: p.landscapePosition,
         concentrationRatio: p.concentrationRatio,
         densityRatio: p.densityRatio,
+        meanCoverageInLongestRun: p.meanCoverageInLongestRun,
         dominantModel: p.dominantModel,
         structuralContributors: p.structuralContributors,
         supporters: Array.isArray(c?.supporters) ? c!.supporters : [],
+        ...(p.queryDistance !== undefined ? { queryDistance: p.queryDistance } : {}),
       };
     });
 
@@ -446,50 +340,6 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
     ...(basinAnnotations ? { basinAnnotations } : {}),
     meta: { processingTimeMs: performance.now() - t0 },
   };
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────
-// Peripheral-aware passage length
-//
-// A passage is a contiguous run of paragraphs. When we remove peripheral
-// nodes from the middle of a run, we may break it into sub-runs. We need
-// the longest surviving contiguous sub-run, not just (original length - removed).
-// ─────────────────────────────────────────────────────────────────────────
-
-function countCorePassageLength(
-  passage: { modelIndex: number; startParagraphIndex: number; endParagraphIndex: number; length: number },
-  paragraphCoverage: Array<{ paragraphId: string; paragraphIndex: number; modelIndex: number }>,
-  peripheralNodeIds: Set<string>,
-): number {
-  // Get the paragraph IDs in this passage's range and model, sorted by index
-  const inRange = paragraphCoverage
-    .filter(pc =>
-      pc.modelIndex === passage.modelIndex &&
-      pc.paragraphIndex >= passage.startParagraphIndex &&
-      pc.paragraphIndex <= passage.endParagraphIndex
-    )
-    .sort((a, b) => a.paragraphIndex - b.paragraphIndex);
-
-  // Filter to core-only, then find longest contiguous sub-run
-  const coreIndices = inRange
-    .filter(pc => !peripheralNodeIds.has(pc.paragraphId))
-    .map(pc => pc.paragraphIndex);
-
-  if (coreIndices.length === 0) return 0;
-
-  let maxRun = 1;
-  let currentRun = 1;
-  for (let i = 1; i < coreIndices.length; i++) {
-    if (coreIndices[i] === coreIndices[i - 1] + 1) {
-      currentRun++;
-      if (currentRun > maxRun) maxRun = currentRun;
-    } else {
-      currentRun = 1;
-    }
-  }
-
-  return maxRun;
 }
 
 

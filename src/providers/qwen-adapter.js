@@ -360,7 +360,7 @@ export class QwenAdapter {
   }
 
   _isQwenAuthError(error) {
-    const code = error?.code;
-    return code === 'login' || code === 'csrf';
+    const authCode = error?.type ?? error?.code;
+    return authCode === 'login' || authCode === 'csrf';
   }
 }
