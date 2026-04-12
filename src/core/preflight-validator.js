@@ -107,8 +107,10 @@ export async function runPreflight(request, authStatus, availableProviders) {
     }
 
     // === Singularity ===
-    let singularity = request.singularity || null;
-    // Only block if explicitly false, not if undefined
+    const singularityExplicitlyDisabled =
+        Object.prototype.hasOwnProperty.call(request || {}, 'singularity') &&
+        !request.singularity;
+    let singularity = singularityExplicitlyDisabled ? null : (request.singularity || null);
     if (singularity && authStatus[singularity.toLowerCase()] === false) {
         // Check singularity lock to determine fallback behavior
         const candidate = selectBestProvider('singularity', authStatus, availableProviders);
@@ -123,10 +125,9 @@ export async function runPreflight(request, authStatus, availableProviders) {
         } else {
             singularity = candidate || 'gemini';
         }
-    } else if (!singularity) {
+    } else if (!singularity && !singularityExplicitlyDisabled) {
         singularity = selectBestProvider('singularity', authStatus, availableProviders) || 'gemini';
     }
 
     return { providers, mapper, singularity, warnings };
 }
-

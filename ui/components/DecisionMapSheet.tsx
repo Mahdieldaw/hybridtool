@@ -719,7 +719,9 @@ function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       let largestBasinId = null;
       if (basins.length > 0) {
         let best = basins[0];
-        for (const b of basins) if (b.nodeIds.length > best.nodeIds.length) best = b;
+        for (const b of basins) {
+          if ((b.nodeIds?.length ?? 0) > (best.nodeIds?.length ?? 0)) best = b;
+        }
         largestBasinId = best.basinId;
       }
 

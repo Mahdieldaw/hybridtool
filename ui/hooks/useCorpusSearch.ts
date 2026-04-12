@@ -89,7 +89,13 @@ export function useCorpusSearch(aiTurnId: string | null | undefined) {
         return;
       }
       scheduleProbeTimeout();
-      await api.probeQuery(aiTurnId, trimmedQuery, nnParagraphs, enabledProviders as string[]);
+      await api.probeQuery(
+        aiTurnId,
+        trimmedQuery,
+        nextResults,
+        nnParagraphs,
+        enabledProviders as string[],
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
       setResults([]);

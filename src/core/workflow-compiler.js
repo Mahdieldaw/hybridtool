@@ -114,6 +114,10 @@ export class WorkflowCompiler {
         break;
     }
 
+    const singularityExplicitlyDisabled =
+      Object.prototype.hasOwnProperty.call(compileRequest || {}, "singularity") &&
+      !compileRequest.singularity;
+
     // Mapping step, followed by singularity
     if (this._needsMappingStep(compileRequest, resolvedContext)) {
       const mappingStep = this._createMappingStep(compileRequest, resolvedContext, {
@@ -121,16 +125,17 @@ export class WorkflowCompiler {
       });
       steps.push(mappingStep);
 
-      // Singularity step — orchestrates cognitive halt (traversal) or runs through
-      steps.push({
-        stepId: `singularity-${Date.now()}`,
-        type: "singularity",
-        payload: {
-          singularityProvider: compileRequest.singularity || null,
-          originalPrompt: compileRequest.userMessage || resolvedContext?.sourceUserMessage,
-          useThinking: !!compileRequest.useThinking,
-        },
-      });
+      if (!singularityExplicitlyDisabled) {
+        steps.push({
+          stepId: `singularity-${Date.now()}`,
+          type: "singularity",
+          payload: {
+            singularityProvider: compileRequest.singularity || null,
+            originalPrompt: compileRequest.userMessage || resolvedContext?.sourceUserMessage,
+            useThinking: !!compileRequest.useThinking,
+          },
+        });
+      }
     }
 
     const workflowContext = this._buildWorkflowContext(

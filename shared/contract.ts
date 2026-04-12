@@ -26,6 +26,38 @@ export interface ProbeResult {
   };
 }
 
+export interface ProbeCorpusHit {
+  paragraphId: string;
+  similarity: number;
+  normalizedSim: number;
+  modelIndex: number;
+  paragraphIndex: number;
+  text: string;
+}
+
+export interface ProbeSessionResponse {
+  providerId: string;
+  modelIndex: number;
+  modelName: string;
+  text: string;
+  paragraphs: string[];
+  status: "streaming" | "completed" | "error";
+  error?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface ProbeSession {
+  id: string;
+  queryText: string;
+  searchResults: ProbeCorpusHit[];
+  providerIds: string[];
+  responses: Record<string, ProbeSessionResponse>;
+  status: "searching" | "probing" | "complete";
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface SingularityOutput {
   text: string;
   providerId: string;
@@ -1351,6 +1383,8 @@ export interface AiTurn {
 
   /** Per-provider singularity responses */
   singularityResponses?: Record<string, any[]>;
+
+  probeSessions?: ProbeSession[];
 
   pipelineStatus?: any;
 

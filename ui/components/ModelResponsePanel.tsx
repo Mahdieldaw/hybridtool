@@ -3,7 +3,7 @@
 // This makes the scrollbar visible at the top level, not buried in code blocks
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, Suspense } from "react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useAtom, useSetAtom } from "jotai";
 import {
     providerEffectiveStateFamily,
     activeRecomputeStateAtom,
@@ -11,9 +11,16 @@ import {
     turnsMapAtom,
     workflowProgressForTurnFamily,
     providerErrorsForTurnFamily,
+    modelResponsePanelModeFamily,
+    splitPaneFullWidthAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/providers/useProviderActions";
+import { useArtifactResolution } from "../hooks/useArtifactResolution";
+import { usePassageHighlight } from "./reading/usePassageHighlight";
+import { ClaimRibbon } from "./reading/ClaimRibbon";
+import { ModelGrid } from "./reading/ModelGrid";
+import { EditorialDocument } from "./editorial/EditorialDocument";
 import MarkdownDisplay from "./MarkdownDisplay";
 import type { Artifact } from "./ArtifactOverlay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
@@ -22,6 +29,7 @@ import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import clsx from "clsx";
 import { safeLazy } from "../utils/safeLazy";
 import { PipelineErrorBanner } from "./PipelineErrorBanner";
+import type { EditorialAST } from "../../shared/contract";
 
 // Lazy load ArtifactOverlay - only shown when user clicks artifact badge
 const ArtifactOverlay = safeLazy(() => import("./ArtifactOverlay").then(m => ({ default: m.ArtifactOverlay })));
@@ -118,6 +126,23 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
         return { status, text, hasText, isStreaming: isGenerating, isError, artifacts, errorMsg, requiresReauth, retryable, stage };
     }, [latestResponse, shownProviderId, workflowProgress, providerErrors]);
+
+    // Panel mode (Single | All | Reading) — per-turn persistent
+    const [panelMode, setPanelMode] = useAtom(modelResponsePanelModeFamily(shownTurnId));
+    const setSplitFullWidth = useSetAtom(splitPaneFullWidthAtom);
+
+    // Artifact + evidence for All / Reading modes
+    const { artifact, citationSourceOrder } = useArtifactResolution(shownTurnId);
+    const [focusedClaimId, setFocusedClaimId] = useState<string | null>(null);
+    const highlightMap = usePassageHighlight(artifact, focusedClaimId);
+    const editorialAST = artifact?.editorialAST as EditorialAST | undefined;
+
+    // Drive full-width when in All mode; restore on mode change or unmount
+    useEffect(() => {
+        const isAll = panelMode === 'all';
+        setSplitFullWidth(isAll);
+        return () => { if (isAll) setSplitFullWidth(false); };
+    }, [panelMode, setSplitFullWidth]);
 
     // Branch send handler
     const handleBranchSend = useCallback(() => {
@@ -239,11 +264,9 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     const isTargeted = activeTarget?.providerId === shownProviderId;
     const hasHistory = historyCount > 1;
 
-    // Empty/loading state
-    // We show the "Waiting" block if we have no response AND we are not in an error state
-    // OR if we are in a 'thinking' stage and have no text yet.
+    // Empty/loading state — only applies to Single mode (All/Reading have their own empty states)
     // RULE OF HOOKS: Conditional return MUST come AFTER all hook calls.
-    if ((!latestResponse && !derivedState.isError) || (derivedState.stage === 'thinking' && !derivedState.hasText)) {
+    if (panelMode === 'single' && ((!latestResponse && !derivedState.isError) || (derivedState.stage === 'thinking' && !derivedState.hasText))) {
         return (
             <div className="h-full w-full min-w-0 flex flex-col items-center justify-center bg-surface-raised border border-border-subtle rounded-2xl shadow-lg">
                 <div className="flex flex-col items-center gap-3">
@@ -266,10 +289,11 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             style={{ contain: 'inline-size' }}
         >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle bg-surface-raised flex-shrink-0">
-                <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle bg-surface-raised flex-shrink-0 gap-2">
+                {/* Left: provider identity */}
+                <div className="flex items-center gap-2 min-w-0 flex-shrink">
                     <div className={clsx(
-                        "w-2 h-2 rounded-full transition-colors",
+                        "w-2 h-2 rounded-full transition-colors flex-shrink-0",
                         derivedState.isStreaming && "bg-intent-warning animate-pulse",
                         derivedState.status === 'completed' && derivedState.hasText && "bg-intent-success",
                         derivedState.status === 'completed' && !derivedState.hasText && "bg-intent-warning",
@@ -277,14 +301,14 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                     )} />
 
                     {provider?.logoSrc && (
-                        <img src={provider.logoSrc} alt={provider.name} className="w-5 h-5 rounded" />
+                        <img src={provider.logoSrc} alt={provider.name} className="w-5 h-5 rounded flex-shrink-0" />
                     )}
                     <div className="flex flex-col min-w-0">
-                        <h3 className="text-sm font-medium text-text-primary m-0">
+                        <h3 className="text-sm font-medium text-text-primary m-0 truncate">
                             {provider?.name || shownProviderId}
                         </h3>
                         {(turnContext.turnNumber || turnContext.promptPreview) && (
-                            <div className="text-[11px] text-text-muted truncate max-w-[360px]">
+                            <div className="text-[11px] text-text-muted truncate max-w-[200px]">
                                 {turnContext.turnNumber ? `Turn ${turnContext.turnNumber}` : "Turn"}
                                 {turnContext.promptPreview ? ` — ${turnContext.promptPreview}` : ""}
                             </div>
@@ -292,13 +316,40 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                     </div>
 
                     {isBranching && (
-                        <span className="text-xs bg-brand-500 text-white px-2 py-0.5 rounded-full animate-pulse">
+                        <span className="text-xs bg-brand-500 text-white px-2 py-0.5 rounded-full animate-pulse flex-shrink-0">
                             Branching...
                         </span>
                     )}
                 </div>
 
-                <div className="flex items-center gap-1">
+                {/* Center: mode switcher */}
+                <div className="flex items-center gap-0.5 bg-surface p-0.5 rounded-lg flex-shrink-0">
+                    {(['single', 'all', 'reading'] as const).map((mode) => {
+                        const disabled = mode === 'reading' && !editorialAST;
+                        const labels: Record<typeof mode, string> = { single: 'Single', all: 'All', reading: 'Reading' };
+                        return (
+                            <button
+                                key={mode}
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => setPanelMode(mode)}
+                                className={clsx(
+                                    "px-2.5 py-1 text-xs rounded-md transition-colors",
+                                    panelMode === mode
+                                        ? "bg-surface-raised text-text-primary shadow-sm"
+                                        : disabled
+                                            ? "text-text-muted/40 cursor-not-allowed"
+                                            : "text-text-muted hover:text-text-primary"
+                                )}
+                            >
+                                {labels[mode]}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {/* Right: action buttons */}
+                <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                         onClick={() => handleToggleTarget(shownProviderId)}
                         className={clsx(
@@ -366,155 +417,179 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                 </div>
             </div>
 
-            {/* ============================================
-                CONTENT AREA - CRITICAL FIX
-                ============================================
-                
-                KEY CHANGE: overflow-x-auto (not overflow-x-hidden)
-                
-                WHY THIS WORKS:
-                - Horizontal scrollbar appears at THIS level
-                - Users can immediately see when content is cut off
-                - No hunting through nested code blocks
-                - PreBlock no longer needs its own scrollbar
-                
-                contain: inline-size still prevents layout expansion
-                ============================================ */}
-            <div
-                className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-auto custom-scrollbar relative z-10"
-                style={{ paddingBottom: 24 }}
-            >
-                <div className="p-4 w-fit min-w-full">
-                    {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && (
-                        <div className="mb-4">
-                            <PipelineErrorBanner
-                                type="batch"
-                                failedProviderId={shownProviderId}
-                                onRetry={(pid) => handleRetryProvider(pid)}
-                                errorMessage={
-                                    derivedState.isError
-                                        ? derivedState.errorMsg || "Error occurred"
-                                        : "No response received."
-                                }
-                                requiresReauth={derivedState.requiresReauth}
-                                retryable={derivedState.retryable}
-                                compact
-                            />
+            {/* ── All mode: claim ribbon + model grid ── */}
+            {panelMode === 'all' && (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    <div className="border-b border-border-subtle flex-shrink-0">
+                        <ClaimRibbon
+                            artifact={artifact}
+                            focusedClaimId={focusedClaimId}
+                            onFocusClaim={setFocusedClaimId}
+                        />
+                    </div>
+                    <ModelGrid
+                        artifact={artifact}
+                        citationSourceOrder={citationSourceOrder}
+                        focusedClaimId={focusedClaimId}
+                        highlightMap={highlightMap}
+                    />
+                </div>
+            )}
+
+            {/* ── Reading mode: editorial document ── */}
+            {panelMode === 'reading' && (
+                editorialAST ? (
+                    <EditorialDocument
+                        ast={editorialAST}
+                        artifact={artifact}
+                        citationSourceOrder={citationSourceOrder}
+                        onCollapse={() => setPanelMode('all')}
+                        onClose={onClose}
+                    />
+                ) : (
+                    <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
+                        No editorial document available for this turn.
+                    </div>
+                )
+            )}
+
+            {/* ── Single mode: provider response ── */}
+            {panelMode === 'single' && (
+                <div
+                    className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-auto custom-scrollbar relative z-10"
+                    style={{ paddingBottom: 24 }}
+                >
+                    <div className="p-4 w-fit min-w-full">
+                        {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && (
+                            <div className="mb-4">
+                                <PipelineErrorBanner
+                                    type="batch"
+                                    failedProviderId={shownProviderId}
+                                    onRetry={(pid) => handleRetryProvider(pid)}
+                                    errorMessage={
+                                        derivedState.isError
+                                            ? derivedState.errorMsg || "Error occurred"
+                                            : "No response received."
+                                    }
+                                    requiresReauth={derivedState.requiresReauth}
+                                    retryable={derivedState.retryable}
+                                    compact
+                                />
+                            </div>
+                        )}
+                        <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <MarkdownDisplay content={displayContent} />
+                            {derivedState.isStreaming && <span className="streaming-dots" />}
                         </div>
-                    )}
-                    {/* Main response - Remove redundant overflow props */}
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <MarkdownDisplay content={displayContent} />
-                        {derivedState.isStreaming && <span className="streaming-dots" />}
+
+                        {/* Artifact badges */}
+                        {derivedState.artifacts.length > 0 && (
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                {derivedState.artifacts.map((art, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => setSelectedArtifact(art)}
+                                        className="bg-gradient-to-br from-brand-500/20 to-brand-600/20 border border-brand-500/30 rounded-lg px-3 py-2 text-sm flex items-center gap-1.5 hover:bg-brand-500/30 hover:-translate-y-px transition-all cursor-pointer"
+                                    >
+                                        📄 {art.title}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* History Stack */}
+                        {hasHistory && (
+                            <div className="mt-6 pt-4 border-t border-border-subtle">
+                                <button
+                                    onClick={() => setShowHistory(!showHistory)}
+                                    className="w-full flex items-center justify-between text-xs text-text-muted hover:text-text-primary transition-colors py-1"
+                                >
+                                    <span>{historyCount - 1} previous version(s)</span>
+                                    {showHistory ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronUpIcon className="w-3 h-3" />}
+                                </button>
+
+                                {showHistory && (
+                                    <div className="mt-3 space-y-3 animate-in slide-in-from-top-2 duration-200">
+                                        {allResponses.slice(0, -1).reverse().map((resp, idx) => {
+                                            const histText = resp.text || '';
+                                            const histArtifacts = (resp.artifacts || []) as Artifact[];
+                                            const hasContent = histText || histArtifacts.length > 0;
+
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    className="bg-surface p-3 rounded-lg border border-border-subtle opacity-75 hover:opacity-100 transition-opacity"
+                                                >
+                                                    <div className="text-xs text-text-muted mb-2 flex justify-between">
+                                                        <span>Attempt {historyCount - 1 - idx}</span>
+                                                        <span>{new Date(resp.createdAt).toLocaleTimeString()}</span>
+                                                    </div>
+                                                    <div className="prose prose-sm max-w-none dark:prose-invert text-xs line-clamp-4 hover:line-clamp-none transition-all">
+                                                        {hasContent ? (
+                                                            <>
+                                                                <MarkdownDisplay content={histText || '*Artifact only*'} />
+                                                                {histArtifacts.length > 0 && (
+                                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                                        {histArtifacts.map((art, i) => (
+                                                                            <button
+                                                                                key={i}
+                                                                                onClick={() => setSelectedArtifact(art)}
+                                                                                className="text-xs bg-brand-500/10 text-brand-500 px-1.5 py-0.5 rounded border border-brand-500/20 cursor-pointer hover:bg-brand-500/20 transition-colors"
+                                                                            >
+                                                                                📄 {art.title}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <span className="text-text-muted italic">Empty response</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
-                    {/* Artifact badges */}
-                    {derivedState.artifacts.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                            {derivedState.artifacts.map((artifact, idx) => (
+                    {/* Branch Input */}
+                    {isTargeted && (
+                        <div className="p-3 border-t border-brand-500/30 bg-brand-500/5 flex-shrink-0 animate-in slide-in-from-bottom-2 duration-200">
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={branchInput}
+                                    onChange={(e) => setBranchInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleBranchSend();
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            handleToggleTarget(shownProviderId);
+                                        }
+                                    }}
+                                    placeholder={`Continue with ${provider?.name || shownProviderId}...`}
+                                    className="flex-1 bg-surface border border-border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                                    autoFocus
+                                />
                                 <button
-                                    key={idx}
-                                    onClick={() => setSelectedArtifact(artifact)}
-                                    className="bg-gradient-to-br from-brand-500/20 to-brand-600/20 border border-brand-500/30 rounded-lg px-3 py-2 text-sm flex items-center gap-1.5 hover:bg-brand-500/30 hover:-translate-y-px transition-all cursor-pointer"
+                                    onClick={handleBranchSend}
+                                    disabled={!branchInput.trim() || isBranching}
+                                    className="bg-brand-500 text-white px-4 py-2 rounded text-sm disabled:opacity-50 hover:bg-brand-600 transition-colors"
                                 >
-                                    📄 {artifact.title}
+                                    Send
                                 </button>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* History Stack */}
-                    {hasHistory && (
-                        <div className="mt-6 pt-4 border-t border-border-subtle">
-                            <button
-                                onClick={() => setShowHistory(!showHistory)}
-                                className="w-full flex items-center justify-between text-xs text-text-muted hover:text-text-primary transition-colors py-1"
-                            >
-                                <span>{historyCount - 1} previous version(s)</span>
-                                {showHistory ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronUpIcon className="w-3 h-3" />}
-                            </button>
-
-                            {showHistory && (
-                                <div className="mt-3 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                                    {allResponses.slice(0, -1).reverse().map((resp, idx) => {
-                                        const histText = resp.text || '';
-                                        const histArtifacts = (resp.artifacts || []) as Artifact[];
-                                        const hasContent = histText || histArtifacts.length > 0;
-
-                                        return (
-                                            <div
-                                                key={idx}
-                                                className="bg-surface p-3 rounded-lg border border-border-subtle opacity-75 hover:opacity-100 transition-opacity"
-                                            >
-                                                <div className="text-xs text-text-muted mb-2 flex justify-between">
-                                                    <span>Attempt {historyCount - 1 - idx}</span>
-                                                    <span>{new Date(resp.createdAt).toLocaleTimeString()}</span>
-                                                </div>
-                                                <div className="prose prose-sm max-w-none dark:prose-invert text-xs line-clamp-4 hover:line-clamp-none transition-all">
-                                                    {hasContent ? (
-                                                        <>
-                                                            <MarkdownDisplay content={histText || '*Artifact only*'} />
-                                                            {histArtifacts.length > 0 && (
-                                                                <div className="mt-2 flex flex-wrap gap-1">
-                                                                    {histArtifacts.map((art, i) => (
-                                                                        <button
-                                                                            key={i}
-                                                                            onClick={() => setSelectedArtifact(art)}
-                                                                            className="text-xs bg-brand-500/10 text-brand-500 px-1.5 py-0.5 rounded border border-brand-500/20 cursor-pointer hover:bg-brand-500/20 transition-colors"
-                                                                        >
-                                                                            📄 {art.title}
-                                                                        </button>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    ) : (
-                                                        <span className="text-text-muted italic">Empty response</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
+                            </div>
+                            <div className="text-xs text-text-muted mt-1.5 px-1">Enter to send • ESC to cancel</div>
                         </div>
                     )}
                 </div>
-
-                {/* Branch Input */}
-                {isTargeted && (
-                    <div className="p-3 border-t border-brand-500/30 bg-brand-500/5 flex-shrink-0 animate-in slide-in-from-bottom-2 duration-200">
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={branchInput}
-                                onChange={(e) => setBranchInput(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleBranchSend();
-                                    }
-                                    if (e.key === 'Escape') {
-                                        e.preventDefault();
-                                        handleToggleTarget(shownProviderId);
-                                    }
-                                }}
-                                placeholder={`Continue with ${provider?.name || shownProviderId}...`}
-                                className="flex-1 bg-surface border border-border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-brand-500 transition-colors"
-                                autoFocus
-                            />
-                            <button
-                                onClick={handleBranchSend}
-                                disabled={!branchInput.trim() || isBranching}
-                                className="bg-brand-500 text-white px-4 py-2 rounded text-sm disabled:opacity-50 hover:bg-brand-600 transition-colors"
-                            >
-                                Send
-                            </button>
-                        </div>
-                        <div className="text-xs text-text-muted mt-1.5 px-1">Enter to send • ESC to cancel</div>
-                    </div>
-                )}
-            </div>
+            )}
 
             {/* Artifact Overlay */}
             {selectedArtifact && (

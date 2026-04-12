@@ -10,7 +10,7 @@ import type {
   AppStep,
   HistorySessionSummary,
 } from "../types";
-import type { AiTurn, ProviderResponse } from "../../shared/contract";
+import type { AiTurn, ProbeSession, ProviderResponse } from "../../shared/contract";
 
 const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> => {
   const phaseResponses = aiTurn.batch?.responses;
@@ -123,6 +123,35 @@ export const isContinuationModeAtom = atom((get) => {
   const sessionId = get(currentSessionIdAtom);
   const turnIds = get(turnIdsAtom);
   return sessionId !== null && turnIds.length > 0;
+});
+
+export const explorationInputModeOverrideAtom = atom<"probe" | "new" | null>(null);
+export const dismissedExplorationTurnIdAtom = atom<string | null>(null);
+
+export const latestCompletedAiTurnIdAtom = atom((get) => {
+  const turnIds = get(turnIdsAtom);
+  const turnsMap = get(turnsMapAtom);
+
+  for (let i = turnIds.length - 1; i >= 0; i -= 1) {
+    const turn = turnsMap.get(turnIds[i]);
+    if (!turn || turn.type !== "ai") continue;
+    if (turn.pipelineStatus === "in_progress" || turn.pipelineStatus === "error") {
+      return null;
+    }
+    return turn.id;
+  }
+
+  return null;
+});
+
+export const activeExplorationTurnIdAtom = atom((get) => {
+  const override = get(explorationInputModeOverrideAtom);
+  if (override === "new") return null;
+  if (get(isLoadingAtom)) return null;
+  const latestTurnId = get(latestCompletedAiTurnIdAtom);
+  if (!latestTurnId) return null;
+  if (get(dismissedExplorationTurnIdAtom) === latestTurnId) return null;
+  return latestTurnId;
 });
 
 // -----------------------------
@@ -345,28 +374,22 @@ export const toastAtom = atom<{
 // -----------------------------
 
 export const activeSplitPanelAtom = atom<{ turnId: string; providerId: string } | null>(null);
+export const splitPaneRatioAtom = atomWithStorage<number>("htos_split_pane_ratio", 55);
+export const splitPaneFullWidthAtom = atom(false);
+export const modelResponsePanelModeFamily = atomFamily(
+  (_turnId: string) => atom<"single" | "all" | "reading">("single"),
+  (a, b) => a === b,
+);
+export const activeProbeDraftFamily = atomFamily(
+  (_turnId: string) => atom<ProbeSession | null>(null),
+  (a, b) => a === b,
+);
 
 // Derived atom for performance: ChatView subscribes to this boolean, not the full object
 export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null);
 
 
 export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
-
-
-/**
- * SCAFFOLDING — temporary atom for editorial surface development.
- * Will be reconciled when editorial surface promotes to primary path.
- */
-export const __scaffold__editorialSurfaceOpenAtom = atom<{ turnId: string } | null>(null);
-
-/**
- * SCAFFOLDING — per-turn editorial surface state.
- * Tracks columns → preview → expanded transitions.
- */
-export const __scaffold__editorialStateFamily = atomFamily(
-  (_turnId: string) => atom<'columns' | 'preview' | 'expanded'>('columns'),
-  (a: string, b: string) => a === b,
-);
 
 
 // =============================================================================

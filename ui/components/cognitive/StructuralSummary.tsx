@@ -180,6 +180,7 @@ function buildTensionLine(analysis: StructuralAnalysis): SummaryLine | null {
                 color: "text-orange-400",
             };
         }
+        return null; // conflict is already the headline
     }
 
     // For constrained, the shape line already shows the tradeoff — show conflict if any
@@ -195,6 +196,7 @@ function buildTensionLine(analysis: StructuralAnalysis): SummaryLine | null {
                 color: "text-amber-400",
             };
         }
+        return null; // tradeoff is already the headline
     }
 
     // For convergent/parallel/sparse — show top conflict or tradeoff

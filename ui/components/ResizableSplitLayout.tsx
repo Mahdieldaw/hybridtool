@@ -16,6 +16,7 @@ interface ResizableSplitLayoutProps {
     dividerContent?: React.ReactNode;
     className?: string;
     style?: React.CSSProperties;
+    rightPaneFullWidth?: boolean;
 }
 
 export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
@@ -28,7 +29,8 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     maxRatio = 80,
     dividerContent,
     className,
-    style
+    style,
+    rightPaneFullWidth = false,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 55);
@@ -38,14 +40,15 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     const ratio = controlledRatio ?? internalRatio;
 
     // Calculate grid columns based on split state
-    // When closed: single column (100%)
-    // When open: left% + divider(6px) + right%
+    const dividerWidth = rightPaneFullWidth ? 0 : 6;
     const gridTemplateColumns = isSplitOpen
-        ? `${ratio}fr 6px ${100 - ratio}fr`
+        ? rightPaneFullWidth
+            ? `0fr 0px 1fr`
+            : `${ratio}fr ${dividerWidth}px ${100 - ratio}fr`
         : '1fr';
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
-        if (!isSplitOpen) return;
+        if (!isSplitOpen || rightPaneFullWidth) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(true);
@@ -54,7 +57,7 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
 
         // Capture pointer to handle moves outside the divider
         (e.target as Element).setPointerCapture(e.pointerId);
-    }, [isSplitOpen]);
+    }, [isSplitOpen, rightPaneFullWidth]);
 
     const handlePointerMove = useCallback((e: React.PointerEvent) => {
         if (!isDragging || !containerRef.current) return;
@@ -123,6 +126,7 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
                         className="h-full bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative select-none touch-none"
                         style={{
                             gridColumn: '2',
+                            opacity: rightPaneFullWidth ? 0 : 1,
                         }}
                         onPointerDown={handlePointerDown}
                         onPointerMove={handlePointerMove}

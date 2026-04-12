@@ -35,6 +35,9 @@ export function parseSessionTurns(fullSession: any): {
     const providers = round.providers || {};
     const mappingRaw = (round as any).mappingResponses || {};
     const singularityRaw = (round as any).singularityResponses || {};
+    const probeSessions = Array.isArray((round as any).probeSessions)
+      ? (round as any).probeSessions
+      : [];
 
     const hasAnyResponseData =
       Object.keys(providers).length > 0 ||
@@ -43,6 +46,7 @@ export function parseSessionTurns(fullSession: any): {
     const hasAnyCognitiveData =
       !!round.mapping?.artifact ||
       !!round.singularityOutput ||
+      probeSessions.length > 0 ||
       typeof round.pipelineStatus === "string";
 
     if (hasAnyResponseData || hasAnyCognitiveData) {
@@ -145,6 +149,7 @@ export function parseSessionTurns(fullSession: any): {
         ...(round.batch ? { batch: round.batch } : batchPhaseFromLegacy ? { batch: batchPhaseFromLegacy } : {}),
         // Tier 3: mapping.artifact is ephemeral — not in history payload
         ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
+        ...(probeSessions.length > 0 ? { probeSessions } : {}),
         ...(round.meta ? { meta: round.meta } : {}),
         pipelineStatus: round.pipelineStatus || undefined,
       };

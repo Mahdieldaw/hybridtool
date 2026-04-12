@@ -163,7 +163,7 @@ export async function computeDerivedFields({
   try {
     const { identifyPeriphery } = await import('../../geometry/interpretation/periphery');
     const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
-    const preSemanticRegions = geoRecord?.meta?.preSemanticInterpretation?.regions || result.preSemantic?.regions;
+    const preSemanticRegions = geoRecord?.meta?.preSemanticInterpretation?.regions || preSemantic?.regions;
     periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
 
     const { computeClaimDensity } = await import('../claimDensity');

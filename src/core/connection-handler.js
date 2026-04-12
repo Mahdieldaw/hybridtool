@@ -343,10 +343,48 @@ export class ConnectionHandler {
     ]));
   }
 
-  _postProbeSessionStart(aiTurnId, providerIds, indices) {
+  _buildProbeSessionRecord({
+    probeSessionId,
+    queryText,
+    searchResults,
+    providerIds,
+    indices,
+    now,
+  }) {
+    const responses = Object.fromEntries(
+      (providerIds || []).map((providerId) => [
+        providerId,
+        {
+          providerId,
+          modelIndex: indices?.get(providerId) || 0,
+          modelName: this._providerDisplayName(providerId),
+          text: '',
+          paragraphs: [],
+          status: 'streaming',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]),
+    );
+    return {
+      id: probeSessionId,
+      queryText: String(queryText || '').trim(),
+      searchResults: Array.isArray(searchResults) ? searchResults : [],
+      providerIds: Array.isArray(providerIds) ? providerIds : [],
+      responses,
+      status: providerIds?.length ? 'probing' : 'complete',
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  _postProbeSessionStart(aiTurnId, probeSessionId, queryText, searchResults, providerIds, indices) {
     this.port?.postMessage({
       type: PROBE_SESSION_START,
       aiTurnId,
+      probeSessionId,
+      queryText,
+      searchResults: Array.isArray(searchResults) ? searchResults : [],
       probeCount: Array.isArray(providerIds) ? providerIds.length : 0,
       providerIds: Array.isArray(providerIds) ? providerIds : [],
       modelIndices: Array.isArray(providerIds)
@@ -356,6 +394,31 @@ export class ConnectionHandler {
         }))
         : [],
     });
+  }
+
+  async _upsertProbeSessionOnTurn(aiTurnId, probeSessionId, updater) {
+    const adapter = this.services?.sessionManager?.adapter;
+    if (!adapter) return null;
+    const turn = await adapter.get('turns', aiTurnId);
+    if (!turn) return null;
+    const probeSessions = Array.isArray(turn.probeSessions)
+      ? [...turn.probeSessions]
+      : [];
+    const existingIndex = probeSessions.findIndex((session) => session?.id === probeSessionId);
+    const nextValue = updater(existingIndex >= 0 ? probeSessions[existingIndex] : null, turn);
+    if (!nextValue) return turn;
+    if (existingIndex >= 0) {
+      probeSessions[existingIndex] = nextValue;
+    } else {
+      probeSessions.push(nextValue);
+    }
+    const updatedTurn = {
+      ...turn,
+      probeSessions,
+      updatedAt: nextValue.updatedAt || Date.now(),
+    };
+    await adapter.put('turns', updatedTurn);
+    return updatedTurn;
   }
 
   async _enqueueProbePersistence(aiTurnId, task) {
@@ -375,6 +438,12 @@ export class ConnectionHandler {
 
   async _nextProbeModelIndices(aiTurnId, providerIds) {
     const adapter = this.services?.sessionManager?.adapter;
+    if (!adapter) {
+      const indices = new Map();
+      let cursor = 1;
+      for (const pid of providerIds) indices.set(pid, cursor++);
+      return { indices, turn: null, responses: [] };
+    }
     const turn = await adapter.get('turns', aiTurnId);
     const responses = await adapter.getResponsesByTurnId(aiTurnId);
     const used = new Set();
@@ -407,6 +476,7 @@ export class ConnectionHandler {
 
   async _persistProbeResult({
     aiTurnId,
+    probeSessionId,
     providerId,
     modelIndex,
     text,
@@ -414,6 +484,7 @@ export class ConnectionHandler {
     now,
   }) {
     const adapter = this.services?.sessionManager?.adapter;
+    if (!adapter) return;
     const turn = await adapter.get('turns', aiTurnId);
     if (!turn) return;
 
@@ -488,13 +559,59 @@ export class ConnectionHandler {
       updatedAt: now,
     });
 
+    await this._upsertProbeSessionOnTurn(aiTurnId, probeSessionId, (existingSession) => {
+      const baseSession = existingSession || {
+        id: probeSessionId,
+        queryText: '',
+        searchResults: [],
+        providerIds: [providerId],
+        responses: {},
+        status: 'probing',
+        createdAt: now,
+        updatedAt: now,
+      };
+      const nextResponses = {
+        ...(baseSession.responses || {}),
+        [providerId]: {
+          providerId,
+          modelIndex,
+          modelName: this._providerDisplayName(providerId),
+          text: text || '',
+          paragraphs: paragraphTexts,
+          status: 'completed',
+          createdAt:
+            baseSession.responses?.[providerId]?.createdAt ||
+            baseSession.createdAt ||
+            now,
+          updatedAt: now,
+        },
+      };
+      const providerIds = Array.from(
+        new Set([...(baseSession.providerIds || []), providerId]),
+      );
+      const responseStatuses = Object.values(nextResponses).map((response) => response?.status);
+      const isComplete = providerIds.length > 0
+        && providerIds.every((pid) => {
+          const status = nextResponses[pid]?.status;
+          return status === 'completed' || status === 'error';
+        });
+      return {
+        ...baseSession,
+        providerIds,
+        responses: nextResponses,
+        status: isComplete ? 'complete' : 'probing',
+        updatedAt: now,
+      };
+    });
+
+    const refreshedTurn = await adapter.get('turns', aiTurnId);
     const updatedTurn = {
-      ...turn,
+      ...(refreshedTurn || turn),
       updatedAt: now,
       mapping: {
-        ...(turn.mapping || {}),
+        ...((refreshedTurn || turn).mapping || {}),
         artifact: {
-          ...(turn.mapping?.artifact || {}),
+          ...((refreshedTurn || turn).mapping?.artifact || {}),
           citationSourceOrder,
         },
       },
@@ -503,7 +620,14 @@ export class ConnectionHandler {
   }
 
   async _handleProbeQuery(message) {
-    const { aiTurnId, queryText, nnParagraphs, enabledProviders } = message?.payload || {};
+    const {
+      aiTurnId,
+      queryText,
+      searchResults,
+      nnParagraphs,
+      enabledProviders,
+      probeSessionId: incomingProbeSessionId,
+    } = message?.payload || {};
     if (!aiTurnId || !String(queryText || '').trim()) return;
 
     const orchestrator = this.services?.orchestrator;
@@ -515,14 +639,50 @@ export class ConnectionHandler {
       ? Array.from(new Set(enabledProviders.map((providerId) => String(providerId || '').toLowerCase()).filter(Boolean)))
       : [];
     const probeProviders = requestedProviders.filter((pid) => providerRegistry.isAvailable(pid));
+    const probeSessionId = incomingProbeSessionId || `probe-${aiTurnId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const normalizedSearchResults = Array.isArray(searchResults)
+      ? searchResults.map((result) => ({
+        paragraphId: result?.paragraphId || '',
+        similarity: Number(result?.similarity || 0),
+        normalizedSim: Number(result?.normalizedSim || 0),
+        modelIndex: Number(result?.modelIndex || 0),
+        paragraphIndex: Number(result?.paragraphIndex || 0),
+        text: String(result?.text || ''),
+      }))
+      : [];
+    const sessionStartedAt = Date.now();
     if (probeProviders.length === 0) {
-      this._postProbeSessionStart(aiTurnId, [], new Map());
+      await this._enqueueProbePersistence(aiTurnId, () =>
+        this._upsertProbeSessionOnTurn(aiTurnId, probeSessionId, () =>
+          this._buildProbeSessionRecord({
+            probeSessionId,
+            queryText,
+            searchResults: normalizedSearchResults,
+            providerIds: [],
+            indices: new Map(),
+            now: sessionStartedAt,
+          }),
+        ),
+      );
+      this._postProbeSessionStart(aiTurnId, probeSessionId, queryText, normalizedSearchResults, [], new Map());
       return;
     }
 
     const { indices } = await this._nextProbeModelIndices(aiTurnId, probeProviders);
     const providerContexts = this._buildFreshProbeContexts(probeProviders);
-    this._postProbeSessionStart(aiTurnId, probeProviders, indices);
+    await this._enqueueProbePersistence(aiTurnId, () =>
+      this._upsertProbeSessionOnTurn(aiTurnId, probeSessionId, () =>
+        this._buildProbeSessionRecord({
+          probeSessionId,
+          queryText,
+          searchResults: normalizedSearchResults,
+          providerIds: probeProviders,
+          indices,
+          now: sessionStartedAt,
+        }),
+      ),
+    );
+    this._postProbeSessionStart(aiTurnId, probeSessionId, queryText, normalizedSearchResults, probeProviders, indices);
 
     const prompt = this._buildProbePrompt(queryText, nnParagraphs);
     const pending = new Set(probeProviders);
@@ -539,16 +699,18 @@ export class ConnectionHandler {
           // Compute delta: if the new text starts with what we already sent,
           // it's a full-replacement provider (like Qwen) — only send the new suffix.
           const previousText = probeAccumulated.get(providerId) || '';
-          let delta = rawText;
-          if (rawText.length > previousText.length && rawText.startsWith(previousText)) {
-            // Full-replacement: extract only the new portion
-            delta = rawText.slice(previousText.length);
-          }
-          probeAccumulated.set(providerId, rawText.length > previousText.length ? rawText : previousText + rawText);
+          // Detect full-replacement chunks (like Qwen) vs incremental chunks.
+          // Full-replacement: new text contains all previously sent text as a prefix.
+          // Incremental: new text is just the delta to append.
+          const isFullReplacement = rawText.length >= previousText.length && rawText.startsWith(previousText);
+          const newAccumulated = isFullReplacement ? rawText : previousText + rawText;
+          probeAccumulated.set(providerId, newAccumulated);
+          const delta = newAccumulated.length > previousText.length ? newAccumulated.slice(previousText.length) : '';
           if (!delta) return; // nothing new
           this.port?.postMessage({
             type: 'PROBE_CHUNK',
             aiTurnId,
+            probeSessionId,
             modelIndex,
             modelName: this._providerDisplayName(providerId),
             providerId,
@@ -574,6 +736,7 @@ export class ConnectionHandler {
               const now = Date.now();
               await this._enqueueProbePersistence(aiTurnId, () => this._persistProbeResult({
                 aiTurnId,
+                probeSessionId,
                 providerId,
                 modelIndex,
                 text,
@@ -584,6 +747,7 @@ export class ConnectionHandler {
               this.port?.postMessage({
                 type: 'PROBE_COMPLETE',
                 aiTurnId,
+                probeSessionId,
                 result: {
                   modelIndex,
                   modelName: this._providerDisplayName(providerId),
@@ -602,6 +766,7 @@ export class ConnectionHandler {
               this.port?.postMessage({
                 type: 'PROBE_COMPLETE',
                 aiTurnId,
+                probeSessionId,
                 result: {
                   modelIndex,
                   modelName: this._providerDisplayName(providerId),
@@ -1078,6 +1243,12 @@ export class ConnectionHandler {
       } catch (e) {
         // Port may already be dead
       }
+    }
+
+    // Drop any pending probe persistence queues so their promise chains
+    // don't keep references to the stale services/adapter alive.
+    if (this._probePersistenceQueues) {
+      this._probePersistenceQueues.clear();
     }
 
     // Null out references for GC

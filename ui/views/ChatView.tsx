@@ -9,7 +9,8 @@ import {
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
   chatInputHeightAtom,
-  __scaffold__editorialSurfaceOpenAtom,
+  splitPaneRatioAtom,
+  splitPaneFullWidthAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -31,10 +32,6 @@ const DecisionMapSheet = safeLazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
 );
 
-const EditorialSurface = safeLazy(() =>
-  import("../components/editorial/EditorialSurface").then(m => ({ default: m.EditorialSurface }))
-);
-
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
@@ -49,8 +46,8 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-  const isEditorialOpen = useAtomValue(__scaffold__editorialSurfaceOpenAtom);
-  const setEditorialOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
+  const [splitPaneRatio, setSplitPaneRatio] = useAtom(splitPaneRatioAtom);
+  const isSplitFullWidth = useAtomValue(splitPaneFullWidthAtom);
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -59,9 +56,7 @@ export default function ChatView() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isEditorialOpen) {
-          setEditorialOpen(null);
-        } else if (isDecisionMapOpen) {
+        if (isDecisionMapOpen) {
           setDecisionMapOpen(null);
         } else if (isSplitOpen) {
           setActiveSplitPanel(null);
@@ -70,7 +65,7 @@ export default function ChatView() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isEditorialOpen, isDecisionMapOpen, isSplitOpen, setEditorialOpen, setDecisionMapOpen, setActiveSplitPanel]);
+  }, [isDecisionMapOpen, isSplitOpen, setDecisionMapOpen, setActiveSplitPanel]);
 
   const itemContent = useMemo(
     () => (_index: number, turnId: string) => {
@@ -209,17 +204,6 @@ export default function ChatView() {
     };
   }, [turnIds, currentSessionId, selectChat, setActiveSplitPanel]);
 
-  // Editorial surface gets a fully isolated view — hide everything else
-  if (isEditorialOpen) {
-    return (
-      <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
-        <Suspense fallback={null}>
-          <EditorialSurface />
-        </Suspense>
-      </div>
-    );
-  }
-
   return (
     <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
       {showWelcome ? (
@@ -229,6 +213,9 @@ export default function ChatView() {
           className="flex-1 h-full"
           style={{ paddingBottom: (chatInputHeight || 80) + 12 }}
           isSplitOpen={!!isSplitOpen}
+          ratio={splitPaneRatio}
+          onRatioChange={setSplitPaneRatio}
+          rightPaneFullWidth={isSplitFullWidth}
           leftPane={
             <Virtuoso
               className="h-full"
@@ -248,7 +235,7 @@ export default function ChatView() {
             />
           }
           rightPane={<SplitPaneRightPanel />}
-          dividerContent={
+          dividerContent={isSplitFullWidth ? null : (
             <div className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2" style={{ cursor: 'default' }}>
               <Suspense fallback={
                 <div className="flex flex-col items-center gap-3 py-4 w-full">
@@ -260,7 +247,7 @@ export default function ChatView() {
                 <CouncilOrbsVertical />
               </Suspense>
             </div>
-          }
+          )}
         />
       )}
 

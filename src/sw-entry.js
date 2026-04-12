@@ -949,9 +949,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             const dims = record.meta.dimensions;
             const unpacked = unpackEmbeddingMap(record.paragraphEmbeddings, record.meta.paragraphIndex, dims);
             for (const [pid, vec] of unpacked.entries()) {
-              paragraphEmbeddings.set(pid, vec);
               if (paragraphMetaSeen.has(pid)) continue;
               paragraphMetaSeen.add(pid);
+              paragraphEmbeddings.set(pid, vec);
               const p = paraLookup.get(pid);
               paragraphMeta.push({
                 id: pid,
@@ -1151,6 +1151,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               // UI rebuilds artifacts on demand via BUILD_ARTIFACT / REGENERATE_EMBEDDINGS.
               ...(primaryAi?.singularity ? { singularity: primaryAi.singularity } : {}),
               ...(primaryAi?.meta ? { meta: primaryAi.meta } : {}),
+              ...(Array.isArray(primaryAi?.probeSessions) && primaryAi.probeSessions.length > 0
+                ? { probeSessions: primaryAi.probeSessions }
+                : {}),
               ...(Object.keys(providers).length > 0 ? { providers } : {}),
               ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
               ...(Object.keys(singularityResponses).length > 0 ? { singularityResponses } : {}),

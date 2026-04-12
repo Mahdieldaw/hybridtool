@@ -165,7 +165,7 @@ export function classifyError(error: unknown): ProviderError {
     if (status === 403) {
       return {
         type: "unknown",
-        message: "Provider rejected the request. Retrying may help.",
+        message: "Provider rejected the request (forbidden).",
         retryable: false,
       };
     }

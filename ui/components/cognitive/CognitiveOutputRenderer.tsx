@@ -1,17 +1,19 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { AiTurn } from '../../../shared/contract';
+import type { EditorialAST } from '../../../shared/contract';
 import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, __scaffold__editorialSurfaceOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, mappingProviderAtom, modelResponsePanelModeFamily, singularityProviderAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
 import { useProviderArtifact } from '../../hooks/useProviderArtifact';
+import { EditorialPreview } from '../editorial/EditorialPreview';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
@@ -40,7 +42,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         }
     }, [mappingArtifact, effectivePid, aiTurn.pipelineStatus, rebuildArtifact]);
 
-    // Helper for recomputing singularity
+    // Helper for recomputing singularity (already has output — true recompute)
     const triggerAndSwitch = async (options: any = {}) => {
         if (options.providerId) {
             singularityState.setPinnedProvider(options.providerId);
@@ -48,12 +50,20 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         await runSingularity(aiTurn.id, { ...options, isRecompute: true, sourceTurnId: aiTurn.id });
     };
 
+    // Helper for deferred first-run synthesis (no existing output)
+    const defaultSingularityProvider = useAtomValue(singularityProviderAtom);
+    const handleSynthesize = useCallback(async (providerId?: string) => {
+        const pid = providerId || defaultSingularityProvider || LLM_PROVIDERS_CONFIG[0]?.id;
+        if (pid) singularityState.setPinnedProvider(String(pid));
+        await runSingularity(aiTurn.id, { providerId: pid ? String(pid) : undefined, sourceTurnId: aiTurn.id });
+    }, [runSingularity, aiTurn.id, defaultSingularityProvider, singularityState]);
+
     const selectedModels = useAtomValue(selectedModelsAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
     const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
-    const setEditorialSurfaceOpen = useSetAtom(__scaffold__editorialSurfaceOpenAtom);
+    const setPanelMode = useSetAtom(modelResponsePanelModeFamily(aiTurn.id));
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
     }, [singularityState.output]);
@@ -220,16 +230,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     >
                         <span>Debug</span>
                     </button>
-                    {mappingArtifact?.editorialAST && (
-                        <button
-                            type="button"
-                            onClick={() => setEditorialSurfaceOpen({ turnId: aiTurn.id })}
-                            className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
-                            aria-label="Open editorial reading surface"
-                        >
-                            <span>Editorial</span>
-                        </button>
-                    )}
                 </div>
 
                 {/* Council Orbs */}
@@ -305,29 +305,15 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     copyAllText={copyAllText}
                 />
             ) : (!isRoundActive && isPipelineComplete && mappingArtifact) ? (
-                <div className="animate-in fade-in duration-500">
-                    <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle gap-4">
-                        <div className="text-3xl">🧩</div>
-                        <div className="text-text-secondary font-medium">
-                            Singularity step was not reached
-                        </div>
-                        <div className="text-xs text-text-muted text-center">
-                            Pipeline data is available. Select a provider to generate the synthesis.
-                        </div>
-                        <div className="flex flex-wrap justify-center gap-2 mt-2">
-                            {LLM_PROVIDERS_CONFIG.map((provider) => (
-                                <button
-                                    key={provider.id}
-                                    onClick={() => triggerAndSwitch({ providerId: provider.id })}
-                                    className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:border-brand-500/50 text-xs font-medium text-text-secondary hover:text-text-primary transition-all flex items-center gap-2"
-                                >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-border-subtle" />
-                                    {provider.name}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
+                <SynthesizeCTA
+                    editorialAST={mappingArtifact?.editorialAST as any}
+                    onSynthesize={handleSynthesize}
+                    onExpandReading={() => {
+                        const pid = effectivePid ? String(effectivePid) : LLM_PROVIDERS_CONFIG[0]?.id;
+                        if (pid) setActiveSplitPanel({ turnId: aiTurn.id, providerId: String(pid) });
+                        setPanelMode('reading');
+                    }}
+                />
             ) : (
                 <div className="animate-in fade-in duration-500">
                     <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
@@ -341,6 +327,73 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                     </div>
                 </div>
             )}
+        </div>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// SynthesizeCTA — shown when pipeline is complete but synthesis is deferred
+// ---------------------------------------------------------------------------
+
+interface SynthesizeCTAProps {
+    editorialAST?: EditorialAST;
+    onSynthesize: (providerId?: string) => void;
+    onExpandReading: () => void;
+}
+
+const SynthesizeCTA: React.FC<SynthesizeCTAProps> = ({ editorialAST, onSynthesize, onExpandReading }) => {
+    const [showProviders, setShowProviders] = useState(false);
+
+    return (
+        <div className="animate-in fade-in duration-500 flex flex-col gap-4">
+            {/* Inline editorial preview — only when AST is available */}
+            {editorialAST && (
+                <EditorialPreview
+                    ast={editorialAST}
+                    onExpand={onExpandReading}
+                />
+            )}
+
+            {/* Synthesize affordance */}
+            <div className="flex flex-col items-center gap-3 py-8 px-6 bg-surface-highlight/10 rounded-xl border border-border-subtle">
+                <div className="text-sm text-text-muted text-center max-w-sm">
+                    Evidence mapping is complete. Synthesize to generate an integrated response.
+                </div>
+
+                <button
+                    type="button"
+                    onClick={() => onSynthesize()}
+                    className="px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition-colors shadow-sm"
+                >
+                    Synthesize →
+                </button>
+
+                {/* Provider picker disclosure */}
+                <button
+                    type="button"
+                    onClick={() => setShowProviders(v => !v)}
+                    className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+                >
+                    {showProviders ? 'Hide provider options' : 'Choose provider...'}
+                </button>
+
+                {showProviders && (
+                    <div className="flex flex-wrap justify-center gap-2 animate-in fade-in duration-200">
+                        {LLM_PROVIDERS_CONFIG.map((provider) => (
+                            <button
+                                key={provider.id}
+                                onClick={() => onSynthesize(String(provider.id))}
+                                className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:border-brand-500/50 text-xs font-medium text-text-secondary hover:text-text-primary transition-all flex items-center gap-2"
+                            >
+                                {provider.logoSrc && (
+                                    <img src={provider.logoSrc} alt="" className="w-3.5 h-3.5 rounded" />
+                                )}
+                                {provider.name}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

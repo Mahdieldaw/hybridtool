@@ -17,6 +17,10 @@ import {
   turnIdsAtom,
   turnsMapAtom,
   activeSplitPanelAtom,
+  latestCompletedAiTurnIdAtom,
+  dismissedExplorationTurnIdAtom,
+  explorationInputModeOverrideAtom,
+  probeProvidersEnabledAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -63,7 +67,18 @@ const ChatInput = ({
 
   const setToast = useSetAtom(toastAtom);
 
-  const { sendMessage, abort } = useChat();
+  const { sendMessage, abort, probeTurn } = useChat();
+
+  // Exploration mode: probe vs new-query routing
+  const latestCompletedTurnId = useAtomValue(latestCompletedAiTurnIdAtom);
+  const [dismissedExplorationTurnId, setDismissedExplorationTurnId] = useAtom(dismissedExplorationTurnIdAtom);
+  const [explorationModeOverride, setExplorationModeOverride] = useAtom(explorationInputModeOverrideAtom);
+  const [probeProvidersEnabled] = useAtom(probeProvidersEnabledAtom);
+
+  // Show the bar when there's a completed turn that hasn't been dismissed and no active streaming
+  const showExplorationBar = !!latestCompletedTurnId && dismissedExplorationTurnId !== latestCompletedTurnId && !isLoading;
+  // Default: probe mode. Overridden to "new" by explicit user action.
+  const isProbeMode = showExplorationBar && explorationModeOverride !== "new";
 
 
   // Callbacks
@@ -165,10 +180,11 @@ const ChatInput = ({
       textareaRef.current.style.height = `${newHeight}px`;
 
       const targetHeight = activeTarget ? 30 : 0;
-      const totalHeight = newHeight + 24 + 2 + targetHeight;
+      const explorationBarHeight = showExplorationBar ? 38 : 0;
+      const totalHeight = newHeight + 24 + 2 + targetHeight + explorationBarHeight;
       onHeightChange?.(totalHeight);
     }
-  }, [prompt, onHeightChange, activeTarget]);
+  }, [prompt, onHeightChange, activeTarget, showExplorationBar]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setPrompt(e.target.value);
@@ -180,6 +196,19 @@ const ChatInput = ({
       setToast({ id: Date.now(), message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`, type: "error" });
       return;
     }
+
+    // Probe mode: route to corpus probe rather than a new/continuation turn
+    if (isProbeMode && latestCompletedTurnId) {
+      const enabledProviders = (Object.entries(probeProvidersEnabled) as [string, boolean][])
+        .filter(([, enabled]) => enabled)
+        .map(([id]) => id);
+      void probeTurn(latestCompletedTurnId, trimmed, enabledProviders);
+      setPrompt("");
+      return;
+    }
+
+    // Normal send: reset override so next completed turn defaults to probe mode again
+    setExplorationModeOverride(null);
     closeSplitPanel(null);
     if (isContinuationMode) {
       onContinuation(trimmed);
@@ -201,7 +230,7 @@ const ChatInput = ({
     executeSend(prompt);
   };
 
-  const buttonText = (isContinuationMode ? "Continue" : "Send");
+  const buttonText = isProbeMode ? "Probe" : (isContinuationMode ? "Continue" : "Send");
   const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit;
   const showMappingBtn = canShowMapping && !!prompt.trim();
   const showAbortBtn = !!onAbort && isLoading;
@@ -248,6 +277,37 @@ const ChatInput = ({
 
       <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
 
+        {/* === Exploration mode bar === */}
+        {showExplorationBar && (
+          <div className="w-full flex items-center gap-2 mb-1 animate-in slide-in-from-top-1 duration-150">
+            <div className="flex gap-0.5 bg-surface-raised border border-border-subtle rounded-lg p-0.5">
+              <button
+                type="button"
+                onClick={() => setExplorationModeOverride(null)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${isProbeMode ? "bg-brand-500/20 text-brand-300" : "text-text-muted hover:text-text-secondary"}`}
+              >
+                Probe
+              </button>
+              <button
+                type="button"
+                onClick={() => setExplorationModeOverride("new")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${!isProbeMode ? "bg-surface-highlight text-text-primary" : "text-text-muted hover:text-text-secondary"}`}
+              >
+                New Query
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => latestCompletedTurnId && setDismissedExplorationTurnId(latestCompletedTurnId)}
+              className="ml-auto text-text-muted hover:text-text-secondary p-1 rounded hover:bg-surface-highlight transition-colors text-sm leading-none cursor-pointer"
+              aria-label="Dismiss exploration mode"
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {activeTarget && (
           <div className="w-full flex items-center justify-between bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 mb-1 animate-in slide-in-from-bottom-2 duration-200">
             <div className="flex items-center gap-2 text-xs font-medium text-brand-400">
@@ -271,9 +331,11 @@ const ChatInput = ({
             placeholder={
               activeTarget
                 ? `Continue conversation with ${providerName}...`
-                : isContinuationMode
-                  ? "Continue the conversation with your follow-up message..."
-                  : "Ask anything... Singularity will orchestrate multiple AI models for you."
+                : isProbeMode
+                  ? "Probe the evidence corpus for this turn..."
+                  : isContinuationMode
+                    ? "Continue the conversation with your follow-up message..."
+                    : "Ask anything... Singularity will orchestrate multiple AI models for you."
             }
             rows={1}
             className={`w-full min-h-[34px] px-3 py-1.5 bg-transparent border-none text-text-primary text-[15px] font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted`}

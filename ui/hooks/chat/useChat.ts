@@ -5,23 +5,25 @@ import api from "../../services/extension-api";
 import {
   turnsMapAtom,
   turnIdsAtom,
-  messagesAtom,
   currentSessionIdAtom,
   isLoadingAtom,
   selectedModelsAtom,
   mappingEnabledAtom,
   mappingProviderAtom,
-  singularityProviderAtom,
   thinkOnChatGPTAtom,
   activeAiTurnIdAtom,
   currentAppStepAtom,
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
   activeProviderTargetAtom,
+  activeProbeDraftFamily,
   cleanupTurnAtoms,
+  messagesAtom,
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
+  ProbeCorpusHit,
+  ProbeSession,
   ProviderKey,
   PrimitiveWorkflowRequest,
   UserTurn,
@@ -38,6 +40,8 @@ import type {
 } from "../../types";
 
 export function useChat() {
+  const store = useStore();
+
   // Reads
   const selectedModels = useAtomValue(selectedModelsAtom);
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
@@ -46,9 +50,6 @@ export function useChat() {
   const thinkOnChatGPT = useAtomValue(thinkOnChatGPTAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const turnIds = useAtomValue(turnIdsAtom);
-  const singularityProvider = useAtomValue(singularityProviderAtom);
-
-
 
   // Writes
   const setTurnsMap = useSetAtom(turnsMapAtom);
@@ -61,9 +62,6 @@ export function useChat() {
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
-  const store = useStore();
-
-
   const sendMessage = useCallback(
     async (prompt: string, mode: "new" | "continuation") => {
       if (!prompt || !prompt.trim()) return;
@@ -101,8 +99,6 @@ export function useChat() {
         const shouldUseMapping = mappingEnabled && mappingProvider !== null;
         const effectiveMappingProvider = mappingProvider;
 
-        const effectiveSingularityProvider = singularityProvider;
-
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);
 
@@ -138,9 +134,7 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            singularity: effectiveSingularityProvider
-              ? (effectiveSingularityProvider as ProviderKey)
-              : undefined,
+            singularity: undefined,
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -157,9 +151,7 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            singularity: effectiveSingularityProvider
-              ? (effectiveSingularityProvider as ProviderKey)
-              : undefined,
+            singularity: undefined,
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -185,14 +177,87 @@ export function useChat() {
       currentSessionId,
       setIsLoading,
       setUiPhase,
-      setCurrentAppStep,
       setActiveAiTurnId,
       mappingEnabled,
       mappingProvider,
-      singularityProvider,
       thinkOnChatGPT,
       turnIds,
     ],
+  );
+
+  const probeTurn = useCallback(
+    async (aiTurnId: string, queryText: string, enabledProviders: string[]) => {
+      const trimmedQuery = String(queryText || "").trim();
+      if (!aiTurnId || !trimmedQuery) return;
+
+      const draftId = `probe-${aiTurnId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const startedAt = Date.now();
+      const initialDraft: ProbeSession = {
+        id: draftId,
+        queryText: trimmedQuery,
+        searchResults: [],
+        providerIds: enabledProviders,
+        responses: {},
+        status: "searching",
+        createdAt: startedAt,
+        updatedAt: startedAt,
+      };
+
+      store.set(activeProbeDraftFamily(aiTurnId), initialDraft);
+
+      try {
+        const data = await api.corpusSearch(aiTurnId, trimmedQuery);
+        const searchResults = Array.isArray(data?.results)
+          ? (data.results as ProbeCorpusHit[])
+          : [];
+        const nnParagraphs = searchResults
+          .map((result) => result?.text || "")
+          .filter(Boolean)
+          .slice(0, 8);
+
+        const probingDraft: ProbeSession = {
+          ...initialDraft,
+          searchResults,
+          status: enabledProviders.length > 0 ? "probing" : "complete",
+          updatedAt: Date.now(),
+        };
+        store.set(activeProbeDraftFamily(aiTurnId), probingDraft);
+
+        if (enabledProviders.length === 0) {
+          return;
+        }
+
+        await api.probeQuery(
+          aiTurnId,
+          trimmedQuery,
+          searchResults,
+          nnParagraphs,
+          enabledProviders,
+          draftId,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Probe failed";
+        store.set(activeProbeDraftFamily(aiTurnId), {
+          ...initialDraft,
+          status: "complete",
+          updatedAt: Date.now(),
+          responses: {
+            error: {
+              providerId: "error",
+              modelIndex: 0,
+              modelName: "Error",
+              text: "",
+              paragraphs: [],
+              status: "error",
+              error: message,
+              createdAt: startedAt,
+              updatedAt: Date.now(),
+            },
+          },
+        });
+      }
+    },
+    [store],
   );
 
   const newChat = useCallback(() => {
@@ -372,6 +437,7 @@ export function useChat() {
   const messages = useAtomValue(messagesAtom);
   return {
     sendMessage,
+    probeTurn,
     newChat,
     selectChat,
     deleteChat,

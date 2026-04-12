@@ -333,10 +333,17 @@ class ExtensionAPI {
     });
   }
 
-  async probeQuery(aiTurnId: string, queryText: string, nnParagraphs: string[], enabledProviders: string[]): Promise<void> {
+  async probeQuery(
+    aiTurnId: string,
+    queryText: string,
+    searchResults: any[],
+    nnParagraphs: string[],
+    enabledProviders: string[],
+    probeSessionId?: string,
+  ): Promise<void> {
     await this.sendPortMessage({
       type: PROBE_QUERY,
-      payload: { aiTurnId, queryText, nnParagraphs, enabledProviders },
+      payload: { aiTurnId, queryText, searchResults, nnParagraphs, enabledProviders, probeSessionId },
     });
   }
 }
