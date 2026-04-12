@@ -1864,7 +1864,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
         mapperArtifact.statementClassification
       ) {
         const { buildPassageIndex, parseEditorialOutput } =
-          await import('./ConciergeService/editorialMapper');
+          await import('./concierge-service/editorialMapper.js');
         const { buildSourceContinuityMap } = await import('./core/passageRouting');
 
         const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
@@ -1914,7 +1914,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
         if (orchestrator) {
           const { buildSourceContinuityMap } = await import('./core/passageRouting');
           const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-            await import('./ConciergeService/editorialMapper');
+            await import('./concierge-service/editorialMapper.js');
 
           const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
           const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(

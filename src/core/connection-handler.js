@@ -582,7 +582,6 @@ export class ConnectionHandler {
         },
       };
       const providerIds = Array.from(new Set([...(baseSession.providerIds || []), providerId]));
-      const responseStatuses = Object.values(nextResponses).map((response) => response?.status);
       const isComplete =
         providerIds.length > 0 &&
         providerIds.every((pid) => {

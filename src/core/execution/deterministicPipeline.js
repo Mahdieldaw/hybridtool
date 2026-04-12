@@ -81,7 +81,7 @@ export async function computeDerivedFields({
       } else {
         try {
           if (queryEmbedding && substrate) {
-            const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
+            const { computeQueryRelevance } = await import('../../geometry/annotate');
             result.queryRelevance = computeQueryRelevance({
               queryEmbedding,
               statements: shadowStatements,
@@ -161,11 +161,26 @@ export async function computeDerivedFields({
   // are final. Pure L1: set membership + integer arithmetic on paragraph indices.
   let periphery = null;
   try {
-    const { identifyPeriphery } = await import('../../geometry/interpretation/periphery');
-    const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
-    const preSemanticRegions =
-      geoRecord?.meta?.preSemanticInterpretation?.regions || preSemantic?.regions;
-    periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
+    // periphery fields are now computed inside buildPreSemanticInterpretation —
+    // read directly from preSemantic rather than calling identifyPeriphery again.
+    if (preSemantic && 'corpusMode' in preSemantic) {
+      periphery = {
+        corpusMode: preSemantic.corpusMode,
+        peripheralNodeIds: preSemantic.peripheralNodeIds,
+        peripheralRatio: preSemantic.peripheralRatio,
+        largestBasinRatio: preSemantic.largestBasinRatio,
+        basinByNodeId: preSemantic.basinByNodeId,
+      };
+    } else {
+      // Fallback for pre-built preSemantic from geoRecord (old shape without periphery)
+      const { identifyPeriphery } = await import('../../geometry/interpret');
+      const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
+      const preSemanticRegions =
+        preSemantic?.regions ||
+        geoRecord?.meta?.preSemanticInterpretation?.regions ||
+        preSemantic?.regionization?.regions;
+      periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
+    }
 
     const { computeClaimDensity } = await import('../claimDensity');
     result.claimDensityResult = computeClaimDensity(
@@ -187,7 +202,7 @@ export async function computeDerivedFields({
   // This ensures ownership counts match what blast surface will see.
   try {
     const { computeStatementOwnership, computeClaimExclusivity } =
-      await import('../../ConciergeService/claimProvenance');
+      await import('../../concierge-service/claimProvenance');
     const ownership = computeStatementOwnership(enrichedClaims);
     result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
     result.statementOwnership = ownership;
@@ -559,7 +574,7 @@ export async function computePreSurveyPipeline({
     if (!mappingText) {
       throw new Error('Either mappingText or parsedMappingResult is required');
     }
-    const { parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+    const { parseSemanticMapperOutput } = await import('../../concierge-service/semanticMapper');
     const parseResult = parseSemanticMapperOutput(mappingText);
     if (!parseResult?.success || !parseResult?.output) {
       throw new Error('Failed to parse mapping response text into claims/edges');
@@ -619,11 +634,11 @@ export async function computePreSurveyPipeline({
     preSemantic = preBuiltPreSemantic;
     queryRelevance = preBuiltQueryRelevance;
 
-    regions = preSemantic?.regionization?.regions || [];
+    regions = preSemantic?.regions || preSemantic?.regionization?.regions || [];
   } else {
     // Regen path — build geometry from scratch
-    const { buildGeometricSubstrate } = await import('../../geometry/substrate');
-    const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+    const { buildGeometricSubstrate } = await import('../../geometry/measure');
+    const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
     const { computeBasinInversion } =
       await import('../../../shared/geometry/basinInversionBayesian');
 
@@ -650,13 +665,13 @@ export async function computePreSurveyPipeline({
       basinInversionResult
     );
 
-    regions = preSemantic?.regionization?.regions || [];
+    regions = preSemantic?.regions || preSemantic?.regionization?.regions || [];
 
     // ── 5. Query relevance ────────────────────────────────────────────
     queryRelevance = null;
     try {
       if (queryEmbedding) {
-        const { computeQueryRelevance: _computeQR } = await import('../../geometry/queryRelevance');
+        const { computeQueryRelevance: _computeQR } = await import('../../geometry/annotate');
         queryRelevance = _computeQR({
           queryEmbedding,
           statements: shadowStatements,
@@ -674,7 +689,7 @@ export async function computePreSurveyPipeline({
   }
 
   try {
-    const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
+    const { enrichStatementsWithGeometry } = await import('../../geometry/annotate');
     enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions || []);
   } catch (_) {
     /* non-fatal */
@@ -682,7 +697,7 @@ export async function computePreSurveyPipeline({
 
   // ── 6. Claim embeddings ───────────────────────────────────────────
   const { generateClaimEmbeddings, reconstructCanonicalProvenance } =
-    await import('../../ConciergeService/claimAssembly');
+    await import('../../concierge-service/claim-assembly');
 
   const mapperClaimsForProvenance = parsedClaims.map((c) => ({
     id: c.id,
@@ -952,8 +967,8 @@ export async function computeProbeGeometry({ modelIndex, content, embeddingConfi
   ] = await Promise.all([
     import('../../shadow'),
     import('../../clustering'),
-    import('../../geometry/substrate'),
-    import('../../geometry/interpretation'),
+    import('../../geometry/measure'),
+    import('../../geometry/interpret'),
     import('../../persistence/embeddingCodec'),
   ]);
 

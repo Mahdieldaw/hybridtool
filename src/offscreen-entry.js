@@ -1,7 +1,7 @@
 // src/offscreen-entry.js
 // This runs in the offscreen document with window/DOM APIs available
 
-import { OffscreenBootstrap } from './HTOS/OffscreenBootstrap.js';
+import { OffscreenBootstrap } from './htos/OffscreenBootstrap.js';
 
 // The module is loaded, so just run the initialization.
 // No need for globals.

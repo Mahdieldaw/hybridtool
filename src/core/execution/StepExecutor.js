@@ -517,9 +517,9 @@ export class StepExecutor {
     const shadowModule = await import('../../shadow');
     const { extractShadowStatements } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } =
-      await import('../../ConciergeService/semanticMapper');
+      await import('../../concierge-service/semanticMapper.js');
     // claimAssembly import removed — computePreSurveyPipeline handles it internally
-    const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
+    const { computeQueryRelevance } = await import('../../geometry/annotate');
 
     const nowMs = () =>
       typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -608,7 +608,7 @@ export class StepExecutor {
           getEmbeddingStatus,
         } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
-        const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+        const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
 
         /** @type {"none" | "webgpu" | "wasm"} */
         let embeddingBackend = 'none';
@@ -1316,7 +1316,7 @@ export class StepExecutor {
                       try {
                         const { buildSourceContinuityMap } = await import('../passageRouting');
                         const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-                          await import('../../ConciergeService/editorialMapper');
+                          await import('../../concierge-service/editorialMapper.js');
 
                         const continuityMap = buildSourceContinuityMap(
                           preSurvey.derived.claimDensityResult
@@ -1967,7 +1967,7 @@ export class StepExecutor {
     let ConciergeService;
     let handoffV2Enabled = false;
     try {
-      const module = await import('../../ConciergeService/ConciergeService');
+      const module = await import('../../concierge-service/ConciergeService.js');
       ConciergeService = module.ConciergeService;
       handoffV2Enabled = module.HANDOFF_V2_ENABLED === true;
     } catch (e) {

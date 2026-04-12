@@ -491,115 +491,117 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
         {/* ── Single mode: provider response ── */}
         {panelMode === 'single' && (
-          <div
-            className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-auto custom-scrollbar relative z-10"
-            style={{ paddingBottom: 24 }}
-          >
-            <div className="p-4 w-fit min-w-full">
-              {(derivedState.isError ||
-                (derivedState.status === 'completed' && !derivedState.hasText)) && (
-                <div className="mb-4">
-                  <PipelineErrorBanner
-                    type="batch"
-                    failedProviderId={shownProviderId}
-                    onRetry={(pid) => handleRetryProvider(pid)}
-                    errorMessage={
-                      derivedState.isError
-                        ? derivedState.errorMsg || 'Error occurred'
-                        : 'No response received.'
-                    }
-                    requiresReauth={derivedState.requiresReauth}
-                    retryable={derivedState.retryable}
-                    compact
-                  />
+          <>
+            <div
+              className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-auto custom-scrollbar relative z-10"
+              style={{ paddingBottom: 24 }}
+            >
+              <div className="p-4 w-fit min-w-full">
+                {(derivedState.isError ||
+                  (derivedState.status === 'completed' && !derivedState.hasText)) && (
+                  <div className="mb-4">
+                    <PipelineErrorBanner
+                      type="batch"
+                      failedProviderId={shownProviderId}
+                      onRetry={(pid) => handleRetryProvider(pid)}
+                      errorMessage={
+                        derivedState.isError
+                          ? derivedState.errorMsg || 'Error occurred'
+                          : 'No response received.'
+                      }
+                      requiresReauth={derivedState.requiresReauth}
+                      retryable={derivedState.retryable}
+                      compact
+                    />
+                  </div>
+                )}
+                <div className="prose prose-sm max-w-none dark:prose-invert">
+                  <MarkdownDisplay content={displayContent} />
+                  {derivedState.isStreaming && <span className="streaming-dots" />}
                 </div>
-              )}
-              <div className="prose prose-sm max-w-none dark:prose-invert">
-                <MarkdownDisplay content={displayContent} />
-                {derivedState.isStreaming && <span className="streaming-dots" />}
-              </div>
 
-              {/* Artifact badges */}
-              {derivedState.artifacts.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {derivedState.artifacts.map((art, idx) => (
+                {/* Artifact badges */}
+                {derivedState.artifacts.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {derivedState.artifacts.map((art, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedArtifact(art)}
+                        className="bg-gradient-to-br from-brand-500/20 to-brand-600/20 border border-brand-500/30 rounded-lg px-3 py-2 text-sm flex items-center gap-1.5 hover:bg-brand-500/30 hover:-translate-y-px transition-all cursor-pointer"
+                      >
+                        📄 {art.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* History Stack */}
+                {hasHistory && (
+                  <div className="mt-6 pt-4 border-t border-border-subtle">
                     <button
-                      key={idx}
-                      onClick={() => setSelectedArtifact(art)}
-                      className="bg-gradient-to-br from-brand-500/20 to-brand-600/20 border border-brand-500/30 rounded-lg px-3 py-2 text-sm flex items-center gap-1.5 hover:bg-brand-500/30 hover:-translate-y-px transition-all cursor-pointer"
+                      onClick={() => setShowHistory(!showHistory)}
+                      className="w-full flex items-center justify-between text-xs text-text-muted hover:text-text-primary transition-colors py-1"
                     >
-                      📄 {art.title}
+                      <span>{historyCount - 1} previous version(s)</span>
+                      {showHistory ? (
+                        <ChevronDownIcon className="w-3 h-3" />
+                      ) : (
+                        <ChevronUpIcon className="w-3 h-3" />
+                      )}
                     </button>
-                  ))}
-                </div>
-              )}
 
-              {/* History Stack */}
-              {hasHistory && (
-                <div className="mt-6 pt-4 border-t border-border-subtle">
-                  <button
-                    onClick={() => setShowHistory(!showHistory)}
-                    className="w-full flex items-center justify-between text-xs text-text-muted hover:text-text-primary transition-colors py-1"
-                  >
-                    <span>{historyCount - 1} previous version(s)</span>
-                    {showHistory ? (
-                      <ChevronDownIcon className="w-3 h-3" />
-                    ) : (
-                      <ChevronUpIcon className="w-3 h-3" />
+                    {showHistory && (
+                      <div className="mt-3 space-y-3 animate-in slide-in-from-top-2 duration-200">
+                        {allResponses
+                          .slice(0, -1)
+                          .reverse()
+                          .map((resp, idx) => {
+                            const histText = resp.text || '';
+                            const histArtifacts = (resp.artifacts || []) as Artifact[];
+                            const hasContent = histText || histArtifacts.length > 0;
+
+                            return (
+                              <div
+                                key={idx}
+                                className="bg-surface p-3 rounded-lg border border-border-subtle opacity-75 hover:opacity-100 transition-opacity"
+                              >
+                                <div className="text-xs text-text-muted mb-2 flex justify-between">
+                                  <span>Attempt {historyCount - 1 - idx}</span>
+                                  <span>{new Date(resp.createdAt).toLocaleTimeString()}</span>
+                                </div>
+                                <div className="prose prose-sm max-w-none dark:prose-invert text-xs line-clamp-4 hover:line-clamp-none transition-all">
+                                  {hasContent ? (
+                                    <>
+                                      <MarkdownDisplay content={histText || '*Artifact only*'} />
+                                      {histArtifacts.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-1">
+                                          {histArtifacts.map((art, i) => (
+                                            <button
+                                              key={i}
+                                              onClick={() => setSelectedArtifact(art)}
+                                              className="text-xs bg-brand-500/10 text-brand-500 px-1.5 py-0.5 rounded border border-brand-500/20 cursor-pointer hover:bg-brand-500/20 transition-colors"
+                                            >
+                                              📄 {art.title}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-text-muted italic">Empty response</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
                     )}
-                  </button>
-
-                  {showHistory && (
-                    <div className="mt-3 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                      {allResponses
-                        .slice(0, -1)
-                        .reverse()
-                        .map((resp, idx) => {
-                          const histText = resp.text || '';
-                          const histArtifacts = (resp.artifacts || []) as Artifact[];
-                          const hasContent = histText || histArtifacts.length > 0;
-
-                          return (
-                            <div
-                              key={idx}
-                              className="bg-surface p-3 rounded-lg border border-border-subtle opacity-75 hover:opacity-100 transition-opacity"
-                            >
-                              <div className="text-xs text-text-muted mb-2 flex justify-between">
-                                <span>Attempt {historyCount - 1 - idx}</span>
-                                <span>{new Date(resp.createdAt).toLocaleTimeString()}</span>
-                              </div>
-                              <div className="prose prose-sm max-w-none dark:prose-invert text-xs line-clamp-4 hover:line-clamp-none transition-all">
-                                {hasContent ? (
-                                  <>
-                                    <MarkdownDisplay content={histText || '*Artifact only*'} />
-                                    {histArtifacts.length > 0 && (
-                                      <div className="mt-2 flex flex-wrap gap-1">
-                                        {histArtifacts.map((art, i) => (
-                                          <button
-                                            key={i}
-                                            onClick={() => setSelectedArtifact(art)}
-                                            className="text-xs bg-brand-500/10 text-brand-500 px-1.5 py-0.5 rounded border border-brand-500/20 cursor-pointer hover:bg-brand-500/20 transition-colors"
-                                          >
-                                            📄 {art.title}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span className="text-text-muted italic">Empty response</span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Branch Input */}
+            {/* Branch Input — fixed footer, outside scroll container so it stays visible */}
             {isTargeted && (
               <div className="p-3 border-t border-brand-500/30 bg-brand-500/5 flex-shrink-0 animate-in slide-in-from-bottom-2 duration-200">
                 <div className="flex gap-2">
@@ -634,7 +636,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
 
         {/* Artifact Overlay */}

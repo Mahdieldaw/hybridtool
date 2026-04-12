@@ -2,10 +2,13 @@
 // GEOMETRY MODULE - PUBLIC API
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Types
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 export type {
   NodeLocalStats,
   GeometricSubstrate,
+  MeasuredSubstrate,
+  SubstrateHealth,
   DegenerateSubstrate,
   DegenerateReason,
   PairwiseField,
@@ -13,39 +16,54 @@ export type {
   MutualRankEdge,
   MutualRankNodeStats,
   MutualRankGraph,
+  MeasuredRegion,
+  SubstrateInterpretation,
+  RegionSource,
+  RegionizationMeta,
+  GateVerdict,
+  PipelineGateResult,
+  CorpusMode,
+  PeripheryResult,
+  ExtendedSimilarityStats,
 } from './types';
 
 export { isDegenerate } from './types';
 
-// Config
-export type { SubstrateConfig } from './substrate';
-export { DEFAULT_SUBSTRATE_CONFIG } from './substrate';
+// ─── Measure ──────────────────────────────────────────────────────────────────
 
-// Main builder
-export { buildGeometricSubstrate } from './substrate';
+export type { SubstrateConfig } from './measure';
+export { DEFAULT_SUBSTRATE_CONFIG } from './measure';
 
-// Utilities
-export { quantize, buildPairwiseField } from './knn';
-export { computeExtendedStatsFromArray } from './threshold';
-export { buildMutualRankGraph } from './mutualRank';
-export { computeNodeStats } from './nodes';
+export {
+  measureSubstrate,
+  buildGeometricSubstrate,   // backward-compat alias
+  buildPairwiseField,
+  buildMutualRankGraph,
+  computeNodeStats,
+  computeExtendedStatsFromArray,
+  quantize,
+} from './measure';
 
-export type {
-  Region,
-  RegionizationResult,
-  RegionProfile,
-  PreSemanticInterpretation,
-  GateVerdict,
-  PipelineGateResult,
-  InterpretationInputs,
-  ClaimWithProvenance,
-  EdgeList,
-} from './interpretation/types';
+// ─── Interpret ────────────────────────────────────────────────────────────────
 
-export { buildRegions } from './interpretation/regions';
-export { profileRegions } from './interpretation/profiles';
-export { evaluatePipelineGates } from './interpretation/pipelineGates';
-export { buildPreSemanticInterpretation } from './interpretation';
+export {
+  interpretSubstrate,
+  buildPreSemanticInterpretation, // backward-compat alias
+  identifyPeriphery,
+} from './interpret';
 
-export type { QueryRelevanceResult, QueryRelevanceStatementScore } from './queryRelevance';
-export { computeQueryRelevance } from './queryRelevance';
+// ─── Annotate ─────────────────────────────────────────────────────────────────
+
+export type { QueryRelevanceResult, QueryRelevanceStatementScore, EnrichmentResult } from './annotate';
+
+export {
+  enrichStatementsWithGeometry,
+  enrichStatements,
+  computeQueryRelevance,
+  annotateStatements,
+} from './annotate';
+
+// ─── Engine (full pipeline) ───────────────────────────────────────────────────
+
+export type { GeometryPipelineResult } from './engine';
+export { buildGeometryPipeline } from './engine';

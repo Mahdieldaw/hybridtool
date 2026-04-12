@@ -12,7 +12,7 @@ import type {
   MixedStatementEntry,
   ParagraphOrigin,
 } from '../../shared/contract';
-import type { Region } from '../geometry/interpretation/types';
+import type { MeasuredRegion } from '../geometry/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
 
@@ -50,7 +50,7 @@ export async function reconstructCanonicalProvenance(
   paragraphEmbeddings: Map<string, Float32Array>,
   statementEmbeddings: Map<string, Float32Array> | null,
   precomputedClaimEmbeddings: Map<string, Float32Array>,
-  regions: Region[],
+  regions: MeasuredRegion[],
   totalModelCount: number
 ): Promise<{
   claims: LinkedClaim[];

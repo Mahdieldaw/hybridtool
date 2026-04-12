@@ -34,7 +34,7 @@ import { cosineSimilarity } from '../clustering/distance';
 // Input
 // ─────────────────────────────────────────────────────────────────────────
 
-import type { PeripheryResult } from '../geometry/interpretation/periphery';
+import type { PeripheryResult } from '../geometry/types';
 
 interface MinimalEnrichedClaim {
   id: string;

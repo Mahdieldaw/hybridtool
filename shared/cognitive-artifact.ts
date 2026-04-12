@@ -36,7 +36,11 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
       preSemantic: pipeline?.preSemantic
         ? {
             ...pipeline.preSemantic,
-            regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
+            regions: (
+              pipeline.preSemantic.regions ||
+              pipeline.preSemantic.regionization?.regions ||
+              []
+            ).map((r: any) => ({
               id: r.id,
               kind: r.kind,
               nodeIds: r.nodeIds,

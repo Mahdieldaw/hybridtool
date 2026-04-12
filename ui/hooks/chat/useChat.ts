@@ -228,8 +228,11 @@ export function useChat() {
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Probe failed';
+        // Read the current draft so we can preserve any searchResults already fetched
+        const currentDraft = store.get(activeProbeDraftFamily(aiTurnId));
         store.set(activeProbeDraftFamily(aiTurnId), {
           ...initialDraft,
+          searchResults: currentDraft?.searchResults ?? initialDraft.searchResults,
           status: 'complete',
           updatedAt: Date.now(),
           responses: {

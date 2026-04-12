@@ -21,7 +21,7 @@ import type {
   UnclaimedGroup,
   UnclaimedParagraphEntry,
 } from '../../shared/contract';
-import { computeStatementOwnership } from '../ConciergeService/claimProvenance';
+import { computeStatementOwnership } from '../concierge-service/claimProvenance';
 
 // ── Input ───────────────────────────────────────────────────────────────
 

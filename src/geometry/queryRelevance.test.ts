@@ -1,7 +1,7 @@
 import type { NodeLocalStats } from "./types";
 import type { ShadowParagraph } from "../shadow/ShadowParagraphProjector";
 import type { ShadowStatement } from "../shadow/ShadowExtractor";
-import { computeQueryRelevance } from "./queryRelevance";
+import { computeQueryRelevance } from "./annotate";
 
 function makeStatement(id: string, modelIndex: number): ShadowStatement {
   return {

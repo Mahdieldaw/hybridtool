@@ -105,7 +105,7 @@ export class CognitivePipelineHandler {
           // Guarded dynamic import for resilience during partial deploys
           let ConciergeModule;
           try {
-            ConciergeModule = await import('../../ConciergeService/ConciergeService');
+            ConciergeModule = await import('../../concierge-service/ConciergeService.js');
           } catch (err) {
             console.error(
               '[CognitiveHandler] Critical error: ConciergeService module could not be loaded',
@@ -182,7 +182,7 @@ export class CognitivePipelineHandler {
               let evidenceSubstrate = '';
               try {
                 const { buildEvidenceSubstrate } =
-                  await import('../../ConciergeService/evidenceSubstrate');
+                  await import('../../concierge-service/evidenceSubstrate.js');
                 const cso = mappingArtifact?.meta?.citationSourceOrder || {};
                 evidenceSubstrate = buildEvidenceSubstrate(
                   mappingArtifact,
@@ -687,7 +687,7 @@ export class CognitivePipelineHandler {
           if (editorialResponse?.text) {
             try {
               const { parseEditorialOutput } =
-                await import('../../ConciergeService/editorialMapper');
+                await import('../../concierge-service/editorialMapper.js');
               // Collect valid passage/unclaimed keys from the artifact
               const validPassageKeys = new Set();
               const densityProfiles = mappingArtifact?.claimDensity?.profiles ?? {};
@@ -735,12 +735,12 @@ export class CognitivePipelineHandler {
         let conciergePrompt = null;
         try {
           const { buildEvidenceSubstrate } =
-            await import('../../ConciergeService/evidenceSubstrate');
+            await import('../../concierge-service/evidenceSubstrate.js');
           const cso = mappingArtifact?.meta?.citationSourceOrder || {};
           const evidenceSubstrate = buildEvidenceSubstrate(mappingArtifact, latestMappingText, cso);
 
           if (evidenceSubstrate) {
-            const ConciergeModule = await import('../../ConciergeService/ConciergeService');
+            const ConciergeModule = await import('../../concierge-service/ConciergeService.js');
             const ConciergeService = ConciergeModule?.ConciergeService;
             if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
               conciergePrompt = ConciergeService.buildConciergePrompt(originalPrompt, {

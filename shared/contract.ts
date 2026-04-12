@@ -1075,9 +1075,34 @@ export interface PipelineGateResult {
 }
 
 export interface PreSemanticInterpretation {
+  // Legacy nested shape (kept for geoRecord backward compat)
   regionization: PipelineRegionizationResult;
   regionProfiles: PipelineRegionProfile[];
   pipelineGate?: PipelineGateResult;
+
+  // New flat shape (SubstrateInterpretation — populated after refactor)
+  gate?: PipelineGateResult;
+  regions?: Array<PipelineRegion & {
+    nodeCount?: number;
+    modelDiversity?: number;
+    modelDiversityRatio?: number;
+    internalDensity?: number;
+    isolation?: number;
+    nearestCarrierSimilarity?: number;
+    avgInternalSimilarity?: number;
+  }>;
+  regionMeta?: {
+    regionCount: number;
+    kindCounts: Record<'basin' | 'gap', number>;
+    coveredNodes: number;
+    totalNodes: number;
+  };
+  regionSource?: 'gap' | 'basin' | 'none';
+  corpusMode?: 'dominant-core' | 'parallel-cores' | 'no-geometry';
+  peripheralNodeIds?: Set<string>;
+  peripheralRatio?: number;
+  largestBasinRatio?: number | null;
+  basinByNodeId?: Record<string, number>;
 }
 
 export interface EnrichmentResult {

@@ -482,6 +482,8 @@ export function cleanupTurnAtoms(
     turnExpandedStateFamily.remove(turnId);
     workflowProgressForTurnFamily.remove(turnId);
     providerErrorsForTurnFamily.remove(turnId);
+    modelResponsePanelModeFamily.remove(turnId);
+    activeProbeDraftFamily.remove(turnId);
   }
   for (const pair of turnIdProviderPairs) {
     providerEffectiveStateFamily.remove(pair);
