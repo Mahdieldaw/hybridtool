@@ -19,7 +19,7 @@ import {
 } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
-import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
+import { computeStructuralAnalysis } from '../../../src/core/prompt-methods';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
 import { useProviderArtifact } from '../../hooks/useProviderArtifact';
 import { EditorialPreview } from '../editorial/EditorialPreview';
@@ -97,7 +97,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     if (singText) {
       const singProvider = singularityState.output?.providerId
         ? LLM_PROVIDERS_CONFIG.find((p) => p.id === singularityState.output?.providerId)?.name ||
-          singularityState.output?.providerId
+        singularityState.output?.providerId
         : 'Singularity';
       parts.push(`**${singProvider} (Singularity)**:\n\n${singText}\n`);
     }

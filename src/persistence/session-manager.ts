@@ -1,7 +1,7 @@
 // Enhanced SessionManager with Persistence Adapter Integration
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
-import { SimpleIndexedDBAdapter } from './SimpleIndexedDBAdapter';
+import { SimpleIndexedDBAdapter } from './simple-indexeddb-adapter';
 // dehydrateArtifact removed — Tier 3 artifacts are ephemeral (never persisted)
 import { DEFAULT_THREAD } from '../../shared/messaging';
 import type {

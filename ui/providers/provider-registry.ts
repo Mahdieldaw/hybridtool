@@ -1,7 +1,7 @@
 import type { LLMProvider } from '../types';
 
 // Provider icons are light-weight and color-driven via tokens to remain dark-mode safe
-import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon, GrokIcon } from './providerIcons';
+import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon, GrokIcon } from './provider-icons';
 
 // Import SVG Logos
 import ChatGPTLogo from '../assets/providers/chatgpt.svg';

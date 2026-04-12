@@ -14,7 +14,7 @@ import {
   createProviderAuthError,
   getErrorMessage,
   normalizeError,
-} from '../utils/ErrorHandler';
+} from '../utils/error-handler.js';
 
 // Provider-specific adapter debug flag (off by default)
 const CHATGPT_ADAPTER_DEBUG = false;

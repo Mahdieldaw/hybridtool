@@ -102,7 +102,7 @@ export async function computeDerivedFields({
     (async () => {
       try {
         if (enrichedClaims.length > 0) {
-          const { computeStructuralAnalysis } = await import('../PromptMethods');
+          const { computeStructuralAnalysis } = await import('../prompt-methods');
           result.cachedStructuralAnalysis = computeStructuralAnalysis({
             claims: enrichedClaims,
             edges: parsedEdges,
@@ -122,7 +122,7 @@ export async function computeDerivedFields({
           result.basinInversion = geoRecord.meta.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
           const { computeBasinInversion } =
-            await import('../../../shared/geometry/basinInversionBayesian');
+            await import('../../../shared/geometry/basin-inversion-bayesian');
           const dims = geoRecord.meta.dimensions || 384;
           const paraIds = geoRecord.meta.paragraphIndex;
           const view = new Float32Array(geoRecord.paragraphEmbeddings);
@@ -182,7 +182,7 @@ export async function computeDerivedFields({
       periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
     }
 
-    const { computeClaimDensity } = await import('../claimDensity');
+    const { computeClaimDensity } = await import('../claim-density');
     result.claimDensityResult = computeClaimDensity(
       enrichedClaims,
       shadowParagraphs,
@@ -202,7 +202,7 @@ export async function computeDerivedFields({
   // This ensures ownership counts match what blast surface will see.
   try {
     const { computeStatementOwnership, computeClaimExclusivity } =
-      await import('../../concierge-service/claimProvenance');
+      await import('../../concierge-service/claim-provenance');
     const ownership = computeStatementOwnership(enrichedClaims);
     result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
     result.statementOwnership = ownership;
@@ -220,7 +220,7 @@ export async function computeDerivedFields({
   // ── Blast surface (provenance-derived) ───────────────────────────
   try {
     if (result.mixedProvenanceResult && result.claimProvenanceExclusivity) {
-      const { computeBlastSurface } = await import('../blast-radius/blastSurface');
+      const { computeBlastSurface } = await import('../blast-radius/blast-surface');
       // Build conflict claim IDs from raw edges for speculative fate test
       const conflictClaimIds = new Set();
       for (const e of parsedEdges || []) {
@@ -319,7 +319,7 @@ export async function computeDerivedFields({
         if (enrichedClaims.length === 0) return;
 
         // Phase 1: conflict validation (pure geometry, blast-surface-independent)
-        const { computeConflictValidation } = await import('../blast-radius/conflictValidation');
+        const { computeConflictValidation } = await import('../blast-radius/conflict-validation');
         const validatedConflicts = computeConflictValidation({
           enrichedClaims,
           edges: result.semanticEdges,
@@ -330,7 +330,7 @@ export async function computeDerivedFields({
 
         // Phase 2: PASSAGE ROUTING (active layer — evidence concentration)
         if (result.claimDensityResult) {
-          const { computePassageRouting } = await import('../passageRouting');
+          const { computePassageRouting } = await import('../passage-routing');
           result.passageRoutingResult = computePassageRouting({
             claimDensityResult: result.claimDensityResult,
             enrichedClaims,
@@ -361,7 +361,7 @@ export async function computeDerivedFields({
   // ── Provenance refinement (canonical provenance assignment) ──────────
   try {
     if (result.claimDensityResult && statementOwners.size > 0) {
-      const { computeProvenanceRefinement } = await import('../blast-radius/provenanceRefinement');
+      const { computeProvenanceRefinement } = await import('../blast-radius/provenance-refinement');
       result.provenanceRefinement = computeProvenanceRefinement({
         enrichedClaims,
         shadowStatements,
@@ -382,7 +382,7 @@ export async function computeDerivedFields({
   // ── Statement classification (corpus coverage for reading surface) ──
   try {
     if (result.claimDensityResult && enrichedClaims.length > 0) {
-      const { computeStatementClassification } = await import('../statementClassification');
+      const { computeStatementClassification } = await import('../statement-classification');
       result.statementClassification = computeStatementClassification({
         shadowStatements,
         shadowParagraphs,
@@ -574,7 +574,7 @@ export async function computePreSurveyPipeline({
     if (!mappingText) {
       throw new Error('Either mappingText or parsedMappingResult is required');
     }
-    const { parseSemanticMapperOutput } = await import('../../concierge-service/semanticMapper');
+    const { parseSemanticMapperOutput } = await import('../../concierge-service/semantic-mapper');
     const parseResult = parseSemanticMapperOutput(mappingText);
     if (!parseResult?.success || !parseResult?.output) {
       throw new Error('Failed to parse mapping response text into claims/edges');
@@ -640,7 +640,7 @@ export async function computePreSurveyPipeline({
     const { buildGeometricSubstrate } = await import('../../geometry/measure');
     const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
     const { computeBasinInversion } =
-      await import('../../../shared/geometry/basinInversionBayesian');
+      await import('../../../shared/geometry/basin-inversion-bayesian');
 
     const paraVectors = Array.from(paragraphEmbeddings.values());
     const paraIds = Array.from(paragraphEmbeddings.keys());
@@ -769,7 +769,7 @@ export async function computePreSurveyPipeline({
     } else if (paragraphEmbeddings?.size > 0) {
       try {
         const { computeBasinInversionBayesian: _bayesian } =
-          await import('../../../shared/geometry/basinInversionBayesian');
+          await import('../../../shared/geometry/basin-inversion-bayesian');
         const _paraIds = Array.from(paragraphEmbeddings.keys());
         const _paraVecs = _paraIds.map((id) => paragraphEmbeddings.get(id));
         derived.bayesianBasinInversion = _bayesian(_paraIds, _paraVecs);
@@ -969,7 +969,7 @@ export async function computeProbeGeometry({ modelIndex, content, embeddingConfi
     import('../../clustering'),
     import('../../geometry/measure'),
     import('../../geometry/interpret'),
-    import('../../persistence/embeddingCodec'),
+    import('../../persistence/embedding-codec'),
   ]);
 
   const { DEFAULT_CONFIG, generateStatementEmbeddings, generateEmbeddings } = clustering;

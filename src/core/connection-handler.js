@@ -748,7 +748,8 @@ export class ConnectionHandler {
                 text = '';
               }
 
-              const { computeProbeGeometry } = await import('./execution/deterministicPipeline');
+              const { computeProbeGeometry } =
+                await import('./execution/deterministic-pipeline.js');
               const geometryResult = await computeProbeGeometry({
                 modelIndex,
                 content: text,

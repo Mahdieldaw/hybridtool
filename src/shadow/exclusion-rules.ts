@@ -13,7 +13,7 @@
 // Changes require human review (see GUARDRAILS.md)
 // ===========================================================================
 
-import { Stance } from './StatementTypes';
+import { Stance } from './statement-types';
 
 export interface ExclusionResult {
   excluded: boolean;

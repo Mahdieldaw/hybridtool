@@ -12,8 +12,8 @@
 // DEPENDENCIES
 // =============================================================================
 
-import { BusController } from './BusController.js';
-import { EmbeddingController } from '../offscreen/EmbeddingController.js';
+import { BusController } from './bus-controller.js';
+import { EmbeddingController } from '../offscreen/embedding-controller.js';
 
 const logOffscreenError = (message, error) => {
   try {

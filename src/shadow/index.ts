@@ -17,34 +17,34 @@
 // ===========================================================================
 
 // Types
-export type { Stance, SignalPatterns } from './StatementTypes';
+export type { Stance, SignalPatterns } from './statement-types';
 
-export type { ExclusionRule } from './ExclusionRules';
+export type { ExclusionRule } from './exclusion-rules';
 
-export type { ShadowStatement, ShadowExtractionResult, TableCellMeta } from './ShadowExtractor';
+export type { ShadowStatement, ShadowExtractionResult, TableCellMeta } from './shadow-extractor';
 
-export type { ShadowParagraph, ParagraphProjectionResult } from './ShadowParagraphProjector';
+export type { ShadowParagraph, ParagraphProjectionResult } from './shadow-paragraph-projector';
 
 // Constants
-export { STANCE_PRIORITY, STANCE_PATTERNS, SIGNAL_PATTERNS } from './StatementTypes';
+export { STANCE_PRIORITY, STANCE_PATTERNS, SIGNAL_PATTERNS } from './statement-types';
 
-export { EXCLUSION_RULES } from './ExclusionRules';
+export { EXCLUSION_RULES } from './exclusion-rules';
 
 // Functions - StatementTypes
-export { getStancePriority, classifyStance, detectSignals } from './StatementTypes';
+export { getStancePriority, classifyStance, detectSignals } from './statement-types';
 
 // Functions - ExclusionRules
-export { isExcluded } from './ExclusionRules';
+export { isExcluded } from './exclusion-rules';
 
 // Functions - ShadowExtractor
-export { extractShadowStatements } from './ShadowExtractor';
+export { extractShadowStatements } from './shadow-extractor';
 
-export { projectParagraphs } from './ShadowParagraphProjector';
+export { projectParagraphs } from './shadow-paragraph-projector';
 
 // ===========================================================================
 // LEGACY ALIASES (Migration Support)
 // ===========================================================================
 
-export { extractShadowStatements as executeShadowExtraction } from './ShadowExtractor';
+export { extractShadowStatements as executeShadowExtraction } from './shadow-extractor';
 
-export type { ShadowExtractionResult as TwoPassResult } from './ShadowExtractor';
+export type { ShadowExtractionResult as TwoPassResult } from './shadow-extractor';

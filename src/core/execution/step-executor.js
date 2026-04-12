@@ -4,15 +4,15 @@ import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 
 import { authManager } from '../auth-manager.js';
 import { classifyError } from '../error-classifier';
-import { runWithProviderHealth } from '../providerHealthGate';
+import { runWithProviderHealth } from '../provider-health-gate.js';
 import { logRetryEvent } from '../retry-telemetry';
 import {
   errorHandler,
   isProviderAuthError,
   createMultiProviderAuthError,
   getErrorMessage,
-} from '../../utils/ErrorHandler';
-import { buildReactiveBridge } from '../../services/ReactiveBridge';
+} from '../../utils/error-handler.js';
+import { buildReactiveBridge } from '../../services/reactive-bridge.js';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
 import { DEFAULT_CONFIG } from '../../clustering';
 // computeExplore import removed (unused)
@@ -517,7 +517,7 @@ export class StepExecutor {
     const shadowModule = await import('../../shadow');
     const { extractShadowStatements } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } =
-      await import('../../concierge-service/semanticMapper.js');
+      await import('../../concierge-service/semantic-mapper.js');
     // claimAssembly import removed — computePreSurveyPipeline handles it internally
     const { computeQueryRelevance } = await import('../../geometry/annotate');
 
@@ -758,7 +758,7 @@ export class StepExecutor {
         // ─────────────────────────────────────────────────────────────────────────
         try {
           const { computeBasinInversion } =
-            await import('../../../shared/geometry/basinInversionBayesian');
+            await import('../../../shared/geometry/basin-inversion-bayesian.js');
           const paraIds = Array.from(geometryParagraphEmbeddings.keys());
           const paraVectors = paraIds.map((id) => geometryParagraphEmbeddings.get(id));
           basinInversionResult = computeBasinInversion(paraIds, paraVectors);
@@ -903,7 +903,7 @@ export class StepExecutor {
 
         try {
           if (options.sessionManager && context.canonicalAiTurnId) {
-            const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
+            const { packEmbeddingMap } = await import('../../persistence/embedding-codec.js');
             const stmtDim = statementEmbeddingResult?.embeddings?.values?.().next?.().value?.length;
             const paraDim = geometryParagraphEmbeddings?.values?.().next?.().value?.length;
             const queryDim = queryEmbedding?.length;
@@ -1149,7 +1149,7 @@ export class StepExecutor {
                   try {
                     // ── PRE-SURVEY PIPELINE (shared with regenerate flow) ──
                     const { computePreSurveyPipeline, assembleFromPreSurvey } =
-                      await import('./deterministicPipeline');
+                      await import('./deterministic-pipeline.js');
 
                     const preSurvey = await computePreSurveyPipeline({
                       parsedMappingResult: {
@@ -1183,7 +1183,7 @@ export class StepExecutor {
                         context.canonicalAiTurnId
                       ) {
                         const { packEmbeddingMap } =
-                          await import('../../persistence/embeddingCodec');
+                          await import('../../persistence/embedding-codec.js');
                         let dims = 0;
                         for (const v of claimEmbeddings.values()) {
                           const n = v?.length;
@@ -1314,9 +1314,9 @@ export class StepExecutor {
                     // ── EDITORIAL MODEL CALL (StepExecutor-only) ──────────────
                     if (mapperArtifact && preSurvey?.derived) {
                       try {
-                        const { buildSourceContinuityMap } = await import('../passageRouting');
+                        const { buildSourceContinuityMap } = await import('../passage-routing.js');
                         const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-                          await import('../../concierge-service/editorialMapper.js');
+                          await import('../../concierge-service/editorial-mapper.js');
 
                         const continuityMap = buildSourceContinuityMap(
                           preSurvey.derived.claimDensityResult
@@ -1967,7 +1967,7 @@ export class StepExecutor {
     let ConciergeService;
     let handoffV2Enabled = false;
     try {
-      const module = await import('../../concierge-service/ConciergeService.js');
+      const module = await import('../../concierge-service/concierge-service.js');
       ConciergeService = module.ConciergeService;
       handoffV2Enabled = module.HANDOFF_V2_ENABLED === true;
     } catch (e) {
@@ -2042,7 +2042,7 @@ export class StepExecutor {
       };
     };
 
-    // Store on context so callers (turnemitter, handleContinueRequest) can
+    // Store on context so callers (turn-emitter, handleContinueRequest) can
     // surface the actual concierge prompt in the UI / debug panel.
     if (context && typeof context === 'object') {
       context.singularityPromptUsed = singularityPrompt;

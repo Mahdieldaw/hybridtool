@@ -29,20 +29,16 @@ export const computeStructuralAnalysis = (input: {
 
   //5. Synthesise shape from dominant layer.
   // layers[0] IS the dominant shape; layers[1..n] are residual structure.
-  // CognitiveOutputRenderer derives problemStructure = structuralAnalysis?.shape,
-  //  then passes it to MetricsRibbon, StructuralSummary, and StructureGlyph — all
-  //three read .primary, .confidence, and .patterns from this object.
+  // Returns problemStructure with .primary, .patterns, and .evidence.
   const dominantLayer = layers[0];
   const shape: ProblemStructure = dominantLayer
     ? {
         primary: dominantLayer.primary as PrimaryShape,
-        confidence: dominantLayer.coverage,
         patterns: secondaryPatterns,
         evidence: dominantLayer.evidence,
       }
     : {
         primary: 'sparse',
-        confidence: 0,
         patterns: [],
         evidence: ['No structural signal detected'],
       };

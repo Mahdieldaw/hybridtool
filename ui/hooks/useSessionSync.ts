@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { currentSessionIdAtom, turnIdsAtom, turnsMapAtom, uiPhaseAtom } from '../state/atoms';
 import api from '../services/extension-api';
-import { parseSessionTurns } from '../utils/parseSessionTurns';
+import { parseSessionTurns } from '../utils/parse-session-turns';
 
 /**
  * After initialization, if there's a stored sessionId but no turns loaded,

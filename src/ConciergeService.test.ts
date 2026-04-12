@@ -1,8 +1,8 @@
-import { ConciergeService } from './concierge-service/ConciergeService';
+import { ConciergeService } from './concierge-service/concierge-service';
 import {
   buildSemanticMapperPrompt,
   parseSemanticMapperOutput,
-} from './concierge-service/semanticMapper';
+} from './concierge-service/semantic-mapper';
 
 describe('ConciergeService', () => {
   it('should build prompt without capabilities or signal instructions', () => {

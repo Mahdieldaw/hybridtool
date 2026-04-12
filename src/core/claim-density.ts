@@ -8,7 +8,7 @@
  * from the provenance link chain: claim → sourceStatementIds → paragraph.
  */
 
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type {
   ClaimDensityProfile,
   ClaimDensityResult,

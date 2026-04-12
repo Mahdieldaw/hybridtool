@@ -236,7 +236,7 @@ function toNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-export class TurnEmitter {
+export class Turnemitter {
   private port: Port;
   lastFinalizedTurn: FinalizedTurn | null;
 
@@ -257,7 +257,7 @@ export class TurnEmitter {
     currentUserMessage: string
   ): void {
     if (resolvedContext?.type === 'recompute') {
-      console.log('[TurnEmitter] Skipping TURN_FINALIZED for recompute operation');
+      console.log('[turn-emitter] Skipping TURN_FINALIZED for recompute operation');
       return;
     }
 
@@ -412,7 +412,7 @@ export class TurnEmitter {
         Object.keys(singularityResponses).length > 0;
 
       if (!hasData) {
-        console.log('[TurnEmitter] No AI responses to finalize');
+        console.log('[turn-emitter] No AI responses to finalize');
         return;
       }
 
@@ -450,7 +450,7 @@ export class TurnEmitter {
             inferredSingularityOutput = candidate;
           }
         } catch (err) {
-          console.debug('[TurnEmitter] Failed to extract singularity output:', err);
+          console.debug('[turn-emitter] Failed to extract singularity output:', err);
         }
       }
 
@@ -488,7 +488,7 @@ export class TurnEmitter {
         },
       };
 
-      console.log('[TurnEmitter] Emitting TURN_FINALIZED', {
+      console.log('[turn-emitter] Emitting TURN_FINALIZED', {
         userTurnId: userTurn.id,
         aiTurnId: aiTurn.id,
         batchCount: Object.keys(batchResponses).length,
@@ -515,11 +515,11 @@ export class TurnEmitter {
 
       if (aiTurn.pipelineStatus === 'complete') {
         cleanupPendingEmbeddingsBuffers().catch((err) => {
-          console.warn('[TurnEmitter] Failed to cleanup embeddings buffers:', err);
+          console.warn('[turn-emitter] Failed to cleanup embeddings buffers:', err);
         });
       }
     } catch (error) {
-      console.error('[TurnEmitter] Failed to emit TURN_FINALIZED:', error);
+      console.error('[turn-emitter] Failed to emit TURN_FINALIZED:', error);
     }
   }
 }

@@ -138,7 +138,6 @@ export interface UnifiedMapperOutput {
 
 export interface ShapeClassification {
   primary: PrimaryShape;
-  confidence: number;
   evidence: string[];
 }
 

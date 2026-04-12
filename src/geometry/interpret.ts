@@ -18,7 +18,7 @@
 // INVERSION TEST: L1. No semantic context crosses this boundary.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type {
   GeometricSubstrate,
   NodeLocalStats,
@@ -31,7 +31,7 @@ import type {
 } from './types';
 import { isDegenerate } from './types';
 import { cosineSimilarity } from '../clustering/distance';
-import { computeGapRegionalization } from '../../shared/geometry/gapRegionalization';
+import { computeGapRegionalization } from '../../shared/geometry/gap-regionalization';
 
 export type {
   SubstrateInterpretation,
@@ -46,13 +46,13 @@ export type {
 
 // ─── Gate constants ───────────────────────────────────────────────────────────
 
-const DISCRIMINATION_MIN_RANGE      = 0.10;
-const ISOLATION_SKIP_THRESHOLD      = 0.70;
-const GATE_CONFIDENCE_BASELINE      = 0.25;
-const GATE_DENSITY_WEIGHT           = 0.45;
-const GATE_DENSITY_SATURATION       = 0.35;
-const GATE_CONNECTIVITY_WEIGHT      = 0.30;
-const GATE_CONNECTIVITY_SATURATION  = 0.90;
+const DISCRIMINATION_MIN_RANGE = 0.1;
+const ISOLATION_SKIP_THRESHOLD = 0.7;
+const GATE_CONFIDENCE_BASELINE = 0.25;
+const GATE_DENSITY_WEIGHT = 0.45;
+const GATE_DENSITY_SATURATION = 0.35;
+const GATE_CONNECTIVITY_WEIGHT = 0.3;
+const GATE_CONNECTIVITY_SATURATION = 0.9;
 
 function clamp01(value: number): number {
   return value <= 0 ? 0 : value >= 1 ? 1 : value;
@@ -77,7 +77,12 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
   };
 
   if (measurements.isDegenerate) {
-    return { verdict: 'skip_geometry', confidence: 1, evidence: ['degenerate_substrate=true'], measurements };
+    return {
+      verdict: 'skip_geometry',
+      confidence: 1,
+      evidence: ['degenerate_substrate=true'],
+      measurements,
+    };
   }
 
   const evidence: string[] = [
@@ -102,19 +107,24 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
   }
 
   if (isolationRatio > ISOLATION_SKIP_THRESHOLD) {
-    const confidence = clamp01((isolationRatio - ISOLATION_SKIP_THRESHOLD) / (1 - ISOLATION_SKIP_THRESHOLD));
+    const confidence = clamp01(
+      (isolationRatio - ISOLATION_SKIP_THRESHOLD) / (1 - ISOLATION_SKIP_THRESHOLD)
+    );
     return {
       verdict: 'insufficient_structure',
       confidence,
-      evidence: [...evidence, `isolation_above_threshold(${formatPct(isolationRatio)}>${formatPct(ISOLATION_SKIP_THRESHOLD)})`],
+      evidence: [
+        ...evidence,
+        `isolation_above_threshold(${formatPct(isolationRatio)}>${formatPct(ISOLATION_SKIP_THRESHOLD)})`,
+      ],
       measurements,
     };
   }
 
   const proceedConfidence = clamp01(
-    GATE_CONFIDENCE_BASELINE
-    + GATE_DENSITY_WEIGHT      * clamp01(density / GATE_DENSITY_SATURATION)
-    + GATE_CONNECTIVITY_WEIGHT * clamp01((1 - isolationRatio) / GATE_CONNECTIVITY_SATURATION)
+    GATE_CONFIDENCE_BASELINE +
+      GATE_DENSITY_WEIGHT * clamp01(density / GATE_DENSITY_SATURATION) +
+      GATE_CONNECTIVITY_WEIGHT * clamp01((1 - isolationRatio) / GATE_CONNECTIVITY_SATURATION)
   );
 
   return { verdict: 'proceed', confidence: proceedConfidence, evidence, measurements };
@@ -139,11 +149,11 @@ function selectRegionSource(basinInversionResult?: any, gapResult?: any): Region
 // ─── Step 3A: Raw topology index ─────────────────────────────────────────────
 
 interface TopologyIndex {
-  nodeToBasin: Map<string, number>;         // paragraphId → basinId
-  nodeToGap: Map<string, number>;           // paragraphId → gapId
-  gapSizes: Map<number, number>;            // gapId → node count
-  nodeIsolation: Map<string, number>;       // paragraphId → isolationScore
-  nodeNeighborhood: Map<string, string[]>;  // paragraphId → neighbor ids
+  nodeToBasin: Map<string, number>; // paragraphId → basinId
+  nodeToGap: Map<string, number>; // paragraphId → gapId
+  gapSizes: Map<number, number>; // gapId → node count
+  nodeIsolation: Map<string, number>; // paragraphId → isolationScore
+  nodeNeighborhood: Map<string, string[]>; // paragraphId → neighbor ids
 }
 
 function buildTopologyIndex(
@@ -180,7 +190,9 @@ function buildTopologyIndex(
   // Node isolation + neighborhood from substrate
   for (const node of substrate.nodes) {
     nodeIsolation.set(node.paragraphId, node.isolationScore);
-    const neighbors = (substrate.mutualRankGraph.adjacency.get(node.paragraphId) || []).map((e) => e.target);
+    const neighbors = (substrate.mutualRankGraph.adjacency.get(node.paragraphId) || []).map(
+      (e) => e.target
+    );
     nodeNeighborhood.set(node.paragraphId, neighbors);
   }
 
@@ -202,7 +214,10 @@ function uniqueSorted(numbers: number[]): number[] {
   return Array.from(new Set(numbers)).sort((a, b) => a - b);
 }
 
-function unionStatementIdsStable(nodeIds: string[], nodesById: Map<string, NodeLocalStats>): string[] {
+function unionStatementIdsStable(
+  nodeIds: string[],
+  nodesById: Map<string, NodeLocalStats>
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const nodeId of nodeIds) {
@@ -272,7 +287,9 @@ function collectRegionIdentities(
   });
 
   // Re-index after sort (deterministic, order-dependent IDs)
-  identities.forEach((r, i) => { r.id = `r_${i}`; });
+  identities.forEach((r, i) => {
+    r.id = `r_${i}`;
+  });
 
   return identities;
 }
@@ -350,7 +367,10 @@ function computePopulationMetrics(
     outer: for (const r of identities) {
       for (const pid of r.nodeIds) {
         const emb = paragraphEmbeddings.get(pid);
-        if (emb && emb.length > 0) { dims = emb.length; break outer; }
+        if (emb && emb.length > 0) {
+          dims = emb.length;
+          break outer;
+        }
       }
     }
 
@@ -382,8 +402,10 @@ function computePopulationMetrics(
           for (let j = i + 1; j < ids.length; j++) {
             const cb = centroids.get(ids[j])!;
             const sim = Math.max(0, Math.min(1, cosineSimilarity(ca, cb)));
-            if (sim > (nearestCarrierByRegion.get(ids[i]) ?? 0)) nearestCarrierByRegion.set(ids[i], sim);
-            if (sim > (nearestCarrierByRegion.get(ids[j]) ?? 0)) nearestCarrierByRegion.set(ids[j], sim);
+            if (sim > (nearestCarrierByRegion.get(ids[i]) ?? 0))
+              nearestCarrierByRegion.set(ids[i], sim);
+            if (sim > (nearestCarrierByRegion.get(ids[j]) ?? 0))
+              nearestCarrierByRegion.set(ids[j], sim);
           }
         }
       }
@@ -399,8 +421,10 @@ function computePopulationMetrics(
       const a = nodeToRegion.get(edge.source);
       const b = nodeToRegion.get(edge.target);
       if (!a || !b || a === b) continue;
-      if (edge.similarity > (nearestCarrierByRegion.get(a) ?? 0)) nearestCarrierByRegion.set(a, edge.similarity);
-      if (edge.similarity > (nearestCarrierByRegion.get(b) ?? 0)) nearestCarrierByRegion.set(b, edge.similarity);
+      if (edge.similarity > (nearestCarrierByRegion.get(a) ?? 0))
+        nearestCarrierByRegion.set(a, edge.similarity);
+      if (edge.similarity > (nearestCarrierByRegion.get(b) ?? 0))
+        nearestCarrierByRegion.set(b, edge.similarity);
     }
   }
 
@@ -472,7 +496,9 @@ function constructMeasuredRegions(
 
 export function identifyPeriphery(
   basinInversion: any,
-  regionsOrTopologyIndex?: { kind: 'basin' | 'gap'; nodeIds: string[] }[] | { nodeToGap: Map<string, number>; gapSizes: Map<number, number> }
+  regionsOrTopologyIndex?:
+    | { kind: 'basin' | 'gap'; nodeIds: string[] }[]
+    | { nodeToGap: Map<string, number>; gapSizes: Map<number, number> }
 ): PeripheryResult {
   const empty: PeripheryResult = {
     corpusMode: 'no-geometry',
@@ -550,7 +576,10 @@ function deriveCorpusMode(
   basinInversionResult: any,
   topologyIndex: TopologyIndex,
   _totalNodes: number
-): Pick<SubstrateInterpretation, 'corpusMode' | 'peripheralNodeIds' | 'peripheralRatio' | 'largestBasinRatio' | 'basinByNodeId'> {
+): Pick<
+  SubstrateInterpretation,
+  'corpusMode' | 'peripheralNodeIds' | 'peripheralRatio' | 'largestBasinRatio' | 'basinByNodeId'
+> {
   const periphery = identifyPeriphery(basinInversionResult, {
     nodeToGap: topologyIndex.nodeToGap,
     gapSizes: topologyIndex.gapSizes,
@@ -623,7 +652,12 @@ export function interpretSubstrate(
   const topologyIndex = buildTopologyIndex(substrate, basinInversionResult, gapResult);
 
   // Step 3B — Region identities (structural, no metrics)
-  const identities = collectRegionIdentities(regionSource, substrate, basinInversionResult, gapResult);
+  const identities = collectRegionIdentities(
+    regionSource,
+    substrate,
+    basinInversionResult,
+    gapResult
+  );
 
   // Step 4 — Population phase (all regions known before metrics computed)
   const populationMetrics = computePopulationMetrics(identities, substrate, paragraphEmbeddings);

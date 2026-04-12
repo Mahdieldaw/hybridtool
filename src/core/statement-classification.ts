@@ -11,7 +11,7 @@
  */
 
 import { cosineSimilarity } from '../clustering/distance';
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type {
   ClaimDensityResult,
   PassageRoutingResult,
@@ -21,7 +21,7 @@ import type {
   UnclaimedGroup,
   UnclaimedParagraphEntry,
 } from '../../shared/contract';
-import { computeStatementOwnership } from '../concierge-service/claimProvenance';
+import { computeStatementOwnership } from '../concierge-service/claim-provenance';
 
 // ── Input ───────────────────────────────────────────────────────────────
 

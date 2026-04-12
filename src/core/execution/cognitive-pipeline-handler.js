@@ -105,7 +105,7 @@ export class CognitivePipelineHandler {
           // Guarded dynamic import for resilience during partial deploys
           let ConciergeModule;
           try {
-            ConciergeModule = await import('../../concierge-service/ConciergeService.js');
+            ConciergeModule = await import('../../concierge-service/concierge-service.js');
           } catch (err) {
             console.error(
               '[CognitiveHandler] Critical error: ConciergeService module could not be loaded',
@@ -182,7 +182,7 @@ export class CognitivePipelineHandler {
               let evidenceSubstrate = '';
               try {
                 const { buildEvidenceSubstrate } =
-                  await import('../../concierge-service/evidenceSubstrate.js');
+                  await import('../../concierge-service/evidence-substrate.js');
                 const cso = mappingArtifact?.meta?.citationSourceOrder || {};
                 evidenceSubstrate = buildEvidenceSubstrate(
                   mappingArtifact,
@@ -338,7 +338,7 @@ export class CognitivePipelineHandler {
               if (handoffV2Enabled && turnInCurrentInstance >= 2) {
                 try {
                   const { parseHandoffResponse, hasHandoffContent } =
-                    await import('../../../shared/parsing-utils');
+                    await import('../../../shared/parsing-utils.js');
                   const parsed = parseHandoffResponse(singularityResult?.text || '');
 
                   if (parsed.handoff && hasHandoffContent(parsed.handoff)) {
@@ -573,8 +573,8 @@ export class CognitivePipelineHandler {
         // Phase 2 rebuild (preferred path — uses the ONE code path)
         if (!mappingArtifact && latestMappingText) {
           try {
-            const { buildArtifactForProvider } = await import('./deterministicPipeline');
-            const { unpackEmbeddingMap } = await import('../../persistence/embeddingCodec');
+            const { buildArtifactForProvider } = await import('./deterministic-pipeline.js');
+            const { unpackEmbeddingMap } = await import('../../persistence/embedding-codec.js');
 
             const geoRecord = await this.sessionManager.loadEmbeddings(aiTurnId);
             if (
@@ -599,7 +599,7 @@ export class CognitivePipelineHandler {
                   : null;
 
               // Canonical provider ordering for deterministic statement IDs
-              const { canonicalCitationOrder } = await import('../../../shared/provider-config');
+              const { canonicalCitationOrder } = await import('../../../shared/provider-config.js');
               const normalizeProvId = (pid) =>
                 String(pid || '')
                   .trim()
@@ -632,7 +632,8 @@ export class CognitivePipelineHandler {
               let shadowStatements = null;
               let shadowParagraphs = null;
               try {
-                const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
+                const { extractShadowStatements, projectParagraphs } =
+                  await import('../../shadow/index.js');
                 const shadowResult = extractShadowStatements(batchSources);
                 shadowStatements = shadowResult.statements;
                 shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
@@ -644,7 +645,7 @@ export class CognitivePipelineHandler {
               }
 
               const { buildCitationSourceOrder: buildCSO } =
-                await import('../../../shared/provider-config');
+                await import('../../../shared/provider-config.js');
               const buildResult = await buildArtifactForProvider({
                 mappingText: latestMappingText,
                 shadowStatements,
@@ -687,7 +688,7 @@ export class CognitivePipelineHandler {
           if (editorialResponse?.text) {
             try {
               const { parseEditorialOutput } =
-                await import('../../concierge-service/editorialMapper.js');
+                await import('../../concierge-service/editorial-mapper.js');
               // Collect valid passage/unclaimed keys from the artifact
               const validPassageKeys = new Set();
               const densityProfiles = mappingArtifact?.claimDensity?.profiles ?? {};
@@ -735,12 +736,12 @@ export class CognitivePipelineHandler {
         let conciergePrompt = null;
         try {
           const { buildEvidenceSubstrate } =
-            await import('../../concierge-service/evidenceSubstrate.js');
+            await import('../../concierge-service/evidence-substrate.js');
           const cso = mappingArtifact?.meta?.citationSourceOrder || {};
           const evidenceSubstrate = buildEvidenceSubstrate(mappingArtifact, latestMappingText, cso);
 
           if (evidenceSubstrate) {
-            const ConciergeModule = await import('../../concierge-service/ConciergeService.js');
+            const ConciergeModule = await import('../../concierge-service/concierge-service.js');
             const ConciergeService = ConciergeModule?.ConciergeService;
             if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
               conciergePrompt = ConciergeService.buildConciergePrompt(originalPrompt, {
@@ -954,7 +955,8 @@ export class CognitivePipelineHandler {
         const finalStatus = finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus;
         if (finalStatus === 'complete') {
           try {
-            const { cleanupPendingEmbeddingsBuffers } = await import('../../clustering/embeddings');
+            const { cleanupPendingEmbeddingsBuffers } =
+              await import('../../clustering/embeddings.js');
             await cleanupPendingEmbeddingsBuffers();
           } catch (e) {
             console.warn('[CognitiveHandler] Failed to cleanup embeddings buffers:', e);

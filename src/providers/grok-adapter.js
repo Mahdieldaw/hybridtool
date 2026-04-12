@@ -16,7 +16,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   normalizeError,
-} from '../utils/ErrorHandler';
+} from '../utils/error-handler.js';
 
 // Provider-specific adapter debug flag (off by default)
 const GROK_ADAPTER_DEBUG = false;

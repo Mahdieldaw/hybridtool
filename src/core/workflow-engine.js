@@ -1,10 +1,10 @@
 import { getHealthTracker } from './provider-health-tracker.js';
-import { StepExecutor } from './execution/StepExecutor';
-import { StreamingManager } from './execution/streamingmanager';
-import { ContextManager } from './execution/ContextManager';
-import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
-import { TurnEmitter } from './execution/turnemitter';
-import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
+import { StepExecutor } from './execution/step-executor.js';
+import { StreamingManager } from './execution/streaming-manager.js';
+import { ContextManager } from './execution/context-manager.js';
+import { PersistenceCoordinator } from './execution/persistence-coordinator.js';
+import { TurnEmitter } from './execution/turn-emitter.js';
+import { CognitivePipelineHandler } from './execution/cognitive-pipeline-handler.js';
 import { classifyError } from './error-classifier';
 
 export class WorkflowEngine {

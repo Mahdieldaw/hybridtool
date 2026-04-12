@@ -10,8 +10,8 @@
 // - Renormalizes embeddings after pooling for determinism
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
-import type { ShadowStatement } from '../shadow/ShadowExtractor';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
+import type { ShadowStatement } from '../shadow/shadow-extractor';
 import { EmbeddingConfig, DEFAULT_CONFIG } from './config';
 
 // ═══════════════════════════════════════════════════════════════════════════

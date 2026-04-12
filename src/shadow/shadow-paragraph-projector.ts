@@ -1,6 +1,6 @@
-import type { ShadowStatement } from './ShadowExtractor';
-import type { Stance } from './StatementTypes';
-import { STANCE_PRIORITY } from './StatementTypes';
+import type { ShadowStatement } from './shadow-extractor';
+import type { Stance } from './statement-types';
+import { STANCE_PRIORITY } from './statement-types';
 
 export interface ShadowParagraph {
   id: string;

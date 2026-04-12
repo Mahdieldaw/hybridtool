@@ -1,7 +1,7 @@
 import { useRef, useMemo, useState, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import clsx from 'clsx';
-import type { ColumnDef, ViewConfig } from './columnRegistry';
+import type { ColumnDef, ViewConfig } from './column-registry';
 import { CopyButton } from '../CopyButton';
 
 // ============================================================================

@@ -31,7 +31,7 @@ export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
     // ═══════════════════════════════════════════════════════════════════
     // LINE 1: PRIMARY SHAPE + RESIDUAL (if meaningful)
     // ═══════════════════════════════════════════════════════════════════
-    const shapeLine = buildShapeLine(analysis, problemStructure, layers);
+    const shapeLine = buildShapeLine(analysis, layers);
     if (shapeLine) result.push(shapeLine);
 
     // ═══════════════════════════════════════════════════════════════════
@@ -215,13 +215,10 @@ function describeLayer(
 
 function buildShapeLine(
   analysis: StructuralAnalysis,
-  structure?: ProblemStructure,
   layers?: StructureLayer[]
 ): SummaryLine | null {
   const primaryLayer = layers?.[0];
-  if (!primaryLayer) {
-    return buildShapeLineLegacy(analysis, structure);
-  }
+  if (!primaryLayer) return null;
 
   const primaryDesc = describeLayer(primaryLayer, analysis, false);
   if (!primaryDesc) return null;
@@ -241,106 +238,6 @@ function buildShapeLine(
     text: fullText,
     color: primaryDesc.color,
   };
-}
-
-// Legacy fallback (kept for compatibility if layers not passed)
-function buildShapeLineLegacy(
-  analysis: StructuralAnalysis,
-  structure?: ProblemStructure
-): SummaryLine | null {
-  const claims = analysis.claimsWithLeverage;
-  if (claims.length === 0) return null;
-
-  const primary = structure?.primary ?? analysis.shape?.primary;
-  if (!primary) return null;
-
-  const coverage = structure?.confidence ?? analysis.shape?.confidence ?? 0;
-
-  const bySupport = [...claims].sort((a, b) => b.supporters.length - a.supporters.length);
-  const top1 = bySupport[0];
-  const top2 = bySupport[1];
-
-  switch (primary) {
-    case 'convergent': {
-      const highSupport = claims.filter((c) => c.isHighSupport);
-      if (highSupport.length >= 2 && top2) {
-        return {
-          icon: '✓',
-          text: `Models focus on "${top1.label}" and "${top2.label}"`,
-          color: 'text-emerald-400',
-        };
-      }
-      return {
-        icon: '✓',
-        text: `Models converge around "${top1.label}"`,
-        color: 'text-emerald-400',
-      };
-    }
-
-    case 'forked': {
-      const topConflict = analysis.patterns.conflictInfos?.[0] ?? analysis.patterns.conflicts[0];
-      if (topConflict) {
-        const qualifier = coverage < 0.5 ? `, but other angles carry more attention` : ``;
-        return {
-          icon: '⚡',
-          text: `Models split between "${topConflict.claimA.label}" and "${topConflict.claimB.label}"${qualifier}`,
-          color: 'text-red-400',
-        };
-      }
-      if (top2) {
-        const qualifier = coverage < 0.5 ? `, but other angles carry more attention` : ``;
-        return {
-          icon: '⚡',
-          text: `Models split between "${top1.label}" and "${top2.label}"${qualifier}`,
-          color: 'text-red-400',
-        };
-      }
-      return {
-        icon: '⚡',
-        text: `Genuine disagreement — no dominant position`,
-        color: 'text-red-400',
-      };
-    }
-
-    case 'constrained': {
-      const topTradeoff = analysis.patterns.tradeoffs[0];
-      if (topTradeoff) {
-        if (coverage < 0.5) {
-          return {
-            icon: '⚖️',
-            text: `Tradeoff between "${topTradeoff.claimA.label}" and "${topTradeoff.claimB.label}", among other angles`,
-            color: 'text-orange-400',
-          };
-        }
-        return {
-          icon: '⚖️',
-          text: `"${topTradeoff.claimA.label}" and "${topTradeoff.claimB.label}" — gaining one costs the other`,
-          color: 'text-orange-400',
-        };
-      }
-      return {
-        icon: '⚖️',
-        text: `Positions are mutually constraining — tradeoffs dominate`,
-        color: 'text-orange-400',
-      };
-    }
-
-    case 'parallel':
-      return {
-        icon: '∥',
-        text: `Models explored independent dimensions — positions don't interact`,
-        color: 'text-purple-400',
-      };
-
-    case 'sparse':
-      return {
-        icon: '○',
-        text: top1
-          ? `Flat distribution — "${top1.label}" edges ahead but no clear pattern`
-          : `Models explored multiple angles without converging`,
-        color: 'text-slate-400',
-      };
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

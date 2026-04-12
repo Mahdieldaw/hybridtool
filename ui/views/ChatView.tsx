@@ -20,7 +20,7 @@ import ChatInput from '../components/ChatInput';
 import WelcomeScreen from '../components/WelcomeScreen';
 import { useChat } from '../hooks/chat/useChat';
 import { SplitPaneRightPanel } from '../components/SplitPaneRightPanel';
-import { safeLazy } from '../utils/safeLazy';
+import { safeLazy } from '../utils/safe-lazy';
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
 const CouncilOrbsVertical = safeLazy(() =>

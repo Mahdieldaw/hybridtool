@@ -5,13 +5,13 @@
  */
 
 // Vendor controllers (from core/vendor dir)
-export { BusController, utils } from '../htos/BusController.js';
+export { BusController, utils } from '../htos/bus-controller.js';
 export {
   NetRulesManager,
   CSPController,
   UserAgentController,
   ArkoseController,
-} from '../htos/NetRulesManager.js';
+} from '../htos/net-rules-manager.js';
 
 // Core exports
 export { LifecycleManager } from './lifecycle-manager.js';

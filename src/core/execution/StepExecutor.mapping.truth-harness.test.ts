@@ -1,4 +1,4 @@
-import { StepExecutor } from './StepExecutor.js';
+import { StepExecutor } from './step-executor.js';
 
 function makeStreamingManager() {
   return {
@@ -15,8 +15,11 @@ describe('StepExecutor mapping truth harness', () => {
         _prompt: string,
         providerIds: string[],
         callbacks: {
-          onAllComplete: (results: Map<string, any>, errors: Map<string, any>) => Promise<void> | void;
-        },
+          onAllComplete: (
+            results: Map<string, any>,
+            errors: Map<string, any>
+          ) => Promise<void> | void;
+        }
       ) => {
         const providerId = providerIds[0];
         const results = new Map<string, any>();
@@ -54,13 +57,9 @@ describe('StepExecutor mapping truth harness', () => {
       workflowControl: { DISRUPTION_FIRST_MAPPER: true },
     };
 
-    const res = await executor.executeMappingStep(
-      step as any,
-      context as any,
-      new Map(),
-      {},
-      { streamingManager } as any,
-    );
+    const res = await executor.executeMappingStep(step as any, context as any, new Map(), {}, {
+      streamingManager,
+    } as any);
 
     expect(res).toBeTruthy();
     expect(res.status).toBe('completed');

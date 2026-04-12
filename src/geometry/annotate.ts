@@ -8,8 +8,8 @@
 //   computeQueryRelevance() — score statements against a query embedding
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ShadowStatement } from '../shadow/ShadowExtractor';
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { ShadowStatement } from '../shadow/shadow-extractor';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type { GeometricSubstrate, NodeLocalStats, MeasuredRegion } from './types';
 import { cosineSimilarity } from '../clustering/distance';
 
@@ -27,11 +27,11 @@ export interface EnrichmentResult {
 // ─── Query relevance types ────────────────────────────────────────────────────
 
 export interface QueryRelevanceStatementScore {
-  querySimilarity: number;           // [-1,1] raw cosine (CANONICAL for pipeline decisions)
+  querySimilarity: number; // [-1,1] raw cosine (CANONICAL for pipeline decisions)
   querySimilarityNormalized: number; // [0,1] (cos+1)/2 — for UI display only
-  simRaw: number;                    // [-1,1] deprecated alias for querySimilarity
+  simRaw: number; // [-1,1] deprecated alias for querySimilarity
   embeddingSource: 'statement' | 'paragraph' | 'none';
-  paragraphSimRaw: number;           // [-1,1] raw cosine at paragraph level
+  paragraphSimRaw: number; // [-1,1] raw cosine at paragraph level
 }
 
 export interface QueryRelevanceResult {
@@ -178,12 +178,7 @@ export function annotateStatements(input: {
   statementEmbeddings?: Map<string, Float32Array> | null;
   paragraphEmbeddings?: Map<string, Float32Array> | null;
 }): { queryRelevance: QueryRelevanceResult | null } {
-  enrichStatementsWithGeometry(
-    input.statements,
-    input.paragraphs,
-    input.substrate,
-    input.regions
-  );
+  enrichStatementsWithGeometry(input.statements, input.paragraphs, input.substrate, input.regions);
 
   let queryRelevance: QueryRelevanceResult | null = null;
   if (input.queryEmbedding) {

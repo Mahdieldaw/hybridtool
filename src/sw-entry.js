@@ -31,10 +31,10 @@ import { ConnectionHandler } from './core/connection-handler.js';
 import { authManager } from './core/auth-manager.js';
 
 // Persistence Layer Imports
-import { SessionManager } from './persistence/SessionManager';
+import { SessionManager } from './persistence/session-manager.js';
 import { initializePersistenceLayer } from './persistence/index';
-import { errorHandler, getErrorMessage } from './utils/ErrorHandler';
-import { persistenceMonitor } from './core/PersistenceMonitor.js';
+import { errorHandler, getErrorMessage } from './utils/error-handler.js';
+import { persistenceMonitor } from './core/persistence-monitor.js';
 
 // Global Services Registry
 import { ServiceRegistry } from './core/service-registry.js';
@@ -913,10 +913,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           const geoRecord = await sm.loadEmbeddings(aiTurnId);
-          const { unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
+          const { unpackEmbeddingMap } = await import('./persistence/embedding-codec.js');
           const { generateTextEmbeddings, structuredTruncate } = await import('./clustering');
           const { DEFAULT_CONFIG } = await import('./clustering');
-          const { searchCorpus } = await import('./core/corpusSearch');
+          const { searchCorpus } = await import('./core/corpus-search.js');
 
           const turnRaw = await sm.adapter.get('turns', aiTurnId);
           let shadowParagraphs = turnRaw?.mapping?.artifact?.shadow?.paragraphs || [];
@@ -1531,7 +1531,8 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       structuredTruncate,
       DEFAULT_CONFIG,
     } = await import('./clustering');
-    const { packEmbeddingMap, unpackEmbeddingMap } = await import('./persistence/embeddingCodec');
+    const { packEmbeddingMap, unpackEmbeddingMap } =
+      await import('./persistence/embedding-codec.js');
     const dims = DEFAULT_CONFIG.embeddingDimensions;
 
     // ── Load query text (shared) ──
@@ -1757,7 +1758,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
     // ══════════════════════════════════════════════════════════════
     // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
     // ══════════════════════════════════════════════════════════════
-    const { buildArtifactForProvider } = await import('./core/execution/deterministicPipeline');
+    const { buildArtifactForProvider } = await import('./core/execution/deterministic-pipeline.js');
     const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } =
       await import('../shared/provider-config');
     const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));
@@ -1864,8 +1865,8 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
         mapperArtifact.statementClassification
       ) {
         const { buildPassageIndex, parseEditorialOutput } =
-          await import('./concierge-service/editorialMapper.js');
-        const { buildSourceContinuityMap } = await import('./core/passageRouting');
+          await import('./concierge-service/editorial-mapper.js');
+        const { buildSourceContinuityMap } = await import('./core/passage-routing.js');
 
         const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
         const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
@@ -1912,9 +1913,9 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       try {
         const orchestrator = services.get('orchestrator');
         if (orchestrator) {
-          const { buildSourceContinuityMap } = await import('./core/passageRouting');
+          const { buildSourceContinuityMap } = await import('./core/passage-routing.js');
           const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-            await import('./concierge-service/editorialMapper.js');
+            await import('./concierge-service/editorial-mapper.js');
 
           const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
           const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(

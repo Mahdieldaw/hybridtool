@@ -4,7 +4,7 @@ import { usePortMessageHandler } from './hooks/chat/usePortMessageHandler';
 import { useConnectionMonitoring } from './hooks/useConnectionMonitoring';
 import { useHistoryLoader } from './hooks/useHistoryLoader';
 import { useResponsiveLoadingGuard } from './hooks/ui/useLoadingWatchdog';
-import { safeLazy } from './utils/safeLazy';
+import { safeLazy } from './utils/safe-lazy';
 const ChatView = safeLazy(() => import('./views/ChatView'));
 import Header from './components/Header';
 const HistoryPanel = safeLazy(() => import('./components/HistoryPanel'));

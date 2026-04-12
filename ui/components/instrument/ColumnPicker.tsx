@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import clsx from 'clsx';
-import type { ColumnDef } from './columnRegistry';
-import { compileExpression, validateExpression } from './expressionEngine';
+import type { ColumnDef } from './column-registry';
+import { compileExpression, validateExpression } from './expression-engine';
 import type { EvidenceRow } from '../../hooks/useEvidenceRows';
 
 // ============================================================================

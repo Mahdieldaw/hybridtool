@@ -22,7 +22,7 @@ import {
   providerArtifactFamily,
 } from '../../state/atoms';
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from '../../state/atoms';
-import { StreamingBuffer } from '../../utils/streamingBuffer';
+import { StreamingBuffer } from '../../utils/streaming-buffer';
 import { applyStreamingTurnUpdate, createOptimisticAiTurn } from '../../utils/turn-helpers';
 import { normalizeProviderId } from '../../utils/provider-id-mapper';
 import api from '../../services/extension-api';

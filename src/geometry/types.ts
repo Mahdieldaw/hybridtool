@@ -2,7 +2,7 @@
 // GEOMETRIC SUBSTRATE TYPES
 // ===========================================================================
 
-import type { Stance } from '../shadow/StatementTypes';
+import type { Stance } from '../shadow/statement-types';
 
 // ------------------------------------------------------------------------------
 // SIMILARITY STATS (inlined from threshold.ts)
@@ -102,9 +102,9 @@ export interface Layout2D {
 // ------------------------------------------------------------------------------
 
 export interface SubstrateHealth {
-  isolationRatio: number;   // fraction of nodes with zero mutual recognition edges
-  edgeCount: number;        // total edges in mutual recognition graph
-  density: number;          // edgeCount / maxPossibleEdges
+  isolationRatio: number; // fraction of nodes with zero mutual recognition edges
+  edgeCount: number; // total edges in mutual recognition graph
+  density: number; // edgeCount / maxPossibleEdges
   discriminationRange: number; // p90 - p10 from pairwise field
   nodeCount: number;
 }

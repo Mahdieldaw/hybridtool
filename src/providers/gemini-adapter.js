@@ -12,7 +12,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   normalizeError,
-} from '../utils/ErrorHandler';
+} from '../utils/error-handler.js';
 
 const GEMINI_ADAPTER_DEBUG = false;
 const pad = (...args) => {

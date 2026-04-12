@@ -3,7 +3,7 @@
  * Provides comprehensive error handling, recovery strategies, and fallback mechanisms
  */
 
-import { persistenceMonitor } from '../core/PersistenceMonitor';
+import { persistenceMonitor } from '../core/persistence-monitor';
 import {
   classifyError,
   isProviderAuthError as _isProviderAuthError,

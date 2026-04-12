@@ -3,10 +3,10 @@
 export * from './types';
 export * from './database';
 export * from './transactions';
-export * from './SessionManager';
+export * from './session-manager';
 
 import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from './database';
-import { SimpleIndexedDBAdapter } from './SimpleIndexedDBAdapter';
+import { SimpleIndexedDBAdapter } from './simple-indexeddb-adapter';
 
 // Simplified PersistenceLayer interface
 interface PersistenceLayer {

@@ -2,7 +2,7 @@
 // Provides init(), get(), put(), delete(), getAll() methods with auto-population of key fields
 
 import { openDatabase } from './database';
-import { verifySchemaAndRepair } from './schemaVerification';
+import { verifySchemaAndRepair } from './schema-verification';
 import { withTransaction } from './transactions';
 
 export interface SimpleRecord {

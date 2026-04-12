@@ -10,8 +10,8 @@
 // Output: ShadowStatement[] with stance, signals, and location metadata
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { Stance, classifyStance, detectSignals } from './StatementTypes';
-import { isExcluded } from './ExclusionRules';
+import { Stance, classifyStance, detectSignals } from './statement-types';
+import { isExcluded } from './exclusion-rules';
 import { stripInlineMarkdown } from '../clustering/embeddings';
 
 // ═══════════════════════════════════════════════════════════════════════════

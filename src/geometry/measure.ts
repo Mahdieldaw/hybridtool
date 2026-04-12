@@ -13,7 +13,7 @@
 // INVERSION TEST: L1. Pure math on pairwise similarity distributions.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type {
   GeometricSubstrate,
   DegenerateSubstrate,
@@ -60,7 +60,20 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 
 export function computeExtendedStatsFromArray(allSims: number[]): ExtendedSimilarityStats {
   if (allSims.length === 0) {
-    return { count: 0, min: 0, p10: 0, p25: 0, p50: 0, p75: 0, p80: 0, p90: 0, p95: 0, max: 0, mean: 0, stddev: 0 };
+    return {
+      count: 0,
+      min: 0,
+      p10: 0,
+      p25: 0,
+      p50: 0,
+      p75: 0,
+      p80: 0,
+      p90: 0,
+      p95: 0,
+      max: 0,
+      mean: 0,
+      stddev: 0,
+    };
   }
 
   const sorted = allSims.slice().sort((a, b) => a - b);
@@ -154,7 +167,13 @@ export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGr
   for (const [nodeId, neighbors] of perNode) {
     const count = neighbors.length;
     if (count === 0) {
-      thresholdStats.set(nodeId, { paragraphId: nodeId, mean: 0, stddev: 0, threshold: 0, notableNeighborCount: 0 });
+      thresholdStats.set(nodeId, {
+        paragraphId: nodeId,
+        mean: 0,
+        stddev: 0,
+        threshold: 0,
+        notableNeighborCount: 0,
+      });
       notableLookup.set(nodeId, new Set());
       continue;
     }
@@ -177,7 +196,13 @@ export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGr
       if (n.similarity > threshold) notable.add(n.nodeId);
     }
 
-    thresholdStats.set(nodeId, { paragraphId: nodeId, mean, stddev, threshold, notableNeighborCount: notable.size });
+    thresholdStats.set(nodeId, {
+      paragraphId: nodeId,
+      mean,
+      stddev,
+      threshold,
+      notableNeighborCount: notable.size,
+    });
     notableLookup.set(nodeId, notable);
   }
 
@@ -216,7 +241,9 @@ export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGr
   }
   for (const edge of edges) {
     adjacency.get(edge.source)!.push(edge);
-    adjacency.get(edge.target)!.push({ source: edge.target, target: edge.source, similarity: edge.similarity });
+    adjacency
+      .get(edge.target)!
+      .push({ source: edge.target, target: edge.source, similarity: edge.similarity });
   }
 
   const nodeStats = new Map<string, MutualRankNodeStats>();
@@ -331,7 +358,18 @@ function buildDegenerateSubstrate(
     matrix: new Map(paragraphs.map((p) => [p.id, new Map()])),
     perNode: new Map(paragraphs.map((p) => [p.id, []])),
     stats: {
-      count: 0, min: 0, p10: 0, p25: 0, p50: 0, p75: 0, p80: 0, p90: 0, p95: 0, max: 0, mean: 0, stddev: 0,
+      count: 0,
+      min: 0,
+      p10: 0,
+      p25: 0,
+      p50: 0,
+      p75: 0,
+      p80: 0,
+      p90: 0,
+      p95: 0,
+      max: 0,
+      mean: 0,
+      stddev: 0,
       discriminationRange: 0,
     },
     nodeCount: n,
@@ -375,11 +413,21 @@ export function measureSubstrate(
   const n = paragraphs.length;
 
   if (n < config.minParagraphs) {
-    return buildDegenerateSubstrate(paragraphs, 'insufficient_paragraphs', embeddingBackend, performance.now() - startTime);
+    return buildDegenerateSubstrate(
+      paragraphs,
+      'insufficient_paragraphs',
+      embeddingBackend,
+      performance.now() - startTime
+    );
   }
 
   if (!embeddings || embeddings.size === 0) {
-    return buildDegenerateSubstrate(paragraphs, 'embedding_failure', embeddingBackend, performance.now() - startTime);
+    return buildDegenerateSubstrate(
+      paragraphs,
+      'embedding_failure',
+      embeddingBackend,
+      performance.now() - startTime
+    );
   }
 
   const paragraphIds = paragraphs.map((p) => p.id);
@@ -389,7 +437,12 @@ export function measureSubstrate(
 
   // Degenerate: all embeddings identical
   if (field.stats.discriminationRange === 0 && field.nodeCount > 1) {
-    return buildDegenerateSubstrate(paragraphs, 'all_embeddings_identical', embeddingBackend, performance.now() - startTime);
+    return buildDegenerateSubstrate(
+      paragraphs,
+      'all_embeddings_identical',
+      embeddingBackend,
+      performance.now() - startTime
+    );
   }
 
   // Phase 2 — Mutual recognition graph

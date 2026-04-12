@@ -1,6 +1,6 @@
 import { LLMProvider } from './types';
 
-import { INITIAL_PROVIDERS } from './providers/providerRegistry';
+import { INITIAL_PROVIDERS } from './providers/provider-registry';
 
 export const LLM_PROVIDERS_CONFIG: LLMProvider[] = [...INITIAL_PROVIDERS];
 

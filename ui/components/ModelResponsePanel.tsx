@@ -27,7 +27,7 @@ import { ChevronDownIcon, ChevronUpIcon } from './Icons';
 import { CopyButton } from './CopyButton';
 import { formatProviderResponseForMd } from '../utils/copy-format-utils';
 import clsx from 'clsx';
-import { safeLazy } from '../utils/safeLazy';
+import { safeLazy } from '../utils/safe-lazy';
 import { PipelineErrorBanner } from './PipelineErrorBanner';
 import type { EditorialAST } from '../../shared/contract';
 
@@ -118,9 +118,9 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         typeof errorObj === 'string'
           ? errorObj
           : errorObj?.message ||
-            classifiedError?.message ||
-            (latestResponse?.meta as any)?.skippedReason ||
-            ((status as string) === 'skipped' ? 'Skipped by system' : 'Error occurred');
+          classifiedError?.message ||
+          (latestResponse?.meta as any)?.skippedReason ||
+          ((status as string) === 'skipped' ? 'Skipped by system' : 'Error occurred');
       const requiresReauth = !!(
         errorObj?.requiresReauth ??
         metaRequiresReauth ??
@@ -499,22 +499,22 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
               <div className="p-4 w-fit min-w-full">
                 {(derivedState.isError ||
                   (derivedState.status === 'completed' && !derivedState.hasText)) && (
-                  <div className="mb-4">
-                    <PipelineErrorBanner
-                      type="batch"
-                      failedProviderId={shownProviderId}
-                      onRetry={(pid) => handleRetryProvider(pid)}
-                      errorMessage={
-                        derivedState.isError
-                          ? derivedState.errorMsg || 'Error occurred'
-                          : 'No response received.'
-                      }
-                      requiresReauth={derivedState.requiresReauth}
-                      retryable={derivedState.retryable}
-                      compact
-                    />
-                  </div>
-                )}
+                    <div className="mb-4">
+                      <PipelineErrorBanner
+                        type="batch"
+                        failedProviderId={shownProviderId}
+                        onRetry={(pid) => handleRetryProvider(pid)}
+                        errorMessage={
+                          derivedState.isError
+                            ? derivedState.errorMsg || 'Error occurred'
+                            : 'No response received.'
+                        }
+                        requiresReauth={derivedState.requiresReauth}
+                        retryable={derivedState.retryable}
+                        compact
+                      />
+                    </div>
+                  )}
                 <div className="prose prose-sm max-w-none dark:prose-invert">
                   <MarkdownDisplay content={displayContent} />
                   {derivedState.isStreaming && <span className="streaming-dots" />}

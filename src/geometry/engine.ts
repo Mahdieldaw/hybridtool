@@ -9,8 +9,8 @@
 // Callers that need individual phases should import measure/interpret/annotate
 // directly.
 
-import type { ShadowStatement } from '../shadow/ShadowExtractor';
-import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { ShadowStatement } from '../shadow/shadow-extractor';
+import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type { MeasuredSubstrate, DegenerateSubstrate, SubstrateInterpretation } from './types';
 import type { QueryRelevanceResult } from './annotate';
 import { measureSubstrate } from './measure';

@@ -43,8 +43,8 @@ import {
   PARAGRAPH_COLUMNS,
   PARAGRAPH_VIEWS,
   PARAGRAPH_VIEW_MAP,
-} from './instrument/columnRegistry';
-import type { ColumnDef, ViewConfig } from './instrument/columnRegistry';
+} from './instrument/column-registry';
+import type { ColumnDef, ViewConfig } from './instrument/column-registry';
 import { EvidenceTable } from './instrument/EvidenceTable';
 import { ContextStrip } from './instrument/ContextStrip';
 import { ColumnPicker } from './instrument/ColumnPicker';
@@ -2087,9 +2087,9 @@ export const DecisionMapSheet = React.memo(() => {
                                   onToggle={() => instrumentActions.toggleRefSection(id)}
                                   copyText={
                                     id !== 'cross-signal' &&
-                                    id !== 'traversal-pruning' &&
-                                    id !== 'passage-ownership' &&
-                                    id !== 'passage-pruning'
+                                      id !== 'traversal-pruning' &&
+                                      id !== 'passage-ownership' &&
+                                      id !== 'passage-pruning'
                                       ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                       : undefined
                                   }
@@ -2326,9 +2326,9 @@ export const DecisionMapSheet = React.memo(() => {
                                     onToggle={() => instrumentActions.toggleRefSection(id)}
                                     copyText={
                                       id !== 'cross-signal' &&
-                                      id !== 'traversal-pruning' &&
-                                      id !== 'passage-ownership' &&
-                                      id !== 'passage-pruning'
+                                        id !== 'traversal-pruning' &&
+                                        id !== 'passage-ownership' &&
+                                        id !== 'passage-pruning'
                                         ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                         : undefined
                                     }
