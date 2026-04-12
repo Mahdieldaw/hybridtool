@@ -20,7 +20,7 @@ export interface MinimalRegion {
 
 export function identifyPeriphery(
   basinInversion: BasinInversionResult | null | undefined,
-  regions: MinimalRegion[] | undefined,
+  regions: MinimalRegion[] | undefined
 ): PeripheryResult {
   const empty: PeripheryResult = {
     corpusMode: 'no-geometry',

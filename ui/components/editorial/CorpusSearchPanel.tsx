@@ -23,7 +23,8 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
   const [query, setQuery] = useState('');
   const [probeProvidersEnabled, setProbeProvidersEnabled] = useAtom(probeProvidersEnabledAtom);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { results, isSearching, error, search, clear, probeResults, isProbing } = useCorpusSearch(aiTurnId);
+  const { results, isSearching, error, search, clear, probeResults, isProbing } =
+    useCorpusSearch(aiTurnId);
   const controlsDisabled = isSearching || isProbing;
   const hasEnabledProbeProvider = probeProvidersEnabled.gemini || probeProvidersEnabled.qwen;
 
@@ -62,8 +63,18 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
     <div className="flex flex-col border-b border-white/10 bg-surface-raised/30">
       {/* Search input */}
       <form onSubmit={handleSubmit} className="flex items-center gap-2 px-4 py-2.5">
-        <svg className="w-4 h-4 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        <svg
+          className="w-4 h-4 text-text-muted shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
         </svg>
         <input
           ref={inputRef}
@@ -104,7 +115,12 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
             aria-label="Clear search"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         )}
@@ -114,21 +130,22 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
       </form>
 
       {/* Error */}
-      {error && (
-        <div className="px-4 pb-2 text-xs text-intent-warning">{error}</div>
-      )}
+      {error && <div className="px-4 pb-2 text-xs text-intent-warning">{error}</div>}
 
       <div className="border-t border-white/5">
         <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
-          <span className="text-[11px] uppercase tracking-wide text-text-muted">Probe Responses</span>
+          <span className="text-[11px] uppercase tracking-wide text-text-muted">
+            Probe Responses
+          </span>
           {isProbing && <span className="text-[10px] text-brand-300">generating...</span>}
         </div>
         <div className="max-h-[220px] overflow-y-auto">
-          {probeResults.length === 0 && (isProbing || (query.trim() && hasEnabledProbeProvider)) && (
-            <div className="px-4 py-3 text-xs text-text-muted">
-              {isProbing ? 'Generating probe responses...' : 'No probe responses yet'}
-            </div>
-          )}
+          {probeResults.length === 0 &&
+            (isProbing || (query.trim() && hasEnabledProbeProvider)) && (
+              <div className="px-4 py-3 text-xs text-text-muted">
+                {isProbing ? 'Generating probe responses...' : 'No probe responses yet'}
+              </div>
+            )}
           {probeResults.map((probe: ProbeSearchResult) => (
             <div
               key={`probe-${probe.modelIndex}`}
@@ -145,7 +162,10 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
               {probe.paragraphs.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {probe.paragraphs.map((p, idx) => (
-                    <p key={`probe-${probe.modelIndex}-p-${idx}`} className="text-[11px] text-text-muted leading-relaxed line-clamp-2">
+                    <p
+                      key={`probe-${probe.modelIndex}-p-${idx}`}
+                      className="text-[11px] text-text-muted leading-relaxed line-clamp-2"
+                    >
                       {p}
                     </p>
                   ))}
@@ -158,7 +178,9 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
 
       <div className="border-t border-white/5">
         <div className="px-4 py-2 border-b border-white/5 bg-white/[0.02]">
-          <span className="text-[11px] uppercase tracking-wide text-text-muted">Corpus NN Results</span>
+          <span className="text-[11px] uppercase tracking-wide text-text-muted">
+            Corpus NN Results
+          </span>
         </div>
         {results.length > 0 && (
           <div className="max-h-[320px] overflow-y-auto">
@@ -168,15 +190,15 @@ export const CorpusSearchPanel: React.FC<CorpusSearchPanelProps> = ({
                 className="px-4 py-2.5 border-b border-white/5 last:border-b-0 hover:bg-white/[0.03] transition-colors"
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${simBadgeColor(hit.normalizedSim)}`}>
+                  <span
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${simBadgeColor(hit.normalizedSim)}`}
+                  >
                     {hit.normalizedSim.toFixed(2)}
                   </span>
                   <span className="text-[11px] text-text-muted">
                     {resolveModelName(hit.modelIndex)}
                   </span>
-                  <span className="text-[10px] text-text-muted/50">
-                    #{i + 1}
-                  </span>
+                  <span className="text-[10px] text-text-muted/50">#{i + 1}</span>
                 </div>
                 <p className="text-xs text-text-secondary leading-relaxed line-clamp-3">
                   {hit.text || '(empty)'}

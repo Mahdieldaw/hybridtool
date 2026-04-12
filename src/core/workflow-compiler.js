@@ -7,7 +7,6 @@
  */
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
 
-
 export class WorkflowCompiler {
   constructor(sessionManager) {
     // Kept only for dependency injection - NEVER USED
@@ -27,7 +26,7 @@ export class WorkflowCompiler {
    */
   compile(request, resolvedContext) {
     if (!resolvedContext) {
-      throw new Error("[Compiler] resolvedContext required");
+      throw new Error('[Compiler] resolvedContext required');
     }
 
     this._validateRequest(request);
@@ -46,7 +45,7 @@ export class WorkflowCompiler {
     // STEP GENERATION: Based on primitive request
     // ========================================================================
     switch (resolvedContext.type) {
-      case "initialize":
+      case 'initialize':
         // Initialize ALWAYS runs full batch if providers specified
         if (compileRequest.providers && compileRequest.providers.length > 0) {
           const batchStep = this._createBatchStep(compileRequest, resolvedContext);
@@ -55,24 +54,25 @@ export class WorkflowCompiler {
         }
         break;
 
-      case "extend":
+      case 'extend':
         // Singularity-only: user selected only the singularity provider via council orbs
-        const isSingularityOnly = compileRequest.singularity
-          && Array.isArray(compileRequest.providers)
-          && compileRequest.providers.length === 1
-          && compileRequest.providers[0] === compileRequest.singularity;
+        const isSingularityOnly =
+          compileRequest.singularity &&
+          Array.isArray(compileRequest.providers) &&
+          compileRequest.providers.length === 1 &&
+          compileRequest.providers[0] === compileRequest.singularity;
 
         if (isSingularityOnly) {
-          console.log("[Compiler] Singularity-only extend: direct routing");
+          console.log('[Compiler] Singularity-only extend: direct routing');
           const singularityStep = {
             stepId: `singularity-direct-${Date.now()}`,
-            type: "singularity",
+            type: 'singularity',
             payload: {
               singularityProvider: compileRequest.singularity,
               originalPrompt: compileRequest.userMessage,
               // Note: mapperArtifact will be resolved from context in CognitivePipelineHandler
               useThinking: !!compileRequest.useThinking,
-            }
+            },
           };
           steps.push(singularityStep);
         } else if (compileRequest.providers && compileRequest.providers.length > 0) {
@@ -83,8 +83,8 @@ export class WorkflowCompiler {
         }
         break;
 
-      case "recompute":
-        if (resolvedContext.stepType === "batch") {
+      case 'recompute':
+        if (resolvedContext.stepType === 'batch') {
           // Generate a single-provider prompt step targeting the provider being retried
           const provider = resolvedContext.targetProvider;
           const stepId = `batch-retry-${Date.now()}`;
@@ -98,7 +98,7 @@ export class WorkflowCompiler {
             : undefined;
           const batchStep = {
             stepId,
-            type: "prompt",
+            type: 'prompt',
             payload: {
               prompt: resolvedContext.sourceUserMessage,
               providers: [provider],
@@ -109,13 +109,13 @@ export class WorkflowCompiler {
           steps.push(batchStep);
           batchStepId = stepId;
         } else {
-          console.log("[Compiler] Recompute: Skipping batch (frozen outputs)");
+          console.log('[Compiler] Recompute: Skipping batch (frozen outputs)');
         }
         break;
     }
 
     const singularityExplicitlyDisabled =
-      Object.prototype.hasOwnProperty.call(compileRequest || {}, "singularity") &&
+      Object.prototype.hasOwnProperty.call(compileRequest || {}, 'singularity') &&
       !compileRequest.singularity;
 
     // Mapping step, followed by singularity
@@ -128,7 +128,7 @@ export class WorkflowCompiler {
       if (!singularityExplicitlyDisabled) {
         steps.push({
           stepId: `singularity-${Date.now()}`,
-          type: "singularity",
+          type: 'singularity',
           payload: {
             singularityProvider: compileRequest.singularity || null,
             originalPrompt: compileRequest.userMessage || resolvedContext?.sourceUserMessage,
@@ -138,10 +138,7 @@ export class WorkflowCompiler {
       }
     }
 
-    const workflowContext = this._buildWorkflowContext(
-      compileRequest,
-      resolvedContext,
-    );
+    const workflowContext = this._buildWorkflowContext(compileRequest, resolvedContext);
 
     console.log(`[Compiler] Generated ${steps.length} steps`);
 
@@ -160,12 +157,11 @@ export class WorkflowCompiler {
   _createBatchStep(request, context) {
     return {
       stepId: `batch-${Date.now()}`,
-      type: "prompt",
+      type: 'prompt',
       payload: {
         prompt: request.userMessage,
         providers: request.providers,
-        providerContexts:
-          context.type === "extend" ? context.providerContexts : undefined,
+        providerContexts: context.type === 'extend' ? context.providerContexts : undefined,
         previousContext: context.previousContext || null,
         previousAnalysis: context.previousAnalysis || null,
         providerMeta: request.providerMeta || {},
@@ -177,20 +173,20 @@ export class WorkflowCompiler {
   _createMappingStep(request, context, linkIds = {}) {
     // Include provider in stepId so UI can derive provider on failure without result payload
     const mappingProviderId =
-      context.type === "recompute"
+      context.type === 'recompute'
         ? context.targetProvider
         : request.mapper || this._getDefaultMapper(request);
     const mappingStepId = `mapping-${mappingProviderId}-${Date.now()}`;
 
-    if (context.type === "recompute") {
+    if (context.type === 'recompute') {
       return {
         stepId: mappingStepId,
-        type: "mapping",
+        type: 'mapping',
         payload: {
           mappingProvider: context.targetProvider,
           sourceHistorical: {
             turnId: context.sourceTurnId,
-            responseType: "batch",
+            responseType: 'batch',
           },
           originalPrompt: context.sourceUserMessage,
           useThinking: !!request.useThinking,
@@ -204,15 +200,13 @@ export class WorkflowCompiler {
 
     return {
       stepId: mappingStepId,
-      type: "mapping",
+      type: 'mapping',
       payload: {
         mappingProvider: mapper,
         sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-        providerOrder: Array.isArray(request.providers)
-          ? request.providers.slice()
-          : undefined,
+        providerOrder: Array.isArray(request.providers) ? request.providers.slice() : undefined,
         originalPrompt: request.userMessage,
-        useThinking: !!request.useThinking && mapper === "chatgpt",
+        useThinking: !!request.useThinking && mapper === 'chatgpt',
         attemptNumber: 1,
       },
     };
@@ -223,8 +217,8 @@ export class WorkflowCompiler {
   // ============================================================================
 
   _needsMappingStep(request, context) {
-    if (context.type === "recompute") {
-      return context.stepType === "mapping";
+    if (context.type === 'recompute') {
+      return context.stepType === 'mapping';
     }
     // Check primitive property
     if (!request || !request.includeMapping) return false;
@@ -247,38 +241,34 @@ export class WorkflowCompiler {
     let sessionCreated = false;
 
     switch (context.type) {
-      case "initialize":
+      case 'initialize':
         // Prefer sessionId passed in the primitive (set by ConnectionHandler); fallback to generate
         sessionId =
-          request.sessionId ||
-          `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          request.sessionId || `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         sessionCreated = true;
         break;
 
-      case "extend":
-      case "recompute":
+      case 'extend':
+      case 'recompute':
         sessionId = context.sessionId;
         break;
 
       default:
-        sessionId = "unknown-session";
+        sessionId = 'unknown-session';
     }
 
     const userMessage =
-      context.type === "recompute"
-        ? context.sourceUserMessage
-        : request.userMessage;
+      context.type === 'recompute' ? context.sourceUserMessage : request.userMessage;
 
     const workflowControl =
-      request?.workflowControl && typeof request.workflowControl === "object"
+      request?.workflowControl && typeof request.workflowControl === 'object'
         ? { ...request.workflowControl }
         : undefined;
 
     return {
       sessionId,
       threadId: DEFAULT_THREAD,
-      targetUserTurnId:
-        context.type === "recompute" ? context.sourceTurnId : "",
+      targetUserTurnId: context.type === 'recompute' ? context.sourceTurnId : '',
       sessionCreated,
       userMessage,
       workflowControl,
@@ -302,43 +292,38 @@ export class WorkflowCompiler {
   // ============================================================================
 
   _validateRequest(request) {
-    if (!request?.type) throw new Error("[Compiler] Request type required");
+    if (!request?.type) throw new Error('[Compiler] Request type required');
 
-    const validTypes = ["initialize", "extend", "recompute"];
+    const validTypes = ['initialize', 'extend', 'recompute'];
     if (!validTypes.includes(request.type)) {
       throw new Error(`[Compiler] Invalid type: ${request.type}`);
     }
 
     // Type-specific validation
     switch (request.type) {
-      case "initialize":
+      case 'initialize':
         if (!request.userMessage?.trim())
-          throw new Error("[Compiler] Initialize: userMessage required");
+          throw new Error('[Compiler] Initialize: userMessage required');
         if (!request.providers?.length)
-          throw new Error("[Compiler] Initialize: providers required");
+          throw new Error('[Compiler] Initialize: providers required');
         break;
 
-      case "extend":
-        if (!request.sessionId)
-          throw new Error("[Compiler] Extend: sessionId required");
+      case 'extend':
+        if (!request.sessionId) throw new Error('[Compiler] Extend: sessionId required');
         if (!request.userMessage?.trim())
-          throw new Error("[Compiler] Extend: userMessage required");
-        if (!request.providers?.length)
-          throw new Error("[Compiler] Extend: providers required");
+          throw new Error('[Compiler] Extend: userMessage required');
+        if (!request.providers?.length) throw new Error('[Compiler] Extend: providers required');
         break;
 
-      case "recompute":
-        if (!request.sessionId)
-          throw new Error("[Compiler] Recompute: sessionId required");
-        if (!request.sourceTurnId)
-          throw new Error("[Compiler] Recompute: sourceTurnId required");
-        if (!request.stepType)
-          throw new Error("[Compiler] Recompute: stepType required");
+      case 'recompute':
+        if (!request.sessionId) throw new Error('[Compiler] Recompute: sessionId required');
+        if (!request.sourceTurnId) throw new Error('[Compiler] Recompute: sourceTurnId required');
+        if (!request.stepType) throw new Error('[Compiler] Recompute: stepType required');
         if (!request.targetProvider)
-          throw new Error("[Compiler] Recompute: targetProvider required");
-        if (!["batch", "mapping"].includes(request.stepType)) {
+          throw new Error('[Compiler] Recompute: targetProvider required');
+        if (!['batch', 'mapping'].includes(request.stepType)) {
           throw new Error(
-            `[Compiler] Recompute: unsupported stepType '${request.stepType}' for foundation compiler`,
+            `[Compiler] Recompute: unsupported stepType '${request.stepType}' for foundation compiler`
           );
         }
         break;
@@ -346,40 +331,35 @@ export class WorkflowCompiler {
   }
 
   _validateContext(context) {
-    if (!context?.type) throw new Error("[Compiler] Context type required");
+    if (!context?.type) throw new Error('[Compiler] Context type required');
 
-    const validTypes = ["initialize", "extend", "recompute"];
+    const validTypes = ['initialize', 'extend', 'recompute'];
     if (!validTypes.includes(context.type)) {
       throw new Error(`[Compiler] Invalid context type: ${context.type}`);
     }
 
     switch (context.type) {
-      case "initialize": {
+      case 'initialize': {
         // initialize has no additional required fields in context
         break;
       }
-      case "extend": {
-        if (!context.sessionId)
-          throw new Error("[Compiler] Extend: sessionId required");
-        if (!context.lastTurnId)
-          throw new Error("[Compiler] Extend: lastTurnId required");
+      case 'extend': {
+        if (!context.sessionId) throw new Error('[Compiler] Extend: sessionId required');
+        if (!context.lastTurnId) throw new Error('[Compiler] Extend: lastTurnId required');
         if (!context.providerContexts)
-          throw new Error("[Compiler] Extend: providerContexts required");
+          throw new Error('[Compiler] Extend: providerContexts required');
         break;
       }
-      case "recompute": {
-        if (!context.sessionId)
-          throw new Error("[Compiler] Recompute: sessionId required");
-        if (!context.sourceTurnId)
-          throw new Error("[Compiler] Recompute: sourceTurnId required");
-        if (!context.stepType)
-          throw new Error("[Compiler] Recompute: stepType required");
+      case 'recompute': {
+        if (!context.sessionId) throw new Error('[Compiler] Recompute: sessionId required');
+        if (!context.sourceTurnId) throw new Error('[Compiler] Recompute: sourceTurnId required');
+        if (!context.stepType) throw new Error('[Compiler] Recompute: stepType required');
         if (!context.targetProvider)
-          throw new Error("[Compiler] Recompute: targetProvider required");
+          throw new Error('[Compiler] Recompute: targetProvider required');
         // Only require frozenBatchOutputs for non-batch historical recomputes
-        if (context.stepType !== "batch" && !context.frozenBatchOutputs) {
+        if (context.stepType !== 'batch' && !context.frozenBatchOutputs) {
           throw new Error(
-            "[Compiler] Recompute: frozenBatchOutputs required for non-batch recompute",
+            '[Compiler] Recompute: frozenBatchOutputs required for non-batch recompute'
           );
         }
         break;

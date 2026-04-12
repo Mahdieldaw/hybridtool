@@ -1,8 +1,8 @@
 // IndexedDB Database Initialization for HTOS Document Composition System
 
-import { StoreConfig, MetadataRecord } from "./types";
+import { StoreConfig, MetadataRecord } from './types';
 
-const DB_NAME = "OpusDeusDB";
+const DB_NAME = 'OpusDeusDB';
 const DB_VERSION = 10;
 export const SCHEMA_VERSION = 10;
 
@@ -10,24 +10,24 @@ export const SCHEMA_VERSION = 10;
 export const STORE_CONFIGS: StoreConfig[] = [
   // 1. Sessions Store
   {
-    name: "sessions",
-    keyPath: "id",
+    name: 'sessions',
+    keyPath: 'id',
     indices: [
-      { name: "byCreatedAt", keyPath: "createdAt", unique: false },
-      { name: "byLastActivity", keyPath: "lastActivity", unique: false },
+      { name: 'byCreatedAt', keyPath: 'createdAt', unique: false },
+      { name: 'byLastActivity', keyPath: 'lastActivity', unique: false },
     ],
   },
 
   // 2. Threads Store
   {
-    name: "threads",
-    keyPath: "id",
+    name: 'threads',
+    keyPath: 'id',
     indices: [
-      { name: "bySessionId", keyPath: "sessionId", unique: false },
-      { name: "byParentThreadId", keyPath: "parentThreadId", unique: false },
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
+      { name: 'byParentThreadId', keyPath: 'parentThreadId', unique: false },
       {
-        name: "bySessionId_createdAt",
-        keyPath: ["sessionId", "createdAt"],
+        name: 'bySessionId_createdAt',
+        keyPath: ['sessionId', 'createdAt'],
         unique: false,
       },
     ],
@@ -35,95 +35,89 @@ export const STORE_CONFIGS: StoreConfig[] = [
 
   // 3. Turns Store
   {
-    name: "turns",
-    keyPath: "id",
+    name: 'turns',
+    keyPath: 'id',
     indices: [
-      { name: "bySessionId", keyPath: "sessionId", unique: false },
-      { name: "byThreadId", keyPath: "threadId", unique: false },
-      { name: "byType", keyPath: "type", unique: false },
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
+      { name: 'byThreadId', keyPath: 'threadId', unique: false },
+      { name: 'byType', keyPath: 'type', unique: false },
       {
-        name: "bySessionId_createdAt",
-        keyPath: ["sessionId", "createdAt"],
+        name: 'bySessionId_createdAt',
+        keyPath: ['sessionId', 'createdAt'],
         unique: false,
       },
       {
-        name: "byThreadId_createdAt",
-        keyPath: ["threadId", "createdAt"],
+        name: 'byThreadId_createdAt',
+        keyPath: ['threadId', 'createdAt'],
         unique: false,
       },
-      { name: "byUserTurnId", keyPath: "userTurnId", unique: false },
-      { name: "byIsComplete", keyPath: "isComplete", unique: false },
+      { name: 'byUserTurnId', keyPath: 'userTurnId', unique: false },
+      { name: 'byIsComplete', keyPath: 'isComplete', unique: false },
     ],
   },
 
   // 4. Provider Responses Store
   {
-    name: "provider_responses",
-    keyPath: "id",
+    name: 'provider_responses',
+    keyPath: 'id',
     autoIncrement: true,
     indices: [
-      { name: "byAiTurnId", keyPath: "aiTurnId", unique: false },
-      { name: "byProviderId", keyPath: "providerId", unique: false },
-      { name: "byResponseType", keyPath: "responseType", unique: false },
+      { name: 'byAiTurnId', keyPath: 'aiTurnId', unique: false },
+      { name: 'byProviderId', keyPath: 'providerId', unique: false },
+      { name: 'byResponseType', keyPath: 'responseType', unique: false },
       {
-        name: "byCompoundKey",
-        keyPath: ["aiTurnId", "providerId", "responseType", "responseIndex"],
+        name: 'byCompoundKey',
+        keyPath: ['aiTurnId', 'providerId', 'responseType', 'responseIndex'],
         unique: true,
       },
       {
-        name: "bySessionId_providerId",
-        keyPath: ["sessionId", "providerId"],
+        name: 'bySessionId_providerId',
+        keyPath: ['sessionId', 'providerId'],
         unique: false,
       },
-      { name: "bySessionId", keyPath: "sessionId", unique: false },
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
     ],
   },
 
   // 5. Provider Contexts Store
   {
-    name: "provider_contexts",
-    keyPath: ["sessionId", "providerId"],
+    name: 'provider_contexts',
+    keyPath: ['sessionId', 'providerId'],
     indices: [
-      { name: "bySessionId", keyPath: "sessionId", unique: false },
-      { name: "byProviderId", keyPath: "providerId", unique: false },
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
+      { name: 'byProviderId', keyPath: 'providerId', unique: false },
     ],
   },
 
   // 6. Metadata Store (generic key-value for system data)
   {
-    name: "metadata",
-    keyPath: "key",
+    name: 'metadata',
+    keyPath: 'key',
     indices: [
-      { name: "bySessionId", keyPath: "sessionId", unique: false },
-      { name: "byEntityId", keyPath: "entityId", unique: false },
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
+      { name: 'byEntityId', keyPath: 'entityId', unique: false },
     ],
   },
 
   // 7. Context Bridges Store
   {
-    name: "context_bridges",
-    keyPath: "turnId",
-    indices: [
-      { name: "bySessionId", keyPath: "sessionId", unique: false },
-    ],
+    name: 'context_bridges',
+    keyPath: 'turnId',
+    indices: [{ name: 'bySessionId', keyPath: 'sessionId', unique: false }],
   },
 
   // 8. Embeddings Store (geometry-layer: statements, paragraphs, query — immutable per turn)
   {
-    name: "embeddings",
-    keyPath: "aiTurnId",
-    indices: [
-      { name: "byTimestamp", keyPath: "createdAt", unique: false },
-    ],
+    name: 'embeddings',
+    keyPath: 'aiTurnId',
+    indices: [{ name: 'byTimestamp', keyPath: 'createdAt', unique: false }],
   },
 
   // 9. Claim Embeddings Store (mapper-layer: per provider per turn)
   {
-    name: "claim_embeddings",
-    keyPath: "id",  // "{aiTurnId}:{providerId}"
-    indices: [
-      { name: "byAiTurnId", keyPath: "aiTurnId", unique: false },
-    ],
+    name: 'claim_embeddings',
+    keyPath: 'id', // "{aiTurnId}:{providerId}"
+    indices: [{ name: 'byAiTurnId', keyPath: 'aiTurnId', unique: false }],
   },
 ];
 
@@ -139,19 +133,17 @@ export async function openDatabase(): Promise<IDBDatabase> {
       const oldVersion = event.oldVersion;
       const transaction = (event.target as IDBOpenDBRequest).transaction!;
 
-      console.log(
-        `Upgrading database from version ${oldVersion} to ${DB_VERSION}`,
-      );
+      console.log(`Upgrading database from version ${oldVersion} to ${DB_VERSION}`);
 
       // Initial schema creation
       if (oldVersion < 1) {
         createInitialSchema(db);
 
-        const metadataStore = transaction.objectStore("metadata");
+        const metadataStore = transaction.objectStore('metadata');
         const now = Date.now();
         const schemaVersionRecord: MetadataRecord = {
-          id: "schema_version_record",
-          key: "schema_version",
+          id: 'schema_version_record',
+          key: 'schema_version',
           value: SCHEMA_VERSION,
           createdAt: now,
           updatedAt: now,
@@ -162,7 +154,7 @@ export async function openDatabase(): Promise<IDBDatabase> {
       // Migration to v5: Remove document-related stores only
       if (oldVersion < 5 && oldVersion > 0) {
         // Delete document stores (documents, canvas_blocks, ghosts)
-        const storesToDelete = ["documents", "canvas_blocks", "ghosts"];
+        const storesToDelete = ['documents', 'canvas_blocks', 'ghosts'];
 
         for (const storeName of storesToDelete) {
           if (db.objectStoreNames.contains(storeName)) {
@@ -175,11 +167,11 @@ export async function openDatabase(): Promise<IDBDatabase> {
         reconcileSchema(db, transaction);
 
         // Update schema version in metadata
-        const metadataStore = transaction.objectStore("metadata");
+        const metadataStore = transaction.objectStore('metadata');
         const now = Date.now();
         const rec: MetadataRecord = {
-          id: "schema_version_record",
-          key: "schema_version",
+          id: 'schema_version_record',
+          key: 'schema_version',
           value: SCHEMA_VERSION,
           createdAt: now,
           updatedAt: now,
@@ -190,105 +182,102 @@ export async function openDatabase(): Promise<IDBDatabase> {
       // Migration to v6: Add byIsComplete index to turns store
       if (oldVersion < 6) {
         try {
-          const turnsStore = transaction.objectStore("turns");
+          const turnsStore = transaction.objectStore('turns');
           const existing = new Set(Array.from(turnsStore.indexNames));
-          if (!existing.has("byIsComplete")) {
-            turnsStore.createIndex("byIsComplete", "isComplete", {
+          if (!existing.has('byIsComplete')) {
+            turnsStore.createIndex('byIsComplete', 'isComplete', {
               unique: false,
             });
-            console.log("Created index turns.byIsComplete during v6 migration");
+            console.log('Created index turns.byIsComplete during v6 migration');
           }
         } catch (e) {
-          console.warn(
-            "Failed to create turns.byIsComplete during v6 migration:",
-            e,
-          );
+          console.warn('Failed to create turns.byIsComplete during v6 migration:', e);
         }
         try {
-          const metadataStore = transaction.objectStore("metadata");
+          const metadataStore = transaction.objectStore('metadata');
           const now = Date.now();
           const rec: MetadataRecord = {
-            id: "schema_version_record",
-            key: "schema_version",
+            id: 'schema_version_record',
+            key: 'schema_version',
             value: SCHEMA_VERSION,
             createdAt: now,
             updatedAt: now,
           };
           metadataStore.put(rec);
-        } catch (_) { }
+        } catch (_) {}
       }
 
       // Migration to v7: Add context_bridges store
       if (oldVersion < 7) {
         try {
-          if (!db.objectStoreNames.contains("context_bridges")) {
-            const bridgeStore = db.createObjectStore("context_bridges", {
-              keyPath: "turnId",
+          if (!db.objectStoreNames.contains('context_bridges')) {
+            const bridgeStore = db.createObjectStore('context_bridges', {
+              keyPath: 'turnId',
             });
-            bridgeStore.createIndex("bySessionId", "sessionId", {
+            bridgeStore.createIndex('bySessionId', 'sessionId', {
               unique: false,
             });
-            console.log("Created context_bridges store during v7 migration");
+            console.log('Created context_bridges store during v7 migration');
           }
 
-          const metadataStore = transaction.objectStore("metadata");
+          const metadataStore = transaction.objectStore('metadata');
           const now = Date.now();
           const rec: MetadataRecord = {
-            id: "schema_version_record",
-            key: "schema_version",
+            id: 'schema_version_record',
+            key: 'schema_version',
             value: SCHEMA_VERSION,
             createdAt: now,
             updatedAt: now,
           };
           metadataStore.put(rec);
         } catch (e) {
-          console.warn("Failed to complete v7 migration:", e);
+          console.warn('Failed to complete v7 migration:', e);
         }
       }
 
       // Migration to v8/v9: Add embeddings + claim_embeddings stores
       if (oldVersion < 9) {
         try {
-          if (!db.objectStoreNames.contains("embeddings")) {
-            const embeddingsStore = db.createObjectStore("embeddings", {
-              keyPath: "aiTurnId",
+          if (!db.objectStoreNames.contains('embeddings')) {
+            const embeddingsStore = db.createObjectStore('embeddings', {
+              keyPath: 'aiTurnId',
             });
-            embeddingsStore.createIndex("byTimestamp", "createdAt", {
+            embeddingsStore.createIndex('byTimestamp', 'createdAt', {
               unique: false,
             });
-            console.log("Created embeddings store during v8 migration");
+            console.log('Created embeddings store during v8 migration');
           }
 
-          if (!db.objectStoreNames.contains("claim_embeddings")) {
-            const claimEmbStore = db.createObjectStore("claim_embeddings", {
-              keyPath: "id",
+          if (!db.objectStoreNames.contains('claim_embeddings')) {
+            const claimEmbStore = db.createObjectStore('claim_embeddings', {
+              keyPath: 'id',
             });
-            claimEmbStore.createIndex("byAiTurnId", "aiTurnId", {
+            claimEmbStore.createIndex('byAiTurnId', 'aiTurnId', {
               unique: false,
             });
-            console.log("Created claim_embeddings store during v8 migration");
+            console.log('Created claim_embeddings store during v8 migration');
           }
 
-          const metadataStore = transaction.objectStore("metadata");
+          const metadataStore = transaction.objectStore('metadata');
           const now = Date.now();
           const rec: MetadataRecord = {
-            id: "schema_version_record",
-            key: "schema_version",
+            id: 'schema_version_record',
+            key: 'schema_version',
             value: SCHEMA_VERSION,
             createdAt: now,
             updatedAt: now,
           };
           metadataStore.put(rec);
         } catch (e) {
-          console.warn("Failed to complete v8 migration:", e);
+          console.warn('Failed to complete v8 migration:', e);
         }
       }
 
       // Migration to v10: Move survey gates from artifacts (L3) to provider responses (L2)
       if (oldVersion < 10) {
         try {
-          const turnsStore = transaction.objectStore("turns");
-          const responsesStore = transaction.objectStore("provider_responses");
+          const turnsStore = transaction.objectStore('turns');
+          const responsesStore = transaction.objectStore('provider_responses');
 
           // We need to iterate all turns to find those with survey gates in their artifacts
           const cursorRequest = turnsStore.openCursor();
@@ -305,16 +294,18 @@ export async function openDatabase(): Promise<IDBDatabase> {
                 if (mapperProviderId) {
                   const aiTurnId = turn.id;
                   // Use compound key index to find the exact mapping response
-                  const index = responsesStore.index("byCompoundKey");
-                  const getRequest = index.get([aiTurnId, mapperProviderId, "mapping", 0]);
-                  
+                  const index = responsesStore.index('byCompoundKey');
+                  const getRequest = index.get([aiTurnId, mapperProviderId, 'mapping', 0]);
+
                   getRequest.onsuccess = (ev) => {
                     const response = (ev.target as IDBRequest).result;
                     if (response) {
                       response.surveyGates = surveyGates;
                       if (surveyRationale) response.surveyRationale = surveyRationale;
                       responsesStore.put(response);
-                      console.log(`[Migration v10] Moved survey gates for turn ${aiTurnId} (provider: ${mapperProviderId})`);
+                      console.log(
+                        `[Migration v10] Moved survey gates for turn ${aiTurnId} (provider: ${mapperProviderId})`
+                      );
                     }
                   };
                 }
@@ -323,19 +314,19 @@ export async function openDatabase(): Promise<IDBDatabase> {
             }
           };
 
-          const metadataStore = transaction.objectStore("metadata");
+          const metadataStore = transaction.objectStore('metadata');
           const now = Date.now();
           const rec: MetadataRecord = {
-            id: "schema_version_record",
-            key: "schema_version",
+            id: 'schema_version_record',
+            key: 'schema_version',
             value: SCHEMA_VERSION,
             createdAt: now,
             updatedAt: now,
           };
           metadataStore.put(rec);
-          console.log("Completed v10 migration setup (data move will proceed via cursor)");
+          console.log('Completed v10 migration setup (data move will proceed via cursor)');
         } catch (e) {
-          console.warn("Failed to initiate v10 migration:", e);
+          console.warn('Failed to initiate v10 migration:', e);
         }
       }
     };
@@ -344,14 +335,12 @@ export async function openDatabase(): Promise<IDBDatabase> {
       const db = request.result;
 
       db.onerror = (event) => {
-        console.error("Database error:", (event.target as IDBRequest).error);
+        console.error('Database error:', (event.target as IDBRequest).error);
       };
 
       db.onversionchange = () => {
         db.close();
-        console.warn(
-          "Database schema was upgraded in another tab. Please reload.",
-        );
+        console.warn('Database schema was upgraded in another tab. Please reload.');
       };
 
       resolve(db);
@@ -359,26 +348,22 @@ export async function openDatabase(): Promise<IDBDatabase> {
 
     request.onerror = () => {
       const error = request.error;
-      console.error("Failed to open database:", error);
+      console.error('Failed to open database:', error);
 
-      if (error?.name === "QuotaExceededError") {
-        reject(
-          new Error(
-            "Storage quota exceeded. Please free up space and try again.",
-          ),
-        );
+      if (error?.name === 'QuotaExceededError') {
+        reject(new Error('Storage quota exceeded. Please free up space and try again.'));
       } else {
         reject(error);
       }
     };
 
     request.onblocked = () => {
-      console.warn(
-        "Database upgrade blocked by another tab. Please close other tabs.",
-      );
+      console.warn('Database upgrade blocked by another tab. Please close other tabs.');
       // If blocked for more than 5s, reject so startup doesn't hang forever
       setTimeout(() => {
-        reject(new Error("Database upgrade blocked by another connection. Close other tabs and reload."));
+        reject(
+          new Error('Database upgrade blocked by another connection. Close other tabs and reload.')
+        );
       }, 5000);
     };
   });
@@ -388,7 +373,7 @@ export async function openDatabase(): Promise<IDBDatabase> {
  * Creates the initial database schema with all stores and indices
  */
 function createInitialSchema(db: IDBDatabase): void {
-  console.log("Creating initial database schema...");
+  console.log('Creating initial database schema...');
 
   for (const config of STORE_CONFIGS) {
     console.log(`Creating store: ${config.name}`);
@@ -415,7 +400,7 @@ function createInitialSchema(db: IDBDatabase): void {
     }
   }
 
-  console.log("Initial schema creation completed");
+  console.log('Initial schema creation completed');
 }
 
 /**
@@ -423,7 +408,7 @@ function createInitialSchema(db: IDBDatabase): void {
  * Creates missing stores and indices, useful for recovery from corruption
  */
 function reconcileSchema(db: IDBDatabase, transaction: IDBTransaction): void {
-  console.log("Reconciling database schema...");
+  console.log('Reconciling database schema...');
 
   for (const config of STORE_CONFIGS) {
     let store: IDBObjectStore;
@@ -450,9 +435,7 @@ function reconcileSchema(db: IDBDatabase, transaction: IDBTransaction): void {
 
     for (const indexConfig of config.indices) {
       if (!existingIndices.has(indexConfig.name)) {
-        console.log(
-          `  Creating missing index: ${indexConfig.name} in ${config.name}`,
-        );
+        console.log(`  Creating missing index: ${indexConfig.name} in ${config.name}`);
         const indexOptions: IDBIndexParameters = {
           unique: indexConfig.unique || false,
           multiEntry: indexConfig.multiEntry || false,
@@ -462,19 +445,17 @@ function reconcileSchema(db: IDBDatabase, transaction: IDBTransaction): void {
     }
   }
 
-  console.log("Schema reconciliation completed");
+  console.log('Schema reconciliation completed');
 }
 
 /**
  * Gets the current schema version from the metadata store
  */
-export async function getCurrentSchemaVersion(
-  db: IDBDatabase,
-): Promise<number> {
+export async function getCurrentSchemaVersion(db: IDBDatabase): Promise<number> {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction("metadata", "readonly");
-    const store = transaction.objectStore("metadata");
-    const request = store.get("schema_version");
+    const transaction = db.transaction('metadata', 'readonly');
+    const store = transaction.objectStore('metadata');
+    const request = store.get('schema_version');
 
     request.onsuccess = () => {
       const record = request.result as MetadataRecord | undefined;
@@ -523,9 +504,7 @@ export async function checkDatabaseHealth(): Promise<{
       isHealthy: false,
       currentVersion: 0,
       expectedVersion: DB_VERSION,
-      issues: [
-        `Database error: ${error instanceof Error ? error.message : "Unknown error"}`,
-      ],
+      issues: [`Database error: ${error instanceof Error ? error.message : 'Unknown error'}`],
     };
   }
 }
@@ -538,7 +517,7 @@ export async function deleteDatabase(): Promise<void> {
     const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
 
     deleteRequest.onsuccess = () => {
-      console.log("Database deleted successfully");
+      console.log('Database deleted successfully');
       resolve();
     };
 
@@ -547,9 +526,7 @@ export async function deleteDatabase(): Promise<void> {
     };
 
     deleteRequest.onblocked = () => {
-      console.warn(
-        "Database deletion blocked. Please close all tabs using this database.",
-      );
+      console.warn('Database deletion blocked. Please close all tabs using this database.');
     };
   });
 }

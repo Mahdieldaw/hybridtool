@@ -16,25 +16,26 @@ import type { EnrichedClaim } from '../../shared/contract';
 //    A statement cited by N claims is structurally different from one cited by 1.
 // ---------------------------------------------------------------------------
 
-export function computeStatementOwnership(
-    claims: EnrichedClaim[]
-): Map<string, Set<string>> {
-    const ownership = new Map<string, Set<string>>();
-    for (const c of claims) {
-        const claimId = String((c as any)?.id || '').trim();
-        if (!claimId) continue;
-        const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
-            ? (c as any).sourceStatementIds
-            : [];
-        for (const sidRaw of sourceIds) {
-            const sid = String(sidRaw || '').trim();
-            if (!sid) continue;
-            let set = ownership.get(sid);
-            if (!set) { set = new Set(); ownership.set(sid, set); }
-            set.add(claimId);
-        }
+export function computeStatementOwnership(claims: EnrichedClaim[]): Map<string, Set<string>> {
+  const ownership = new Map<string, Set<string>>();
+  for (const c of claims) {
+    const claimId = String((c as any)?.id || '').trim();
+    if (!claimId) continue;
+    const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
+      ? (c as any).sourceStatementIds
+      : [];
+    for (const sidRaw of sourceIds) {
+      const sid = String(sidRaw || '').trim();
+      if (!sid) continue;
+      let set = ownership.get(sid);
+      if (!set) {
+        set = new Set();
+        ownership.set(sid, set);
+      }
+      set.add(claimId);
     }
-    return ownership;
+  }
+  return ownership;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,38 +47,37 @@ export function computeStatementOwnership(
 // ---------------------------------------------------------------------------
 
 export interface ClaimExclusivity {
-    exclusiveIds: string[];
-    sharedIds: string[];
-    exclusivityRatio: number;
+  exclusiveIds: string[];
+  sharedIds: string[];
+  exclusivityRatio: number;
 }
 
 export function computeClaimExclusivity(
-    claims: EnrichedClaim[],
-    ownership: Map<string, Set<string>>
+  claims: EnrichedClaim[],
+  ownership: Map<string, Set<string>>
 ): Map<string, ClaimExclusivity> {
-    const result = new Map<string, ClaimExclusivity>();
-    for (const c of claims) {
-        const claimId = String((c as any)?.id || '').trim();
-        if (!claimId) continue;
-        const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
-            ? (c as any).sourceStatementIds
-            : [];
-        const exclusiveIds: string[] = [];
-        const sharedIds: string[] = [];
-        for (const sidRaw of sourceIds) {
-            const sid = String(sidRaw || '').trim();
-            if (!sid) continue;
-            const owners = ownership.get(sid);
-            if (!owners || owners.size <= 1) exclusiveIds.push(sid);
-            else sharedIds.push(sid);
-        }
-        const total = exclusiveIds.length + sharedIds.length;
-        result.set(claimId, {
-            exclusiveIds,
-            sharedIds,
-            exclusivityRatio: total > 0 ? exclusiveIds.length / total : 0,
-        });
+  const result = new Map<string, ClaimExclusivity>();
+  for (const c of claims) {
+    const claimId = String((c as any)?.id || '').trim();
+    if (!claimId) continue;
+    const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
+      ? (c as any).sourceStatementIds
+      : [];
+    const exclusiveIds: string[] = [];
+    const sharedIds: string[] = [];
+    for (const sidRaw of sourceIds) {
+      const sid = String(sidRaw || '').trim();
+      if (!sid) continue;
+      const owners = ownership.get(sid);
+      if (!owners || owners.size <= 1) exclusiveIds.push(sid);
+      else sharedIds.push(sid);
     }
-    return result;
+    const total = exclusiveIds.length + sharedIds.length;
+    result.set(claimId, {
+      exclusiveIds,
+      sharedIds,
+      exclusivityRatio: total > 0 ? exclusiveIds.length / total : 0,
+    });
+  }
+  return result;
 }
-

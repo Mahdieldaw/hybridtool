@@ -3,7 +3,7 @@
  * HTOS Grok Signature Module
  * - Generates x-statsig-id header for Grok API requests
  * - Port of Python xctid.py (cubic bezier, SVG parsing, matrix math)
- * 
+ *
  * Build-phase safe: runs in Service Worker
  */
 
@@ -18,7 +18,7 @@ import { base64ToBytes, bytesToBase64 } from './grok-crypto.js';
  * Map value from byte range to target range
  */
 function _h(x, _param, c, isInteger) {
-  const f = ((x * (c - _param)) / 255.0) + _param;
+  const f = (x * (c - _param)) / 255.0 + _param;
   if (isInteger) {
     return Math.floor(f);
   }
@@ -123,9 +123,7 @@ function simulateStyle(values, c) {
   const t = currentTime / duration;
 
   // Control points from values[7:], alternating between param=0 and param=-1
-  const cp = values.slice(7).map((v, i) => 
-    _h(v, i % 2 ? -1 : 0, 1, false)
-  );
+  const cp = values.slice(7).map((v, i) => _h(v, i % 2 ? -1 : 0, 1, false));
 
   const easedY = cubicBezierEased(t, cp[0], cp[1], cp[2], cp[3]);
 
@@ -223,10 +221,7 @@ function extractSignatureData(verificationBytes, svg, xValues) {
     throw new Error('Invalid Grok xsid indices');
   }
   const idx = arr[xValues[0]] % 16;
-  const c =
-    (arr[xValues[1]] % 16) *
-    (arr[xValues[2]] % 16) *
-    (arr[xValues[3]] % 16);
+  const c = (arr[xValues[1]] % 16) * (arr[xValues[2]] % 16) * (arr[xValues[3]] % 16);
 
   const svgParts = parseSvgPath(svg);
   if (idx < 0 || idx >= svgParts.length) {
@@ -264,7 +259,7 @@ function extractSignatureData(verificationBytes, svg, xValues) {
 
 /**
  * Generate x-statsig-id signature for Grok API requests
- * 
+ *
  * @param {string} path - API endpoint path (e.g., '/rest/app-chat/conversations/new')
  * @param {string} method - HTTP method (e.g., 'POST')
  * @param {string} verificationToken - Base64-encoded verification token from c_request
@@ -274,15 +269,7 @@ function extractSignatureData(verificationBytes, svg, xValues) {
  * @param {number} [randomFloat] - Optional random override (for testing)
  * @returns {string} Base64-encoded signature (without padding)
  */
-export function generateSign(
-  path,
-  method,
-  verificationToken,
-  svg,
-  xValues,
-  timeN,
-  randomFloat
-) {
+export function generateSign(path, method, verificationToken, svg, xValues, timeN, randomFloat) {
   // Timestamp: seconds since epoch offset
   const n = typeof timeN === 'number' ? timeN : Math.floor(Date.now() / 1000) - 1682924400;
 
@@ -303,7 +290,9 @@ export function generateSign(
   const digest = sha256(encoder.encode(msg)).slice(0, 16);
 
   // Generate prefix byte (Python uses floor(random() * 256) which is always 0-255)
-  const prefixByte = Math.floor((typeof randomFloat === 'number' ? randomFloat : Math.random()) * 256);
+  const prefixByte = Math.floor(
+    (typeof randomFloat === 'number' ? randomFloat : Math.random()) * 256
+  );
 
   // Assemble final array: [prefix, verification, timestamp, digest, 3]
   const assembled = new Uint8Array(1 + r.length + 4 + 16 + 1);
@@ -365,11 +354,11 @@ export function parseVerificationToken(html, metaName = 'grok-site-verification'
     if (m && m[1]) token = m[1];
   }
   if (!token) return [null, null];
-  
+
   const decoded = base64ToBytes(token);
   const animIndex = decoded[5] % 4;
   const anim = `loading-x-anim-${animIndex}`;
-  
+
   return [token, anim];
 }
 

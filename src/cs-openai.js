@@ -6,8 +6,8 @@
 
   // Initialize HTOS global if not present
   (() => {
-    const appName = "__htos_app";
-    const env = "production";
+    const appName = '__htos_app';
+    const env = 'production';
     const isDev = false;
 
     htosApp = globalThis[appName];
@@ -18,37 +18,33 @@
     const baseApp = {
       name: appName,
       env: env,
-      version: "0.1.0",
+      version: '0.1.0',
       get: (key) => (key in baseApp ? baseApp[key] : null),
     };
 
     const createLogger = (namespace) => {
       const log = (level, ...args) => {
-        if (isDev || level === "error") {
+        if (isDev || level === 'error') {
           const color = namespace
-            .split("")
+            .split('')
             .reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
           const r = (color & 0xff0000) >> 16;
           const g = (color & 0x00ff00) >> 8;
           const b = color & 0x0000ff;
-          console[level](
-            `%c[HTOS:${namespace}]`,
-            `color: rgb(${r}, ${g}, ${b})`,
-            ...args,
-          );
+          console[level](`%c[HTOS:${namespace}]`, `color: rgb(${r}, ${g}, ${b})`, ...args);
         }
       };
 
       return {
-        log: (...args) => log("log", ...args),
-        warn: (...args) => log("warn", ...args),
-        error: (...args) => log("error", ...args),
+        log: (...args) => log('log', ...args),
+        warn: (...args) => log('warn', ...args),
+        error: (...args) => log('error', ...args),
       };
     };
 
     const appProxy = new Proxy(baseApp, {
       get(target, prop) {
-        if (prop === "assign") {
+        if (prop === 'assign') {
           return (obj) => Object.assign(target, obj);
         }
         if (!(prop in target)) {
@@ -74,10 +70,10 @@
 
     arkose.controller = {
       init() {
-        arkose.log("Initializing OpenAI Arkose controller");
+        arkose.log('Initializing OpenAI Arkose controller');
 
         if (this._isArkoseIframe()) {
-          arkose.log("Detected Arkose iframe, setting up patches");
+          arkose.log('Detected Arkose iframe, setting up patches');
           this._config = this._getConfig();
           if (this._config) {
             this._patchFetch();
@@ -85,20 +81,22 @@
             this._patchEnforcement();
           }
         } else {
-          arkose.log("Main page context, no additional setup needed");
+          arkose.log('Main page context, no additional setup needed');
         }
       },
 
       _isArkoseIframe() {
-        return window !== window.top && typeof window.name === "string" && window.name.startsWith("ae:");
+        return (
+          window !== window.top && typeof window.name === 'string' && window.name.startsWith('ae:')
+        );
       },
 
       _getConfig() {
         try {
-          const configStr = window.name.replace("ae:", "");
+          const configStr = window.name.replace('ae:', '');
           return JSON.parse(configStr);
         } catch (error) {
-          arkose.error("Failed to parse Arkose config:", error);
+          arkose.error('Failed to parse Arkose config:', error);
           return null;
         }
       },
@@ -124,7 +122,7 @@
           };
         `);
 
-        arkose.log("Patched fetch for Arkose URL modification");
+        arkose.log('Patched fetch for Arkose URL modification');
       },
 
       _patchHeadAppendChild() {
@@ -151,7 +149,7 @@
           };
         `);
 
-        arkose.log("Patched appendChild for Arkose script modification");
+        arkose.log('Patched appendChild for Arkose script modification');
       },
 
       _patchEnforcement() {
@@ -205,17 +203,15 @@
           }
         `);
 
-        arkose.log("Applied Arkose enforcement patches");
+        arkose.log('Applied Arkose enforcement patches');
       },
 
       _execute(code) {
         // Secure code execution in page context
-        const wrappedCode = code
-          .replace(/^\s*/, "(() => {")
-          .replace(/\s*$/, "})();");
-        const element = document.createElement("div");
-        element.setAttribute("onreset", wrappedCode);
-        element.dispatchEvent(new Event("reset"));
+        const wrappedCode = code.replace(/^\s*/, '(() => {').replace(/\s*$/, '})();');
+        const element = document.createElement('div');
+        element.setAttribute('onreset', wrappedCode);
+        element.dispatchEvent(new Event('reset'));
       },
     };
   })();
@@ -226,9 +222,9 @@
 
     main.controller = {
       init() {
-        main.log("HTOS OpenAI content script initializing");
+        main.log('HTOS OpenAI content script initializing');
         htosApp.arkose.controller.init();
-        main.log("HTOS OpenAI content script ready");
+        main.log('HTOS OpenAI content script ready');
       },
     };
   })();
@@ -239,8 +235,8 @@
 
     startup.openaiController = {
       init() {
-        if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", () => {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => {
             htosApp.main.controller.init();
           });
         } else {

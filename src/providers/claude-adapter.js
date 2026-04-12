@@ -2,7 +2,7 @@
  * HTOS Claude Provider Adapter
  * - Implements ProviderAdapter interface for Claude
  * - Wraps ClaudeSessionApi with auth recovery
- * 
+ *
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { authManager } from '../core/auth-manager.js';
@@ -12,7 +12,7 @@ import {
   isDefinitiveAuthError,
   createProviderAuthError,
   isNetworkError,
-  normalizeError
+  normalizeError,
 } from '../utils/ErrorHandler';
 
 // Provider-specific adapter debug flag (off by default)
@@ -23,7 +23,7 @@ const pad = (...args) => {
 
 export class ClaudeAdapter {
   constructor(controller) {
-    this.id = "claude";
+    this.id = 'claude';
     this.capabilities = {
       needsDNR: false,
       needsOffscreen: false,
@@ -54,13 +54,17 @@ export class ClaudeAdapter {
   /**
    * Unified ask API: prefer continuation when chatId/threadUrl exists, else start new.
    */
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined
+  ) {
     try {
       const ctx = Object(providerContext);
       const meta = ctx.meta || providerContext || {};
-      const hasChat = Boolean(
-        meta.chatId || ctx.chatId || ctx.threadUrl,
-      );
+      const hasChat = Boolean(meta.chatId || ctx.chatId || ctx.threadUrl);
 
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasChat}`);
 
@@ -72,9 +76,11 @@ export class ClaudeAdapter {
       }
 
       try {
-        const len = (res?.text || "").length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
-      } catch (_) { }
+        const len = (res?.text || '').length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`
+        );
+      } catch (_) {}
 
       return res;
     } catch (e) {
@@ -85,7 +91,7 @@ export class ClaudeAdapter {
 
   async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
-    let aggregatedText = "";
+    let aggregatedText = '';
 
     try {
       // Send prompt to Claude with streaming via callback
@@ -105,7 +111,7 @@ export class ClaudeAdapter {
             latencyMs: Date.now() - startTime,
             meta: { orgId, chatId },
           });
-        },
+        }
       );
 
       // Ensure final text is returned
@@ -130,7 +136,10 @@ export class ClaudeAdapter {
         const orgId = details.orgId;
         if (chatId) {
           try {
-            const recoveredText = await this.controller.claudeSession.fetchLatestAssistantText(chatId, orgId);
+            const recoveredText = await this.controller.claudeSession.fetchLatestAssistantText(
+              chatId,
+              orgId
+            );
             if (recoveredText && recoveredText.trim().length > 0) {
               aggregatedText = recoveredText;
               return {
@@ -143,11 +152,11 @@ export class ClaudeAdapter {
                 meta: {
                   orgId,
                   chatId,
-                  recoveredFrom: "network_error",
+                  recoveredFrom: 'network_error',
                 },
               };
             }
-          } catch (_) { }
+          } catch (_) {}
         }
       }
       if (isProviderAuthError(error)) {
@@ -175,7 +184,7 @@ export class ClaudeAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -216,11 +225,11 @@ export class ClaudeAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: "no_recovery",
+          errorCode: 'no_recovery',
           latencyMs: Date.now() - startTime,
           meta: {
-            error: "no recovery",
-            details: error?.details || error?.message
+            error: 'no recovery',
+            details: error?.details || error?.message,
           },
         };
       } catch (handledError) {
@@ -230,7 +239,7 @@ export class ClaudeAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: normalizedHandledError.code || "unknown",
+          errorCode: normalizedHandledError.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalizedHandledError.message,
@@ -243,15 +252,16 @@ export class ClaudeAdapter {
 
   async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
-    let aggregatedText = "";
+    let aggregatedText = '';
     const meta = providerContext?.meta || providerContext || {};
 
     try {
-      const chatId = providerContext?.chatId ?? meta.chatId ?? providerContext?.threadUrl ?? meta.threadUrl;
+      const chatId =
+        providerContext?.chatId ?? meta.chatId ?? providerContext?.threadUrl ?? meta.threadUrl;
 
       if (!chatId) {
         console.warn(`[ClaudeAdapter] Context missing (no ChatId)`);
-        throw new Error("Continuity lost: Missing Claude ChatId for this thread.");
+        throw new Error('Continuity lost: Missing Claude ChatId for this thread.');
       }
 
       const result = await this.controller.claudeSession.ask(
@@ -270,12 +280,14 @@ export class ClaudeAdapter {
             latencyMs: Date.now() - startTime,
             meta: { orgId, chatId: newChatId || chatId },
           });
-        },
+        }
       );
 
       aggregatedText = result?.text ?? aggregatedText;
 
-      pad(`[ClaudeAdapter] providerComplete: claude status=success, latencyMs=${Date.now() - startTime}, textLen=${(aggregatedText || "").length}`);
+      pad(
+        `[ClaudeAdapter] providerComplete: claude status=success, latencyMs=${Date.now() - startTime}, textLen=${(aggregatedText || '').length}`
+      );
 
       return {
         providerId: this.id,
@@ -294,11 +306,18 @@ export class ClaudeAdapter {
       if (!isProviderAuthError(error) && isNetworkError(error)) {
         const details = error?.details || {};
         const errMeta = providerContext?.meta || providerContext || {};
-        const chatId = providerContext?.chatId ?? errMeta.chatId ?? providerContext?.threadUrl ?? errMeta.threadUrl;
+        const chatId =
+          providerContext?.chatId ??
+          errMeta.chatId ??
+          providerContext?.threadUrl ??
+          errMeta.threadUrl;
         const orgId = details.orgId;
         if (chatId) {
           try {
-            const recoveredText = await this.controller.claudeSession.fetchLatestAssistantText(chatId, orgId);
+            const recoveredText = await this.controller.claudeSession.fetchLatestAssistantText(
+              chatId,
+              orgId
+            );
             if (recoveredText && recoveredText.trim().length > 0) {
               aggregatedText = recoveredText;
               return {
@@ -312,16 +331,23 @@ export class ClaudeAdapter {
                   orgId,
                   chatId,
                   threadUrl: chatId,
-                  recoveredFrom: "network_error",
+                  recoveredFrom: 'network_error',
                 },
               };
             }
-          } catch (_) { }
+          } catch (_) {}
         }
       }
       if (isProviderAuthError(error)) {
         try {
-          return await this._handleAuthError(error, { originalPrompt: prompt, meta: providerContext }, onChunk, signal, _isRetry, true);
+          return await this._handleAuthError(
+            error,
+            { originalPrompt: prompt, meta: providerContext },
+            onChunk,
+            signal,
+            _isRetry,
+            true
+          );
         } catch (authError) {
           const normalizedAuthError = normalizeError(authError);
           return {
@@ -345,7 +371,7 @@ export class ClaudeAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -357,7 +383,11 @@ export class ClaudeAdapter {
 
       if (isNetworkError(error)) {
         const errMeta = providerContext?.meta || providerContext || {};
-        const chatId = providerContext?.chatId ?? errMeta?.chatId ?? providerContext?.threadUrl ?? errMeta?.threadUrl;
+        const chatId =
+          providerContext?.chatId ??
+          errMeta?.chatId ??
+          providerContext?.threadUrl ??
+          errMeta?.threadUrl;
         return {
           providerId: this.id,
           ok: false,
@@ -377,7 +407,14 @@ export class ClaudeAdapter {
           providerId: this.id,
           prompt: prompt?.substring(0, 200),
           operation: async () => {
-            return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+            return await this.sendContinuation(
+              prompt,
+              providerContext,
+              sessionId,
+              onChunk,
+              signal,
+              true
+            );
           },
         });
         if (recovery) return recovery;
@@ -387,10 +424,10 @@ export class ClaudeAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: "no_recovery",
+          errorCode: 'no_recovery',
           latencyMs: Date.now() - startTime,
           meta: {
-            error: "no recovery",
+            error: 'no recovery',
             details: error?.details || error?.message,
             chatId: providerContext?.chatId,
           },
@@ -401,7 +438,7 @@ export class ClaudeAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: normalizedHandledError.code || "unknown",
+          errorCode: normalizedHandledError.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalizedHandledError.message,
@@ -418,7 +455,9 @@ export class ClaudeAdapter {
 
     // 401 or pattern match (session expired, login required, etc.) → definitive, no retry
     if (isDefinitiveAuthError(error) || _isRetry) {
-      console.log(`[ClaudeAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+      console.log(
+        `[ClaudeAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+      );
       await authManager.markUnauthenticated(this.id);
       throw createProviderAuthError(this.id, error);
     }
@@ -426,7 +465,14 @@ export class ClaudeAdapter {
     // 403 → ambiguous, could be transient. Retry once.
     console.log(`[ClaudeAdapter] Ambiguous auth error (${error.status}), retrying once...`);
     if (isContinuation) {
-      return await this.sendContinuation(req.originalPrompt, req.meta, undefined, onChunk, signal, true);
+      return await this.sendContinuation(
+        req.originalPrompt,
+        req.meta,
+        undefined,
+        onChunk,
+        signal,
+        true
+      );
     } else {
       return await this.sendPrompt(req, onChunk, signal, true);
     }

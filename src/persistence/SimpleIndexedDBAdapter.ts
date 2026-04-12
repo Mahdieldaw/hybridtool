@@ -1,9 +1,9 @@
 // Simplified IndexedDB Adapter with minimal API for HTOS persistence
 // Provides init(), get(), put(), delete(), getAll() methods with auto-population of key fields
 
-import { openDatabase } from "./database";
-import { verifySchemaAndRepair } from "./schemaVerification";
-import { withTransaction } from "./transactions";
+import { openDatabase } from './database';
+import { verifySchemaAndRepair } from './schemaVerification';
+import { withTransaction } from './transactions';
 
 export interface SimpleRecord {
   id?: string;
@@ -24,10 +24,7 @@ export class SimpleIndexedDBAdapter {
    * Initialize the adapter and open the database
    * Only returns after onupgradeneeded completes and DB is fully open
    */
-  async init(options?: {
-    timeoutMs?: number;
-    autoRepair?: boolean;
-  }): Promise<void> {
+  async init(options?: { timeoutMs?: number; autoRepair?: boolean }): Promise<void> {
     this.initTimeoutMs = options?.timeoutMs ?? this.initTimeoutMs;
     const autoRepair = options?.autoRepair ?? true;
 
@@ -37,25 +34,24 @@ export class SimpleIndexedDBAdapter {
       this.db = await this.withTimeout(
         dbPromise,
         this.initTimeoutMs,
-        "Timeout opening IndexedDB database",
+        'Timeout opening IndexedDB database'
       );
 
       // Runtime assertions - verify DB is properly opened
       if (!this.db) {
-        console.error("persistence:init - Database failed to open");
-        throw new Error("IndexedDB failed to open - database is null");
+        console.error('persistence:init - Database failed to open');
+        throw new Error('IndexedDB failed to open - database is null');
       }
 
       // Verify/repair schema if needed
-      const { repaired, db: repairedDb } =
-        await verifySchemaAndRepair(autoRepair);
+      const { repaired, db: repairedDb } = await verifySchemaAndRepair(autoRepair);
       if (repaired && repairedDb) {
         // Replace db handle with repaired instance
         if (this.db) {
           try {
             this.db.close();
           } catch (e) {
-            console.warn("Error closing old DB connection:", e);
+            console.warn('Error closing old DB connection:', e);
           }
         }
         this.db = repairedDb;
@@ -63,33 +59,28 @@ export class SimpleIndexedDBAdapter {
       if (!repaired) {
         // verify required object stores exist if no repair was needed
         const requiredStores = [
-          "sessions",
-          "threads",
-          "turns",
-          "provider_responses",
-          "provider_contexts",
-          "metadata",
-          "context_bridges",
-          "embeddings",
-          "claim_embeddings",
+          'sessions',
+          'threads',
+          'turns',
+          'provider_responses',
+          'provider_contexts',
+          'metadata',
+          'context_bridges',
+          'embeddings',
+          'claim_embeddings',
         ];
         const missingStores = requiredStores.filter(
-          (storeName) => !this.db!.objectStoreNames.contains(storeName),
+          (storeName) => !this.db!.objectStoreNames.contains(storeName)
         );
         if (missingStores.length > 0) {
-          console.error(
-            "persistence:init - Missing required object stores:",
-            missingStores,
-          );
-          throw new Error(
-            `IndexedDB missing required object stores: ${missingStores.join(", ")}`,
-          );
+          console.error('persistence:init - Missing required object stores:', missingStores);
+          throw new Error(`IndexedDB missing required object stores: ${missingStores.join(', ')}`);
         }
       }
 
       this.isInitialized = true;
     } catch (error) {
-      console.error("persistence:init - Initialization failed:", error);
+      console.error('persistence:init - Initialization failed:', error);
       throw error;
     }
   }
@@ -102,19 +93,14 @@ export class SimpleIndexedDBAdapter {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
-      const result = await withTransaction(
-        this.db!,
-        [resolved],
-        "readonly",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          return new Promise<SimpleRecord | undefined>((resolve, reject) => {
-            const request = store.get(key);
-            request.onsuccess = () => resolve(request.result || undefined);
-            request.onerror = () => reject(request.error);
-          });
-        },
-      );
+      const result = await withTransaction(this.db!, [resolved], 'readonly', async (tx) => {
+        const store = tx.objectStore(resolved);
+        return new Promise<SimpleRecord | undefined>((resolve, reject) => {
+          const request = store.get(key);
+          request.onsuccess = () => resolve(request.result || undefined);
+          request.onerror = () => reject(request.error);
+        });
+      });
 
       return result;
     } catch (error) {
@@ -127,11 +113,7 @@ export class SimpleIndexedDBAdapter {
    * Put a record into the specified store
    * Auto-populates id, createdAt, updatedAt fields if missing
    */
-  async put(
-    storeName: string,
-    value: SimpleRecord,
-    key?: string,
-  ): Promise<SimpleRecord> {
+  async put(storeName: string, value: SimpleRecord, key?: string): Promise<SimpleRecord> {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
@@ -151,31 +133,25 @@ export class SimpleIndexedDBAdapter {
       }
       clonedValue.updatedAt = now;
 
-      const result = await withTransaction(
-        this.db!,
-        [resolved],
-        "readwrite",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          return new Promise<SimpleRecord>((resolve, reject) => {
-            // If the store has a keyPath defined, IndexedDB requires that we DO NOT provide
-            // an explicit key argument to put(). Passing a key would raise a DataError DOMException.
-            const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
-            const request = hasKeyPath
-              ? store.put(clonedValue)
-              : (key ? store.put(clonedValue, key) : store.put(clonedValue));
-            request.onsuccess = () => resolve(clonedValue);
-            request.onerror = () => reject(request.error);
-          });
-        },
-      );
+      const result = await withTransaction(this.db!, [resolved], 'readwrite', async (tx) => {
+        const store = tx.objectStore(resolved);
+        return new Promise<SimpleRecord>((resolve, reject) => {
+          // If the store has a keyPath defined, IndexedDB requires that we DO NOT provide
+          // an explicit key argument to put(). Passing a key would raise a DataError DOMException.
+          const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
+          const request = hasKeyPath
+            ? store.put(clonedValue)
+            : key
+              ? store.put(clonedValue, key)
+              : store.put(clonedValue);
+          request.onsuccess = () => resolve(clonedValue);
+          request.onerror = () => reject(request.error);
+        });
+      });
 
       return result;
     } catch (error) {
-      console.error(
-        `persistence:put(${resolved}, ${key || value.id}) - error:`,
-        error,
-      );
+      console.error(`persistence:put(${resolved}, ${key || value.id}) - error:`, error);
       throw error;
     }
   }
@@ -185,10 +161,7 @@ export class SimpleIndexedDBAdapter {
    * Unlike put(), this skips JSON.parse(JSON.stringify()) cloning which would
    * destroy ArrayBuffer contents. Uses IndexedDB's native structured clone instead.
    */
-  async putBinary(
-    storeName: string,
-    value: SimpleRecord,
-  ): Promise<SimpleRecord> {
+  async putBinary(storeName: string, value: SimpleRecord): Promise<SimpleRecord> {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
@@ -202,29 +175,21 @@ export class SimpleIndexedDBAdapter {
         record.id = crypto.randomUUID();
       }
 
-      const result = await withTransaction(
-        this.db!,
-        [resolved],
-        "readwrite",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          return new Promise<SimpleRecord>((resolve, reject) => {
-            const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
-            const request = hasKeyPath
-              ? store.put(record)
-              : store.put(record, record.id as IDBValidKey);
-            request.onsuccess = () => resolve(record);
-            request.onerror = () => reject(request.error);
-          });
-        },
-      );
+      const result = await withTransaction(this.db!, [resolved], 'readwrite', async (tx) => {
+        const store = tx.objectStore(resolved);
+        return new Promise<SimpleRecord>((resolve, reject) => {
+          const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
+          const request = hasKeyPath
+            ? store.put(record)
+            : store.put(record, record.id as IDBValidKey);
+          request.onsuccess = () => resolve(record);
+          request.onerror = () => reject(request.error);
+        });
+      });
 
       return result;
     } catch (error) {
-      console.error(
-        `persistence:putBinary(${resolved}) - error:`,
-        error,
-      );
+      console.error(`persistence:putBinary(${resolved}) - error:`, error);
       throw error;
     }
   }
@@ -232,48 +197,37 @@ export class SimpleIndexedDBAdapter {
   async update(
     storeName: string,
     key: string,
-    updater: (current: SimpleRecord | undefined) => SimpleRecord | undefined,
+    updater: (current: SimpleRecord | undefined) => SimpleRecord | undefined
   ): Promise<SimpleRecord | undefined> {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
-      const result = await withTransaction(
-        this.db!,
-        [resolved],
-        "readwrite",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          const current = await new Promise<SimpleRecord | undefined>(
-            (resolve, reject) => {
-              const request = store.get(key);
-              request.onsuccess = () => resolve(request.result || undefined);
-              request.onerror = () => reject(request.error);
-            },
-          );
+      const result = await withTransaction(this.db!, [resolved], 'readwrite', async (tx) => {
+        const store = tx.objectStore(resolved);
+        const current = await new Promise<SimpleRecord | undefined>((resolve, reject) => {
+          const request = store.get(key);
+          request.onsuccess = () => resolve(request.result || undefined);
+          request.onerror = () => reject(request.error);
+        });
 
-          const next = updater(
-            current ? JSON.parse(JSON.stringify(current)) : undefined,
-          );
-          if (!next) return undefined;
+        const next = updater(current ? JSON.parse(JSON.stringify(current)) : undefined);
+        if (!next) return undefined;
 
-          const clonedValue = JSON.parse(JSON.stringify(next));
-          const now = Date.now();
-          if (!clonedValue.id) clonedValue.id = key;
-          if (!clonedValue.createdAt) clonedValue.createdAt = current?.createdAt || now;
-          clonedValue.updatedAt = now;
+        const clonedValue = JSON.parse(JSON.stringify(next));
+        const now = Date.now();
+        if (!clonedValue.id) clonedValue.id = key;
+        if (!clonedValue.createdAt) clonedValue.createdAt = current?.createdAt || now;
+        clonedValue.updatedAt = now;
 
-          await new Promise<void>((resolve, reject) => {
-            const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
-            const request = hasKeyPath
-              ? store.put(clonedValue)
-              : store.put(clonedValue, key);
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-          });
+        await new Promise<void>((resolve, reject) => {
+          const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
+          const request = hasKeyPath ? store.put(clonedValue) : store.put(clonedValue, key);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
 
-          return clonedValue;
-        },
-      );
+        return clonedValue;
+      });
 
       return result;
     } catch (error) {
@@ -285,10 +239,7 @@ export class SimpleIndexedDBAdapter {
   /**
    * Batch put records into the specified store in a single transaction
    */
-  async batchPut(
-    storeName: string,
-    values: SimpleRecord[],
-  ): Promise<void> {
+  async batchPut(storeName: string, values: SimpleRecord[]): Promise<void> {
     this.ensureReady();
     if (!values || values.length === 0) return;
 
@@ -296,35 +247,30 @@ export class SimpleIndexedDBAdapter {
     const now = Date.now();
 
     try {
-      await withTransaction(
-        this.db!,
-        [resolved],
-        "readwrite",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
+      await withTransaction(this.db!, [resolved], 'readwrite', async (tx) => {
+        const store = tx.objectStore(resolved);
+        const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
 
-          // Process all puts within the single transaction
-          const promises = values.map(value => {
-            return new Promise<void>((resolve, reject) => {
-              // Clone and auto-populate
-              const clonedValue = JSON.parse(JSON.stringify(value));
-              if (!clonedValue.id) clonedValue.id = crypto.randomUUID();
-              if (!clonedValue.createdAt) clonedValue.createdAt = now;
-              clonedValue.updatedAt = now;
+        // Process all puts within the single transaction
+        const promises = values.map((value) => {
+          return new Promise<void>((resolve, reject) => {
+            // Clone and auto-populate
+            const clonedValue = JSON.parse(JSON.stringify(value));
+            if (!clonedValue.id) clonedValue.id = crypto.randomUUID();
+            if (!clonedValue.createdAt) clonedValue.createdAt = now;
+            clonedValue.updatedAt = now;
 
-              const request = hasKeyPath
-                ? store.put(clonedValue)
-                : store.put(clonedValue, clonedValue.id);
+            const request = hasKeyPath
+              ? store.put(clonedValue)
+              : store.put(clonedValue, clonedValue.id);
 
-              request.onsuccess = () => resolve();
-              request.onerror = () => reject(request.error);
-            });
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
           });
+        });
 
-          await Promise.all(promises);
-        }
-      );
+        await Promise.all(promises);
+      });
     } catch (error) {
       console.error(`persistence:batchPut(${resolved}) - error:`, error);
       throw error;
@@ -338,7 +284,7 @@ export class SimpleIndexedDBAdapter {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
-      await withTransaction(this.db!, [resolved], "readwrite", async (tx) => {
+      await withTransaction(this.db!, [resolved], 'readwrite', async (tx) => {
         const store = tx.objectStore(resolved);
         return new Promise<void>((resolve, reject) => {
           const request = store.delete(key);
@@ -362,19 +308,14 @@ export class SimpleIndexedDBAdapter {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
-      const result = await withTransaction(
-        this.db!,
-        [resolved],
-        "readonly",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          return new Promise<SimpleRecord[]>((resolve, reject) => {
-            const request = store.getAll();
-            request.onsuccess = () => resolve(request.result || []);
-            request.onerror = () => reject(request.error);
-          });
-        },
-      );
+      const result = await withTransaction(this.db!, [resolved], 'readonly', async (tx) => {
+        const store = tx.objectStore(resolved);
+        return new Promise<SimpleRecord[]>((resolve, reject) => {
+          const request = store.getAll();
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
+        });
+      });
 
       return result;
     } catch (error) {
@@ -390,40 +331,29 @@ export class SimpleIndexedDBAdapter {
   async getByIndex(
     storeName: string,
     indexName: string,
-    key: IDBValidKey | IDBKeyRange,
+    key: IDBValidKey | IDBKeyRange
   ): Promise<SimpleRecord[]> {
     this.ensureReady();
     const resolved = this.resolveStoreName(storeName);
     try {
-      const result = await withTransaction(
-        this.db!,
-        [resolved],
-        "readonly",
-        async (tx) => {
-          const store = tx.objectStore(resolved);
-          let index: IDBIndex;
-          try {
-            index = store.index(indexName);
-          } catch (e) {
-            console.error(
-              `persistence:getByIndex(${resolved}.${indexName}) - missing index`,
-              e,
-            );
-            throw e;
-          }
-          return new Promise<SimpleRecord[]>((resolve, reject) => {
-            const request = index.getAll(key);
-            request.onsuccess = () => resolve(request.result || []);
-            request.onerror = () => reject(request.error);
-          });
-        },
-      );
+      const result = await withTransaction(this.db!, [resolved], 'readonly', async (tx) => {
+        const store = tx.objectStore(resolved);
+        let index: IDBIndex;
+        try {
+          index = store.index(indexName);
+        } catch (e) {
+          console.error(`persistence:getByIndex(${resolved}.${indexName}) - missing index`, e);
+          throw e;
+        }
+        return new Promise<SimpleRecord[]>((resolve, reject) => {
+          const request = index.getAll(key);
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
+        });
+      });
       return result;
     } catch (error) {
-      console.error(
-        `persistence:getByIndex(${resolved}.${indexName}) - error:`,
-        error,
-      );
+      console.error(`persistence:getByIndex(${resolved}.${indexName}) - error:`, error);
       throw error;
     }
   }
@@ -432,45 +362,45 @@ export class SimpleIndexedDBAdapter {
    * Convenience wrappers for common indexed queries
    */
   async getThreadsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
-    return this.getByIndex("threads", "bySessionId", sessionId);
+    return this.getByIndex('threads', 'bySessionId', sessionId);
   }
 
   async getTurnsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
-    return this.getByIndex("turns", "bySessionId", sessionId);
+    return this.getByIndex('turns', 'bySessionId', sessionId);
   }
 
   async getResponsesByTurnId(aiTurnId: string): Promise<SimpleRecord[]> {
     // provider_responses.byAiTurnId
-    return this.getByIndex("provider_responses", "byAiTurnId", aiTurnId);
+    return this.getByIndex('provider_responses', 'byAiTurnId', aiTurnId);
   }
 
   async getContextsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
     // provider_contexts.bySessionId
-    return this.getByIndex("provider_contexts", "bySessionId", sessionId);
+    return this.getByIndex('provider_contexts', 'bySessionId', sessionId);
   }
 
   async getResponsesBySessionId(sessionId: string): Promise<SimpleRecord[]> {
     // provider_responses.bySessionId
-    return this.getByIndex("provider_responses", "bySessionId", sessionId);
+    return this.getByIndex('provider_responses', 'bySessionId', sessionId);
   }
 
   async getMetadataBySessionId(sessionId: string): Promise<SimpleRecord[]> {
     // metadata.bySessionId
-    return this.getByIndex("metadata", "bySessionId", sessionId);
+    return this.getByIndex('metadata', 'bySessionId', sessionId);
   }
 
   async getMetadataByEntityId(entityId: string): Promise<SimpleRecord[]> {
     // metadata.byEntityId
-    return this.getByIndex("metadata", "byEntityId", entityId);
+    return this.getByIndex('metadata', 'byEntityId', entityId);
   }
 
   async getAllSessions(): Promise<SimpleRecord[]> {
     // Convenience wrapper for listing sessions; full-scan is acceptable for sessions catalog
-    return this.getAll("sessions");
+    return this.getAll('sessions');
   }
 
   async getIncompleteTurns(): Promise<SimpleRecord[]> {
-    const aiTurns = await this.getByIndex("turns", "byType", "ai");
+    const aiTurns = await this.getByIndex('turns', 'byType', 'ai');
     return (aiTurns || []).filter((t) => t && t.isComplete !== true);
   }
 
@@ -479,8 +409,8 @@ export class SimpleIndexedDBAdapter {
    */
   async transaction<T>(
     storeNames: string[],
-    mode: "readonly" | "readwrite",
-    operation: (tx: IDBTransaction) => Promise<T>,
+    mode: 'readonly' | 'readwrite',
+    operation: (tx: IDBTransaction) => Promise<T>
   ): Promise<T> {
     this.ensureReady();
     const resolvedStores = storeNames.map((s) => this.resolveStoreName(s));
@@ -510,9 +440,7 @@ export class SimpleIndexedDBAdapter {
    */
   private ensureReady(): void {
     if (!this.isReady()) {
-      throw new Error(
-        "SimpleIndexedDBAdapter is not initialized. Call init() first.",
-      );
+      throw new Error('SimpleIndexedDBAdapter is not initialized. Call init() first.');
     }
   }
 
@@ -522,8 +450,8 @@ export class SimpleIndexedDBAdapter {
    */
   private resolveStoreName(name: string): string {
     const map: Record<string, string> = {
-      providerResponses: "provider_responses",
-      providerContexts: "provider_contexts",
+      providerResponses: 'provider_responses',
+      providerContexts: 'provider_contexts',
     };
     return map[name] || name;
   }
@@ -540,14 +468,11 @@ export class SimpleIndexedDBAdapter {
   private async withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
-    timeoutMessage: string,
+    timeoutMessage: string
   ): Promise<T> {
     let timeoutHandle: any;
     const timeoutPromise = new Promise<T>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(timeoutMessage)),
-        timeoutMs,
-      );
+      timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
     });
     try {
       const result = await Promise.race([promise, timeoutPromise]);

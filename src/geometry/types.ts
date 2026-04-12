@@ -10,20 +10,20 @@ import type { ExtendedSimilarityStats } from './threshold';
 // ------------------------------------------------------------------------------
 
 export interface NodeLocalStats {
-    paragraphId: string;
-    modelIndex: number;
-    dominantStance: Stance;
-    contested: boolean;
-    statementIds: string[];
+  paragraphId: string;
+  modelIndex: number;
+  dominantStance: Stance;
+  contested: boolean;
+  statementIds: string[];
 
-    isolationScore: number;       // 0 = connected hub, 1 = fully isolated
+  isolationScore: number; // 0 = connected hub, 1 = fully isolated
 
-    // From mutual recognition graph (μ+σ)
-    mutualNeighborhoodPatch: string[];
-    mutualRankDegree: number;
+  // From mutual recognition graph (μ+σ)
+  mutualNeighborhoodPatch: string[];
+  mutualRankDegree: number;
 
-    // topographic basin id (from density inversion)
-    basinId?: number;
+  // topographic basin id (from density inversion)
+  basinId?: number;
 }
 
 // ------------------------------------------------------------------------------
@@ -31,14 +31,14 @@ export interface NodeLocalStats {
 // ------------------------------------------------------------------------------
 
 export interface PairwiseFieldStats extends ExtendedSimilarityStats {
-    discriminationRange: number;  // p90 - p10
+  discriminationRange: number; // p90 - p10
 }
 
 export interface PairwiseField {
-    matrix: Map<string, Map<string, number>>;
-    perNode: Map<string, Array<{ nodeId: string; similarity: number }>>;
-    stats: PairwiseFieldStats;
-    nodeCount: number;
+  matrix: Map<string, Map<string, number>>;
+  perNode: Map<string, Array<{ nodeId: string; similarity: number }>>;
+  stats: PairwiseFieldStats;
+  nodeCount: number;
 }
 
 // ------------------------------------------------------------------------------
@@ -46,37 +46,37 @@ export interface PairwiseField {
 // ------------------------------------------------------------------------------
 
 export interface MutualRankEdge {
-    source: string;
-    target: string;
-    similarity: number;
+  source: string;
+  target: string;
+  similarity: number;
 }
 
 export interface MutualRecognitionThresholdStats {
-    paragraphId: string;
-    mean: number;
-    stddev: number;
-    threshold: number; // mean + stddev
-    notableNeighborCount: number;
+  paragraphId: string;
+  mean: number;
+  stddev: number;
+  threshold: number; // mean + stddev
+  notableNeighborCount: number;
 }
 
 export interface MutualRankNodeStats {
-    paragraphId: string;
-    mutualRankDegree: number;
-    isolated: boolean;
-    mutualRankNeighborhood: string[];  // [self + neighbors], sorted
+  paragraphId: string;
+  mutualRankDegree: number;
+  isolated: boolean;
+  mutualRankNeighborhood: string[]; // [self + neighbors], sorted
 }
 
 export interface MutualRankGraph {
-    edges: MutualRankEdge[];
-    adjacency: Map<string, MutualRankEdge[]>;
-    nodeStats: Map<string, MutualRankNodeStats>;
-    thresholdStats: Map<string, MutualRecognitionThresholdStats>;
+  edges: MutualRankEdge[];
+  adjacency: Map<string, MutualRankEdge[]>;
+  nodeStats: Map<string, MutualRankNodeStats>;
+  thresholdStats: Map<string, MutualRecognitionThresholdStats>;
 }
 
 export interface Layout2D {
-    method: 'umap' | 'spectral' | 'force';
-    coordinates: Record<string, [number, number]>;
-    buildTimeMs: number;
+  method: 'umap' | 'spectral' | 'force';
+  coordinates: Record<string, [number, number]>;
+  buildTimeMs: number;
 }
 
 // ------------------------------------------------------------------------------
@@ -84,30 +84,30 @@ export interface Layout2D {
 // ------------------------------------------------------------------------------
 
 export interface GeometricSubstrate {
-    nodes: NodeLocalStats[];
+  nodes: NodeLocalStats[];
 
-    pairwiseField: PairwiseField;
-    mutualRankGraph: MutualRankGraph;
+  pairwiseField: PairwiseField;
+  mutualRankGraph: MutualRankGraph;
 
-    layout2d?: Layout2D;
+  layout2d?: Layout2D;
 
-    meta: {
-        embeddingSuccess: boolean;
-        embeddingBackend: 'webgpu' | 'wasm' | 'none';
-        nodeCount: number;
+  meta: {
+    embeddingSuccess: boolean;
+    embeddingBackend: 'webgpu' | 'wasm' | 'none';
+    nodeCount: number;
 
-        similarityStats: {
-            max: number;
-            p95: number;
-            p80: number;
-            p50: number;
-            mean: number;
-        };
-
-        quantization: '1e-6';
-        tieBreaker: 'lexicographic';
-        buildTimeMs: number;
+    similarityStats: {
+      max: number;
+      p95: number;
+      p80: number;
+      p50: number;
+      mean: number;
     };
+
+    quantization: '1e-6';
+    tieBreaker: 'lexicographic';
+    buildTimeMs: number;
+  };
 }
 
 // ------------------------------------------------------------------------------
@@ -115,15 +115,15 @@ export interface GeometricSubstrate {
 // ------------------------------------------------------------------------------
 
 export type DegenerateReason =
-    | 'embedding_failure'
-    | 'insufficient_paragraphs'
-    | 'all_embeddings_identical';
+  | 'embedding_failure'
+  | 'insufficient_paragraphs'
+  | 'all_embeddings_identical';
 
 export interface DegenerateSubstrate extends GeometricSubstrate {
-    degenerate: true;
-    degenerateReason: DegenerateReason;
+  degenerate: true;
+  degenerateReason: DegenerateReason;
 }
 
 export function isDegenerate(s: GeometricSubstrate): s is DegenerateSubstrate {
-    return 'degenerate' in s && s.degenerate === true;
+  return 'degenerate' in s && s.degenerate === true;
 }

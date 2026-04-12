@@ -1,12 +1,21 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from 'react';
 
 // Keep PipelineLayer exported for backward compatibility (used in Reference Shelf cards)
 export type PipelineLayer =
-  | 'geometry' | 'query-relevance'
-  | 'competitive-provenance' | 'claim-statements'
-  | 'blast-radius' | 'raw-artifacts'
-  | 'provenance-comparison' | 'mixed-provenance' | 'traversal-pruning'
-  | 'claim-density' | 'passage-ownership' | 'passage-pruning' | 'regions' | 'bayesian-basins'
+  | 'geometry'
+  | 'query-relevance'
+  | 'competitive-provenance'
+  | 'claim-statements'
+  | 'blast-radius'
+  | 'raw-artifacts'
+  | 'provenance-comparison'
+  | 'mixed-provenance'
+  | 'traversal-pruning'
+  | 'claim-density'
+  | 'passage-ownership'
+  | 'passage-pruning'
+  | 'regions'
+  | 'bayesian-basins'
   | 'stmt-classification';
 
 export type SelectedEntity =
@@ -77,21 +86,33 @@ const DEFAULTS: InstrumentState = {
 };
 
 export function useInstrumentState(): [InstrumentState, InstrumentActions] {
-  const [rightPanelMode, setRightPanelMode] = useState<'instrument' | 'narrative'>(DEFAULTS.rightPanelMode);
+  const [rightPanelMode, setRightPanelMode] = useState<'instrument' | 'narrative'>(
+    DEFAULTS.rightPanelMode
+  );
   const [selectedView, setSelectedView] = useState<string>(DEFAULTS.selectedView);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity>(null);
-  const [expandedRefSections, setExpandedRefSections] = useState<string[]>(DEFAULTS.expandedRefSections);
+  const [expandedRefSections, setExpandedRefSections] = useState<string[]>(
+    DEFAULTS.expandedRefSections
+  );
   const [scope, setScope] = useState<EvidenceScope>(DEFAULTS.scope);
   const [showMutualEdges, setShowMutualEdges] = useState(DEFAULTS.showMutualEdges);
   const [showClaimDiamonds, setShowClaimDiamonds] = useState(DEFAULTS.showClaimDiamonds);
   const [showMapperEdges, setShowMapperEdges] = useState(DEFAULTS.showMapperEdges);
   const [showRegionHulls, setShowRegionHulls] = useState(DEFAULTS.showRegionHulls);
   const [showBasinRects, setShowBasinRects] = useState(DEFAULTS.showBasinRects);
-  const [colorParagraphsByModel, setColorParagraphsByModel] = useState(DEFAULTS.colorParagraphsByModel);
-  const [highlightSourceParagraphs, setHighlightSourceParagraphs] = useState(DEFAULTS.highlightSourceParagraphs);
-  const [highlightInternalEdges, setHighlightInternalEdges] = useState(DEFAULTS.highlightInternalEdges);
-  const [highlightSpannedHulls, setHighlightSpannedHulls] = useState(DEFAULTS.highlightSpannedHulls);
+  const [colorParagraphsByModel, setColorParagraphsByModel] = useState(
+    DEFAULTS.colorParagraphsByModel
+  );
+  const [highlightSourceParagraphs, setHighlightSourceParagraphs] = useState(
+    DEFAULTS.highlightSourceParagraphs
+  );
+  const [highlightInternalEdges, setHighlightInternalEdges] = useState(
+    DEFAULTS.highlightInternalEdges
+  );
+  const [highlightSpannedHulls, setHighlightSpannedHulls] = useState(
+    DEFAULTS.highlightSpannedHulls
+  );
   const [showRiskGlyphs, setShowRiskGlyphs] = useState(DEFAULTS.showRiskGlyphs);
 
   const selectClaim = useCallback((claimId: string | null, label?: string) => {
@@ -100,10 +121,8 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
   }, []);
 
   const toggleRefSection = useCallback((sectionId: string) => {
-    setExpandedRefSections(prev =>
-      prev.includes(sectionId)
-        ? prev.filter(s => s !== sectionId)
-        : [...prev, sectionId]
+    setExpandedRefSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((s) => s !== sectionId) : [...prev, sectionId]
     );
   }, []);
 
@@ -126,51 +145,67 @@ export function useInstrumentState(): [InstrumentState, InstrumentActions] {
     setShowRiskGlyphs(DEFAULTS.showRiskGlyphs);
   }, []);
 
-  const state = useMemo<InstrumentState>(() => ({
-    rightPanelMode,
-    selectedView,
-    selectedClaimId,
-    selectedEntity,
-    expandedRefSections,
-    scope,
-    showMutualEdges,
-    showClaimDiamonds,
-    showMapperEdges,
-    showRegionHulls,
-    showBasinRects,
-    colorParagraphsByModel,
-    highlightSourceParagraphs,
-    highlightInternalEdges,
-    highlightSpannedHulls,
-    showRiskGlyphs,
-  }), [
-    rightPanelMode, selectedView, selectedClaimId, selectedEntity,
-    expandedRefSections, scope,
-    showMutualEdges, showClaimDiamonds, showMapperEdges, showRegionHulls, showBasinRects,
-    colorParagraphsByModel,
-    highlightSourceParagraphs, highlightInternalEdges, highlightSpannedHulls,
-    showRiskGlyphs,
-  ]);
+  const state = useMemo<InstrumentState>(
+    () => ({
+      rightPanelMode,
+      selectedView,
+      selectedClaimId,
+      selectedEntity,
+      expandedRefSections,
+      scope,
+      showMutualEdges,
+      showClaimDiamonds,
+      showMapperEdges,
+      showRegionHulls,
+      showBasinRects,
+      colorParagraphsByModel,
+      highlightSourceParagraphs,
+      highlightInternalEdges,
+      highlightSpannedHulls,
+      showRiskGlyphs,
+    }),
+    [
+      rightPanelMode,
+      selectedView,
+      selectedClaimId,
+      selectedEntity,
+      expandedRefSections,
+      scope,
+      showMutualEdges,
+      showClaimDiamonds,
+      showMapperEdges,
+      showRegionHulls,
+      showBasinRects,
+      colorParagraphsByModel,
+      highlightSourceParagraphs,
+      highlightInternalEdges,
+      highlightSpannedHulls,
+      showRiskGlyphs,
+    ]
+  );
 
-  const actions = useMemo<InstrumentActions>(() => ({
-    setRightPanelMode,
-    setSelectedView,
-    selectClaim,
-    setSelectedEntity,
-    toggleRefSection,
-    setScope,
-    toggleMutualEdges: () => setShowMutualEdges(v => !v),
-    toggleClaimDiamonds: () => setShowClaimDiamonds(v => !v),
-    toggleMapperEdges: () => setShowMapperEdges(v => !v),
-    toggleRegionHulls: () => setShowRegionHulls(v => !v),
-    toggleBasinRects: () => setShowBasinRects(v => !v),
-    toggleColorParagraphsByModel: () => setColorParagraphsByModel(v => !v),
-    toggleHighlightSourceParagraphs: () => setHighlightSourceParagraphs(v => !v),
-    toggleHighlightInternalEdges: () => setHighlightInternalEdges(v => !v),
-    toggleHighlightSpannedHulls: () => setHighlightSpannedHulls(v => !v),
-    toggleRiskGlyphs: () => setShowRiskGlyphs(v => !v),
-    reset,
-  }), [selectClaim, toggleRefSection, reset]);
+  const actions = useMemo<InstrumentActions>(
+    () => ({
+      setRightPanelMode,
+      setSelectedView,
+      selectClaim,
+      setSelectedEntity,
+      toggleRefSection,
+      setScope,
+      toggleMutualEdges: () => setShowMutualEdges((v) => !v),
+      toggleClaimDiamonds: () => setShowClaimDiamonds((v) => !v),
+      toggleMapperEdges: () => setShowMapperEdges((v) => !v),
+      toggleRegionHulls: () => setShowRegionHulls((v) => !v),
+      toggleBasinRects: () => setShowBasinRects((v) => !v),
+      toggleColorParagraphsByModel: () => setColorParagraphsByModel((v) => !v),
+      toggleHighlightSourceParagraphs: () => setHighlightSourceParagraphs((v) => !v),
+      toggleHighlightInternalEdges: () => setHighlightInternalEdges((v) => !v),
+      toggleHighlightSpannedHulls: () => setHighlightSpannedHulls((v) => !v),
+      toggleRiskGlyphs: () => setShowRiskGlyphs((v) => !v),
+      reset,
+    }),
+    [selectClaim, toggleRefSection, reset]
+  );
 
   return [state, actions];
 }

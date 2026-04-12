@@ -17,18 +17,18 @@ const utils = {
     defined: (e) => undefined !== e,
     undefined: (e) => undefined === e,
     nil: (e) => e == null,
-    boolean: (e) => typeof e == "boolean",
-    number: (e) => typeof e == "number",
-    string: (e) => typeof e == "string",
-    symbol: (e) => typeof e == "symbol",
-    function: (e) => typeof e == "function",
+    boolean: (e) => typeof e == 'boolean',
+    number: (e) => typeof e == 'number',
+    string: (e) => typeof e == 'string',
+    symbol: (e) => typeof e == 'symbol',
+    function: (e) => typeof e == 'function',
     map: (e) => e instanceof Map,
     set: (e) => e instanceof Set,
     url: (e) => e instanceof URL,
     error: (e) => e instanceof Error,
     regexp: (e) => e instanceof RegExp,
     array: (e) => Array.isArray(e),
-    object: (e) => Object.prototype.toString.call(e) === "[object Object]",
+    object: (e) => Object.prototype.toString.call(e) === '[object Object]',
     nan: (e) => Number.isNaN(e),
     nonPrimitive: (e) => utils.is.object(e) || utils.is.array(e),
     numeric: (e) => !utils.is.nan(Number(e)),
@@ -52,7 +52,7 @@ const utils = {
 
   // Wait for condition with timeout
   waitFor: async (e, { interval: n = 100, timeout: a = 60000 } = {}) => {
-    if (a <= 0) throw new Error("$utils.waitFor: timeout exceeded");
+    if (a <= 0) throw new Error('$utils.waitFor: timeout exceeded');
     const o = Date.now(),
       i = await e();
     if (i) return i;
@@ -72,23 +72,23 @@ const utils = {
 const env = {
   getLocus: () => {
     const { pathname, href } = location;
-    const _href = String(href || "").toLowerCase();
-    const _path = String(pathname || "").toLowerCase();
+    const _href = String(href || '').toLowerCase();
+    const _path = String(pathname || '').toLowerCase();
 
     if (
-      _href === "https://htos.io/oi" ||
-      _href === "http://localhost:3000/oi" ||
+      _href === 'https://htos.io/oi' ||
+      _href === 'http://localhost:3000/oi' ||
       /(^|\/)oi(\/|$)/.test(_path) ||
-      _path.endsWith("/oi.html")
+      _path.endsWith('/oi.html')
     ) {
-      return "oi";
+      return 'oi';
     }
 
-    if (pathname === "/offscreen.html") {
-      return "os";
+    if (pathname === '/offscreen.html') {
+      return 'os';
     }
 
-    return "bg";
+    return 'bg';
   },
 };
 
@@ -97,7 +97,7 @@ const env = {
 // =============================================================================
 
 const data = {
-  name: "htos", // Updated from 'HTOS1'
+  name: 'htos', // Updated from 'HTOS1'
 };
 
 // =============================================================================
@@ -121,13 +121,13 @@ const BusController = {
     this._handlers = {};
 
     // Context-specific initialization
-    if (this._is("bg")) {
+    if (this._is('bg')) {
       this._setupBg();
-    } else if (this._is("os")) {
+    } else if (this._is('os')) {
       // Offscreen context: we'll initialize iframe-related plumbing in _setupOs
       this._iframe = null;
       this._setupOs();
-    } else if (this._is("oi")) {
+    } else if (this._is('oi')) {
       this._setupOi();
     }
   },
@@ -150,9 +150,9 @@ const BusController = {
   },
 
   async send(e, ...n) {
-    if (this._is("oi")) return await this._sendToParent(e, ...n);
+    if (this._is('oi')) return await this._sendToParent(e, ...n);
 
-    if (this._is("bg", "os"))
+    if (this._is('bg', 'os'))
       return await this._pick([
         this._sendToExt(e, ...n),
         this._callHandlers(
@@ -161,7 +161,7 @@ const BusController = {
             args: n,
             argsStr: null,
           },
-          (e) => e.proxy,
+          (e) => e.proxy
         ),
       ]);
   },
@@ -173,7 +173,7 @@ const BusController = {
         args: t,
         argsStr: null,
       },
-      (e) => !e.proxy,
+      (e) => !e.proxy
     );
   },
 
@@ -228,7 +228,7 @@ const BusController = {
   },
 
   _setupOs() {
-    console.log("[BusController] Setting up Offscreen (os) listeners.");
+    console.log('[BusController] Setting up Offscreen (os) listeners.');
 
     // --- START OF FIX ---
     // Create a promise that will resolve when the iframe is ready so incoming messages
@@ -242,14 +242,11 @@ const BusController = {
     // it creates/attaches the iframe. This resolves the ready promise.
     this.setIframe = (iframe) => {
       this._iframe = iframe;
-      console.log("[BusController-os] Iframe has been set and is now ready.");
+      console.log('[BusController-os] Iframe has been set and is now ready.');
       try {
         resolveIframeReady(iframe);
       } catch (e) {
-        console.warn(
-          "[BusController-os] iframeReady promise already resolved or errored",
-          e,
-        );
+        console.warn('[BusController-os] iframeReady promise already resolved or errored', e);
       }
     };
     // --- END OF FIX ---
@@ -262,7 +259,9 @@ const BusController = {
     this.flushPendingIframeResponses = (reason = 'iframe_restarted') => {
       for (const [id, entry] of pendingIframeResponses) {
         clearTimeout(entry.timeoutId);
-        try { entry.sendResponse(JSON.stringify({ error: reason })); } catch (_) {}
+        try {
+          entry.sendResponse(JSON.stringify({ error: reason }));
+        } catch (_) {}
       }
       pendingIframeResponses.clear();
       console.log(`[BusController-os] Flushed all pending iframe responses (${reason})`);
@@ -270,7 +269,7 @@ const BusController = {
 
     // LISTENER 1: Receives messages from the child iframe (oi.js)
     // This listener is set up ONCE.
-    window.addEventListener("message", async (event) => {
+    window.addEventListener('message', async (event) => {
       // Only accept messages from our child iframe
       if (event.source !== this._iframe?.contentWindow) return;
 
@@ -278,20 +277,14 @@ const BusController = {
 
       // 1) Handle iframe replies first (no $bus/appName required)
       if (msg && msg.resId && pendingIframeResponses.has(msg.resId)) {
-        console.log(
-          "[BusController-os] Received response from iframe for reqId:",
-          msg.resId,
-        );
+        console.log('[BusController-os] Received response from iframe for reqId:', msg.resId);
         const entry = pendingIframeResponses.get(msg.resId);
         clearTimeout(entry.timeoutId);
         try {
           const serialized = this._serialize(msg.result);
           entry.sendResponse(serialized);
         } catch (e) {
-          console.warn(
-            "[BusController-os] Failed to send serialized response to SW:",
-            e,
-          );
+          console.warn('[BusController-os] Failed to send serialized response to SW:', e);
         } finally {
           pendingIframeResponses.delete(msg.resId);
         }
@@ -306,35 +299,24 @@ const BusController = {
         result = result ?? null;
         if (!m?.reqId) return;
         try {
-          this._iframe?.contentWindow?.postMessage(
-            { resId: m.reqId, result },
-            "*",
-          );
+          this._iframe?.contentWindow?.postMessage({ resId: m.reqId, result }, '*');
         } catch (e) {
-          console.warn(
-            "[BusController-os] Failed posting response to iframe:",
-            e,
-          );
+          console.warn('[BusController-os] Failed posting response to iframe:', e);
         }
       };
 
       // Special proxy registration coming from the iframe
-      if (msg.name === "bus.proxy") {
+      if (msg.name === 'bus.proxy') {
         try {
           const [eventName, enable] = msg.args || [];
           if (enable) {
-            this._on(eventName, "oi", (...args) =>
-              this._sendToIframe(eventName, ...args),
-            );
+            this._on(eventName, 'oi', (...args) => this._sendToIframe(eventName, ...args));
           } else {
-            this._off(eventName, "oi");
+            this._off(eventName, 'oi');
           }
           respondToIframe(msg, true);
         } catch (e) {
-          console.warn(
-            "[BusController-os] Failed handling bus.proxy from iframe:",
-            e,
-          );
+          console.warn('[BusController-os] Failed handling bus.proxy from iframe:', e);
           respondToIframe(msg, false);
         }
         return;
@@ -348,10 +330,7 @@ const BusController = {
         ]);
         respondToIframe(msg, result);
       } catch (e) {
-        console.error(
-          "[BusController-os] Error while forwarding iframe message:",
-          e,
-        );
+        console.error('[BusController-os] Error while forwarding iframe message:', e);
         respondToIframe(msg, null);
       }
     });
@@ -369,8 +348,8 @@ const BusController = {
           const iframe = await this._iframeReadyPromise;
 
           console.log(
-            "[BusController-os] Iframe is ready, forwarding message from SW:",
-            message.name,
+            '[BusController-os] Iframe is ready, forwarding message from SW:',
+            message.name
           );
 
           // Generate a unique ID to track the response for this specific request.
@@ -381,9 +360,13 @@ const BusController = {
           const timeoutId = setTimeout(() => {
             const pending = pendingIframeResponses.get(requestId);
             if (pending) {
-              try { pending.sendResponse(JSON.stringify({ error: 'iframe_timeout' })); } catch (_) {}
+              try {
+                pending.sendResponse(JSON.stringify({ error: 'iframe_timeout' }));
+              } catch (_) {}
               pendingIframeResponses.delete(requestId);
-              console.warn(`[BusController-os] Pending iframe response timed out for reqId: ${requestId}`);
+              console.warn(
+                `[BusController-os] Pending iframe response timed out for reqId: ${requestId}`
+              );
             }
           }, 30000);
           pendingIframeResponses.set(requestId, { sendResponse, timeoutId });
@@ -393,7 +376,7 @@ const BusController = {
           try {
             if (Array.isArray(message.args)) {
               args = message.args;
-            } else if (typeof message.argsStr === "string") {
+            } else if (typeof message.argsStr === 'string') {
               const des = await this._deserialize(message.argsStr);
               if (Array.isArray(des)) args = des;
               else if (des == null) args = [];
@@ -401,8 +384,8 @@ const BusController = {
             }
           } catch (e) {
             console.warn(
-              "[BusController-os] Failed to deserialize argsStr; falling back to empty args",
-              e,
+              '[BusController-os] Failed to deserialize argsStr; falling back to empty args',
+              e
             );
             args = [];
           }
@@ -413,42 +396,33 @@ const BusController = {
             args,
             reqId: requestId,
           });
-          iframe.contentWindow.postMessage(busMsg, "*");
+          iframe.contentWindow.postMessage(busMsg, '*');
         } catch (error) {
-          console.error(
-            "[BusController-os] Failed to forward message to iframe:",
-            error,
-          );
+          console.error('[BusController-os] Failed to forward message to iframe:', error);
           try {
             sendResponse(
               this._serialize({
-                error: "Failed to communicate with the offscreen iframe.",
-              }),
+                error: 'Failed to communicate with the offscreen iframe.',
+              })
             );
-          } catch (_) { }
+          } catch (_) {}
         }
       })();
 
       return true; // Keep the message channel open for the async response.
     });
-
   },
 
   _setupOi() {
-    console.log(
-      "[BusController] Setting up Offscreen Iframe (oi/oi) listeners.",
-    );
+    console.log('[BusController] Setting up Offscreen Iframe (oi/oi) listeners.');
 
     // Listen for messages from the parent window (os.js)
-    window.addEventListener("message", async (event) => {
+    window.addEventListener('message', async (event) => {
       // We only care about bus messages from our direct parent
       if (!this._isBusMsg(event.data) || event.source !== window.parent) return;
 
       const message = event.data;
-      console.log(
-        "[BusController-oi] Received message from parent:",
-        message.name,
-      );
+      console.log('[BusController-oi] Received message from parent:', message.name);
 
       // Handle the message using the generic handler
       const result = await this._callHandlers(message);
@@ -461,7 +435,7 @@ const BusController = {
             resId: message.reqId,
             result: result,
           },
-          "*",
+          '*'
         );
       }
     });
@@ -488,11 +462,11 @@ const BusController = {
           });
         } catch (n) {
           const msg = n instanceof Error ? n.message : String(n);
-          if (msg === "Extension context invalidated.") {
+          if (msg === 'Extension context invalidated.') {
             e(null);
             return;
           }
-          console.error("Bus error:", n);
+          console.error('Bus error:', n);
           e(null);
         }
       });
@@ -511,12 +485,12 @@ const BusController = {
       });
 
     return (
-      console.log("[BusController Debug] posting to iframe", {
+      console.log('[BusController Debug] posting to iframe', {
         reqId: n,
         name: e,
         ts: Date.now(),
       }),
-      this._iframe.contentWindow.postMessage(a, "*"),
+      this._iframe.contentWindow.postMessage(a, '*'),
       await this._waitForResponseMessage(n)
     );
   },
@@ -529,7 +503,7 @@ const BusController = {
         reqId: n,
       });
 
-    return (parent.postMessage(a, "*"), await this._waitForResponseMessage(n));
+    return (parent.postMessage(a, '*'), await this._waitForResponseMessage(n));
   },
 
   // =============================================================================
@@ -546,8 +520,8 @@ const BusController = {
   async _deserialize(e) {
     if (!utils.is.string(e)) return null;
     return JSON.parse(e, (_key, n) => {
-      return utils.is.string(n) && n.startsWith("bus.error.")
-        ? new Error(n.slice("bus.error.".length))
+      return utils.is.string(n) && n.startsWith('bus.error.')
+        ? new Error(n.slice('bus.error.'.length))
         : n;
     });
   },
@@ -560,10 +534,10 @@ const BusController = {
     await new Promise((t) => {
       const n = ({ data: a }) => {
         if (!a || a.resId !== e) return;
-        window.removeEventListener("message", n);
+        window.removeEventListener('message', n);
         t(a.result);
       };
-      window.addEventListener("message", n);
+      window.addEventListener('message', n);
     }),
 
   _callHandlers({ name: e, args: n, argsStr: a }, o) {
@@ -589,7 +563,7 @@ const BusController = {
             console.error(`Failed to handle "${e.name}":`, n);
             return n;
           }
-        }),
+        })
       );
     };
 
@@ -609,10 +583,7 @@ const BusController = {
     return e.includes(this._locus);
   },
 
-  _isBusMsg: (t) =>
-    !!t &&
-    !!t.$bus &&
-    (t.appName === data.name || t.appName === "__htos_global"),
+  _isBusMsg: (t) => !!t && !!t.$bus && (t.appName === data.name || t.appName === '__htos_global'),
   _createBusMsg: (t) => ({
     $bus: !0,
     appName: data.name,
@@ -633,16 +604,12 @@ const BusController = {
     e.length === 0
       ? null
       : await new Promise((t) => {
-        let n = 0;
-        e.forEach(async (o) => {
-          const i = await o;
-          return utils.is.nil(i)
-            ? n === e.length - 1
-              ? t(null)
-              : void n++
-            : t(i);
-        });
-      }),
+          let n = 0;
+          e.forEach(async (o) => {
+            const i = await o;
+            return utils.is.nil(i) ? (n === e.length - 1 ? t(null) : void n++) : t(i);
+          });
+        }),
 };
 
 // =============================================================================

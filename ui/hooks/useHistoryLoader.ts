@@ -1,12 +1,8 @@
-import { useEffect } from "react";
-import { useAtom } from "jotai";
-import api from "../services/extension-api";
-import {
-  isHistoryPanelOpenAtom,
-  isHistoryLoadingAtom,
-  historySessionsAtom,
-} from "../state/atoms";
-import { RawHistorySession, FormattedHistorySession } from "../types";
+import { useEffect } from 'react';
+import { useAtom } from 'jotai';
+import api from '../services/extension-api';
+import { isHistoryPanelOpenAtom, isHistoryLoadingAtom, historySessionsAtom } from '../state/atoms';
+import { RawHistorySession, FormattedHistorySession } from '../types';
 
 // The hook now accepts the `isInitialized` flag.
 export function useHistoryLoader(isInitialized: boolean) {
@@ -28,16 +24,16 @@ export function useHistoryLoader(isInitialized: boolean) {
         const formatted: FormattedHistorySession[] = sessions.map((s: RawHistorySession) => ({
           id: s.sessionId,
           sessionId: s.sessionId,
-          title: s.title || "Untitled",
+          title: s.title || 'Untitled',
           startTime: s.startTime || Date.now(),
           lastActivity: s.lastActivity || Date.now(),
           messageCount: s.messageCount || 0,
-          firstMessage: s.firstMessage || "",
+          firstMessage: s.firstMessage || '',
           messages: [],
         }));
         if (!cancelled) setHistorySessions(formatted as any);
       } catch (e) {
-        console.error("Failed to load history", e);
+        console.error('Failed to load history', e);
       } finally {
         if (!cancelled) setIsHistoryLoading(false);
       }
@@ -47,10 +43,5 @@ export function useHistoryLoader(isInitialized: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [
-    isHistoryPanelOpen,
-    isInitialized,
-    setIsHistoryLoading,
-    setHistorySessions,
-  ]);
+  }, [isHistoryPanelOpen, isInitialized, setIsHistoryLoading, setHistorySessions]);
 }

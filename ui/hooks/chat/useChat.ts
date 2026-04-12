@@ -1,7 +1,7 @@
 // ui/hooks/useChat.ts - MAP-BASED STATE MANAGEMENT
-import { useCallback } from "react";
-import { useAtomValue, useSetAtom, useStore } from "jotai";
-import api from "../../services/extension-api";
+import { useCallback } from 'react';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import api from '../../services/extension-api';
 import {
   turnsMapAtom,
   turnIdsAtom,
@@ -19,7 +19,7 @@ import {
   activeProbeDraftFamily,
   cleanupTurnAtoms,
   messagesAtom,
-} from "../../state/atoms";
+} from '../../state/atoms';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
   ProbeCorpusHit,
@@ -27,17 +27,13 @@ import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
   UserTurn,
-} from "../../../shared/contract";
-import { DEFAULT_THREAD } from "../../../shared/messaging";
-import { LLM_PROVIDERS_CONFIG } from "../../constants";
-import { computeThinkFlag } from "../../../src/think/computeThinkFlag.js";
-import { parseSessionTurns } from "../../utils/parseSessionTurns";
+} from '../../../shared/contract';
+import { DEFAULT_THREAD } from '../../../shared/messaging';
+import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import { computeThinkFlag } from '../../../src/think/computeThinkFlag.js';
+import { parseSessionTurns } from '../../utils/parseSessionTurns';
 
-import type {
-  HistorySessionSummary,
-  FullSessionPayload,
-  TurnMessage,
-} from "../../types";
+import type { HistorySessionSummary, FullSessionPayload, TurnMessage } from '../../types';
 
 export function useChat() {
   const store = useStore();
@@ -63,22 +59,22 @@ export function useChat() {
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
   const sendMessage = useCallback(
-    async (prompt: string, mode: "new" | "continuation") => {
+    async (prompt: string, mode: 'new' | 'continuation') => {
       if (!prompt || !prompt.trim()) return;
 
       setIsLoading(true);
-      setUiPhase("streaming");
-      setCurrentAppStep("initial");
+      setUiPhase('streaming');
+      setCurrentAppStep('initial');
 
-      const activeProviders = LLM_PROVIDERS_CONFIG
-        .filter((p) => selectedModels[p.id])
-        .map((p) => p.id as ProviderKey);
+      const activeProviders = LLM_PROVIDERS_CONFIG.filter((p) => selectedModels[p.id]).map(
+        (p) => p.id as ProviderKey
+      );
 
       const ts = Date.now();
       const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
 
       const userTurn: UserTurn = {
-        type: "user",
+        type: 'user',
         id: userTurnId,
         text: prompt,
         createdAt: ts,
@@ -99,17 +95,16 @@ export function useChat() {
         const shouldUseMapping = mappingEnabled && mappingProvider !== null;
         const effectiveMappingProvider = mappingProvider;
 
-        const isInitialize =
-          mode === "new" && (!currentSessionId || turnIds.length === 0);
+        const isInitialize = mode === 'new' && (!currentSessionId || turnIds.length === 0);
 
         // Validate continuation has a sessionId and bind the port before sending
         if (!isInitialize) {
           if (!currentSessionId) {
             console.error(
-              "[useChat] Continuation requested but currentSessionId is missing. Aborting send.",
+              '[useChat] Continuation requested but currentSessionId is missing. Aborting send.'
             );
             setIsLoading(false);
-            setUiPhase("awaiting_action");
+            setUiPhase('awaiting_action');
             return;
           }
           // Proactively bind/reconnect the port scoped to the target session
@@ -117,8 +112,8 @@ export function useChat() {
             await api.ensurePort({ sessionId: currentSessionId });
           } catch (e) {
             console.warn(
-              "[useChat] ensurePort failed prior to extend; proceeding with executeWorkflow",
-              e,
+              '[useChat] ensurePort failed prior to extend; proceeding with executeWorkflow',
+              e
             );
           }
         }
@@ -126,46 +121,42 @@ export function useChat() {
         // Build NEW primitive request shape
         const primitive: PrimitiveWorkflowRequest = isInitialize
           ? {
-            type: "initialize",
-            sessionId: null, // backend is authoritative; do not generate in UI
-            userMessage: prompt,
-            providers: activeProviders,
-            includeMapping: shouldUseMapping,
-            mapper: shouldUseMapping
-              ? (effectiveMappingProvider as ProviderKey)
-              : undefined,
-            singularity: undefined,
-            useThinking: computeThinkFlag({
-              modeThinkButtonOn: thinkOnChatGPT,
-              input: prompt,
-            }),
-            providerMeta: {},
-            clientUserTurnId: userTurnId,
-          }
+              type: 'initialize',
+              sessionId: null, // backend is authoritative; do not generate in UI
+              userMessage: prompt,
+              providers: activeProviders,
+              includeMapping: shouldUseMapping,
+              mapper: shouldUseMapping ? (effectiveMappingProvider as ProviderKey) : undefined,
+              singularity: undefined,
+              useThinking: computeThinkFlag({
+                modeThinkButtonOn: thinkOnChatGPT,
+                input: prompt,
+              }),
+              providerMeta: {},
+              clientUserTurnId: userTurnId,
+            }
           : {
-            type: "extend",
-            sessionId: currentSessionId as string,
-            userMessage: prompt,
-            providers: activeProviders,
-            includeMapping: shouldUseMapping,
-            mapper: shouldUseMapping
-              ? (effectiveMappingProvider as ProviderKey)
-              : undefined,
-            singularity: undefined,
-            useThinking: computeThinkFlag({
-              modeThinkButtonOn: thinkOnChatGPT,
-              input: prompt,
-            }),
-            providerMeta: {},
-            clientUserTurnId: userTurnId,
-          };
+              type: 'extend',
+              sessionId: currentSessionId as string,
+              userMessage: prompt,
+              providers: activeProviders,
+              includeMapping: shouldUseMapping,
+              mapper: shouldUseMapping ? (effectiveMappingProvider as ProviderKey) : undefined,
+              singularity: undefined,
+              useThinking: computeThinkFlag({
+                modeThinkButtonOn: thinkOnChatGPT,
+                input: prompt,
+              }),
+              providerMeta: {},
+              clientUserTurnId: userTurnId,
+            };
 
         // AI turn will be created upon TURN_CREATED from backend
         // Port is already ensured above for extend; for initialize, executeWorkflow ensures port
         await api.executeWorkflow(primitive);
         // For initialize, sessionId will be set by TURN_CREATED handler; do not set here
       } catch (err) {
-        console.error("Failed to execute workflow:", err);
+        console.error('Failed to execute workflow:', err);
         setIsLoading(false);
         setActiveAiTurnId(null);
       }
@@ -182,12 +173,12 @@ export function useChat() {
       mappingProvider,
       thinkOnChatGPT,
       turnIds,
-    ],
+    ]
   );
 
   const probeTurn = useCallback(
     async (aiTurnId: string, queryText: string, enabledProviders: string[]) => {
-      const trimmedQuery = String(queryText || "").trim();
+      const trimmedQuery = String(queryText || '').trim();
       if (!aiTurnId || !trimmedQuery) return;
 
       const draftId = `probe-${aiTurnId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -198,7 +189,7 @@ export function useChat() {
         searchResults: [],
         providerIds: enabledProviders,
         responses: {},
-        status: "searching",
+        status: 'searching',
         createdAt: startedAt,
         updatedAt: startedAt,
       };
@@ -211,14 +202,14 @@ export function useChat() {
           ? (data.results as ProbeCorpusHit[])
           : [];
         const nnParagraphs = searchResults
-          .map((result) => result?.text || "")
+          .map((result) => result?.text || '')
           .filter(Boolean)
           .slice(0, 8);
 
         const probingDraft: ProbeSession = {
           ...initialDraft,
           searchResults,
-          status: enabledProviders.length > 0 ? "probing" : "complete",
+          status: enabledProviders.length > 0 ? 'probing' : 'complete',
           updatedAt: Date.now(),
         };
         store.set(activeProbeDraftFamily(aiTurnId), probingDraft);
@@ -233,22 +224,22 @@ export function useChat() {
           searchResults,
           nnParagraphs,
           enabledProviders,
-          draftId,
+          draftId
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Probe failed";
+        const message = error instanceof Error ? error.message : 'Probe failed';
         store.set(activeProbeDraftFamily(aiTurnId), {
           ...initialDraft,
-          status: "complete",
+          status: 'complete',
           updatedAt: Date.now(),
           responses: {
             error: {
-              providerId: "error",
+              providerId: 'error',
               modelIndex: 0,
-              modelName: "Error",
-              text: "",
+              modelName: 'Error',
+              text: '',
               paragraphs: [],
-              status: "error",
+              status: 'error',
               error: message,
               createdAt: startedAt,
               updatedAt: Date.now(),
@@ -257,7 +248,7 @@ export function useChat() {
         });
       }
     },
-    [store],
+    [store]
   );
 
   const newChat = useCallback(() => {
@@ -273,7 +264,7 @@ export function useChat() {
     async (session: HistorySessionSummary) => {
       const sessionId = session.sessionId || session.id;
       if (!sessionId) {
-        console.error("[useChat] No sessionId in session object");
+        console.error('[useChat] No sessionId in session object');
         return;
       }
 
@@ -286,7 +277,7 @@ export function useChat() {
         const fullSession = response as unknown as FullSessionPayload;
 
         if (!fullSession || !fullSession.turns) {
-          console.warn("[useChat] Empty session loaded");
+          console.warn('[useChat] Empty session loaded');
           setTurnsMap((draft: Map<string, TurnMessage>) => {
             draft.clear();
           });
@@ -297,7 +288,7 @@ export function useChat() {
           return;
         }
         const { ids: newIds, map: newMap } = parseSessionTurns(fullSession);
-        console.log("[useChat] Loaded session with", newIds.length, "turns");
+        console.log('[useChat] Loaded session with', newIds.length, 'turns');
 
         // Replace Map + IDs atomically
         setTurnsMap(newMap);
@@ -305,7 +296,7 @@ export function useChat() {
 
         await api.ensurePort({ sessionId });
       } catch (error) {
-        console.error("[useChat] Error loading session:", error);
+        console.error('[useChat] Error loading session:', error);
         setTurnsMap((draft: Map<string, TurnMessage>) => {
           draft.clear();
         });
@@ -324,7 +315,7 @@ export function useChat() {
       setIsLoading,
       setIsHistoryPanelOpen,
       setActiveTarget,
-    ],
+    ]
   );
 
   const deleteChat = useCallback(
@@ -340,7 +331,7 @@ export function useChat() {
           const pairs: Array<{ turnId: string; providerId: string }> = [];
           for (const turnId of currentTurnIds) {
             const turn = currentTurnsMap.get(turnId);
-            if (turn && turn.type === "ai") {
+            if (turn && turn.type === 'ai') {
               const providers = Object.keys((turn as any).batch?.responses || {});
               for (const pid of providers) {
                 pairs.push({ turnId, providerId: pid });
@@ -357,7 +348,7 @@ export function useChat() {
 
         return removed;
       } catch (err) {
-        console.error("Failed to delete session", err);
+        console.error('Failed to delete session', err);
         return false;
       }
     },
@@ -369,7 +360,7 @@ export function useChat() {
       setTurnIds,
       setActiveAiTurnId,
       setActiveTarget,
-    ],
+    ]
   );
 
   const deleteChats = useCallback(
@@ -384,7 +375,7 @@ export function useChat() {
           const pairs: Array<{ turnId: string; providerId: string }> = [];
           for (const turnId of currentTurnIds) {
             const turn = currentTurnsMap.get(turnId);
-            if (turn && turn.type === "ai") {
+            if (turn && turn.type === 'ai') {
               const providers = Object.keys((turn as any).batch?.responses || {});
               for (const pid of providers) {
                 pairs.push({ turnId, providerId: pid });
@@ -400,7 +391,7 @@ export function useChat() {
         }
         return { removed: removedIds };
       } catch (err) {
-        console.error("Failed to batch delete sessions", err);
+        console.error('Failed to batch delete sessions', err);
         return { removed: [] };
       }
     },
@@ -412,24 +403,23 @@ export function useChat() {
       setTurnIds,
       setActiveAiTurnId,
       setActiveTarget,
-    ],
+    ]
   );
-
 
   const abort = useCallback(async (): Promise<void> => {
     try {
       const sid = currentSessionId;
       if (!sid) {
-        console.warn("[useChat] abort() called but no currentSessionId");
+        console.warn('[useChat] abort() called but no currentSessionId');
       } else {
         await api.abortWorkflow(sid);
       }
     } catch (err) {
-      console.error("[useChat] Failed to abort workflow:", err);
+      console.error('[useChat] Failed to abort workflow:', err);
     } finally {
       // Immediately reflect stop intent in UI; backend will send finalization if applicable
       setIsLoading(false);
-      setUiPhase("awaiting_action");
+      setUiPhase('awaiting_action');
     }
   }, [currentSessionId, setIsLoading, setUiPhase]);
 

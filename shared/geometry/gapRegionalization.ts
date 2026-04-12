@@ -31,7 +31,9 @@ export interface GapRegionalizationMeta {
 }
 
 function cosineSimilarity(a: Float32Array | number[], b: Float32Array | number[]): number {
-  let dot = 0, normA = 0, normB = 0;
+  let dot = 0,
+    normA = 0,
+    normB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     normA += a[i] * a[i];
@@ -51,7 +53,9 @@ function meanAndStddev(values: number[]): { mu: number; sigma: number } {
   return { mu, sigma };
 }
 
-export function computeGapRegionalization(nodes: { id: string; embedding: Float32Array }[]): GapRegionalizationResult {
+export function computeGapRegionalization(
+  nodes: { id: string; embedding: Float32Array }[]
+): GapRegionalizationResult {
   const N = nodes.length;
   if (N === 0) {
     return { regions: [], nodeProfiles: {}, meta: { nodeCount: 0, reciprocalEdgeCount: 0 } };
@@ -59,9 +63,27 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
   if (N === 1) {
     const id = String(nodes[0].id);
     return {
-      regions: [{ id: 1, coreNodeIds: [id], votedNodeIds: [], allNodeIds: [id], size: 1, stats: { meanInternalSimilarity: 1, minInternalSimilarity: 1 } }],
-      nodeProfiles: { [id]: { id, upperBoundary: null, lowerBoundary: null, upperCount: 0, middleCount: 0, lowerCount: 0 } },
-      meta: { nodeCount: 1, reciprocalEdgeCount: 0 }
+      regions: [
+        {
+          id: 1,
+          coreNodeIds: [id],
+          votedNodeIds: [],
+          allNodeIds: [id],
+          size: 1,
+          stats: { meanInternalSimilarity: 1, minInternalSimilarity: 1 },
+        },
+      ],
+      nodeProfiles: {
+        [id]: {
+          id,
+          upperBoundary: null,
+          lowerBoundary: null,
+          upperCount: 0,
+          middleCount: 0,
+          lowerCount: 0,
+        },
+      },
+      meta: { nodeCount: 1, reciprocalEdgeCount: 0 },
     };
   }
 
@@ -85,12 +107,12 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
   for (const n of nodes) {
     const id = String(n.id);
     classifiedMatrix.set(id, new Map());
-    
+
     // 2. Sorted profiles
     const others = Array.from(simMatrix.get(id)!.entries()).sort((a, b) => b[1] - a[1]);
     const gaps: number[] = [];
     for (let i = 0; i < others.length - 1; i++) {
-      gaps.push(others[i][1] - others[i+1][1]);
+      gaps.push(others[i][1] - others[i + 1][1]);
     }
     const { mu, sigma } = meanAndStddev(gaps);
     const threshold = mu + sigma;
@@ -106,21 +128,23 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
 
     // top-down
     for (let i = 0; i < others.length - 1; i++) {
-      if (others[i][1] - others[i+1][1] > threshold) {
-        upperBoundary = (others[i][1] + others[i+1][1]) / 2;
+      if (others[i][1] - others[i + 1][1] > threshold) {
+        upperBoundary = (others[i][1] + others[i + 1][1]) / 2;
         break;
       }
     }
     // bottom-up
     for (let i = others.length - 2; i >= 0; i--) {
-      if (others[i][1] - others[i+1][1] > threshold) {
-        lowerBoundary = (others[i][1] + others[i+1][1]) / 2;
+      if (others[i][1] - others[i + 1][1] > threshold) {
+        lowerBoundary = (others[i][1] + others[i + 1][1]) / 2;
         break;
       }
     }
 
     // 4. Classification
-    let u = 0, m = 0, l = 0;
+    let u = 0,
+      m = 0,
+      l = 0;
     for (const [oid, sim] of others) {
       let cls: 'upper' | 'middle' | 'lower' = 'middle';
       if (upperBoundary != null && sim >= upperBoundary) {
@@ -135,18 +159,28 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
       classifiedMatrix.get(id)!.set(oid, cls);
     }
 
-    profiles[id] = { id, upperBoundary, lowerBoundary, upperCount: u, middleCount: m, lowerCount: l };
+    profiles[id] = {
+      id,
+      upperBoundary,
+      lowerBoundary,
+      upperCount: u,
+      middleCount: m,
+      lowerCount: l,
+    };
   }
 
   // 5. Reciprocal-upper pairs
   const reciprocalEdges: [string, string][] = [];
   const edgeSet = new Set<string>();
-  
+
   for (let i = 0; i < N; i++) {
     for (let j = i + 1; j < N; j++) {
       const idA = String(nodes[i].id);
       const idB = String(nodes[j].id);
-      if (classifiedMatrix.get(idA)?.get(idB) === 'upper' && classifiedMatrix.get(idB)?.get(idA) === 'upper') {
+      if (
+        classifiedMatrix.get(idA)?.get(idB) === 'upper' &&
+        classifiedMatrix.get(idB)?.get(idA) === 'upper'
+      ) {
         reciprocalEdges.push([idA, idB]);
         edgeSet.add(`${idA}::${idB}`);
         edgeSet.add(`${idB}::${idA}`);
@@ -174,7 +208,9 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
     let rootJ = find(j);
     if (rootI !== rootJ) {
       if (size.get(rootI)! < size.get(rootJ)!) {
-        const temp = rootI; rootI = rootJ; rootJ = temp;
+        const temp = rootI;
+        rootI = rootJ;
+        rootJ = temp;
       }
       parent.set(rootJ, rootI);
       size.set(rootI, size.get(rootI)! + size.get(rootJ)!);
@@ -187,7 +223,7 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
 
   const coreComponents = new Map<string, string[]>();
   const isCoreNode = new Set<string>();
-  
+
   for (const n of nodes) {
     const root = find(String(n.id));
     if (size.get(root)! >= 2) {
@@ -198,7 +234,7 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
   }
 
   // 7. Vote assignment for unassigned nodes
-  const unassigned = nodes.filter(n => !isCoreNode.has(String(n.id))).map(n => String(n.id));
+  const unassigned = nodes.filter((n) => !isCoreNode.has(String(n.id))).map((n) => String(n.id));
   const voteAssignments = new Map<string, string[]>(); // root -> string[] of unassigned assigned to it
 
   for (const uid of unassigned) {
@@ -243,7 +279,7 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
   }
 
   // sort by size descending
-  regionsRaw.sort((a, b) => (a.cores.length + a.votes.length) - (b.cores.length + b.votes.length));
+  regionsRaw.sort((a, b) => a.cores.length + a.votes.length - (b.cores.length + b.votes.length));
   regionsRaw.reverse();
 
   // 9. Per-region stats
@@ -262,7 +298,7 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
         pairs++;
       }
     }
-    
+
     regions.push({
       id: regionId++,
       coreNodeIds: r.cores,
@@ -271,8 +307,8 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
       size: allIds.length,
       stats: {
         meanInternalSimilarity: pairs > 0 ? sumSim / pairs : 1,
-        minInternalSimilarity: pairs > 0 ? minSim : 1
-      }
+        minInternalSimilarity: pairs > 0 ? minSim : 1,
+      },
     });
   }
 
@@ -281,7 +317,7 @@ export function computeGapRegionalization(nodes: { id: string; embedding: Float3
     nodeProfiles: profiles,
     meta: {
       nodeCount: N,
-      reciprocalEdgeCount: reciprocalEdges.length
-    }
+      reciprocalEdgeCount: reciprocalEdges.length,
+    },
   };
 }

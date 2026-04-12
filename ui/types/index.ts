@@ -8,13 +8,13 @@
  */
 
 // Import types from shared contract (runtime types)
-import type { AiTurn, UserTurn } from "../../shared/contract";
+import type { AiTurn, UserTurn } from '../../shared/contract';
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
 // =============================================================================
 
-export type { AiTurn, UserTurn } from "../../shared/contract";
+export type { AiTurn, UserTurn } from '../../shared/contract';
 
 // Persistence records re-export
 export type {
@@ -24,7 +24,7 @@ export type {
   UserTurnRecord,
   AiTurnRecord,
   ProviderResponseRecord,
-} from "../../src/persistence/types";
+} from '../../src/persistence/types';
 
 // UI-specific extensions (minimal)
 export interface AiTurnWithUI extends AiTurn {
@@ -41,9 +41,9 @@ export interface AiTurnWithUI extends AiTurn {
 
 export type TurnMessage = UserTurn | AiTurnWithUI;
 
-export type UiPhase = "idle" | "streaming" | "awaiting_action";
+export type UiPhase = 'idle' | 'streaming' | 'awaiting_action';
 
-export type AppStep = "initial" | "cognitive";
+export type AppStep = 'initial' | 'cognitive';
 
 export interface LLMProvider {
   id: string;
@@ -55,9 +55,11 @@ export interface LLMProvider {
   logoSrc?: string;
 }
 
-
 // Helper type guards re-exported from contract
-export { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from "../../shared/contract";
+export {
+  isUserTurn as isUserTurnContract,
+  isAiTurn as isAiTurnContract,
+} from '../../shared/contract';
 
 // =============================================================================
 // HISTORY & SESSION LOADING
@@ -105,4 +107,3 @@ export interface FullSessionPayload {
   turns: TurnMessage[];
   providerContexts: Record<string, any>;
 }
-

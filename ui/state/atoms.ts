@@ -1,16 +1,11 @@
-import { atom } from "jotai";
+import { atom } from 'jotai';
 import type { ProviderLocks } from '@shared/provider-locks';
-import { atomWithImmer } from "jotai-immer";
-import { atomWithStorage, atomFamily } from "jotai/utils";
+import { atomWithImmer } from 'jotai-immer';
+import { atomWithStorage, atomFamily } from 'jotai/utils';
 
 // Import UI types and constants
-import type {
-  TurnMessage,
-  UiPhase,
-  AppStep,
-  HistorySessionSummary,
-} from "../types";
-import type { AiTurn, ProbeSession, ProviderResponse } from "../../shared/contract";
+import type { TurnMessage, UiPhase, AppStep, HistorySessionSummary } from '../types';
+import type { AiTurn, ProbeSession, ProviderResponse } from '../../shared/contract';
 
 const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> => {
   const phaseResponses = aiTurn.batch?.responses;
@@ -22,14 +17,16 @@ const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> =
         [
           {
             providerId,
-            text: response?.text || "",
-            status: response?.status || "completed",
+            text: response?.text || '',
+            status: response?.status || 'completed',
             createdAt,
             updatedAt: createdAt,
-            meta: response?.meta ? { ...response.meta, modelIndex: response.modelIndex } : { modelIndex: response?.modelIndex },
+            meta: response?.meta
+              ? { ...response.meta, modelIndex: response.modelIndex }
+              : { modelIndex: response?.modelIndex },
           } as ProviderResponse,
         ],
-      ]),
+      ])
     );
   }
   return {};
@@ -70,8 +67,13 @@ export const providerEffectiveStateFamily = atomFamily(
   ({ turnId, providerId }: { turnId: string; providerId: string }) =>
     atom((get) => {
       const turn = get(turnsMapAtom).get(turnId);
-      if (!turn || turn.type !== "ai") {
-        return { latestResponse: null, historyCount: 0, isEmpty: true, allResponses: [] as ProviderResponse[] };
+      if (!turn || turn.type !== 'ai') {
+        return {
+          latestResponse: null,
+          historyCount: 0,
+          isEmpty: true,
+          allResponses: [] as ProviderResponse[],
+        };
       }
 
       const aiTurn = turn as AiTurn;
@@ -88,9 +90,6 @@ export const providerEffectiveStateFamily = atomFamily(
   (a, b) => a.turnId === b.turnId && a.providerId === b.providerId
 );
 
-
-
-
 /**Atom family: Get a single turn by ID with isolated subscriptions.
  * Prefer this over turnByIdAtom when you need per-turn render isolation.*/
 export const turnAtomFamily = atomFamily(
@@ -99,25 +98,22 @@ export const turnAtomFamily = atomFamily(
       if (!turnId) return undefined;
       return get(turnsMapAtom).get(turnId);
     }),
-  (a, b) => a === b,
+  (a, b) => a === b
 );
 
 // -----------------------------
 // Core chat state
 // -----------------------------
-export const currentSessionIdAtom = atomWithStorage<string | null>(
-  "htos_last_session_id",
-  null,
-);
+export const currentSessionIdAtom = atomWithStorage<string | null>('htos_last_session_id', null);
 // Deprecated legacy pending user turns removed; TURN_CREATED event handles optimistic UI
 
 // -----------------------------
 // UI phase & loading
 // -----------------------------
 export const isLoadingAtom = atom<boolean>(false);
-export const uiPhaseAtom = atom<UiPhase>("idle");
+export const uiPhaseAtom = atom<UiPhase>('idle');
 export const activeAiTurnIdAtom = atom<string | null>(null);
-export const currentAppStepAtom = atom<AppStep>("initial");
+export const currentAppStepAtom = atom<AppStep>('initial');
 // Derived: continuation mode is true whenever there is an active session and at least one turn
 export const isContinuationModeAtom = atom((get) => {
   const sessionId = get(currentSessionIdAtom);
@@ -125,7 +121,7 @@ export const isContinuationModeAtom = atom((get) => {
   return sessionId !== null && turnIds.length > 0;
 });
 
-export const explorationInputModeOverrideAtom = atom<"probe" | "new" | null>(null);
+export const explorationInputModeOverrideAtom = atom<'probe' | 'new' | null>(null);
 export const dismissedExplorationTurnIdAtom = atom<string | null>(null);
 
 export const latestCompletedAiTurnIdAtom = atom((get) => {
@@ -134,8 +130,8 @@ export const latestCompletedAiTurnIdAtom = atom((get) => {
 
   for (let i = turnIds.length - 1; i >= 0; i -= 1) {
     const turn = turnsMap.get(turnIds[i]);
-    if (!turn || turn.type !== "ai") continue;
-    if (turn.pipelineStatus === "in_progress" || turn.pipelineStatus === "error") {
+    if (!turn || turn.type !== 'ai') continue;
+    if (turn.pipelineStatus === 'in_progress' || turn.pipelineStatus === 'error') {
       return null;
     }
     return turn.id;
@@ -146,7 +142,7 @@ export const latestCompletedAiTurnIdAtom = atom((get) => {
 
 export const activeExplorationTurnIdAtom = atom((get) => {
   const override = get(explorationInputModeOverrideAtom);
-  if (override === "new") return null;
+  if (override === 'new') return null;
   if (get(isLoadingAtom)) return null;
   const latestTurnId = get(latestCompletedAiTurnIdAtom);
   if (!latestTurnId) return null;
@@ -180,9 +176,13 @@ const globalStreamingStateAtom = atom((get) => {
  * Shared idle state object: ensures reference equality for non-active turns.
  * Critical: without this, every turn re-renders on every streaming tick.
  */
-const idleStreamingState: { isLoading: boolean; appStep: AppStep; activeProviderId: string | null } = {
+const idleStreamingState: {
+  isLoading: boolean;
+  appStep: AppStep;
+  activeProviderId: string | null;
+} = {
   isLoading: false,
-  appStep: "initial",
+  appStep: 'initial',
   activeProviderId: null,
 };
 
@@ -200,9 +200,12 @@ export const turnStreamingStateFamily = atomFamily(
 
       if (activeId === turnId) {
         // Priority: recompute provider > last streaming provider > null
-        const activeProviderId = recompute?.aiTurnId === turnId
-          ? recompute.providerId
-          : (isLoading ? lastStreamingProvider : null);
+        const activeProviderId =
+          recompute?.aiTurnId === turnId
+            ? recompute.providerId
+            : isLoading
+              ? lastStreamingProvider
+              : null;
 
         // New object only for active turn – triggers re-render
         return { isLoading, appStep, activeProviderId };
@@ -210,7 +213,7 @@ export const turnStreamingStateFamily = atomFamily(
       // All non-active turns share this single, stable reference
       return idleStreamingState;
     }),
-  (a, b) => a === b,
+  (a, b) => a === b
 );
 
 // -----------------------------
@@ -221,44 +224,30 @@ export const isSettingsOpenAtom = atom<boolean>(false);
 export const showWelcomeAtom = atom((get) => get(turnIdsAtom).length === 0);
 export const turnExpandedStateFamily = atomFamily(
   (_turnId: string) => atom(false),
-  (a, b) => a === b,
+  (a, b) => a === b
 );
-
-
-
-
 
 // -----------------------------
 // Model & feature configuration (persisted)
 // -----------------------------
 export const selectedModelsAtom = atomWithStorage<Record<string, boolean>>(
-  "htos_selected_models",
-  {},
+  'htos_selected_models',
+  {}
 );
-export const mappingEnabledAtom = atomWithStorage<boolean>(
-  "htos_mapping_enabled",
-  true,
-);
-export const mappingProviderAtom = atomWithStorage<string | null>(
-  "htos_mapping_provider",
-  null,
-);
+export const mappingEnabledAtom = atomWithStorage<boolean>('htos_mapping_enabled', true);
+export const mappingProviderAtom = atomWithStorage<string | null>('htos_mapping_provider', null);
 export const probeProvidersEnabledAtom = atomWithStorage<{ gemini: boolean; qwen: boolean }>(
-  "htos_probe_providers_enabled",
+  'htos_probe_providers_enabled',
   {
     gemini: true,
     qwen: true,
-  },
+  }
 );
 
 export const singularityProviderAtom = atomWithStorage<string | null>(
-  "htos_singularity_provider",
-  null,
+  'htos_singularity_provider',
+  null
 );
-
-
-
-
 
 // Re-export for consumers who import from this file
 export type { ProviderLocks } from '@shared/provider-locks';
@@ -268,27 +257,10 @@ export const providerLocksAtom = atom<ProviderLocks>({
   singularity: false,
 });
 
-
-
-
-
-export const powerUserModeAtom = atomWithStorage<boolean>(
-  "htos_power_user_mode",
-  false,
-);
-export const thinkOnChatGPTAtom = atomWithStorage<boolean>(
-  "htos_think_chatgpt",
-  false,
-);
-export const isVisibleModeAtom = atomWithStorage<boolean>(
-  "htos_visible_mode",
-  true,
-);
-export const isReducedMotionAtom = atomWithStorage<boolean>(
-  "htos_reduced_motion",
-  false,
-);
-
+export const powerUserModeAtom = atomWithStorage<boolean>('htos_power_user_mode', false);
+export const thinkOnChatGPTAtom = atomWithStorage<boolean>('htos_think_chatgpt', false);
+export const isVisibleModeAtom = atomWithStorage<boolean>('htos_visible_mode', true);
+export const isReducedMotionAtom = atomWithStorage<boolean>('htos_reduced_motion', false);
 
 /**
  * Feature flag for the new Cognitive Pipeline (v2)
@@ -302,10 +274,7 @@ export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 // -----------------------------
 export const activeRecomputeStateAtom = atom<{
   aiTurnId: string;
-  stepType:
-  | "mapping"
-  | "batch"
-  | "singularity";
+  stepType: 'mapping' | 'batch' | 'singularity';
   providerId: string;
 } | null>(null);
 
@@ -314,20 +283,14 @@ export const activeProviderTargetAtom = atom<{
   providerId: string;
 } | null>(null);
 
-
-
 // -----------------------------
 // Round-level selections
 // -----------------------------
-export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<
-  Record<string, string | null>
->({});
-
-
-export const thinkMappingByRoundAtom = atomWithImmer<Record<string, boolean>>(
-  {},
+export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<Record<string, string | null>>(
+  {}
 );
 
+export const thinkMappingByRoundAtom = atomWithImmer<Record<string, boolean>>({});
 
 // -----------------------------
 // History & sessions
@@ -352,13 +315,9 @@ export const lastActivityAtAtom = atom<number>(0);
 // Derived atoms (examples)
 // -----------------------------
 
-
-export const chatInputValueAtom = atomWithStorage<string>(
-  "htos_chat_input_value",
-  "",
-  undefined,
-  { getOnInit: true }
-);
+export const chatInputValueAtom = atomWithStorage<string>('htos_chat_input_value', '', undefined, {
+  getOnInit: true,
+});
 
 // -----------------------------
 // Global Toast Notification
@@ -374,40 +333,49 @@ export const toastAtom = atom<{
 // -----------------------------
 
 export const activeSplitPanelAtom = atom<{ turnId: string; providerId: string } | null>(null);
-export const splitPaneRatioAtom = atomWithStorage<number>("htos_split_pane_ratio", 55);
+export const splitPaneRatioAtom = atomWithStorage<number>('htos_split_pane_ratio', 55);
 export const splitPaneFullWidthAtom = atom(false);
 export const modelResponsePanelModeFamily = atomFamily(
-  (_turnId: string) => atom<"single" | "all" | "reading">("single"),
-  (a, b) => a === b,
+  (_turnId: string) => atom<'single' | 'all' | 'reading'>('single'),
+  (a, b) => a === b
 );
 export const activeProbeDraftFamily = atomFamily(
   (_turnId: string) => atom<ProbeSession | null>(null),
-  (a, b) => a === b,
+  (a, b) => a === b
 );
 
 // Derived atom for performance: ChatView subscribes to this boolean, not the full object
 export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null);
 
-
-export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json' } | null>(null);
-
+export const isDecisionMapOpenAtom = atom<{
+  turnId: string;
+  tab?: 'graph' | 'narrative' | 'options' | 'space' | 'shadow' | 'json';
+} | null>(null);
 
 // =============================================================================
 // Workflow Progress (for Council Orbs UI)
 // =============================================================================
 
 // ProviderId -> { stage, progress }
-export const workflowProgressAtom = atom<Record<string, {
-  stage: 'idle' | 'thinking' | 'streaming' | 'complete' | 'error';
-  progress?: number; // 0-100
-  error?: string;
-}>>({});
+export const workflowProgressAtom = atom<
+  Record<
+    string,
+    {
+      stage: 'idle' | 'thinking' | 'streaming' | 'complete' | 'error';
+      progress?: number; // 0-100
+      error?: string;
+    }
+  >
+>({});
 
-const idleWorkflowProgress: Record<string, {
-  stage: 'idle' | 'thinking' | 'streaming' | 'complete' | 'error';
-  progress?: number; // 0-100
-  error?: string;
-}> = {};
+const idleWorkflowProgress: Record<
+  string,
+  {
+    stage: 'idle' | 'thinking' | 'streaming' | 'complete' | 'error';
+    progress?: number; // 0-100
+    error?: string;
+  }
+> = {};
 
 export const workflowProgressForTurnFamily = atomFamily(
   (turnId: string) =>
@@ -418,13 +386,13 @@ export const workflowProgressForTurnFamily = atomFamily(
       if (activeId === turnId && isLoading) return get(workflowProgressAtom);
       return idleWorkflowProgress;
     }),
-  (a, b) => a === b,
+  (a, b) => a === b
 );
 
 // =============================================================================
 // Error resilience state (per-current turn)
 // =============================================================================
-import type { ProviderError } from "@shared/contract";
+import type { ProviderError } from '@shared/contract';
 
 /**
  * Track errors per provider for the current turn
@@ -441,10 +409,8 @@ export const providerErrorsForTurnFamily = atomFamily(
       if (activeId === turnId) return get(providerErrorsAtom);
       return idleProviderErrors;
     }),
-  (a, b) => a === b,
+  (a, b) => a === b
 );
-
-
 
 /**
  * Current workflow degradation status
@@ -458,7 +424,7 @@ export const workflowDegradedAtom = atom<{
   isDegraded: false,
   successCount: 0,
   totalCount: 0,
-  failedProviders: []
+  failedProviders: [],
 });
 
 // =============================================================================
@@ -494,8 +460,7 @@ export const hasAutoOpenedPaneAtom = atom<string | null>(null);
  * Read:  useProviderArtifact hook → DecisionMapSheet, CognitiveOutputRenderer
  */
 export const providerArtifactFamily = atomFamily(
-  (_params: { turnId: string; providerId: string }) =>
-    atom<any | null>(null),
+  (_params: { turnId: string; providerId: string }) => atom<any | null>(null),
   (a, b) => a.turnId === b.turnId && a.providerId === b.providerId
 );
 

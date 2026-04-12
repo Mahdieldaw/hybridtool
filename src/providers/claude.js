@@ -6,7 +6,7 @@
  *
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { ProviderDNRGate } from "../core/dnr-utils.js";
+import { ProviderDNRGate } from '../core/dnr-utils.js';
 
 // Provider-specific debug flag (off by default)
 const CLAUDE_DEBUG = false;
@@ -16,33 +16,33 @@ const CLAUDE_DEBUG = false;
 // =============================================================================
 export const ClaudeModels = {
   auto: {
-    id: "auto",
-    name: "Auto",
-    description: "Use the latest available model",
+    id: 'auto',
+    name: 'Auto',
+    description: 'Use the latest available model',
     maxTokens: 190000,
   },
-  "claude-sonnet-4-20250514-claude-ai": {
-    id: "claude-sonnet-4-20250514-claude-ai",
-    name: "Claude 4 Sonnet",
-    description: "Smart, efficient model for everyday use",
+  'claude-sonnet-4-20250514-claude-ai': {
+    id: 'claude-sonnet-4-20250514-claude-ai',
+    name: 'Claude 4 Sonnet',
+    description: 'Smart, efficient model for everyday use',
     maxTokens: 190000,
   },
-  "claude-opus-4-20250514-claude-ai-pro": {
-    id: "claude-opus-4-20250514-claude-ai-pro",
-    name: "Claude 4 Opus",
-    description: "Powerful, large model for complex challenges",
+  'claude-opus-4-20250514-claude-ai-pro': {
+    id: 'claude-opus-4-20250514-claude-ai-pro',
+    name: 'Claude 4 Opus',
+    description: 'Powerful, large model for complex challenges',
     maxTokens: 190000,
   },
-  "claude-3-7-sonnet-20250219": {
-    id: "claude-3-7-sonnet-20250219",
-    name: "Claude 3.7 Sonnet",
-    description: "Smart, efficient model for everyday use",
+  'claude-3-7-sonnet-20250219': {
+    id: 'claude-3-7-sonnet-20250219',
+    name: 'Claude 3.7 Sonnet',
+    description: 'Smart, efficient model for everyday use',
     maxTokens: 190000,
   },
-  "claude-3-5-haiku-20241022": {
-    id: "claude-3-5-haiku-20241022",
-    name: "Claude 3.5 Haiku",
-    description: "Fastest model for daily tasks",
+  'claude-3-5-haiku-20241022': {
+    id: 'claude-3-5-haiku-20241022',
+    name: 'Claude 3.5 Haiku',
+    description: 'Fastest model for daily tasks',
     maxTokens: 190000,
   },
 };
@@ -52,21 +52,21 @@ export const ClaudeModels = {
 export class ClaudeProviderError extends Error {
   constructor(type, details) {
     super(type);
-    this.name = "ClaudeProviderError";
+    this.name = 'ClaudeProviderError';
     this.type = type;
     this.details = details;
   }
   get is() {
     return {
-      login: this.type === "login",
-      tooManyRequests: this.type === "tooManyRequests",
-      failedToReadResponse: this.type === "failedToReadResponse",
-      freeLimitExceeded: this.type === "freeLimitExceeded",
-      badOrgId: this.type === "badOrgId",
-      badModel: this.type === "badModel",
-      aborted: this.type === "aborted",
-      network: this.type === "network",
-      unknown: this.type === "unknown",
+      login: this.type === 'login',
+      tooManyRequests: this.type === 'tooManyRequests',
+      failedToReadResponse: this.type === 'failedToReadResponse',
+      freeLimitExceeded: this.type === 'freeLimitExceeded',
+      badOrgId: this.type === 'badOrgId',
+      badModel: this.type === 'badModel',
+      aborted: this.type === 'aborted',
+      network: this.type === 'network',
+      unknown: this.type === 'unknown',
     };
   }
 }
@@ -95,18 +95,18 @@ export class ClaudeSessionApi {
   async fetchOrgId() {
     // Ensure DNR rules are active for Claude before fetching orgs
     try {
-      await ProviderDNRGate.ensureProviderDnrPrereqs("claude");
+      await ProviderDNRGate.ensureProviderDnrPrereqs('claude');
     } catch (e) {
-      console.warn("[ClaudeProvider] Failed to ensure DNR prereqs", e);
+      console.warn('[ClaudeProvider] Failed to ensure DNR prereqs', e);
     }
-    const apiPath = "/api/organizations";
+    const apiPath = '/api/organizations';
     const response = await this._fetchAuth(apiPath);
     let data = await response.json();
     // Handle array response - sort by chat capability
     if (Array.isArray(data)) {
       data = data.sort((a, b) => {
-        const aHasChat = (a?.capabilities || []).includes("chat");
-        const bHasChat = (b?.capabilities || []).includes("chat");
+        const aHasChat = (a?.capabilities || []).includes('chat');
+        const bHasChat = (b?.capabilities || []).includes('chat');
         if (aHasChat && !bHasChat) return -1;
         if (!aHasChat && bHasChat) return 1;
         return 0;
@@ -127,16 +127,13 @@ export class ClaudeSessionApi {
       orgId = this._orgId;
     }
     if (!orgId) {
-      this._throw("badOrgId");
+      this._throw('badOrgId');
     }
-    await this._fetchAuth(
-      `/api/organizations/${orgId}/chat_conversations/${chatId}`,
-      {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: title.replace(/\xA0\xA0/g, " ") }),
-      },
-    );
+    await this._fetchAuth(`/api/organizations/${orgId}/chat_conversations/${chatId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: title.replace(/\xA0\xA0/g, ' ') }),
+    });
   }
   /**
    * Delete chat conversation
@@ -147,25 +144,22 @@ export class ClaudeSessionApi {
       orgId = this._orgId;
     }
     if (!orgId) {
-      this._throw("badOrgId");
+      this._throw('badOrgId');
     }
-    await this._fetchAuth(
-      `/api/organizations/${orgId}/chat_conversations/${chatId}`,
-      {
-        method: "DELETE",
-        body: chatId,
-      },
-    );
+    await this._fetchAuth(`/api/organizations/${orgId}/chat_conversations/${chatId}`, {
+      method: 'DELETE',
+      body: chatId,
+    });
   }
 
   async fetchLatestAssistantText(chatId, orgId) {
-    if (!chatId) return "";
+    if (!chatId) return '';
     if (!orgId) {
       if (!this._orgId) this._orgId = await this.fetchOrgId();
       orgId = this._orgId;
     }
     if (!orgId) {
-      this._throw("badOrgId");
+      this._throw('badOrgId');
     }
 
     const candidates = [
@@ -175,38 +169,46 @@ export class ClaudeSessionApi {
     ];
 
     const extractTextFromMessage = (msg) => {
-      if (!msg) return "";
+      if (!msg) return '';
       const direct =
-        (typeof msg.text === "string" && msg.text) ||
-        (typeof msg.content === "string" && msg.content) ||
-        (typeof msg.completion === "string" && msg.completion) ||
-        (typeof msg.completion_delta === "string" && msg.completion_delta) ||
-        (typeof msg.delta === "string" && msg.delta) ||
-        "";
+        (typeof msg.text === 'string' && msg.text) ||
+        (typeof msg.content === 'string' && msg.content) ||
+        (typeof msg.completion === 'string' && msg.completion) ||
+        (typeof msg.completion_delta === 'string' && msg.completion_delta) ||
+        (typeof msg.delta === 'string' && msg.delta) ||
+        '';
       if (direct && direct.trim().length > 0) return direct;
 
       const parts = msg.content?.parts;
       if (Array.isArray(parts)) {
         const joined = parts
-          .map((p) => (typeof p === "string" ? p : typeof p?.text === "string" ? p.text : ""))
-          .join("");
+          .map((p) => (typeof p === 'string' ? p : typeof p?.text === 'string' ? p.text : ''))
+          .join('');
         if (joined.trim().length > 0) return joined;
       }
 
       if (Array.isArray(msg.content)) {
         const joined = msg.content
-          .map((p) => (typeof p === "string" ? p : typeof p?.text === "string" ? p.text : typeof p?.content === "string" ? p.content : ""))
-          .join("");
+          .map((p) =>
+            typeof p === 'string'
+              ? p
+              : typeof p?.text === 'string'
+                ? p.text
+                : typeof p?.content === 'string'
+                  ? p.content
+                  : ''
+          )
+          .join('');
         if (joined.trim().length > 0) return joined;
       }
 
       const nested = msg.message || msg.data || msg.payload;
-      if (nested && typeof nested === "object") {
+      if (nested && typeof nested === 'object') {
         const nestedText = extractTextFromMessage(nested);
         if (nestedText.trim().length > 0) return nestedText;
       }
 
-      return "";
+      return '';
     };
 
     const isAssistantMessage = (msg) => {
@@ -216,9 +218,9 @@ export class ClaudeSessionApi {
         msg?.author?.role ||
         msg?.message?.author?.role ||
         msg?.author ||
-        "";
+        '';
       const r = String(role).toLowerCase();
-      return r === "assistant" || r === "ai" || r === "bot";
+      return r === 'assistant' || r === 'ai' || r === 'bot';
     };
 
     const findMessageArray = (root) => {
@@ -226,14 +228,16 @@ export class ClaudeSessionApi {
       const seen = new Set();
       while (queue.length > 0) {
         const cur = queue.shift();
-        if (!cur || typeof cur !== "object") continue;
+        if (!cur || typeof cur !== 'object') continue;
         if (seen.has(cur)) continue;
         seen.add(cur);
 
         if (Array.isArray(cur)) {
           const arr = cur;
-          if (arr.length > 0 && typeof arr[0] === "object") {
-            const hasRoleKey = arr.some((m) => m && (m.role || m.sender || m.author || m.message?.author));
+          if (arr.length > 0 && typeof arr[0] === 'object') {
+            const hasRoleKey = arr.some(
+              (m) => m && (m.role || m.sender || m.author || m.message?.author)
+            );
             if (hasRoleKey) return arr;
           }
           arr.forEach((v) => queue.push(v));
@@ -253,7 +257,7 @@ export class ClaudeSessionApi {
         }
 
         Object.values(cur).forEach((v) => {
-          if (v && typeof v === "object") queue.push(v);
+          if (v && typeof v === 'object') queue.push(v);
         });
       }
       return null;
@@ -262,8 +266,8 @@ export class ClaudeSessionApi {
     for (const path of candidates) {
       try {
         const resp = await this._fetchAuth(path, {
-          method: "GET",
-          headers: { Accept: "application/json" },
+          method: 'GET',
+          headers: { Accept: 'application/json' },
         });
         if (!resp?.ok) continue;
         const data = await resp.json();
@@ -282,10 +286,10 @@ export class ClaudeSessionApi {
           const text = extractTextFromMessage(msg);
           if (text && text.trim().length > 0) return text;
         }
-      } catch (_) { }
+      } catch (_) {}
     }
 
-    return "";
+    return '';
   }
   /**
    * Send prompt to Claude AI and handle streaming response
@@ -293,14 +297,14 @@ export class ClaudeSessionApi {
    * @param {any} options
    * @param {(payload: any, isFirstChunk: boolean) => void} onChunk
    */
-  async ask(prompt, options = {}, onChunk = () => { }) {
+  async ask(prompt, options = {}, onChunk = () => {}) {
     let { orgId, chatId, signal, emoji } = options;
 
     // Ensure DNR rules are active for Claude
     try {
-      await ProviderDNRGate.ensureProviderDnrPrereqs("claude");
+      await ProviderDNRGate.ensureProviderDnrPrereqs('claude');
     } catch (e) {
-      console.warn("[ClaudeProvider] Failed to ensure DNR prereqs", e);
+      console.warn('[ClaudeProvider] Failed to ensure DNR prereqs', e);
     }
     // Get or create org ID (lazy, cached)
     if (!orgId) {
@@ -308,7 +312,7 @@ export class ClaudeSessionApi {
       orgId = this._orgId;
     }
     if (!orgId) {
-      this._throw("badOrgId");
+      this._throw('badOrgId');
     }
     try {
       chatId || (chatId = await this._createChat(orgId, emoji));
@@ -318,25 +322,25 @@ export class ClaudeSessionApi {
       if (prompt.length > 5000) {
         attachments.push({
           extracted_content: prompt,
-          file_name: "paste.txt",
+          file_name: 'paste.txt',
           file_size: prompt.length,
-          file_type: "txt",
+          file_type: 'txt',
         });
-        text = "";
+        text = '';
       }
 
       const url = `/api/organizations/${orgId}/chat_conversations/${chatId}/completion`;
       const payload = {
-        method: "POST",
+        method: 'POST',
         headers: {
-          Accept: "text/event-stream",
-          "Content-Type": "application/json",
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           attachments,
           files: [],
           prompt: text,
-          model: this._model === "auto" ? undefined : this._model,
+          model: this._model === 'auto' ? undefined : this._model,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
         signal,
@@ -347,27 +351,23 @@ export class ClaudeSessionApi {
         let parsedJson = null;
         try {
           parsedJson = await response.json();
-        } catch { }
+        } catch {}
         const code = parsedJson?.error?.code;
-        if (code === "too_many_completions")
-          this._throw("tooManyRequests", parsedJson);
-        if (code === "model_not_allowed") this._throw("badModel", parsedJson);
-        if (response.status === 429) this._throw("tooManyRequests", parsedJson);
-        this._throw("unknown", parsedJson);
+        if (code === 'too_many_completions') this._throw('tooManyRequests', parsedJson);
+        if (code === 'model_not_allowed') this._throw('badModel', parsedJson);
+        if (response.status === 429) this._throw('tooManyRequests', parsedJson);
+        this._throw('unknown', parsedJson);
       }
 
-      let fullText = "";
+      let fullText = '';
       let isFirstChunk = true;
       let softError = null;
       const bodyStream = response.body;
       if (!bodyStream) {
-        throw new ClaudeProviderError(
-          "failedToReadResponse",
-          "Empty response body",
-        );
+        throw new ClaudeProviderError('failedToReadResponse', 'Empty response body');
       }
       const reader = bodyStream.getReader();
-      const carry = { carryOver: "" };
+      const carry = { carryOver: '' };
 
       try {
         let chunkCount = 0;
@@ -401,7 +401,7 @@ export class ClaudeSessionApi {
         }
       } catch (err) {
         if (fullText.length > 0) {
-          console.warn("[Claude] Stream interrupted but partial text recovered:", err);
+          console.warn('[Claude] Stream interrupted but partial text recovered:', err);
           softError = { error: err };
         } else {
           throw err;
@@ -415,16 +415,16 @@ export class ClaudeSessionApi {
         result.softError = softError;
         if (CLAUDE_DEBUG)
           console.info(
-            "[Claude] Completed with soft-error:",
-            softError.error?.message || "unknown",
+            '[Claude] Completed with soft-error:',
+            softError.error?.message || 'unknown'
           );
       }
       return result;
     } catch (e) {
-      const existingType = this.isOwnError(e) ? e.type : "unknown";
+      const existingType = this.isOwnError(e) ? e.type : 'unknown';
       const existingDetails = this.isOwnError(e) ? e.details : e?.message;
       const detailsObj =
-        existingDetails && typeof existingDetails === "object"
+        existingDetails && typeof existingDetails === 'object'
           ? { ...existingDetails }
           : { message: existingDetails };
       if (!detailsObj.orgId) detailsObj.orgId = orgId;
@@ -439,7 +439,7 @@ export class ClaudeSessionApi {
     if (!this.sharedState?.ai?.connections?.get) {
       return;
     }
-    const connection = this.sharedState.ai.connections.get("claude-session");
+    const connection = this.sharedState.ai.connections.get('claude-session');
     if (!connection) {
       return;
     }
@@ -462,22 +462,22 @@ export class ClaudeSessionApi {
     const lines = new TextDecoder()
       .decode(chunk)
       .trim() // ✅ Restore this
-      .split("\n")
-      .filter((line) => line.trim().length > 0 && !line.startsWith("event:")); // ✅ Restore this
+      .split('\n')
+      .filter((line) => line.trim().length > 0 && !line.startsWith('event:')); // ✅ Restore this
 
-    let accumulatedText = "";
+    let accumulatedText = '';
     let error = null;
 
     lines.forEach((line, idx) => {
       let parsedData;
-      let dataPrefix = "";
+      let dataPrefix = '';
 
       if (idx === 0 && carry.carryOver) {
         dataPrefix = carry.carryOver;
-        carry.carryOver = "";
+        carry.carryOver = '';
       }
 
-      const dataString = dataPrefix + line.replace(/^data:\s*/, ""); // ✅ Keep improved regex
+      const dataString = dataPrefix + line.replace(/^data:\s*/, ''); // ✅ Keep improved regex
 
       try {
         parsedData = JSON.parse(dataString);
@@ -486,25 +486,24 @@ export class ClaudeSessionApi {
         return;
       }
 
-      if (parsedData.type === "error") {
+      if (parsedData.type === 'error') {
         if (hasAccumulatedText) {
           error = parsedData;
           console.warn(
-            "[Claude] Trailing error frame (ignored):",
-            parsedData.error?.message || parsedData,
+            '[Claude] Trailing error frame (ignored):',
+            parsedData.error?.message || parsedData
           );
         } else {
-          this._throw("failedToReadResponse", parsedData);
+          this._throw('failedToReadResponse', parsedData);
         }
         return;
       }
 
       const segment =
-        (typeof parsedData.completion === "string" && parsedData.completion) ||
-        (typeof parsedData.completion_delta === "string" &&
-          parsedData.completion_delta) ||
-        (typeof parsedData.delta === "string" && parsedData.delta) ||
-        "";
+        (typeof parsedData.completion === 'string' && parsedData.completion) ||
+        (typeof parsedData.completion_delta === 'string' && parsedData.completion_delta) ||
+        (typeof parsedData.delta === 'string' && parsedData.delta) ||
+        '';
 
       if (segment) {
         accumulatedText += segment;
@@ -515,27 +514,22 @@ export class ClaudeSessionApi {
   }
   async _createChat(orgId, emoji) {
     const chatId =
-      this.utils?.id?.uuid?.() ||
-      crypto.randomUUID?.() ||
-      Math.random().toString(36).slice(2);
-    const title = `${emoji || "🧬"} New Chat`;
-    const response = await this._fetchAuth(
-      `/api/organizations/${orgId}/chat_conversations`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uuid: chatId, name: title }),
-      },
-    );
+      this.utils?.id?.uuid?.() || crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+    const title = `${emoji || '🧬'} New Chat`;
+    const response = await this._fetchAuth(`/api/organizations/${orgId}/chat_conversations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ uuid: chatId, name: title }),
+    });
     if (response.status === 400 || response.status === 404) {
-      this._throw("badOrgId", { orgId });
+      this._throw('badOrgId', { orgId });
     }
     return chatId;
   }
   async _fetchAuth(url, options = {}) {
     // Use browser session cookies for authentication
-    options.credentials = "include";
-    if (options.body && typeof options.body !== "string") {
+    options.credentials = 'include';
+    if (options.body && typeof options.body !== 'string') {
       options.body = JSON.stringify(options.body);
     }
     let response;
@@ -545,39 +539,36 @@ export class ClaudeSessionApi {
         let parsedJson = null;
         try {
           parsedJson = await response.json();
-        } catch { }
-        if (parsedJson?.error?.message === "Invalid model") {
-          this._throw("badModel", parsedJson);
+        } catch {}
+        if (parsedJson?.error?.message === 'Invalid model') {
+          this._throw('badModel', parsedJson);
         }
-        if (parsedJson?.error?.details?.error_code === "model_not_available") {
-          this._throw("badModel", parsedJson);
+        if (parsedJson?.error?.details?.error_code === 'model_not_available') {
+          this._throw('badModel', parsedJson);
         }
         // Check org access
-        const orgCheck = await this.fetch(
-          "https://claude.ai/api/organizations",
-          {
-            credentials: "include",
-          },
-        );
+        const orgCheck = await this.fetch('https://claude.ai/api/organizations', {
+          credentials: 'include',
+        });
         if (orgCheck.status === 403) {
-          this._throw("login");
+          this._throw('login');
         }
-        this._throw("badOrgId");
+        this._throw('badOrgId');
       }
     } catch (e) {
       if (e instanceof ClaudeProviderError) {
         throw e;
       }
-      if (e?.error?.code === "model_not_allowed") {
-        throw this._createError("badModel", e.message);
+      if (e?.error?.code === 'model_not_allowed') {
+        throw this._createError('badModel', e.message);
       }
-      if (String(e) === "TypeError: Failed to fetch") {
-        throw this._createError("network", e.message);
+      if (String(e) === 'TypeError: Failed to fetch') {
+        throw this._createError('network', e.message);
       }
-      throw this._createError("unknown", e.message);
+      throw this._createError('unknown', e.message);
     }
     if (!response) {
-      throw this._createError("network", "Failed to fetch Claude response.");
+      throw this._createError('network', 'Failed to fetch Claude response.');
     }
     return response;
   }
@@ -586,9 +577,7 @@ export class ClaudeSessionApi {
       try {
         return await fn.call(this, ...args);
       } catch (e) {
-        const err = this.isOwnError(e)
-          ? e
-          : this._createError("unknown", e.message);
+        const err = this.isOwnError(e) ? e : this._createError('unknown', e.message);
         if (err.details) {
           this._logError(err.message, err.details);
         } else {
@@ -599,10 +588,7 @@ export class ClaudeSessionApi {
     };
   }
   get _model() {
-    return (
-      this.sharedState?.ai?.connections?.get?.("claude-session")?.selectedOption
-        ?.id || "auto"
-    );
+    return this.sharedState?.ai?.connections?.get?.('claude-session')?.selectedOption?.id || 'auto';
   }
   _throw(type, details) {
     throw this._createError(type, details);
@@ -612,7 +598,7 @@ export class ClaudeSessionApi {
   }
   _logError(...args) {
     if (this._logs) {
-      console.error("ClaudeProvider:", ...args);
+      console.error('ClaudeProvider:', ...args);
     }
   }
 }
@@ -646,10 +632,10 @@ export class ClaudeProviderController {
 export default ClaudeProviderController;
 
 // For global browser usage
-if (typeof window !== "undefined") {
-  window["HTOSClaudeProvider"] = ClaudeProviderController;
-  window["HTOSClaudeSessionApi"] = ClaudeSessionApi;
-  window["HTOSClaudeModels"] = ClaudeModels;
+if (typeof window !== 'undefined') {
+  window['HTOSClaudeProvider'] = ClaudeProviderController;
+  window['HTOSClaudeSessionApi'] = ClaudeSessionApi;
+  window['HTOSClaudeModels'] = ClaudeModels;
 }
 // Provider-specific debug flag (off by default)
 // const CLAUDE_DEBUG = false; // Moved to top

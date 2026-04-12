@@ -48,7 +48,7 @@ function nowMs(): number {
 // ── Engine ───────────────────────────────────────────────────────────────
 
 export function computeStatementClassification(
-  input: StatementClassificationInput,
+  input: StatementClassificationInput
 ): StatementClassificationResult {
   const start = nowMs();
   const {
@@ -84,7 +84,7 @@ export function computeStatementClassification(
     const claimStmtSet = new Set(
       Array.isArray(claim.sourceStatementIds)
         ? claim.sourceStatementIds.filter((s): s is string => typeof s === 'string' && !!s.trim())
-        : [],
+        : []
     );
     if (claimStmtSet.size === 0) continue;
 
@@ -113,7 +113,7 @@ export function computeStatementClassification(
   }
 
   // ── 4. Identify paragraphs with unclaimed statements ───────────────
-  const allStmtIds = new Set(shadowStatements.map(s => s.id));
+  const allStmtIds = new Set(shadowStatements.map((s) => s.id));
   let mixedParagraphCount = 0;
   let fullyUnclaimedParagraphCount = 0;
   let fullyCoveredParagraphCount = 0;
@@ -150,7 +150,7 @@ export function computeStatementClassification(
 
   // ── 5. Compute per-paragraph claim similarities ────────────────────
   // Collect claim IDs + embeddings once
-  const claimIds = enrichedClaims.map(c => c.id);
+  const claimIds = enrichedClaims.map((c) => c.id);
   const claimEmbList: Array<{ id: string; emb: Float32Array }> = [];
   for (const id of claimIds) {
     const emb = claimEmbeddings.get(id);
@@ -218,13 +218,11 @@ export function computeStatementClassification(
 
   const unclaimedGroups: UnclaimedGroup[] = [];
   for (const [nearestClaimId, members] of groupMap) {
-    const paragraphs = members.map(m => m.entry);
+    const paragraphs = members.map((m) => m.entry);
 
     // Group-level aggregates
-    const sims = members.map(m => m.bestSim);
-    const meanClaimSimilarity = sims.length > 0
-      ? sims.reduce((a, b) => a + b, 0) / sims.length
-      : 0;
+    const sims = members.map((m) => m.bestSim);
+    const meanClaimSimilarity = sims.length > 0 ? sims.reduce((a, b) => a + b, 0) / sims.length : 0;
 
     const allQr: number[] = [];
     for (const m of members) {
@@ -232,12 +230,9 @@ export function computeStatementClassification(
         allQr.push(v);
       }
     }
-    const meanQueryRelevance = allQr.length > 0
-      ? allQr.reduce((a, b) => a + b, 0) / allQr.length
-      : 0;
-    const maxQueryRelevance = allQr.length > 0
-      ? Math.max(...allQr)
-      : 0;
+    const meanQueryRelevance =
+      allQr.length > 0 ? allQr.reduce((a, b) => a + b, 0) / allQr.length : 0;
+    const maxQueryRelevance = allQr.length > 0 ? Math.max(...allQr) : 0;
 
     const landscape: LandscapePosition =
       (claimProfiles[nearestClaimId]?.landscapePosition as LandscapePosition) ?? 'floor';

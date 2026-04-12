@@ -1,41 +1,76 @@
-import React, { useCallback, useState, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { containsMath } from "../utils/math-utils";
+import React, { useCallback, useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { containsMath } from '../utils/math-utils';
 
 // --- 1. HELPER: Language Extractor ---
 const ListContext = React.createContext(false);
 
 function getLanguageFromClass(className: string): string {
-  const match = /language-([a-zA-Z0-9+#]+)/.exec(String(className || ""));
-  return match ? match[1] : "";
+  const match = /language-([a-zA-Z0-9+#]+)/.exec(String(className || ''));
+  return match ? match[1] : '';
 }
 
 function languageToExt(lang: string): string {
   switch (String(lang).toLowerCase()) {
-    case "js": case "javascript": return "js";
-    case "ts": case "typescript": return "ts";
-    case "tsx": return "tsx";
-    case "jsx": return "jsx";
-    case "py": case "python": return "py";
-    case "json": return "json";
-    case "go": case "golang": return "go";
-    case "java": return "java";
-    case "ruby": case "rb": return "rb";
-    case "bash": case "sh": return "sh";
-    case "markdown": case "md": return "md";
-    case "yaml": case "yml": return "yml";
-    case "html": return "html";
-    case "css": return "css";
-    case "scss": return "scss";
-    case "c": return "c";
-    case "cpp": case "c++": return "cpp";
-    case "csharp": case "cs": return "cs";
-    case "php": return "php";
-    case "rust": case "rs": return "rs";
-    case "kotlin": case "kt": return "kt";
-    case "swift": return "swift";
-    default: return "txt";
+    case 'js':
+    case 'javascript':
+      return 'js';
+    case 'ts':
+    case 'typescript':
+      return 'ts';
+    case 'tsx':
+      return 'tsx';
+    case 'jsx':
+      return 'jsx';
+    case 'py':
+    case 'python':
+      return 'py';
+    case 'json':
+      return 'json';
+    case 'go':
+    case 'golang':
+      return 'go';
+    case 'java':
+      return 'java';
+    case 'ruby':
+    case 'rb':
+      return 'rb';
+    case 'bash':
+    case 'sh':
+      return 'sh';
+    case 'markdown':
+    case 'md':
+      return 'md';
+    case 'yaml':
+    case 'yml':
+      return 'yml';
+    case 'html':
+      return 'html';
+    case 'css':
+      return 'css';
+    case 'scss':
+      return 'scss';
+    case 'c':
+      return 'c';
+    case 'cpp':
+    case 'c++':
+      return 'cpp';
+    case 'csharp':
+    case 'cs':
+      return 'cs';
+    case 'php':
+      return 'php';
+    case 'rust':
+    case 'rs':
+      return 'rs';
+    case 'kotlin':
+    case 'kt':
+      return 'kt';
+    case 'swift':
+      return 'swift';
+    default:
+      return 'txt';
   }
 }
 
@@ -47,32 +82,40 @@ const PreBlock = ({ children }: any) => {
     (child: any) => child.props && child.props.className
   ) as React.ReactElement | undefined;
 
-  const className = codeElement?.props?.className || "";
-  const codeText = String(codeElement?.props?.children || "").replace(/\n$/, "");
+  const className = codeElement?.props?.className || '';
+  const codeText = String(codeElement?.props?.children || '').replace(/\n$/, '');
   const language = getLanguageFromClass(className);
 
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(codeText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { }
-  }, [codeText]);
+  const handleCopy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(codeText);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {}
+    },
+    [codeText]
+  );
 
   const handleDownload = useCallback(() => {
     try {
-      const blob = new Blob([codeText], { type: "text/plain;charset=utf-8" });
+      const blob = new Blob([codeText], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
       a.download = `snippet.${languageToExt(language)}`;
       document.body.appendChild(a);
       a.click();
-      setTimeout(() => { URL.revokeObjectURL(url); try { document.body.removeChild(a); } catch { } }, 0);
-    } catch { }
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        try {
+          document.body.removeChild(a);
+        } catch {}
+      }, 0);
+    } catch {}
   }, [codeText, language]);
 
   return (
@@ -90,9 +133,7 @@ const PreBlock = ({ children }: any) => {
           </div>
         )}
 
-        <pre className="m-0 font-[inherit] bg-transparent whitespace-pre">
-          {children}
-        </pre>
+        <pre className="m-0 font-[inherit] bg-transparent whitespace-pre">{children}</pre>
 
         {/* Action Buttons */}
         <div className="absolute top-1.5 right-1.5 flex gap-1.5 z-[2]">
@@ -102,7 +143,7 @@ const PreBlock = ({ children }: any) => {
             className={`inline-flex items-center gap-1 px-1.5 mx-0.5 bg-chip-active border border-border-brand rounded-pill text-text-primary text-sm font-bold leading-snug cursor-pointer no-underline transition-all
                         ${copied ? 'text-intent-success' : 'text-text-muted'}`}
           >
-            {copied ? "✓" : "📋"}
+            {copied ? '✓' : '📋'}
           </button>
           <button
             onClick={handleDownload}
@@ -173,18 +214,18 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
 
         try {
           // Lazy load plugins
-          const { loadMathPlugins } = await import("../utils/math-renderer");
+          const { loadMathPlugins } = await import('../utils/math-renderer');
           const { remarkMath, rehypeKatex } = await loadMathPlugins();
 
           if (isMounted) {
             setMathPlugins({
               remarkPlugins: [remarkMath],
-              rehypePlugins: [rehypeKatex]
+              rehypePlugins: [rehypeKatex],
             });
             setIsMathLoaded(true);
           }
         } catch (err) {
-          console.error("Failed to load math plugins:", err);
+          console.error('Failed to load math plugins:', err);
         }
       };
 
@@ -196,7 +237,9 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
     }, [content, isMathLoaded]);
 
     return (
-      <div className={`markdown-body text-base leading-relaxed ${className || 'text-text-primary'}`}>
+      <div
+        className={`markdown-body text-base leading-relaxed ${className || 'text-text-primary'}`}
+      >
         <ReactMarkdown
           remarkPlugins={[remarkGfm, ...mathPlugins.remarkPlugins]}
           rehypePlugins={[...mathPlugins.rehypePlugins]}
@@ -229,11 +272,7 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
                   </span>
                 );
               }
-              return (
-                <div className="mb-4 mt-2">
-                  {children}
-                </div>
-              );
+              return <div className="mb-4 mt-2">{children}</div>;
             },
             ul: ({ children }) => <ul className="pl-5 mb-4 list-disc">{children}</ul>,
             ol: ({ children }) => <ol className="pl-5 mb-4 list-decimal">{children}</ol>,
@@ -242,11 +281,25 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
                 <li className="mb-1">{children}</li>
               </ListContext.Provider>
             ),
-            h1: ({ children }) => <h1 className="text-2xl font-semibold mt-4 mb-2 text-text-primary">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-xl font-semibold mt-3 mb-2 text-text-primary">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-lg font-semibold mt-2 mb-1.5 text-text-secondary">{children}</h3>,
-            h4: ({ children }) => <h4 className="text-base font-semibold mt-2 mb-1.5 text-text-secondary">{children}</h4>,
-            blockquote: ({ children }) => <blockquote className="border-l-4 border-border-subtle pl-4 ml-0 text-text-muted italic">{children}</blockquote>,
+            h1: ({ children }) => (
+              <h1 className="text-2xl font-semibold mt-4 mb-2 text-text-primary">{children}</h1>
+            ),
+            h2: ({ children }) => (
+              <h2 className="text-xl font-semibold mt-3 mb-2 text-text-primary">{children}</h2>
+            ),
+            h3: ({ children }) => (
+              <h3 className="text-lg font-semibold mt-2 mb-1.5 text-text-secondary">{children}</h3>
+            ),
+            h4: ({ children }) => (
+              <h4 className="text-base font-semibold mt-2 mb-1.5 text-text-secondary">
+                {children}
+              </h4>
+            ),
+            blockquote: ({ children }) => (
+              <blockquote className="border-l-4 border-border-subtle pl-4 ml-0 text-text-muted italic">
+                {children}
+              </blockquote>
+            ),
             img: ({ src, alt, ...props }: any) => (
               <img
                 src={src}
@@ -278,7 +331,6 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
                 {children}
               </td>
             ),
-
 
             ...components,
           }}

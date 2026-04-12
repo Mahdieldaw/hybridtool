@@ -1,81 +1,68 @@
-import {
-    ProblemStructure,
-    EnrichedClaim,
-    Edge,
-    StructuralAnalysis,
-} from "../../../shared/contract";
-import { computeLandscapeMetrics, computeClaimRatios, assignPercentileFlags } from "./metrics";
-import { getTopNCount } from "./utils";
-import { analyzeGraph } from "./graph";
-import { detectCompositeShape } from "./classification";
-import {
-    detectLeverageInversions,
-    detectCascadeRisks,
-    detectConflicts,
-    detectTradeoffs,
-    detectConvergencePoints,
-    detectIsolatedClaims,
-    detectEnrichedConflicts,
-    detectConflictClusters,
-} from "./patterns";
+//(Responsibility: Orchestration. Passes the buck without mutating domain models itself).
 
-export interface StructuralAnalysisInput {
-    claims: EnrichedClaim[];
-    edges: Edge[];
-    modelCount?: number;
-}
+import { Claim, Edge, PrimaryShape, ProblemStructure } from '../../../shared/contract';
+import { measureCorpus } from './measure';
+import { analyzeDistribution, finalizeInteractionProfiles, computeLayers } from './classify';
+import { detectAllSecondaryPatterns } from './patterns';
 
-export const computeStructuralAnalysis = (input: StructuralAnalysisInput): StructuralAnalysis => {
-    const rawClaims = Array.isArray(input?.claims) ? input.claims : [];
-    const edges = Array.isArray(input?.edges) ? input.edges : [];
-    const landscape = computeLandscapeMetrics({ claims: rawClaims, modelCount: input?.modelCount });
-    const claimIds = rawClaims.map(c => c.id);
-    const claimsWithRatios = rawClaims.map((c) =>
-        computeClaimRatios(c, edges, landscape.modelCount)
-    );
-    const simpleClaimMap = new Map(claimsWithRatios.map(c => [c.id, { id: c.id, label: c.label }]));
-    const cascadeRisks = detectCascadeRisks(edges, simpleClaimMap);
-    const topCount = getTopNCount(claimsWithRatios.length, 0.3);
-    const sortedBySupport = [...claimsWithRatios].sort((a, b) => b.supportRatio - a.supportRatio);
-    const topClaimIds = new Set(sortedBySupport.slice(0, topCount).map(c => c.id));
-    const claimsWithFlags = assignPercentileFlags(claimsWithRatios, edges, cascadeRisks, topClaimIds);
-    const graph = analyzeGraph(claimIds, edges, claimsWithFlags);
-    // Attach graph-derived hubDominance to the hub claim (undefined for all others)
-    const claimsWithLeverage: EnrichedClaim[] = graph.hubClaim
-        ? claimsWithFlags.map(c => c.id === graph.hubClaim ? { ...c, hubDominance: graph.hubDominance } : c)
-        : claimsWithFlags;
-    const claimMap = new Map<string, EnrichedClaim>(claimsWithLeverage.map((c) => [c.id, c]));
-    const enrichedConflicts = detectEnrichedConflicts(edges, claimsWithLeverage, landscape);
-    const conflictClusters = detectConflictClusters(enrichedConflicts, claimsWithLeverage);
-    const patterns: StructuralAnalysis["patterns"] = {
-        leverageInversions: detectLeverageInversions(claimsWithLeverage, edges, topClaimIds),
-        cascadeRisks,
-        conflicts: detectConflicts(edges, claimMap, topClaimIds),
-        conflictInfos: enrichedConflicts,
-        conflictClusters,
-        tradeoffs: detectTradeoffs(edges, claimMap, topClaimIds),
-        convergencePoints: detectConvergencePoints(edges, claimMap),
-        isolatedClaims: detectIsolatedClaims(claimsWithLeverage),
-    };
-    const compositeShape = detectCompositeShape(
-        claimsWithLeverage,
-        edges,
-        graph,
-        patterns
-    );
-    const shape: ProblemStructure = {
-        primary: compositeShape.primary,
-        confidence: compositeShape.confidence,
-        patterns: compositeShape.patterns,
-        evidence: compositeShape.evidence,
-    };
-    const analysis: StructuralAnalysis = {
-        edges,
-        landscape,
-        claimsWithLeverage,
-        patterns,
-        graph,
-        shape,
-    };
-    return analysis;
+export const computeStructuralAnalysis = (input: {
+  claims: Claim[];
+  edges: Edge[];
+  modelCount?: number;
+}): any => {
+  // 1. Objective Observation
+  const corpus = measureCorpus(input.claims, input.edges, input.modelCount);
+
+  // 2. Initial Distribution Split & Feature Finalization
+  const globalDist = analyzeDistribution(corpus.claims);
+  finalizeInteractionProfiles(corpus, globalDist);
+
+  // 3. Iterative Structure Peeler (replaces flat `shape`)
+  const layers = computeLayers(corpus);
+
+  // 4. Secondary Phenomena (Globally derived topology)
+  const secondaryPatterns = detectAllSecondaryPatterns(
+    corpus,
+    globalDist.salient,
+    globalDist.peripheral
+  );
+
+  //5. Synthesise shape from dominant layer.
+  // layers[0] IS the dominant shape; layers[1..n] are residual structure.
+  // CognitiveOutputRenderer derives problemStructure = structuralAnalysis?.shape,
+  //  then passes it to MetricsRibbon, StructuralSummary, and StructureGlyph — all
+  //three read .primary, .confidence, and .patterns from this object.
+  const dominantLayer = layers[0];
+  const shape: ProblemStructure = dominantLayer
+    ? {
+        primary: dominantLayer.primary as PrimaryShape,
+        confidence: dominantLayer.coverage,
+        patterns: secondaryPatterns,
+        evidence: dominantLayer.evidence,
+      }
+    : {
+        primary: 'sparse',
+        confidence: 0,
+        patterns: [],
+        evidence: ['No structural signal detected'],
+      };
+
+  //6. Output — satisfies StructuralAnalysis contract.
+  //`layers` is additive; no UI consumer reads it yet.
+  return {
+    claimsWithLeverage: corpus.claims,
+    graph: corpus.graph,
+    edges: corpus.edges,
+    landscape: { modelCount: corpus.stats.modelCount },
+    shape,
+    layers,
+    patterns: {
+      conflicts: corpus.profiles.conflicts,
+      conflictInfos: corpus.profiles.conflictInfos,
+      tradeoffs: corpus.profiles.tradeoffs,
+      convergencePoints: corpus.profiles.convergencePoints,
+      cascadeRisks: corpus.profiles.cascadeRisks,
+      isolatedClaims: corpus.claims.filter((c) => (c as any).isIsolated).map((c) => c.id),
+    },
+  } as any;
 };

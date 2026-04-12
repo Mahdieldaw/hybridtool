@@ -20,15 +20,16 @@ export class WorkflowEngine {
     this.healthTracker = getHealthTracker();
 
     // Components
-    this.stepExecutor = new StepExecutor(
-      orchestrator,
-      this.healthTracker
-    );
+    this.stepExecutor = new StepExecutor(orchestrator, this.healthTracker);
     this.streamingManager = new StreamingManager(port);
     this.contextManager = new ContextManager(sessionManager);
     this.persistenceCoordinator = new PersistenceCoordinator(sessionManager);
     this.turnEmitter = new TurnEmitter(port);
-    this.cognitiveHandler = new CognitivePipelineHandler(port, this.persistenceCoordinator, sessionManager);
+    this.cognitiveHandler = new CognitivePipelineHandler(
+      port,
+      this.persistenceCoordinator,
+      sessionManager
+    );
 
     // Executor mapping - FOUNDATION ONLY
     // Singularity/Concierge steps are handled via handleContinueCognitiveRequest
@@ -43,7 +44,7 @@ export class WorkflowEngine {
           ctx,
           results,
           resolved,
-          this.currentUserMessage || ctx?.userMessage || "",
+          this.currentUserMessage || ctx?.userMessage || '',
           this.stepExecutor,
           this.streamingManager
         ),
@@ -58,17 +59,20 @@ export class WorkflowEngine {
 
   _safePostMessage(message) {
     const port = this.port;
-    if (!port || typeof port.postMessage !== "function") return false;
+    if (!port || typeof port.postMessage !== 'function') return false;
     try {
       port.postMessage(message);
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("disconnected port") || msg.includes("Attempting to use a disconnected port object")) {
+      if (
+        msg.includes('disconnected port') ||
+        msg.includes('Attempting to use a disconnected port object')
+      ) {
         this.port = null;
         try {
           this.streamingManager?.setPort?.(null);
-        } catch (_) { }
+        } catch (_) {}
       }
       return false;
     }
@@ -81,19 +85,16 @@ export class WorkflowEngine {
     const workflowContexts = {};
 
     this.currentUserMessage =
-      context?.userMessage ||
-      request?.context?.userMessage ||
-      this.currentUserMessage ||
-      "";
+      context?.userMessage || request?.context?.userMessage || this.currentUserMessage || '';
 
     if (!this.currentUserMessage?.trim()) {
-      console.error("[WorkflowEngine] CRITICAL: execute() with empty userMessage!");
+      console.error('[WorkflowEngine] CRITICAL: execute() with empty userMessage!');
       return;
     }
 
-    if (!context.sessionId || context.sessionId === "new-session") {
+    if (!context.sessionId || context.sessionId === 'new-session') {
       context.sessionId =
-        context.sessionId && context.sessionId !== "new-session"
+        context.sessionId && context.sessionId !== 'new-session'
           ? context.sessionId
           : `sid-${Date.now()}`;
     }
@@ -102,12 +103,16 @@ export class WorkflowEngine {
       try {
         await this._persistCheckpoint(request, context, resolvedContext);
       } catch (e) {
-        console.warn("[WorkflowEngine] Checkpoint persistence failed (non-blocking):", e);
+        console.warn('[WorkflowEngine] Checkpoint persistence failed (non-blocking):', e);
       }
       // VALIDATION: Ensure only foundation/singularity steps are present in the main loop
-      const invalidSteps = steps.filter(s => !['prompt', 'mapping', 'singularity'].includes(s.type));
+      const invalidSteps = steps.filter(
+        (s) => !['prompt', 'mapping', 'singularity'].includes(s.type)
+      );
       if (invalidSteps.length > 0) {
-        throw new Error(`Foundation phase received unsupported steps: ${invalidSteps.map(s => s.type).join(', ')}.`);
+        throw new Error(
+          `Foundation phase received unsupported steps: ${invalidSteps.map((s) => s.type).join(', ')}.`
+        );
       }
 
       this._seedContexts(resolvedContext, stepResults, workflowContexts);
@@ -116,23 +121,39 @@ export class WorkflowEngine {
       for (const step of steps) {
         // Execute the step
         const result = await this._executeStep(
-          step, context, stepResults, workflowContexts, resolvedContext
+          step,
+          context,
+          stepResults,
+          workflowContexts,
+          resolvedContext
         );
 
         // Check for halt conditions
         const haltReason = await this._checkHaltConditions(
-          step, result, request, context, steps, stepResults, resolvedContext
+          step,
+          result,
+          request,
+          context,
+          steps,
+          stepResults,
+          resolvedContext
         );
 
         if (haltReason) {
-          await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
+          await this._haltWorkflow(
+            request,
+            context,
+            steps,
+            stepResults,
+            resolvedContext,
+            haltReason
+          );
           return;
         }
       }
 
       // All steps completed successfully
       await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
-
     } catch (error) {
       const criticalMessage = error instanceof Error ? error.message : String(error);
       console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
@@ -149,12 +170,12 @@ export class WorkflowEngine {
             const pipelineError =
               [criticalMessage, persistMessage].filter(Boolean).join(' | ') || 'Pipeline failed';
 
-            if (typeof adapter.update === "function") {
-              await adapter.update("turns", context.canonicalAiTurnId, (turn) => {
+            if (typeof adapter.update === 'function') {
+              await adapter.update('turns', context.canonicalAiTurnId, (turn) => {
                 if (!turn) return turn;
                 return {
                   ...turn,
-                  pipelineStatus: "error",
+                  pipelineStatus: 'error',
                   meta: {
                     ...(turn.meta || {}),
                     pipelineError,
@@ -166,29 +187,31 @@ export class WorkflowEngine {
               for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 if (attempt > 0) {
                   // Exponential backoff: 50ms, 100ms, 200ms
-                  await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, 50 * Math.pow(2, attempt - 1))
+                  );
                 }
 
                 try {
-                  const turn = await adapter.get("turns", context.canonicalAiTurnId);
+                  const turn = await adapter.get('turns', context.canonicalAiTurnId);
                   if (!turn) break;
 
                   const updated = {
                     ...turn,
-                    pipelineStatus: "error",
+                    pipelineStatus: 'error',
                     meta: {
                       ...(turn.meta || {}),
                       pipelineError,
                     },
                   };
 
-                  await adapter.put("turns", updated);
+                  await adapter.put('turns', updated);
                   break;
                 } catch (retryError) {
                   const isLast = attempt === maxAttempts - 1;
                   console.error(
                     `[WorkflowEngine] Failed to mark turn as errored (attempt ${attempt + 1}/${maxAttempts}):`,
-                    retryError,
+                    retryError
                   );
 
                   if (isLast) {
@@ -196,7 +219,7 @@ export class WorkflowEngine {
                       `[WorkflowEngine] CRITICAL: Could not mark turn ${context.canonicalAiTurnId} as errored after ${maxAttempts} attempts. Last error:`,
                       retryError
                     );
-                    // We don't throw here to avoid crashing the whole process loop if possible, 
+                    // We don't throw here to avoid crashing the whole process loop if possible,
                     // but the error state is lost in persistence.
                   }
                 }
@@ -209,10 +232,10 @@ export class WorkflowEngine {
       }
       if (!finalized) {
         this._safePostMessage({
-          type: "WORKFLOW_COMPLETE",
+          type: 'WORKFLOW_COMPLETE',
           sessionId: context.sessionId,
           workflowId: request.workflowId,
-          error: "A critical error occurred.",
+          error: 'A critical error occurred.',
         });
       }
     } finally {
@@ -231,14 +254,21 @@ export class WorkflowEngine {
     }
 
     const options = this._buildOptionsForStep(step.type);
-    options.isRecompute = resolvedContext?.type === "recompute";
+    options.isRecompute = resolvedContext?.type === 'recompute';
 
     try {
-      const result = await executor(step, context, stepResults, workflowContexts, resolvedContext, options);
+      const result = await executor(
+        step,
+        context,
+        stepResults,
+        workflowContexts,
+        resolvedContext,
+        options
+      );
 
-      stepResults.set(step.stepId, { status: "completed", result });
+      stepResults.set(step.stepId, { status: 'completed', result });
 
-      this._emitStepUpdate(step, context, result, resolvedContext, "completed");
+      this._emitStepUpdate(step, context, result, resolvedContext, 'completed');
 
       if (step.type === 'prompt' && result?.results) {
         Object.entries(result.results).forEach(([pid, data]) => {
@@ -258,17 +288,16 @@ export class WorkflowEngine {
       await this._persistStepResponse(step, context, result, resolvedContext);
 
       return result;
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const classified = classifyError(error);
-      stepResults.set(step.stepId, { status: "failed", error: classified });
+      stepResults.set(step.stepId, { status: 'failed', error: classified });
       this._emitStepUpdate(
         step,
         context,
         { error: classified?.message || errorMessage },
         resolvedContext,
-        "failed",
+        'failed'
       );
       throw error;
     }
@@ -285,7 +314,6 @@ export class WorkflowEngine {
       baseOptions.contextManager = this.contextManager;
     }
 
-
     return baseOptions;
   }
 
@@ -298,25 +326,30 @@ export class WorkflowEngine {
       const entries = Object.entries(resultsObj);
       if (entries.length === 0) return;
 
-      await Promise.all(entries.map(async ([providerId, r]) => {
-        if (!providerId) return;
-        try {
-          await this.persistenceCoordinator.upsertProviderResponse(
-            context.sessionId,
-            aiTurnId,
-            String(providerId),
-            "batch",
-            0,
-            {
-              text: r?.text || "",
-              status: r?.status || "completed",
-              meta: r?.meta || {},
-            },
-          );
-        } catch (err) {
-          console.warn(`[WorkflowEngine] Failed to persist prompt response for provider ${providerId}:`, err);
-        }
-      }));
+      await Promise.all(
+        entries.map(async ([providerId, r]) => {
+          if (!providerId) return;
+          try {
+            await this.persistenceCoordinator.upsertProviderResponse(
+              context.sessionId,
+              aiTurnId,
+              String(providerId),
+              'batch',
+              0,
+              {
+                text: r?.text || '',
+                status: r?.status || 'completed',
+                meta: r?.meta || {},
+              }
+            );
+          } catch (err) {
+            console.warn(
+              `[WorkflowEngine] Failed to persist prompt response for provider ${providerId}:`,
+              err
+            );
+          }
+        })
+      );
 
       return;
     }
@@ -336,12 +369,12 @@ export class WorkflowEngine {
           step.type,
           0,
           {
-            text: result?.text || "",
-            status: result?.status || "completed",
+            text: result?.text || '',
+            status: result?.status || 'completed',
             meta: result?.meta || {},
           }
         );
-      } catch (_) { }
+      } catch (_) {}
     }
   }
 
@@ -352,10 +385,12 @@ export class WorkflowEngine {
   async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext) {
     if (step.type === 'prompt') {
       const resultsObj = result?.results || {};
-      const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
-      const mappingPlanned = Array.isArray(steps) && steps.some(s => s && s.type === 'mapping');
+      const successfulCount = Object.values(resultsObj).filter(
+        (r) => r.status === 'completed'
+      ).length;
+      const mappingPlanned = Array.isArray(steps) && steps.some((s) => s && s.type === 'mapping');
       if (mappingPlanned && resolvedContext?.type !== 'recompute' && successfulCount < 2) {
-        return "insufficient_witnesses";
+        return 'insufficient_witnesses';
       }
     }
 
@@ -363,118 +398,133 @@ export class WorkflowEngine {
   }
 
   async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
-    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext, haltReason);
+    await this._persistAndFinalize(
+      request,
+      context,
+      steps,
+      stepResults,
+      resolvedContext,
+      haltReason
+    );
   }
 
   // --- HELPERS ---
 
   _seedContexts(resolvedContext, stepResults, workflowContexts) {
-    if (resolvedContext && resolvedContext.type === "recompute") {
-      console.log("[WorkflowEngine] Seeding frozen batch outputs for recompute");
+    if (resolvedContext && resolvedContext.type === 'recompute') {
+      console.log('[WorkflowEngine] Seeding frozen batch outputs for recompute');
       try {
-        stepResults.set("batch", {
-          status: "completed",
+        stepResults.set('batch', {
+          status: 'completed',
           result: { results: resolvedContext.frozenBatchOutputs },
         });
       } catch (e) {
-        console.warn("[WorkflowEngine] Failed to seed frozen batch outputs:", e);
+        console.warn('[WorkflowEngine] Failed to seed frozen batch outputs:', e);
       }
 
       try {
         Object.entries(resolvedContext.providerContextsAtSourceTurn || {}).forEach(([pid, ctx]) => {
-          if (ctx && typeof ctx === "object") {
+          if (ctx && typeof ctx === 'object') {
             workflowContexts[pid] = ctx;
           }
         });
       } catch (e) {
-        console.warn("[WorkflowEngine] Failed to cache historical provider contexts:", e);
+        console.warn('[WorkflowEngine] Failed to cache historical provider contexts:', e);
       }
     }
 
-    if (resolvedContext && resolvedContext.type === "extend") {
+    if (resolvedContext && resolvedContext.type === 'extend') {
       try {
         const ctxs = resolvedContext.providerContexts || {};
         const cachedProviders = [];
         Object.entries(ctxs).forEach(([pid, meta]) => {
-          if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+          if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
             workflowContexts[pid] = meta;
             cachedProviders.push(pid);
           }
         });
         if (cachedProviders.length > 0) {
-          console.log(`[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(", ")}`);
+          console.log(
+            `[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(', ')}`
+          );
         }
       } catch (e) {
-        console.warn("[WorkflowEngine] Failed to cache provider contexts from extend:", e);
+        console.warn('[WorkflowEngine] Failed to cache provider contexts from extend:', e);
       }
     }
   }
 
   _emitStepUpdate(step, context, result, resolvedContext, status) {
     this._safePostMessage({
-      type: "WORKFLOW_STEP_UPDATE",
+      type: 'WORKFLOW_STEP_UPDATE',
       sessionId: context.sessionId,
       stepId: step.stepId,
       status: status,
       result: status === 'completed' ? result : undefined,
       error: status === 'failed' ? result.error : undefined,
-      isRecompute: resolvedContext?.type === "recompute",
+      isRecompute: resolvedContext?.type === 'recompute',
       sourceTurnId: resolvedContext?.sourceTurnId,
     });
   }
 
-  async _persistAndFinalize(request, context, steps, stepResults, resolvedContext, haltReason = null) {
+  async _persistAndFinalize(
+    request,
+    context,
+    steps,
+    stepResults,
+    resolvedContext,
+    haltReason = null
+  ) {
     const result = this.persistenceCoordinator.buildPersistenceResultFromStepResults(
       steps,
       stepResults
     );
 
-    const batchPhase = Object.keys(result.batchOutputs || {}).length > 0
-      ? {
-        responses: Object.fromEntries(
-          Object.entries(result.batchOutputs).map(([pid, data]) => [
-            pid,
-            {
-              text: data.text || "",
-              modelIndex: data.meta?.modelIndex ?? 0,
-              status: data.status || "completed",
-              meta: data.meta,
-            },
-          ])
-        ),
-      }
-      : undefined;
+    const batchPhase =
+      Object.keys(result.batchOutputs || {}).length > 0
+        ? {
+            responses: Object.fromEntries(
+              Object.entries(result.batchOutputs).map(([pid, data]) => [
+                pid,
+                {
+                  text: data.text || '',
+                  modelIndex: data.meta?.modelIndex ?? 0,
+                  status: data.status || 'completed',
+                  meta: data.meta,
+                },
+              ])
+            ),
+          }
+        : undefined;
 
     const singularity = context?.singularityData || context?.singularityOutput;
     const singularityPhase = singularity
       ? {
-        prompt: singularity?.prompt || "",
-        output: singularity?.output || singularity?.text || "",
-        timestamp: Number(singularity?.timestamp) || Date.now(),
-      }
+          prompt: singularity?.prompt || '',
+          output: singularity?.output || singularity?.text || '',
+          timestamp: Number(singularity?.timestamp) || Date.now(),
+        }
       : undefined;
 
-
     const persistRequest = {
-      type: resolvedContext?.type || "unknown",
+      type: resolvedContext?.type || 'unknown',
       sessionId: context.sessionId,
       userMessage: this.currentUserMessage,
       runId: context?.runId || request?.context?.runId,
       batch: batchPhase,
       singularity: singularityPhase,
     };
-    if (resolvedContext?.type === "recompute") {
+    if (resolvedContext?.type === 'recompute') {
       persistRequest.sourceTurnId = resolvedContext.sourceTurnId;
       persistRequest.stepType = resolvedContext.stepType;
       persistRequest.targetProvider = resolvedContext.targetProvider;
     }
     if (context?.canonicalUserTurnId)
       persistRequest.canonicalUserTurnId = context.canonicalUserTurnId;
-    if (context?.canonicalAiTurnId)
-      persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
+    if (context?.canonicalAiTurnId) persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
 
     console.log(
-      `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`,
+      `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`
     );
 
     const persistResult = await this.persistenceCoordinator.persistWorkflowResult(
@@ -484,31 +534,33 @@ export class WorkflowEngine {
     );
 
     if (persistResult) {
-      if (persistResult.userTurnId)
-        context.canonicalUserTurnId = persistResult.userTurnId;
-      if (persistResult.aiTurnId)
-        context.canonicalAiTurnId = persistResult.aiTurnId;
-      if (resolvedContext?.type === "initialize" && persistResult.sessionId) {
+      if (persistResult.userTurnId) context.canonicalUserTurnId = persistResult.userTurnId;
+      if (persistResult.aiTurnId) context.canonicalAiTurnId = persistResult.aiTurnId;
+      if (resolvedContext?.type === 'initialize' && persistResult.sessionId) {
         context.sessionId = persistResult.sessionId;
-        console.log(
-          `[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`,
-        );
+        console.log(`[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`);
       }
     }
 
     this._safePostMessage({
-      type: "WORKFLOW_COMPLETE",
+      type: 'WORKFLOW_COMPLETE',
       sessionId: context.sessionId,
       workflowId: request.workflowId,
       finalResults: Object.fromEntries(stepResults),
       ...(haltReason ? { haltReason } : {}),
     });
 
-    this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
+    this.turnEmitter.emitTurnFinalized(
+      context,
+      steps,
+      stepResults,
+      resolvedContext,
+      this.currentUserMessage
+    );
   }
 
   async _persistCheckpoint(request, context, resolvedContext) {
-    if (!resolvedContext || resolvedContext.type === "recompute") return;
+    if (!resolvedContext || resolvedContext.type === 'recompute') return;
     if (!context?.canonicalUserTurnId || !context?.canonicalAiTurnId) return;
 
     await this.persistenceCoordinator.persistWorkflowResult(
@@ -519,22 +571,24 @@ export class WorkflowEngine {
         canonicalUserTurnId: context.canonicalUserTurnId,
         canonicalAiTurnId: context.canonicalAiTurnId,
         partial: true,
-        pipelineStatus: "in_progress",
+        pipelineStatus: 'in_progress',
         runId: context?.runId || request?.context?.runId,
       },
       resolvedContext,
-      { batchOutputs: {}, mappingOutputs: {}, singularityOutputs: {} },
+      { batchOutputs: {}, mappingOutputs: {}, singularityOutputs: {} }
     );
   }
 
   async handleRetryRequest(message) {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
-      console.log(`[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} `);
+      console.log(
+        `[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} `
+      );
 
       try {
         (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));
-      } catch (_) { }
+      } catch (_) {}
 
       try {
         this.port.postMessage({
@@ -542,11 +596,15 @@ export class WorkflowEngine {
           sessionId: sessionId,
           aiTurnId: aiTurnId,
           phase: retryScope || 'batch',
-          providerStatuses: (providerIds || []).map((id) => ({ providerId: id, status: 'queued', progress: 0 })),
+          providerStatuses: (providerIds || []).map((id) => ({
+            providerId: id,
+            status: 'queued',
+            progress: 0,
+          })),
           completedCount: 0,
           totalCount: (providerIds || []).length,
         });
-      } catch (_) { }
+      } catch (_) {}
     } catch (e) {
       console.warn('[WorkflowEngine] handleRetryRequest failed:', e);
     }

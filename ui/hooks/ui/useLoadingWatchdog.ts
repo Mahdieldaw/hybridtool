@@ -1,11 +1,11 @@
-import { useEffect, useRef } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useEffect, useRef } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   isLoadingAtom,
   alertTextAtom,
   lastActivityAtAtom,
   connectionStatusAtom,
-} from "../../state/atoms";
+} from '../../state/atoms';
 
 /**
  * useResponsiveLoadingGuard
@@ -70,26 +70,18 @@ export function useResponsiveLoadingGuard(options?: {
       }
 
       if (!warnedRef.current && idleFor >= idleWarnMs) {
-        setAlertText(
-          "Still processing… you can press Stop to abort and retry if needed.",
-        );
+        setAlertText('Still processing… you can press Stop to abort and retry if needed.');
         warnedRef.current = true;
       }
 
       if (!escalatedRef.current && idleFor >= idleCriticalMs) {
         setAlertText(
-          "Processing is taking longer than expected. Consider pressing Stop, checking provider status, or switching model.",
+          'Processing is taking longer than expected. Consider pressing Stop, checking provider status, or switching model.'
         );
         escalatedRef.current = true;
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [
-    isLoading,
-    connection?.isConnected,
-    setAlertText,
-    idleWarnMs,
-    idleCriticalMs,
-  ]);
+  }, [isLoading, connection?.isConnected, setAlertText, idleWarnMs, idleCriticalMs]);
 }

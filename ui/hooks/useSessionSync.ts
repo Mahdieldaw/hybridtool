@@ -1,13 +1,8 @@
-import { useEffect, useRef } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
-import {
-  currentSessionIdAtom,
-  turnIdsAtom,
-  turnsMapAtom,
-  uiPhaseAtom,
-} from "../state/atoms";
-import api from "../services/extension-api";
-import { parseSessionTurns } from "../utils/parseSessionTurns";
+import { useEffect, useRef } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { currentSessionIdAtom, turnIdsAtom, turnsMapAtom, uiPhaseAtom } from '../state/atoms';
+import api from '../services/extension-api';
+import { parseSessionTurns } from '../utils/parseSessionTurns';
 
 /**
  * After initialization, if there's a stored sessionId but no turns loaded,
@@ -39,12 +34,17 @@ export function useSessionSync(isInitialized: boolean) {
         if (ids.length > 0) {
           setTurnsMap(map);
           setTurnIds(ids);
-          setUiPhase("awaiting_action");
-          console.log("[SessionSync] Rehydrated", ids.length, "turns for session", currentSessionId);
+          setUiPhase('awaiting_action');
+          console.log(
+            '[SessionSync] Rehydrated',
+            ids.length,
+            'turns for session',
+            currentSessionId
+          );
         }
         hasSyncedRef.current = true;
       } catch (e) {
-        console.warn("[SessionSync] Failed to rehydrate session:", e);
+        console.warn('[SessionSync] Failed to rehydrate session:', e);
       }
     })();
   }, [isInitialized, currentSessionId, turnIds.length, setTurnsMap, setTurnIds, setUiPhase]);

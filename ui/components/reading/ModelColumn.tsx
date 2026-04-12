@@ -26,7 +26,7 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
       ? artifact.shadow.paragraphs
       : [];
     return allParas.filter(
-      (p: any) => (typeof p.modelIndex === 'number' ? p.modelIndex : 0) === modelIndex,
+      (p: any) => (typeof p.modelIndex === 'number' ? p.modelIndex : 0) === modelIndex
     );
   }, [artifact, modelIndex]);
 
@@ -70,7 +70,9 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
       {/* Column header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 text-xs text-text-secondary shrink-0 bg-surface-base/50">
         <span className="font-medium text-text-primary">{modelName}</span>
-        <span className="text-text-muted">{paragraphs.length}p · {stmtCount}s</span>
+        <span className="text-text-muted">
+          {paragraphs.length}p · {stmtCount}s
+        </span>
       </div>
 
       {/* Scrollable paragraph list */}
@@ -95,10 +97,10 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
               }}
               className={clsx(
                 'border-l-2 pl-3 py-1 rounded-sm transition-all duration-200',
-                hlState === 'passage'  && clsx(styles.passageBorder, styles.passageBg),
+                hlState === 'passage' && clsx(styles.passageBorder, styles.passageBg),
                 hlState === 'dispersed' && clsx(styles.dispersedBorder, styles.dispersedBg),
-                hlState === 'none'     && 'border-l-transparent',
-                isReceded              && 'opacity-40',
+                hlState === 'none' && 'border-l-transparent',
+                isReceded && 'opacity-40'
               )}
             >
               {para._fullParagraph ? (
@@ -107,10 +109,12 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
                   className={clsx(
                     'text-sm leading-relaxed py-0.5 whitespace-pre-wrap',
                     hasFocus
-                      ? (stmts.some((s: any) => ownedStatementIds.has(String(s.id ?? s.statementId ?? '')))
-                          ? 'text-text-primary'
-                          : 'text-text-secondary')
-                      : 'text-text-primary',
+                      ? stmts.some((s: any) =>
+                          ownedStatementIds.has(String(s.id ?? s.statementId ?? ''))
+                        )
+                        ? 'text-text-primary'
+                        : 'text-text-secondary'
+                      : 'text-text-primary'
                   )}
                 >
                   {para._fullParagraph}
@@ -128,8 +132,10 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
                       className={clsx(
                         'text-sm leading-relaxed py-0.5',
                         hasFocus
-                          ? isOwned ? 'text-text-primary' : 'text-text-secondary'
-                          : 'text-text-primary',
+                          ? isOwned
+                            ? 'text-text-primary'
+                            : 'text-text-secondary'
+                          : 'text-text-primary'
                       )}
                     >
                       {text}
@@ -142,9 +148,7 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
         })}
 
         {paragraphs.length === 0 && (
-          <div className="text-sm text-text-muted py-8 text-center">
-            No output for this model
-          </div>
+          <div className="text-sm text-text-muted py-8 text-center">No output for this model</div>
         )}
       </div>
     </div>

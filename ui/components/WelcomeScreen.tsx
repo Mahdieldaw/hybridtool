@@ -1,5 +1,5 @@
-import { EXAMPLE_PROMPT } from "../constants";
-import logoIcon from "../assets/brand/logo-icon.png";
+import { EXAMPLE_PROMPT } from '../constants';
+import logoIcon from '../assets/brand/logo-icon.png';
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
   isLoading?: boolean;
@@ -9,11 +9,7 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center p-10 pb-40 relative">
       {/* Orb Icon */}
-      <img
-        src={logoIcon}
-        alt="Singularity AI"
-        className="h-32 w-32 mb-6"
-      />
+      <img src={logoIcon} alt="Singularity AI" className="h-32 w-32 mb-6" />
 
       {/* Brand Text */}
       <h1 className="text-4xl font-semibold tracking-[0.15em] mb-2 uppercase">
@@ -21,13 +17,10 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
         <span className="text-brand-400">ITY AI</span>
       </h1>
 
-      <h2 className="text-xl font-medium mb-3 text-text-primary">
-        Intelligence Augmentation
-      </h2>
+      <h2 className="text-xl font-medium mb-3 text-text-primary">Intelligence Augmentation</h2>
 
       <p className="text-base text-text-muted mb-8 max-w-md">
-        Ask one question, get synthesized insights from multiple AI models in
-        real-time
+        Ask one question, get synthesized insights from multiple AI models in real-time
       </p>
 
       {onSendPrompt && (
@@ -43,7 +36,6 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
           Try: "{EXAMPLE_PROMPT}"
         </button>
       )}
-
     </div>
   );
 };

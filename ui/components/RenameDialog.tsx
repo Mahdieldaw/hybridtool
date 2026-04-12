@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from 'react';
 
 interface RenameDialogProps {
   isOpen: boolean;
@@ -32,17 +32,17 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({
   }, [isOpen]);
 
   const handleRename = () => {
-    const t = String(title || "").trim();
+    const t = String(title || '').trim();
     if (t) onRename(t);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!isRenaming) {
         handleRename();
       }
-    } else if (e.key === "Escape") {
+    } else if (e.key === 'Escape') {
       onClose();
     }
   };
@@ -59,14 +59,10 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({
       }}
     >
       <div className="bg-surface-modal border border-border-subtle rounded-2xl p-6 min-w-[400px] max-w-[500px] shadow-overlay">
-        <h3 className="m-0 mb-4 text-lg font-semibold text-text-primary">
-          Rename Chat
-        </h3>
+        <h3 className="m-0 mb-4 text-lg font-semibold text-text-primary">Rename Chat</h3>
 
         <div className="mb-5">
-          <label className="block text-sm font-medium text-text-secondary mb-2">
-            Chat Title
-          </label>
+          <label className="block text-sm font-medium text-text-secondary mb-2">Chat Title</label>
           <input
             ref={inputRef}
             type="text"
@@ -103,7 +99,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({
             {isRenaming && (
               <div className="w-4 h-4 border-2 border-transparent border-t-current rounded-full animate-spin" />
             )}
-            {isRenaming ? "Renaming…" : "Rename"}
+            {isRenaming ? 'Renaming…' : 'Rename'}
           </button>
         </div>
       </div>

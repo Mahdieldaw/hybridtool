@@ -10,7 +10,7 @@ import {
   errorHandler,
   isProviderAuthError,
   createMultiProviderAuthError,
-  getErrorMessage
+  getErrorMessage,
 } from '../../utils/ErrorHandler';
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
@@ -40,14 +40,14 @@ export class StepExecutor {
     if (status === 'success') {
       try {
         this.healthTracker.recordSuccess(providerId);
-      } catch (_) { }
+      } catch (_) {}
       return null;
     }
 
     const classified = classifyError(error);
     try {
       this.healthTracker.recordFailure(providerId, error);
-    } catch (_) { }
+    } catch (_) {}
     try {
       logRetryEvent({
         providerId,
@@ -58,23 +58,17 @@ export class StepExecutor {
         elapsedMs: 0,
         delayMs: classified?.retryAfterMs || 0,
       });
-    } catch (_) { }
+    } catch (_) {}
     return classified;
   }
 
   async executePromptStep(step, context, options) {
     const { streamingManager } = options;
     const artifactProcessor = new ArtifactProcessor();
-    const {
-      prompt,
-      providers,
-      useThinking,
-      providerContexts,
-      previousContext,
-    } = step.payload;
+    const { prompt, providers, useThinking, providerContexts, previousContext } = step.payload;
 
     let enhancedPrompt = prompt;
-    let bridgeContext = "";
+    let bridgeContext = '';
 
     // Reactive Bridge Injection (Priority 1)
     if (step.payload.previousAnalysis) {
@@ -82,10 +76,12 @@ export class StepExecutor {
         const bridge = buildReactiveBridge(prompt, step.payload.previousAnalysis);
         if (bridge) {
           bridgeContext = bridge.context;
-          console.log(`[StepExecutor] Injected reactive bridge context: ${bridge.matched.map(m => m.label).join(', ')}`);
+          console.log(
+            `[StepExecutor] Injected reactive bridge context: ${bridge.matched.map((m) => m.label).join(', ')}`
+          );
         }
       } catch (err) {
-        console.warn("[StepExecutor] Failed to build reactive bridge:", err);
+        console.warn('[StepExecutor] Failed to build reactive bridge:', err);
       }
     }
 
@@ -128,7 +124,7 @@ export class StepExecutor {
         completedCount: 0,
         totalCount: providers.length,
       });
-    } catch (_) { }
+    } catch (_) {}
 
     const promptLength = enhancedPrompt.length;
     const allowedProviders = [];
@@ -149,11 +145,24 @@ export class StepExecutor {
             if (entry) {
               entry.status = 'skipped';
               entry.skippedReason = 'input_too_long';
-              entry.error = { type: 'input_too_long', message: `Prompt length ${promptLength} exceeds limit for ${pid}`, retryable: true };
+              entry.error = {
+                type: 'input_too_long',
+                message: `Prompt length ${promptLength} exceeds limit for ${pid}`,
+                retryable: true,
+              };
             } else {
-              providerStatuses.push({ providerId: pid, status: 'skipped', skippedReason: 'input_too_long', error: { type: 'input_too_long', message: `Prompt length ${promptLength} exceeds limit for ${pid}`, retryable: true } });
+              providerStatuses.push({
+                providerId: pid,
+                status: 'skipped',
+                skippedReason: 'input_too_long',
+                error: {
+                  type: 'input_too_long',
+                  message: `Prompt length ${promptLength} exceeds limit for ${pid}`,
+                  retryable: true,
+                },
+              });
             }
-          } catch (_) { }
+          } catch (_) {}
         });
         try {
           streamingManager.port.postMessage({
@@ -165,10 +174,12 @@ export class StepExecutor {
             completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
             totalCount: providerStatuses.length,
           });
-        } catch (_) { }
+        } catch (_) {}
       }
       if (allowedProviders.length === 0) {
-        throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limits for all selected providers`);
+        throw new Error(
+          `INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limits for all selected providers`
+        );
       }
     } catch (e) {
       return Promise.reject(e);
@@ -187,7 +198,7 @@ export class StepExecutor {
             step.stepId,
             providerId,
             chunk.text,
-            "Prompt",
+            'Prompt'
           );
           try {
             const entry = providerStatuses.find((s) => s.providerId === providerId);
@@ -204,22 +215,21 @@ export class StepExecutor {
                 totalCount: providers.length,
               });
             }
-          } catch (_) { }
+          } catch (_) {}
         },
         onProviderComplete: (providerId, resultWrapper) => {
           const entry = providerStatuses.find((s) => s.providerId === providerId);
 
-          if (resultWrapper && resultWrapper.status === "rejected") {
+          if (resultWrapper && resultWrapper.status === 'rejected') {
             const err = resultWrapper.reason;
             let classified = classifyError(err);
             try {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
                 classified =
-                  this._finalizeProviderResult(providerId, 'failure', err, 'batch') ||
-                  classified;
+                  this._finalizeProviderResult(providerId, 'failure', err, 'batch') || classified;
               }
-            } catch (_) { }
+            } catch (_) {}
 
             if (entry) {
               entry.status = 'failed';
@@ -248,7 +258,7 @@ export class StepExecutor {
               completedProviders.add(providerId);
               this._finalizeProviderResult(providerId, 'success', null, 'batch');
             }
-          } catch (_) { }
+          } catch (_) {}
 
           if (entry) {
             entry.status = 'completed';
@@ -265,19 +275,19 @@ export class StepExecutor {
                 completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
                 totalCount: providers.length,
               });
-            } catch (_) { }
+            } catch (_) {}
           }
         },
         onError: (error) => {
           try {
             streamingManager.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
+              type: 'WORKFLOW_STEP_UPDATE',
               sessionId: context.sessionId,
               stepId: step.stepId,
-              status: "failed",
+              status: 'failed',
               error: error?.message || String(error),
             });
-          } catch (_) { }
+          } catch (_) {}
         },
         onAllComplete: async (results, errors) => {
           const batchUpdates = {};
@@ -286,7 +296,11 @@ export class StepExecutor {
           });
 
           // Persist contexts before proceeding — guarantees mapping step reads fresh data
-          await options.persistenceCoordinator.persistProviderContexts(context.sessionId, batchUpdates, "batch");
+          await options.persistenceCoordinator.persistProviderContexts(
+            context.sessionId,
+            batchUpdates,
+            'batch'
+          );
 
           const formattedResults = {};
           const authErrors = [];
@@ -296,7 +310,7 @@ export class StepExecutor {
             formattedResults[providerId] = {
               providerId: providerId,
               text: processed.cleanText,
-              status: "completed",
+              status: 'completed',
               meta: result.meta || {},
               artifacts: processed.artifacts,
               ...(result.softError ? { softError: result.softError } : {}),
@@ -312,7 +326,7 @@ export class StepExecutor {
                 entry.progress = 100;
                 if (entry.error) delete entry.error;
               }
-            } catch (_) { }
+            } catch (_) {}
           });
 
           errors.forEach((error, providerId) => {
@@ -320,8 +334,8 @@ export class StepExecutor {
             let classified = classifyError(error);
             formattedResults[providerId] = {
               providerId: providerId,
-              text: "",
-              status: "failed",
+              text: '',
+              status: 'failed',
               meta: {
                 error: classified,
                 _rawError: error.message,
@@ -338,8 +352,7 @@ export class StepExecutor {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
                 classified =
-                  this._finalizeProviderResult(providerId, 'failure', error, 'batch') ||
-                  classified;
+                  this._finalizeProviderResult(providerId, 'failure', error, 'batch') || classified;
               }
               const entry = providerStatuses.find((s) => s.providerId === providerId);
               if (entry) {
@@ -353,26 +366,28 @@ export class StepExecutor {
                 formattedResults[providerId].meta.errorMessage = classified?.message;
                 formattedResults[providerId].meta.requiresReauth = classified?.requiresReauth;
               }
-            } catch (_) { }
+            } catch (_) {}
           });
 
           const hasAnyValidResults = Object.values(formattedResults).some(
-            (r) =>
-              r.status === "completed" && r.text && r.text.trim().length > 0,
+            (r) => r.status === 'completed' && r.text && r.text.trim().length > 0
           );
 
           // ✅ CRITICAL FIX: Ensure skipped/failed providers are included in formattedResults
-          providerStatuses.forEach(p => {
-            if ((p.status === 'skipped' || p.status === 'failed') && !formattedResults[p.providerId]) {
+          providerStatuses.forEach((p) => {
+            if (
+              (p.status === 'skipped' || p.status === 'failed') &&
+              !formattedResults[p.providerId]
+            ) {
               formattedResults[p.providerId] = {
                 providerId: p.providerId,
-                text: "",
+                text: '',
                 status: p.status === 'skipped' ? 'skipped' : 'failed', // Map to valid status
                 meta: {
-                  error: p.error?.message || p.skippedReason || "Skipped or failed",
+                  error: p.error?.message || p.skippedReason || 'Skipped or failed',
                   skipped: p.status === 'skipped',
-                  reason: p.skippedReason
-                }
+                  reason: p.skippedReason,
+                },
               };
             }
           });
@@ -380,7 +395,12 @@ export class StepExecutor {
           if (!hasAnyValidResults) {
             if (authErrors.length > 0 && authErrors.length === errors.size) {
               const providerIds = Array.from(errors.keys());
-              reject(createMultiProviderAuthError(providerIds, "Multiple authentication errors occurred."));
+              reject(
+                createMultiProviderAuthError(
+                  providerIds,
+                  'Multiple authentication errors occurred.'
+                )
+              );
               return;
             }
 
@@ -394,9 +414,7 @@ export class StepExecutor {
               return;
             }
 
-            reject(
-              new Error("All providers failed or returned empty responses"),
-            );
+            reject(new Error('All providers failed or returned empty responses'));
             return;
           }
 
@@ -420,11 +438,14 @@ export class StepExecutor {
                 sessionId: context.sessionId,
                 aiTurnId: context.canonicalAiTurnId || 'unknown',
                 successfulProviders: successfulProviders.map((p) => p.providerId),
-                failedProviders: failedProviders.map((p) => ({ providerId: p.providerId, error: p.error })),
+                failedProviders: failedProviders.map((p) => ({
+                  providerId: p.providerId,
+                  error: p.error,
+                })),
                 mappingCompleted: false,
               });
             }
-          } catch (_) { }
+          } catch (_) {}
 
           resolve({
             results: formattedResults,
@@ -439,12 +460,7 @@ export class StepExecutor {
     const { streamingManager, sessionManager } = options;
     const artifactProcessor = new ArtifactProcessor();
     const payload = step.payload;
-    const rawSourceData = await this._resolveSourceData(
-      payload,
-      context,
-      stepResults,
-      options
-    );
+    const rawSourceData = await this._resolveSourceData(payload, context, stepResults, options);
 
     const sourceData = (() => {
       const items = Array.isArray(rawSourceData) ? rawSourceData : [];
@@ -462,14 +478,13 @@ export class StepExecutor {
     })();
 
     if (sourceData.length < 2) {
-      throw new Error(
-        `Mapping requires at least 2 valid sources, but found ${sourceData.length}.`,
-      );
+      throw new Error(`Mapping requires at least 2 valid sources, but found ${sourceData.length}.`);
     }
 
     wdbg(
-      `[StepExecutor] Running mapping with ${sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
+      `[StepExecutor] Running mapping with ${
+        sourceData.length
+      } sources: ${sourceData.map((s) => s.providerId).join(', ')} `
     );
 
     // Canonical provider ordering: deterministic regardless of arrival order.
@@ -477,15 +492,13 @@ export class StepExecutor {
     // providers are appended alphabetically.  Missing providers simply don't
     // appear — remaining providers shift up in modelIndex but never reorder.
     const { canonicalCitationOrder } = await import('../../../shared/provider-config');
-    const citationOrder = canonicalCitationOrder(
-      sourceData.map((s) => s.providerId),
-    );
+    const citationOrder = canonicalCitationOrder(sourceData.map((s) => s.providerId));
 
     const indexedSourceData = sourceData.map((s) => {
       const modelIndex = citationOrder.indexOf(s.providerId) + 1;
       if (modelIndex < 1) {
         throw new Error(
-          `[StepExecutor] Invariant violated: providerId ${s.providerId} missing from citationOrder`,
+          `[StepExecutor] Invariant violated: providerId ${s.providerId} missing from citationOrder`
         );
       }
       return {
@@ -503,7 +516,8 @@ export class StepExecutor {
     // Import shadow module once at function scope so callbacks can use its exports without awaiting
     const shadowModule = await import('../../shadow');
     const { extractShadowStatements } = shadowModule;
-    const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+    const { buildSemanticMapperPrompt, parseSemanticMapperOutput } =
+      await import('../../ConciergeService/semanticMapper');
     // claimAssembly import removed — computePreSurveyPipeline handles it internally
     const { computeQueryRelevance } = await import('../../geometry/queryRelevance');
 
@@ -519,8 +533,9 @@ export class StepExecutor {
 
     // 2. Shadow Extraction (Mechanical)
     // Use indexedSourceData which already has canonical modelIndex assignments
-    const shadowInput = indexedSourceData.map(s => ({
-      modelIndex: s.modelIndex, content: s.text,
+    const shadowInput = indexedSourceData.map((s) => ({
+      modelIndex: s.modelIndex,
+      content: s.text,
     }));
 
     console.log(`[StepExecutor] Extracting shadow statements from ${shadowInput.length} models...`);
@@ -529,9 +544,11 @@ export class StepExecutor {
 
     const { projectParagraphs } = shadowModule;
     const paragraphResult = projectParagraphs(shadowResult.statements);
-    console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
-      `(${paragraphResult.meta.contestedCount} contested, ` +
-      `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
+    console.log(
+      `[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
+        `(${paragraphResult.meta.contestedCount} contested, ` +
+        `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`
+    );
 
     // ════════════════════════════════════════════════════════════════════════
     // 2.6 GEOMETRY (async, may fail gracefully)
@@ -563,8 +580,11 @@ export class StepExecutor {
         }
 
         const ensureOffscreenReady = async () => {
-          if (typeof chrome === 'undefined' || !chrome?.runtime?.getContexts || !chrome?.offscreen) return;
-          const existingContexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+          if (typeof chrome === 'undefined' || !chrome?.runtime?.getContexts || !chrome?.offscreen)
+            return;
+          const existingContexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT'],
+          });
           if (existingContexts.length > 0) return;
           await chrome.offscreen.createDocument({
             url: 'offscreen.html',
@@ -597,7 +617,7 @@ export class StepExecutor {
           if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
             embeddingBackend = status.backend;
           }
-        } catch (_) { }
+        } catch (_) {}
 
         const rawQuery =
           (payload && typeof payload.originalPrompt === 'string' && payload.originalPrompt) ||
@@ -606,15 +626,23 @@ export class StepExecutor {
         const cleanedQuery = stripInlineMarkdown(String(rawQuery || '')).trim();
         const truncatedQuery = structuredTruncate(cleanedQuery, 1740);
         const queryTextForEmbedding =
-          truncatedQuery && !truncatedQuery.toLowerCase().startsWith('represent this sentence for searching relevant passages:')
+          truncatedQuery &&
+          !truncatedQuery
+            .toLowerCase()
+            .startsWith('represent this sentence for searching relevant passages:')
             ? `Represent this sentence for searching relevant passages: ${truncatedQuery}`
             : truncatedQuery;
 
         const queryEmbeddingPromise = (async () => {
           try {
             await offscreenReadyPromise;
-            console.log(`[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`);
-            const queryEmbeddingBatch = await generateTextEmbeddings([queryTextForEmbedding], DEFAULT_CONFIG);
+            console.log(
+              `[StepExecutor] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`
+            );
+            const queryEmbeddingBatch = await generateTextEmbeddings(
+              [queryTextForEmbedding],
+              DEFAULT_CONFIG
+            );
             queryEmbedding = queryEmbeddingBatch.embeddings.get('0') || null;
             if (queryEmbedding && queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions) {
               throw new Error(
@@ -679,10 +707,16 @@ export class StepExecutor {
             geometryDiagnostics.stages.statementEmbeddings = {
               status: 'ok',
               statements: shadowResult.statements.length,
-              embedded: typeof statementEmbeddingResult?.statementCount === 'number' ? statementEmbeddingResult.statementCount : null,
+              embedded:
+                typeof statementEmbeddingResult?.statementCount === 'number'
+                  ? statementEmbeddingResult.statementCount
+                  : null,
             };
           } catch (embeddingError) {
-            console.warn('[StepExecutor] Statement embedding generation failed, continuing without embeddings:', getErrorMessage(embeddingError));
+            console.warn(
+              '[StepExecutor] Statement embedding generation failed, continuing without embeddings:',
+              getErrorMessage(embeddingError)
+            );
             geometryDiagnostics.embeddingBackendFailure = true;
             geometryDiagnostics.stages.statementEmbeddings = {
               status: 'failed',
@@ -697,14 +731,20 @@ export class StepExecutor {
         await statementEmbeddingPromise;
 
         const firstParagraphEmbedding = geometryParagraphEmbeddings?.values?.().next?.().value;
-        if (queryEmbedding && firstParagraphEmbedding && firstParagraphEmbedding.length !== queryEmbedding.length) {
+        if (
+          queryEmbedding &&
+          firstParagraphEmbedding &&
+          firstParagraphEmbedding.length !== queryEmbedding.length
+        ) {
           throw new Error(
             `[StepExecutor] Query/paragraph embedding dimension mismatch: query=${queryEmbedding.length}, paragraph=${firstParagraphEmbedding.length}`
           );
         }
 
         if (!geometryParagraphEmbeddings || geometryParagraphEmbeddings.size === 0) {
-          console.log(`[StepExecutor] Skipping embeddings/geometry (paragraph_embeddings_unavailable)`);
+          console.log(
+            `[StepExecutor] Skipping embeddings/geometry (paragraph_embeddings_unavailable)`
+          );
           geometryDiagnostics.stages.embeddingsSkipped = {
             startedAtMs,
             timeMs: 0,
@@ -717,11 +757,14 @@ export class StepExecutor {
         // 2.7 Basin Inversion (Topographic Analysis)
         // ─────────────────────────────────────────────────────────────────────────
         try {
-          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
+          const { computeBasinInversion } =
+            await import('../../../shared/geometry/basinInversionBayesian');
           const paraIds = Array.from(geometryParagraphEmbeddings.keys());
-          const paraVectors = paraIds.map(id => geometryParagraphEmbeddings.get(id));
+          const paraVectors = paraIds.map((id) => geometryParagraphEmbeddings.get(id));
           basinInversionResult = computeBasinInversion(paraIds, paraVectors);
-          console.log(`[StepExecutor] Basin inversion complete: ${basinInversionResult.basinCount} basins found`);
+          console.log(
+            `[StepExecutor] Basin inversion complete: ${basinInversionResult.basinCount} basins found`
+          );
         } catch (err) {
           console.warn(`[StepExecutor] Basin inversion failed:`, getErrorMessage(err));
         }
@@ -744,9 +787,9 @@ export class StepExecutor {
           const { isDegenerate } = await import('../../geometry');
           substrateDegenerate = isDegenerate(substrate);
           substrateDegenerateReason = substrateDegenerate
-            ? (substrate && typeof substrate === 'object' && 'degenerateReason' in substrate
+            ? substrate && typeof substrate === 'object' && 'degenerateReason' in substrate
               ? String(substrate.degenerateReason)
-              : 'unknown')
+              : 'unknown'
             : null;
         } catch (_) {
           substrateDegenerate = null;
@@ -758,18 +801,26 @@ export class StepExecutor {
           const contestedCount = Array.isArray(substrate.nodes)
             ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
             : 0;
-          const avgIsolationScore = Array.isArray(substrate.nodes) && nodeCount > 0
-            ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0), 0) / nodeCount
-            : 0;
+          const avgIsolationScore =
+            Array.isArray(substrate.nodes) && nodeCount > 0
+              ? substrate.nodes.reduce(
+                  (acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0),
+                  0
+                ) / nodeCount
+              : 0;
           const mutualRankEdgeCount = substrate.mutualRankGraph?.edges?.length ?? 0;
 
           substrateSummary = {
             meta: {
               embeddingSuccess: !!substrate?.meta?.embeddingSuccess,
               embeddingBackend: substrate?.meta?.embeddingBackend || 'none',
-              nodeCount: typeof substrate?.meta?.nodeCount === 'number' ? substrate.meta.nodeCount : nodeCount,
+              nodeCount:
+                typeof substrate?.meta?.nodeCount === 'number'
+                  ? substrate.meta.nodeCount
+                  : nodeCount,
               mutualRankEdgeCount,
-              buildTimeMs: typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
+              buildTimeMs:
+                typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
             },
             nodes: {
               contestedCount,
@@ -785,7 +836,7 @@ export class StepExecutor {
         } else {
           console.log(
             `[StepExecutor] Substrate: ${substrate.meta.nodeCount} nodes, ` +
-            `${substrate.mutualRankGraph?.edges?.length ?? 0} mutual recognition edges`
+              `${substrate.mutualRankGraph?.edges?.length ?? 0} mutual recognition edges`
           );
         }
 
@@ -830,7 +881,11 @@ export class StepExecutor {
             };
           } else {
             queryRelevance = null;
-            const skipReason = !queryEmbedding ? 'queryEmbedding=null' : !substrate ? 'substrate=null' : 'substrateDegenerate=true';
+            const skipReason = !queryEmbedding
+              ? 'queryEmbedding=null'
+              : !substrate
+                ? 'substrate=null'
+                : 'substrateDegenerate=true';
             console.warn(`[StepExecutor] Query relevance SKIPPED: ${skipReason}`);
             geometryDiagnostics.stages.queryRelevance = {
               status: 'skipped',
@@ -852,13 +907,14 @@ export class StepExecutor {
             const stmtDim = statementEmbeddingResult?.embeddings?.values?.().next?.().value?.length;
             const paraDim = geometryParagraphEmbeddings?.values?.().next?.().value?.length;
             const queryDim = queryEmbedding?.length;
-            const dims = Number.isFinite(queryDim) && queryDim > 0
-              ? queryDim
-              : Number.isFinite(paraDim) && paraDim > 0
-                ? paraDim
-                : Number.isFinite(stmtDim) && stmtDim > 0
-                  ? stmtDim
-                  : DEFAULT_CONFIG.embeddingDimensions;
+            const dims =
+              Number.isFinite(queryDim) && queryDim > 0
+                ? queryDim
+                : Number.isFinite(paraDim) && paraDim > 0
+                  ? paraDim
+                  : Number.isFinite(stmtDim) && stmtDim > 0
+                    ? stmtDim
+                    : DEFAULT_CONFIG.embeddingDimensions;
 
             const packedStatements = statementEmbeddingResult?.embeddings
               ? packEmbeddingMap(statementEmbeddingResult.embeddings, dims)
@@ -867,34 +923,53 @@ export class StepExecutor {
               ? packEmbeddingMap(geometryParagraphEmbeddings, dims)
               : null;
             const queryBuffer = queryEmbedding
-              ? queryEmbedding.buffer.slice(queryEmbedding.byteOffset, queryEmbedding.byteOffset + queryEmbedding.byteLength)
+              ? queryEmbedding.buffer.slice(
+                  queryEmbedding.byteOffset,
+                  queryEmbedding.byteOffset + queryEmbedding.byteLength
+                )
               : null;
 
             if (packedStatements || packedParagraphs || queryBuffer) {
-              options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
-                ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
-                ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
-                ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
-                meta: {
-                  embeddingModelId: DEFAULT_CONFIG.modelId,
-                  dimensions: dims,
-                  hasStatements: Boolean(packedStatements),
-                  hasParagraphs: Boolean(packedParagraphs),
-                  hasQuery: Boolean(queryBuffer),
-                  ...(packedStatements ? { statementCount: packedStatements.index.length, statementIndex: packedStatements.index } : {}),
-                  ...(packedParagraphs ? { paragraphCount: packedParagraphs.index.length, paragraphIndex: packedParagraphs.index } : {}),
-                  embeddingVersion: 2,
-                  timestamp: Date.now(),
-                },
-              }).catch((err) => console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err));
+              options.sessionManager
+                .persistEmbeddings(context.canonicalAiTurnId, {
+                  ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
+                  ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
+                  ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
+                  meta: {
+                    embeddingModelId: DEFAULT_CONFIG.modelId,
+                    dimensions: dims,
+                    hasStatements: Boolean(packedStatements),
+                    hasParagraphs: Boolean(packedParagraphs),
+                    hasQuery: Boolean(queryBuffer),
+                    ...(packedStatements
+                      ? {
+                          statementCount: packedStatements.index.length,
+                          statementIndex: packedStatements.index,
+                        }
+                      : {}),
+                    ...(packedParagraphs
+                      ? {
+                          paragraphCount: packedParagraphs.index.length,
+                          paragraphIndex: packedParagraphs.index,
+                        }
+                      : {}),
+                    embeddingVersion: 2,
+                    timestamp: Date.now(),
+                  },
+                })
+                .catch((err) =>
+                  console.warn('[StepExecutor] Embedding persistence failed (non-blocking):', err)
+                );
             }
           }
         } catch (err) {
           console.warn('[StepExecutor] Embedding persistence setup failed (non-blocking):', err);
         }
-
       } catch (geometryError) {
-        console.warn('[StepExecutor] Geometry pipeline failed, continuing without:', getErrorMessage(geometryError));
+        console.warn(
+          '[StepExecutor] Geometry pipeline failed, continuing without:',
+          getErrorMessage(geometryError)
+        );
         geometryDiagnostics.embeddingBackendFailure = true;
         geometryDiagnostics.stages.geometryFailure = {
           startedAtMs,
@@ -907,14 +982,14 @@ export class StepExecutor {
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
     const orderedModelIndices = (() => {
       const observed = new Set();
-      for (const p of (paragraphResult?.paragraphs || [])) {
+      for (const p of paragraphResult?.paragraphs || []) {
         const mi = Number(p?.modelIndex);
         if (Number.isFinite(mi) && mi > 0) observed.add(mi);
       }
       const base = Array.from(observed).sort((a, b) => a - b);
-      const all = indexedSourceData.map(s => s.modelIndex);
+      const all = indexedSourceData.map((s) => s.modelIndex);
       if (base.length === 0) return all;
-      const missing = all.filter(mi => !observed.has(mi));
+      const missing = all.filter((mi) => !observed.has(mi));
       return base.concat(missing);
     })();
     const positionByModelIndex = new Map(orderedModelIndices.map((mi, pos) => [mi, pos]));
@@ -930,12 +1005,18 @@ export class StepExecutor {
     );
 
     const promptLength = mappingPrompt.length;
-    console.log(`[StepExecutor] Semantic Mapper prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
+    console.log(
+      `[StepExecutor] Semantic Mapper prompt length for ${payload.mappingProvider}: ${promptLength} chars`
+    );
 
     const limits = PROVIDER_LIMITS[payload.mappingProvider];
     if (limits && promptLength > limits.maxInputChars) {
-      console.warn(`[StepExecutor] Mapping prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
-      throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
+      console.warn(
+        `[StepExecutor] Mapping prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`
+      );
+      throw new Error(
+        `INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`
+      );
     }
 
     const mappingProviderContexts = await (async () => {
@@ -945,16 +1026,13 @@ export class StepExecutor {
       const explicit = payload?.providerContexts;
       if (explicit && typeof explicit === 'object' && explicit[pid]) {
         const entry = explicit[pid];
-        const meta =
-          entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
+        const meta = entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
         if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
           return { [pid]: { meta, continueThread: true } };
         }
       }
 
-      const sourceStepIds = Array.isArray(payload?.sourceStepIds)
-        ? payload.sourceStepIds
-        : [];
+      const sourceStepIds = Array.isArray(payload?.sourceStepIds) ? payload.sourceStepIds : [];
       for (const sourceStepId of sourceStepIds) {
         const stepResult = stepResults?.get?.(sourceStepId);
         if (!stepResult || stepResult.status !== 'completed') continue;
@@ -976,37 +1054,39 @@ export class StepExecutor {
           const records = await sessionManager.adapter.getResponsesByTurnId(historicalTurnId);
           const candidates = Array.isArray(records)
             ? records.filter(
-              (r) =>
-                r &&
-                r.providerId === pid &&
-                r.responseType === historicalResponseType &&
-                r.meta &&
-                typeof r.meta === 'object',
-            )
+                (r) =>
+                  r &&
+                  r.providerId === pid &&
+                  r.responseType === historicalResponseType &&
+                  r.meta &&
+                  typeof r.meta === 'object'
+              )
             : [];
           candidates.sort((a, b) => {
-            const ai = (a.responseIndex ?? 0);
-            const bi = (b.responseIndex ?? 0);
+            const ai = a.responseIndex ?? 0;
+            const bi = b.responseIndex ?? 0;
             if (bi !== ai) return bi - ai;
-            const at = (a.updatedAt ?? a.createdAt ?? 0);
-            const bt = (b.updatedAt ?? b.createdAt ?? 0);
+            const at = a.updatedAt ?? a.createdAt ?? 0;
+            const bt = b.updatedAt ?? b.createdAt ?? 0;
             return bt - at;
           });
           const meta = candidates[0]?.meta;
           if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
             return { [pid]: { meta, continueThread: true } };
           }
-        } catch (_) { }
+        } catch (_) {}
       }
 
       try {
         if (!sessionManager?.getProviderContexts) return undefined;
-        const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, { contextRole: 'batch' });
+        const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, {
+          contextRole: 'batch',
+        });
         const meta = ctxs?.[pid]?.meta;
         if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
           return { [pid]: { meta, continueThread: true } };
         }
-      } catch (_) { }
+      } catch (_) {}
 
       return undefined;
     })();
@@ -1015,419 +1095,483 @@ export class StepExecutor {
       this.healthTracker,
       payload.mappingProvider,
       'Mapping',
-      async () => new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(
-        mappingPrompt,
-        [payload.mappingProvider],
-        {
-          sessionId: context.sessionId,
-          useThinking: payload.useThinking,
-          providerContexts: mappingProviderContexts,
-          providerMeta: step?.payload?.providerMeta,
-          onPartial: (providerId, chunk) => {
-            streamingManager.dispatchPartialDelta(
-              context.sessionId,
-              step.stepId,
-              providerId,
-              chunk.text,
-              "Mapping",
-            );
-          },
-          onAllComplete: async (results, errors) => {
-            let finalResult = results.get(payload.mappingProvider);
-            const providerError = errors?.get?.(payload.mappingProvider);
-
-            if ((!finalResult || !finalResult.text) && providerError) {
-              const recovered = streamingManager.getRecoveredText(
-                context.sessionId, step.stepId, payload.mappingProvider
-              );
-
-              if (recovered && recovered.trim().length > 0) {
-                finalResult = finalResult || { providerId: payload.mappingProvider, meta: {} };
-                finalResult.text = recovered;
-                finalResult.softError = finalResult.softError || {
-                  message: providerError?.message || String(providerError),
-                };
-              }
-            }
-
-            let mapperArtifact = null;
-            let cognitiveArtifact = null;
-            const rawText = finalResult?.text || "";
-            let structuralValidation = null;
-
-            if (finalResult?.text) {
-              // 4. Parse (New Parser) — no geometry dependency
-              const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
-
-              if (parseResult.success && parseResult.output) {
-                // Wait for geometry — assembly needs embeddings, regions, substrate
-                try {
-                  await geometryPromise;
-                } catch (_) { }
-
-                try {
-                  // ── PRE-SURVEY PIPELINE (shared with regenerate flow) ──
-                  const { computePreSurveyPipeline, assembleFromPreSurvey } =
-                    await import('./deterministicPipeline');
-
-                  const preSurvey = await computePreSurveyPipeline({
-                    parsedMappingResult: {
-                      ...parseResult.output,
-                      narrative: parseResult.narrative || '',
-                    },
-                    shadowStatements: shadowResult.statements,
-                    shadowParagraphs: paragraphResult.paragraphs,
-                    statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
-                    paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
-                    queryEmbedding,
-                    preBuiltSubstrate: substrate,
-                    preBuiltPreSemantic: preSemanticInterpretation,
-                    preBuiltQueryRelevance: queryRelevance,
-                    preBuiltBasinInversion: basinInversionResult,
-                    preBuiltBayesianBasinInversion: bayesianBasinInversionResult,
-                    queryText: payload.originalPrompt,
-                    modelCount: citationOrder.length,
-                    turn: context.turn || 0,
-                  });
-
-                  const { enrichedClaims, claimRouting, claimEmbeddings, claimDensityScores } = preSurvey;
-
-                  // ── PERSIST CLAIM EMBEDDINGS (StepExecutor-only) ──────────
-                  try {
-                    if (claimEmbeddings && claimEmbeddings.size > 0 && options.sessionManager && context.canonicalAiTurnId) {
-                      const { packEmbeddingMap } = await import('../../persistence/embeddingCodec');
-                      let dims = 0;
-                      for (const v of claimEmbeddings.values()) {
-                        const n = v?.length;
-                        if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
-                          dims = n;
-                          break;
-                        }
-                      }
-                      if (dims > 0) {
-                        const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
-                        options.sessionManager.persistClaimEmbeddings(
-                          context.canonicalAiTurnId,
-                          payload.mappingProvider,
-                          {
-                            claimEmbeddings: packedClaims.buffer,
-                            meta: {
-                              dimensions: dims,
-                              claimCount: packedClaims.index.length,
-                              claimIndex: packedClaims.index,
-                              timestamp: Date.now(),
-                            },
-                          },
-                        ).catch((err) => console.warn('[StepExecutor] Claim embedding persistence failed:', err));
-                      } else {
-                        console.warn(`[StepExecutor] Claim embedding persistence skipped: invalid dimensions (aiTurnId=${context.canonicalAiTurnId}, provider=${payload.mappingProvider})`);
-                      }
-                    }
-                  } catch (err) {
-                    console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
-                  }
-
-                  const semanticContinuationMeta = (() => {
-                    try {
-                      const meta = finalResult?.meta;
-                      if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
-                        return { ...meta };
-                      }
-                    } catch (_) { }
-                    return null;
-                  })();
-
-                  // ── POST-SEMANTIC ASSEMBLY ────────────────────────────────
-                  const assemblyResult = await assembleFromPreSurvey(preSurvey, {
-                    queryText: payload.originalPrompt,
-                    modelCount: citationOrder.length,
-                    turn: context.turn || 0,
-                    statementSemanticDensity: statementEmbeddingResult?.semanticDensityScores?.size > 0
-                      ? Object.fromEntries(statementEmbeddingResult.semanticDensityScores)
-                      : undefined,
-                    paragraphSemanticDensity: embeddingResult?.semanticDensityScores?.size > 0
-                      ? Object.fromEntries(embeddingResult.semanticDensityScores)
-                      : undefined,
-                    claimSemanticDensity: claimDensityScores?.size > 0
-                      ? Object.fromEntries(claimDensityScores)
-                      : undefined,
-                  });
-
-
-
-                  mapperArtifact = assemblyResult.mapperArtifact;
-                  cognitiveArtifact = assemblyResult.cognitiveArtifact;
-                  const { cachedStructuralAnalysis } = assemblyResult;
-
-                  // ── POST-ASSEMBLY MUTATIONS (StepExecutor-only) ────────────
-                  if (paragraphResult?.meta) mapperArtifact.paragraphProjection = paragraphResult.meta;
-                  if (substrateSummary) mapperArtifact.substrate = substrateSummary;
-
-                  // Stamp sourceCoherence per claim (pairwise cosine similarity of source statement embeddings)
-                  if (mapperArtifact) {
-                    try {
-                      const embMap = statementEmbeddingResult?.embeddings;
-                      if (embMap) {
-                        for (const c of (mapperArtifact.claims ?? [])) {
-                          const sids = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
-                          const vecs = [];
-                          for (const sid of sids) {
-                            const v = embMap.get(String(sid || '').trim());
-                            if (v) vecs.push(v);
-                          }
-                          if (vecs.length >= 2) {
-                            const sims = [];
-                            for (let i = 0; i < vecs.length; i++) {
-                              for (let j = i + 1; j < vecs.length; j++) {
-                                const a = vecs[i], b = vecs[j];
-                                const n = Math.min(a.length, b.length);
-                                let dot = 0, na2 = 0, nb2 = 0;
-                                for (let k = 0; k < n; k++) {
-                                  dot += a[k] * b[k];
-                                  na2 += a[k] * a[k];
-                                  nb2 += b[k] * b[k];
-                                }
-                                if (na2 > 0 && nb2 > 0) sims.push(dot / (Math.sqrt(na2) * Math.sqrt(nb2)));
-                              }
-                            }
-                            if (sims.length > 0) {
-                              c.sourceCoherence = sims.reduce((s, x) => s + x, 0) / sims.length;
-                            }
-                          }
-                        }
-                      }
-                    } catch (err) {
-                      console.error('[StepExecutor] sourceCoherence stamp failed', err);
-                    }
-
-                    const mapperArtifact_claimProvenance = preSurvey.derived.claimProvenance;
-                    if (mapperArtifact_claimProvenance) {
-                      mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
-                    }
-                  }
-
-                  // ── EDITORIAL MODEL CALL (StepExecutor-only) ──────────────
-                  if (mapperArtifact && preSurvey?.derived) {
-                    try {
-                      const { buildSourceContinuityMap } = await import('../passageRouting');
-                      const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-                        await import('../../ConciergeService/editorialMapper');
-
-                      const continuityMap = buildSourceContinuityMap(preSurvey.derived.claimDensityResult);
-                      const { buildCitationSourceOrder: bCSO } = await import('../../../shared/provider-config');
-                      const editorialCitationSourceOrder = bCSO(citationOrder);
-                      const { passages: indexedPassages, unclaimed: indexedUnclaimed } = buildPassageIndex(
-                        preSurvey.derived.claimDensityResult,
-                        preSurvey.derived.passageRoutingResult,
-                        preSurvey.derived.statementClassification,
-                        { paragraphs: paragraphResult?.paragraphs ?? [] },
-                        enrichedClaims,
-                        editorialCitationSourceOrder,
-                        continuityMap,
-                      );
-
-                      const validPassageKeys = new Set(indexedPassages.map(p => p.passageKey));
-                      const validUnclaimedKeys = new Set(indexedUnclaimed.map(u => u.groupKey));
-
-                      // Build corpus shape summary
-                      const concentrations = indexedPassages.map(p => p.concentrationRatio);
-                      const landscapeComp = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
-                      indexedPassages.forEach(p => { landscapeComp[p.landscapePosition]++; });
-
-                      const editorialPrompt = buildEditorialPrompt(
-                        payload.originalPrompt,
-                        indexedPassages,
-                        indexedUnclaimed,
-                        {
-                          passageCount: indexedPassages.length,
-                          claimCount: enrichedClaims.length,
-                          conflictCount: preSurvey.derived.passageRoutingResult?.routing?.conflictClusters?.length ?? 0,
-                          concentrationSpread: {
-                            min: concentrations.length ? Math.min(...concentrations) : 0,
-                            max: concentrations.length ? Math.max(...concentrations) : 0,
-                            mean: concentrations.length ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length : 0,
-                          },
-                          landscapeComposition: landscapeComp,
-                        },
-                      );
-
-                      // Fire LLM call (same pattern as survey mapper)
-                      const editorialResult = await runWithProviderHealth(
-                        this.healthTracker,
-                        payload.mappingProvider,
-                        'Editorial',
-                        () => new Promise((resolveEditorial, rejectEditorial) => {
-                        this.orchestrator.executeParallelFanout(
-                          editorialPrompt,
-                          [payload.mappingProvider],
-                          {
-                            sessionId: context.sessionId,
-                            useThinking: false,
-                            providerContexts: semanticContinuationMeta
-                              ? { [payload.mappingProvider]: { meta: semanticContinuationMeta, continueThread: true } }
-                              : mappingProviderContexts,
-                            onPartial: () => {},
-                            onAllComplete: async (results, errors) => {
-                              const result = results?.get?.(payload.mappingProvider);
-                              const err = errors?.get?.(payload.mappingProvider);
-                              if (result?.text) resolveEditorial({ text: result.text, meta: result.meta });
-                              else if (err) rejectEditorial(err);
-                              else resolveEditorial({ text: '' });
-                            },
-                            onError: (e) => rejectEditorial(e),
-                          },
-                        );
-                        }),
-                        { nonBlocking: true },
-                      ).catch((err) => {
-                        console.warn('[StepExecutor] Editorial model (non-blocking):', err?.message || err);
-                        return { text: '' };
-                      });
-
-                      if (editorialResult?.text) {
-                        const parsed = parseEditorialOutput(editorialResult.text, validPassageKeys, validUnclaimedKeys);
-                        if (parsed.success && parsed.ast) {
-                          if (cognitiveArtifact) cognitiveArtifact.editorialAST = parsed.ast;
-                          console.log(`[StepExecutor] Editorial AST: ${parsed.ast.threads.length} thread(s), ${parsed.errors.length} warning(s)`);
-                        } else {
-                          console.warn('[StepExecutor] Editorial parse failed:', parsed.errors);
-                        }
-
-                        // Persist editorial raw text as a provider response (same pattern as batch/mapping)
-                        if (options.sessionManager?.adapter && context.canonicalAiTurnId) {
-                          try {
-                            const now = Date.now();
-                            const editorialRespId = `pr-${context.sessionId}-${context.canonicalAiTurnId}-${payload.mappingProvider}-editorial-0-${now}`;
-                            await options.sessionManager.adapter.put('provider_responses', {
-                              id: editorialRespId,
-                              sessionId: context.sessionId,
-                              aiTurnId: context.canonicalAiTurnId,
-                              providerId: payload.mappingProvider,
-                              responseType: 'editorial',
-                              responseIndex: 0,
-                              text: editorialResult.text,
-                              status: 'completed',
-                              meta: editorialResult.meta || {},
-                              createdAt: now,
-                              updatedAt: now,
-                              completedAt: now,
-                            });
-                            console.log(`[StepExecutor] Persisted editorial response for provider ${payload.mappingProvider}`);
-                          } catch (persistErr) {
-                            console.warn('[StepExecutor] Editorial persistence (non-blocking):', persistErr?.message || persistErr);
-                          }
-                        }
-                      }
-                    } catch (err) {
-                      console.warn('[StepExecutor] Editorial model (non-blocking):', err?.message || err);
-                      // Editorial failure is non-blocking — artifact ships without AST
-                    }
-                  }
-
-                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${(mapperArtifact.edges?.length || 0)} edges`);
-                } catch (err) {
-                  console.error('[StepExecutor] Pre-survey pipeline failed (recoverable via regenerate-embeddings):', getErrorMessage(err));
-                  // Don't throw — let the turn complete with raw text.
-                  // Batch responses are already persisted, so regenerate-embeddings
-                  // can rebuild the full pipeline from saved data + fresh embeddings.
-                }
-
-              } else {
-                console.warn("[StepExecutor] Semantic Mapper parsing failed:", parseResult.errors);
-              }
-
-              // Process raw text for clean display
-              const processed = artifactProcessor.process(finalResult.text);
-              finalResult.text = processed.cleanText;
-              finalResult.artifacts = processed.artifacts;
-
+      async () =>
+        new Promise((resolve, reject) => {
+          this.orchestrator.executeParallelFanout(mappingPrompt, [payload.mappingProvider], {
+            sessionId: context.sessionId,
+            useThinking: payload.useThinking,
+            providerContexts: mappingProviderContexts,
+            providerMeta: step?.payload?.providerMeta,
+            onPartial: (providerId, chunk) => {
               streamingManager.dispatchPartialDelta(
                 context.sessionId,
                 step.stepId,
-                payload.mappingProvider,
-                finalResult.text,
-                "Mapping",
-                true,
+                providerId,
+                chunk.text,
+                'Mapping'
               );
-            }
+            },
+            onAllComplete: async (results, errors) => {
+              let finalResult = results.get(payload.mappingProvider);
+              const providerError = errors?.get?.(payload.mappingProvider);
 
-            if (!finalResult || !finalResult.text) {
-              if (providerError) {
-                reject(providerError);
-              } else {
-                const emptyErr = new Error(
-                  `Mapping provider ${payload.mappingProvider} returned empty response`,
-                );
-                reject(
-                  emptyErr,
-                );
-              }
-              return;
-            }
-
-            const { buildCitationSourceOrder } = await import('../../../shared/provider-config');
-            const citationSourceOrder = buildCitationSourceOrder(citationOrder);
-
-            if (mapperArtifact && typeof mapperArtifact === 'object') {
-              mapperArtifact.citationSourceOrder = citationSourceOrder;
-            }
-            if (cognitiveArtifact && typeof cognitiveArtifact === 'object') {
-              cognitiveArtifact.citationSourceOrder = citationSourceOrder;
-            }
-
-            const providerThreadMeta = (() => {
-              try {
-                const meta = finalResult?.meta;
-                if (meta && typeof meta === 'object') return { ...meta };
-              } catch (_) { }
-              return {};
-            })();
-
-            const finalResultWithMeta = {
-              ...finalResult,
-              meta: {
-                ...providerThreadMeta,
-                citationSourceOrder,
-                rawMappingText: rawText,
-                semanticMapperPrompt: mappingPrompt,
-              },
-            };
-
-            try {
-              if (finalResultWithMeta?.meta) {
-                workflowContexts[payload.mappingProvider] =
-                  providerThreadMeta;
-              }
-            } catch (_) { }
-
-            // Persist semantic mapper's thread position for the next extend turn.
-            // If survey mapper runs it will overwrite this with the more recent cursor.
-            try {
-              if (providerThreadMeta && Object.keys(providerThreadMeta).length > 0) {
-                await options.persistenceCoordinator.persistProviderContexts(
+              if ((!finalResult || !finalResult.text) && providerError) {
+                const recovered = streamingManager.getRecoveredText(
                   context.sessionId,
-                  { [payload.mappingProvider]: { text: '', meta: providerThreadMeta } },
-                  "batch",
+                  step.stepId,
+                  payload.mappingProvider
+                );
+
+                if (recovered && recovered.trim().length > 0) {
+                  finalResult = finalResult || { providerId: payload.mappingProvider, meta: {} };
+                  finalResult.text = recovered;
+                  finalResult.softError = finalResult.softError || {
+                    message: providerError?.message || String(providerError),
+                  };
+                }
+              }
+
+              let mapperArtifact = null;
+              let cognitiveArtifact = null;
+              const rawText = finalResult?.text || '';
+              let structuralValidation = null;
+
+              if (finalResult?.text) {
+                // 4. Parse (New Parser) — no geometry dependency
+                const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
+
+                if (parseResult.success && parseResult.output) {
+                  // Wait for geometry — assembly needs embeddings, regions, substrate
+                  try {
+                    await geometryPromise;
+                  } catch (_) {}
+
+                  try {
+                    // ── PRE-SURVEY PIPELINE (shared with regenerate flow) ──
+                    const { computePreSurveyPipeline, assembleFromPreSurvey } =
+                      await import('./deterministicPipeline');
+
+                    const preSurvey = await computePreSurveyPipeline({
+                      parsedMappingResult: {
+                        ...parseResult.output,
+                        narrative: parseResult.narrative || '',
+                      },
+                      shadowStatements: shadowResult.statements,
+                      shadowParagraphs: paragraphResult.paragraphs,
+                      statementEmbeddings: statementEmbeddingResult?.embeddings || new Map(),
+                      paragraphEmbeddings: embeddingResult?.embeddings || new Map(),
+                      queryEmbedding,
+                      preBuiltSubstrate: substrate,
+                      preBuiltPreSemantic: preSemanticInterpretation,
+                      preBuiltQueryRelevance: queryRelevance,
+                      preBuiltBasinInversion: basinInversionResult,
+                      preBuiltBayesianBasinInversion: bayesianBasinInversionResult,
+                      queryText: payload.originalPrompt,
+                      modelCount: citationOrder.length,
+                      turn: context.turn || 0,
+                    });
+
+                    const { enrichedClaims, claimRouting, claimEmbeddings, claimDensityScores } =
+                      preSurvey;
+
+                    // ── PERSIST CLAIM EMBEDDINGS (StepExecutor-only) ──────────
+                    try {
+                      if (
+                        claimEmbeddings &&
+                        claimEmbeddings.size > 0 &&
+                        options.sessionManager &&
+                        context.canonicalAiTurnId
+                      ) {
+                        const { packEmbeddingMap } =
+                          await import('../../persistence/embeddingCodec');
+                        let dims = 0;
+                        for (const v of claimEmbeddings.values()) {
+                          const n = v?.length;
+                          if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
+                            dims = n;
+                            break;
+                          }
+                        }
+                        if (dims > 0) {
+                          const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
+                          options.sessionManager
+                            .persistClaimEmbeddings(
+                              context.canonicalAiTurnId,
+                              payload.mappingProvider,
+                              {
+                                claimEmbeddings: packedClaims.buffer,
+                                meta: {
+                                  dimensions: dims,
+                                  claimCount: packedClaims.index.length,
+                                  claimIndex: packedClaims.index,
+                                  timestamp: Date.now(),
+                                },
+                              }
+                            )
+                            .catch((err) =>
+                              console.warn(
+                                '[StepExecutor] Claim embedding persistence failed:',
+                                err
+                              )
+                            );
+                        } else {
+                          console.warn(
+                            `[StepExecutor] Claim embedding persistence skipped: invalid dimensions (aiTurnId=${context.canonicalAiTurnId}, provider=${payload.mappingProvider})`
+                          );
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('[StepExecutor] Claim embedding persistence setup failed:', err);
+                    }
+
+                    const semanticContinuationMeta = (() => {
+                      try {
+                        const meta = finalResult?.meta;
+                        if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+                          return { ...meta };
+                        }
+                      } catch (_) {}
+                      return null;
+                    })();
+
+                    // ── POST-SEMANTIC ASSEMBLY ────────────────────────────────
+                    const assemblyResult = await assembleFromPreSurvey(preSurvey, {
+                      queryText: payload.originalPrompt,
+                      modelCount: citationOrder.length,
+                      turn: context.turn || 0,
+                      statementSemanticDensity:
+                        statementEmbeddingResult?.semanticDensityScores?.size > 0
+                          ? Object.fromEntries(statementEmbeddingResult.semanticDensityScores)
+                          : undefined,
+                      paragraphSemanticDensity:
+                        embeddingResult?.semanticDensityScores?.size > 0
+                          ? Object.fromEntries(embeddingResult.semanticDensityScores)
+                          : undefined,
+                      claimSemanticDensity:
+                        claimDensityScores?.size > 0
+                          ? Object.fromEntries(claimDensityScores)
+                          : undefined,
+                    });
+
+                    mapperArtifact = assemblyResult.mapperArtifact;
+                    cognitiveArtifact = assemblyResult.cognitiveArtifact;
+                    const { cachedStructuralAnalysis } = assemblyResult;
+
+                    // ── POST-ASSEMBLY MUTATIONS (StepExecutor-only) ────────────
+                    if (paragraphResult?.meta)
+                      mapperArtifact.paragraphProjection = paragraphResult.meta;
+                    if (substrateSummary) mapperArtifact.substrate = substrateSummary;
+
+                    // Stamp sourceCoherence per claim (pairwise cosine similarity of source statement embeddings)
+                    if (mapperArtifact) {
+                      try {
+                        const embMap = statementEmbeddingResult?.embeddings;
+                        if (embMap) {
+                          for (const c of mapperArtifact.claims ?? []) {
+                            const sids = Array.isArray(c?.sourceStatementIds)
+                              ? c.sourceStatementIds
+                              : [];
+                            const vecs = [];
+                            for (const sid of sids) {
+                              const v = embMap.get(String(sid || '').trim());
+                              if (v) vecs.push(v);
+                            }
+                            if (vecs.length >= 2) {
+                              const sims = [];
+                              for (let i = 0; i < vecs.length; i++) {
+                                for (let j = i + 1; j < vecs.length; j++) {
+                                  const a = vecs[i],
+                                    b = vecs[j];
+                                  const n = Math.min(a.length, b.length);
+                                  let dot = 0,
+                                    na2 = 0,
+                                    nb2 = 0;
+                                  for (let k = 0; k < n; k++) {
+                                    dot += a[k] * b[k];
+                                    na2 += a[k] * a[k];
+                                    nb2 += b[k] * b[k];
+                                  }
+                                  if (na2 > 0 && nb2 > 0)
+                                    sims.push(dot / (Math.sqrt(na2) * Math.sqrt(nb2)));
+                                }
+                              }
+                              if (sims.length > 0) {
+                                c.sourceCoherence = sims.reduce((s, x) => s + x, 0) / sims.length;
+                              }
+                            }
+                          }
+                        }
+                      } catch (err) {
+                        console.error('[StepExecutor] sourceCoherence stamp failed', err);
+                      }
+
+                      const mapperArtifact_claimProvenance = preSurvey.derived.claimProvenance;
+                      if (mapperArtifact_claimProvenance) {
+                        mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
+                      }
+                    }
+
+                    // ── EDITORIAL MODEL CALL (StepExecutor-only) ──────────────
+                    if (mapperArtifact && preSurvey?.derived) {
+                      try {
+                        const { buildSourceContinuityMap } = await import('../passageRouting');
+                        const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
+                          await import('../../ConciergeService/editorialMapper');
+
+                        const continuityMap = buildSourceContinuityMap(
+                          preSurvey.derived.claimDensityResult
+                        );
+                        const { buildCitationSourceOrder: bCSO } =
+                          await import('../../../shared/provider-config');
+                        const editorialCitationSourceOrder = bCSO(citationOrder);
+                        const { passages: indexedPassages, unclaimed: indexedUnclaimed } =
+                          buildPassageIndex(
+                            preSurvey.derived.claimDensityResult,
+                            preSurvey.derived.passageRoutingResult,
+                            preSurvey.derived.statementClassification,
+                            { paragraphs: paragraphResult?.paragraphs ?? [] },
+                            enrichedClaims,
+                            editorialCitationSourceOrder,
+                            continuityMap
+                          );
+
+                        const validPassageKeys = new Set(indexedPassages.map((p) => p.passageKey));
+                        const validUnclaimedKeys = new Set(indexedUnclaimed.map((u) => u.groupKey));
+
+                        // Build corpus shape summary
+                        const concentrations = indexedPassages.map((p) => p.concentrationRatio);
+                        const landscapeComp = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
+                        indexedPassages.forEach((p) => {
+                          landscapeComp[p.landscapePosition]++;
+                        });
+
+                        const editorialPrompt = buildEditorialPrompt(
+                          payload.originalPrompt,
+                          indexedPassages,
+                          indexedUnclaimed,
+                          {
+                            passageCount: indexedPassages.length,
+                            claimCount: enrichedClaims.length,
+                            conflictCount:
+                              preSurvey.derived.passageRoutingResult?.routing?.conflictClusters
+                                ?.length ?? 0,
+                            concentrationSpread: {
+                              min: concentrations.length ? Math.min(...concentrations) : 0,
+                              max: concentrations.length ? Math.max(...concentrations) : 0,
+                              mean: concentrations.length
+                                ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length
+                                : 0,
+                            },
+                            landscapeComposition: landscapeComp,
+                          }
+                        );
+
+                        // Fire LLM call (same pattern as survey mapper)
+                        const editorialResult = await runWithProviderHealth(
+                          this.healthTracker,
+                          payload.mappingProvider,
+                          'Editorial',
+                          () =>
+                            new Promise((resolveEditorial, rejectEditorial) => {
+                              this.orchestrator.executeParallelFanout(
+                                editorialPrompt,
+                                [payload.mappingProvider],
+                                {
+                                  sessionId: context.sessionId,
+                                  useThinking: false,
+                                  providerContexts: semanticContinuationMeta
+                                    ? {
+                                        [payload.mappingProvider]: {
+                                          meta: semanticContinuationMeta,
+                                          continueThread: true,
+                                        },
+                                      }
+                                    : mappingProviderContexts,
+                                  onPartial: () => {},
+                                  onAllComplete: async (results, errors) => {
+                                    const result = results?.get?.(payload.mappingProvider);
+                                    const err = errors?.get?.(payload.mappingProvider);
+                                    if (result?.text)
+                                      resolveEditorial({ text: result.text, meta: result.meta });
+                                    else if (err) rejectEditorial(err);
+                                    else resolveEditorial({ text: '' });
+                                  },
+                                  onError: (e) => rejectEditorial(e),
+                                }
+                              );
+                            }),
+                          { nonBlocking: true }
+                        ).catch((err) => {
+                          console.warn(
+                            '[StepExecutor] Editorial model (non-blocking):',
+                            err?.message || err
+                          );
+                          return { text: '' };
+                        });
+
+                        if (editorialResult?.text) {
+                          const parsed = parseEditorialOutput(
+                            editorialResult.text,
+                            validPassageKeys,
+                            validUnclaimedKeys
+                          );
+                          if (parsed.success && parsed.ast) {
+                            if (cognitiveArtifact) cognitiveArtifact.editorialAST = parsed.ast;
+                            console.log(
+                              `[StepExecutor] Editorial AST: ${parsed.ast.threads.length} thread(s), ${parsed.errors.length} warning(s)`
+                            );
+                          } else {
+                            console.warn('[StepExecutor] Editorial parse failed:', parsed.errors);
+                          }
+
+                          // Persist editorial raw text as a provider response (same pattern as batch/mapping)
+                          if (options.sessionManager?.adapter && context.canonicalAiTurnId) {
+                            try {
+                              const now = Date.now();
+                              const editorialRespId = `pr-${context.sessionId}-${context.canonicalAiTurnId}-${payload.mappingProvider}-editorial-0-${now}`;
+                              await options.sessionManager.adapter.put('provider_responses', {
+                                id: editorialRespId,
+                                sessionId: context.sessionId,
+                                aiTurnId: context.canonicalAiTurnId,
+                                providerId: payload.mappingProvider,
+                                responseType: 'editorial',
+                                responseIndex: 0,
+                                text: editorialResult.text,
+                                status: 'completed',
+                                meta: editorialResult.meta || {},
+                                createdAt: now,
+                                updatedAt: now,
+                                completedAt: now,
+                              });
+                              console.log(
+                                `[StepExecutor] Persisted editorial response for provider ${payload.mappingProvider}`
+                              );
+                            } catch (persistErr) {
+                              console.warn(
+                                '[StepExecutor] Editorial persistence (non-blocking):',
+                                persistErr?.message || persistErr
+                              );
+                            }
+                          }
+                        }
+                      } catch (err) {
+                        console.warn(
+                          '[StepExecutor] Editorial model (non-blocking):',
+                          err?.message || err
+                        );
+                        // Editorial failure is non-blocking — artifact ships without AST
+                      }
+                    }
+
+                    console.log(
+                      `[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${mapperArtifact.edges?.length || 0} edges`
+                    );
+                  } catch (err) {
+                    console.error(
+                      '[StepExecutor] Pre-survey pipeline failed (recoverable via regenerate-embeddings):',
+                      getErrorMessage(err)
+                    );
+                    // Don't throw — let the turn complete with raw text.
+                    // Batch responses are already persisted, so regenerate-embeddings
+                    // can rebuild the full pipeline from saved data + fresh embeddings.
+                  }
+                } else {
+                  console.warn(
+                    '[StepExecutor] Semantic Mapper parsing failed:',
+                    parseResult.errors
+                  );
+                }
+
+                // Process raw text for clean display
+                const processed = artifactProcessor.process(finalResult.text);
+                finalResult.text = processed.cleanText;
+                finalResult.artifacts = processed.artifacts;
+
+                streamingManager.dispatchPartialDelta(
+                  context.sessionId,
+                  step.stepId,
+                  payload.mappingProvider,
+                  finalResult.text,
+                  'Mapping',
+                  true
                 );
               }
-            } catch (ctxErr) {
-              console.warn('[StepExecutor] Provider context persistence failed (non-blocking):', getErrorMessage(ctxErr));
-            }
 
-            resolve({
-              providerId: payload.mappingProvider,
-              text: finalResultWithMeta.text,
-              status: "completed",
-              meta: finalResultWithMeta.meta || {},
-              artifacts: finalResult.artifacts || [],
-              ...(cognitiveArtifact ? { mapping: { artifact: cognitiveArtifact } } : {}),
-              ...(finalResult.softError ? { softError: finalResult.softError } : {}),
-            });
-          },
-        },
-      );
-      }),
+              if (!finalResult || !finalResult.text) {
+                if (providerError) {
+                  reject(providerError);
+                } else {
+                  const emptyErr = new Error(
+                    `Mapping provider ${payload.mappingProvider} returned empty response`
+                  );
+                  reject(emptyErr);
+                }
+                return;
+              }
+
+              const { buildCitationSourceOrder } = await import('../../../shared/provider-config');
+              const citationSourceOrder = buildCitationSourceOrder(citationOrder);
+
+              if (mapperArtifact && typeof mapperArtifact === 'object') {
+                mapperArtifact.citationSourceOrder = citationSourceOrder;
+              }
+              if (cognitiveArtifact && typeof cognitiveArtifact === 'object') {
+                cognitiveArtifact.citationSourceOrder = citationSourceOrder;
+              }
+
+              const providerThreadMeta = (() => {
+                try {
+                  const meta = finalResult?.meta;
+                  if (meta && typeof meta === 'object') return { ...meta };
+                } catch (_) {}
+                return {};
+              })();
+
+              const finalResultWithMeta = {
+                ...finalResult,
+                meta: {
+                  ...providerThreadMeta,
+                  citationSourceOrder,
+                  rawMappingText: rawText,
+                  semanticMapperPrompt: mappingPrompt,
+                },
+              };
+
+              try {
+                if (finalResultWithMeta?.meta) {
+                  workflowContexts[payload.mappingProvider] = providerThreadMeta;
+                }
+              } catch (_) {}
+
+              // Persist semantic mapper's thread position for the next extend turn.
+              // If survey mapper runs it will overwrite this with the more recent cursor.
+              try {
+                if (providerThreadMeta && Object.keys(providerThreadMeta).length > 0) {
+                  await options.persistenceCoordinator.persistProviderContexts(
+                    context.sessionId,
+                    { [payload.mappingProvider]: { text: '', meta: providerThreadMeta } },
+                    'batch'
+                  );
+                }
+              } catch (ctxErr) {
+                console.warn(
+                  '[StepExecutor] Provider context persistence failed (non-blocking):',
+                  getErrorMessage(ctxErr)
+                );
+              }
+
+              resolve({
+                providerId: payload.mappingProvider,
+                text: finalResultWithMeta.text,
+                status: 'completed',
+                meta: finalResultWithMeta.meta || {},
+                artifacts: finalResult.artifacts || [],
+                ...(cognitiveArtifact ? { mapping: { artifact: cognitiveArtifact } } : {}),
+                ...(finalResult.softError ? { softError: finalResult.softError } : {}),
+              });
+            },
+          });
+        })
     );
   }
   async _resolveSourceData(payload, context, previousResults, options) {
@@ -1444,49 +1588,54 @@ export class StepExecutor {
     if (payload.sourceHistorical) {
       // Historical source
       const { turnId, responseType } = payload.sourceHistorical;
-      console.log(
-        `[StepExecutor] Resolving historical data from turn: ${turnId} `,
-      );
+      console.log(`[StepExecutor] Resolving historical data from turn: ${turnId} `);
 
       // Prefer adapter lookup
       let aiTurn = null;
       try {
         const adapter = sessionManager?.adapter;
         if (adapter?.isReady && adapter.isReady()) {
-          const turn = await adapter.get("turns", turnId);
-          if (turn && (turn.type === "ai" || turn.role === "assistant")) {
+          const turn = await adapter.get('turns', turnId);
+          if (turn && (turn.type === 'ai' || turn.role === 'assistant')) {
             aiTurn = turn;
-          } else if (turn && turn.type === "user") {
+          } else if (turn && turn.type === 'user') {
             try {
               const sessionTurns = await adapter.getTurnsBySessionId(context.sessionId);
               if (Array.isArray(sessionTurns)) {
-                const userIdx = sessionTurns.findIndex(t => t.id === turnId);
+                const userIdx = sessionTurns.findIndex((t) => t.id === turnId);
                 if (userIdx !== -1) {
                   const next = sessionTurns[userIdx + 1];
-                  if (next && (next.type === "ai" || next.role === "assistant")) {
+                  if (next && (next.type === 'ai' || next.role === 'assistant')) {
                     aiTurn = next;
                   }
                 }
               }
-            } catch (ignored) { }
+            } catch (ignored) {}
           }
         }
       } catch (e) {
-        console.warn("[StepExecutor] resolveSourceData adapter lookup failed:", e);
+        console.warn('[StepExecutor] resolveSourceData adapter lookup failed:', e);
       }
 
       if (!aiTurn) {
         // Try text matching fallback if ID lookup failed (via adapter)
-        const fallbackText = context?.userMessage || "";
-        if (fallbackText && fallbackText.trim().length > 0 && sessionManager?.adapter?.isReady && sessionManager.adapter.isReady()) {
+        const fallbackText = context?.userMessage || '';
+        if (
+          fallbackText &&
+          fallbackText.trim().length > 0 &&
+          sessionManager?.adapter?.isReady &&
+          sessionManager.adapter.isReady()
+        ) {
           try {
-            const sessionTurns = await sessionManager.adapter.getTurnsBySessionId(context.sessionId);
+            const sessionTurns = await sessionManager.adapter.getTurnsBySessionId(
+              context.sessionId
+            );
             if (Array.isArray(sessionTurns)) {
               for (let i = 0; i < sessionTurns.length; i++) {
                 const t = sessionTurns[i];
-                if (t && t.type === "user" && String(t.text || "") === String(fallbackText)) {
+                if (t && t.type === 'user' && String(t.text || '') === String(fallbackText)) {
                   const next = sessionTurns[i + 1];
-                  if (next && next.type === "ai") {
+                  if (next && next.type === 'ai') {
                     aiTurn = next;
                     break;
                   }
@@ -1494,7 +1643,10 @@ export class StepExecutor {
               }
             }
           } catch (e) {
-            console.warn(`[StepExecutor] Could not find corresponding AI turn for ${turnId} (text fallback failed):`, e);
+            console.warn(
+              `[StepExecutor] Could not find corresponding AI turn for ${turnId} (text fallback failed):`,
+              e
+            );
             aiTurn = null;
           }
         }
@@ -1507,20 +1659,24 @@ export class StepExecutor {
 
       let sourceContainer;
       switch (responseType) {
-        case "mapping": sourceContainer = aiTurn.mappingResponses || {}; break;
-        default: sourceContainer = aiTurn.batchResponses || {}; break;
+        case 'mapping':
+          sourceContainer = aiTurn.mappingResponses || {};
+          break;
+        default:
+          sourceContainer = aiTurn.batchResponses || {};
+          break;
       }
 
       const latestMap = new Map();
-      Object.keys(sourceContainer).forEach(pid => {
+      Object.keys(sourceContainer).forEach((pid) => {
         const versions = (sourceContainer[pid] || [])
-          .filter(r => r.status === "completed" && r.text?.trim())
+          .filter((r) => r.status === 'completed' && r.text?.trim())
           .sort((a, b) => (b.responseIndex || 0) - (a.responseIndex || 0));
 
         if (versions.length > 0) {
           latestMap.set(pid, {
             providerId: pid,
-            text: versions[0].text
+            text: versions[0].text,
           });
         }
       });
@@ -1534,52 +1690,47 @@ export class StepExecutor {
         sessionManager.adapter.isReady()
       ) {
         try {
-          const responses = await sessionManager.adapter.getResponsesByTurnId(
-            aiTurn.id,
-          );
+          const responses = await sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
 
-          const respType = responseType || "batch";
+          const respType = responseType || 'batch';
           const dbLatestMap = new Map();
 
           (responses || [])
-            .filter(r => r?.responseType === respType && r.text?.trim())
-            .forEach(r => {
+            .filter((r) => r?.responseType === respType && r.text?.trim())
+            .forEach((r) => {
               const existing = dbLatestMap.get(r.providerId);
               if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
                 dbLatestMap.set(r.providerId, r);
               }
             });
 
-          sourceArray = Array.from(dbLatestMap.values()).map(r => ({
+          sourceArray = Array.from(dbLatestMap.values()).map((r) => ({
             providerId: r.providerId,
-            text: r.text
+            text: r.text,
           }));
           if (sourceArray.length > 0) {
             console.log(
-              "[StepExecutor] provider_responses fallback succeeded for historical sources",
+              '[StepExecutor] provider_responses fallback succeeded for historical sources'
             );
           }
         } catch (e) {
           console.warn(
-            "[StepExecutor] provider_responses fallback failed for historical sources:",
-            e,
+            '[StepExecutor] provider_responses fallback failed for historical sources:',
+            e
           );
         }
       }
 
-      console.log(
-        `[StepExecutor] Found ${sourceArray.length} historical sources`,
-      );
+      console.log(`[StepExecutor] Found ${sourceArray.length} historical sources`);
       return sourceArray;
-
     } else if (payload.sourceStepIds) {
       const sourceArray = [];
       for (const stepId of payload.sourceStepIds) {
         const stepResult = previousResults.get(stepId);
-        if (!stepResult || stepResult.status !== "completed") continue;
+        if (!stepResult || stepResult.status !== 'completed') continue;
         const { results } = stepResult.result;
         Object.entries(results).forEach(([providerId, result]) => {
-          if (result.status === "completed" && result.text && result.text.trim().length > 0) {
+          if (result.status === 'completed' && result.text && result.text.trim().length > 0) {
             sourceArray.push({
               providerId: providerId,
               text: result.text,
@@ -1589,10 +1740,18 @@ export class StepExecutor {
       }
       return sourceArray;
     }
-    throw new Error("No valid source specified for step.");
+    throw new Error('No valid source specified for step.');
   }
 
-  async _executeGenericSingleStep(step, context, providerId, prompt, stepType, options, parseOutputFn) {
+  async _executeGenericSingleStep(
+    step,
+    context,
+    providerId,
+    prompt,
+    stepType,
+    options,
+    parseOutputFn
+  ) {
     const { streamingManager, persistenceCoordinator, sessionManager } = options;
     const { payload } = step;
 
@@ -1601,8 +1760,12 @@ export class StepExecutor {
     // 1. Check Limits
     const limits = PROVIDER_LIMITS[providerId];
     if (limits && prompt.length > limits.maxInputChars) {
-      console.warn(`[StepExecutor] ${stepType} prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
-      throw new Error(`INPUT_TOO_LONG: Prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+      console.warn(
+        `[StepExecutor] ${stepType} prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`
+      );
+      throw new Error(
+        `INPUT_TOO_LONG: Prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`
+      );
     }
 
     const resolveProviderContextsForPid = async (pid) => {
@@ -1611,30 +1774,38 @@ export class StepExecutor {
       const explicit = payload?.providerContexts;
 
       // If we have an explicit context for the scoped ID, use it
-      if (explicit && typeof explicit === "object" && explicit[effectivePid]) {
+      if (explicit && typeof explicit === 'object' && explicit[effectivePid]) {
         const entry = explicit[effectivePid];
-        const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
-        const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
+        const meta = entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
+        const continueThread =
+          entry && typeof entry === 'object' && 'continueThread' in entry
+            ? entry.continueThread
+            : true;
         return { [pid]: { meta, continueThread } };
       }
 
       // Fallback: check for the raw pid (legacy or default)
-      if (explicit && typeof explicit === "object" && explicit[pid]) {
+      if (explicit && typeof explicit === 'object' && explicit[pid]) {
         const entry = explicit[pid];
-        const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
-        const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
+        const meta = entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
+        const continueThread =
+          entry && typeof entry === 'object' && 'continueThread' in entry
+            ? entry.continueThread
+            : true;
         return { [pid]: { meta, continueThread } };
       }
 
       try {
         if (!sessionManager?.getProviderContexts) return undefined;
         // isolation: pass contextRole (e.g. "batch") to get only the scoped thread from DB
-        const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, { contextRole: options.contextRole });
+        const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, {
+          contextRole: options.contextRole,
+        });
         const meta = ctxs?.[pid]?.meta;
-        if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+        if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
           return { [pid]: { meta, continueThread: true } };
         }
-      } catch (_) { }
+      } catch (_) {}
 
       return undefined;
     };
@@ -1643,94 +1814,100 @@ export class StepExecutor {
       const providerContexts = await resolveProviderContextsForPid(pid);
 
       return new Promise((resolve, reject) => {
-        this.orchestrator.executeParallelFanout(
-          prompt,
-          [pid],
-          {
-            sessionId: context.sessionId,
-            useThinking: options.useThinking || payload.useThinking || false,
-            providerContexts,
-            onPartial: (id, chunk) => {
+        this.orchestrator.executeParallelFanout(prompt, [pid], {
+          sessionId: context.sessionId,
+          useThinking: options.useThinking || payload.useThinking || false,
+          providerContexts,
+          onPartial: (id, chunk) => {
+            streamingManager.dispatchPartialDelta(
+              context.sessionId,
+              step.stepId,
+              id,
+              chunk.text,
+              stepType
+            );
+          },
+          onAllComplete: async (results, errors) => {
+            let finalResult = results.get(pid);
+            const providerError = errors?.get?.(pid);
+
+            // 2. Partial Recovery
+            if ((!finalResult || !finalResult.text) && providerError) {
+              const recovered = streamingManager.getRecoveredText(
+                context.sessionId,
+                step.stepId,
+                pid
+              );
+              if (recovered && recovered.trim().length > 0) {
+                finalResult = finalResult || { providerId: pid, meta: {} };
+                finalResult.text = recovered;
+                finalResult.softError = finalResult.softError || {
+                  message: providerError?.message || String(providerError),
+                };
+              } else {
+                reject(providerError);
+                return;
+              }
+            }
+
+            if (finalResult?.text) {
+              // 3. Parse Output
+              let outputData = null;
+              try {
+                outputData = parseOutputFn(finalResult.text);
+                if (outputData && typeof outputData === 'object') {
+                  outputData.providerId = pid;
+                  if (outputData.pipeline && typeof outputData.pipeline === 'object') {
+                    outputData.pipeline.providerId = pid;
+                  }
+                }
+              } catch (parseErr) {
+                console.warn(`[StepExecutor] Output parsing failed for ${stepType}:`, parseErr);
+                // We continue with raw text if parsing fails, but mark it?
+                // For now, allow specific parsers to handle robustness or throw.
+              }
+
+              // Prefer cleaned text from outputData if available
+              const canonicalText =
+                (outputData &&
+                  typeof outputData === 'object' &&
+                  (outputData.text || outputData.cleanedText)) ||
+                finalResult.text;
+
               streamingManager.dispatchPartialDelta(
                 context.sessionId,
                 step.stepId,
-                id,
-                chunk.text,
-                stepType
+                pid,
+                canonicalText,
+                stepType,
+                true
               );
-            },
-            onAllComplete: async (results, errors) => {
-              let finalResult = results.get(pid);
-              const providerError = errors?.get?.(pid);
 
-              // 2. Partial Recovery
-              if ((!finalResult || !finalResult.text) && providerError) {
-                const recovered = streamingManager.getRecoveredText(
-                  context.sessionId, step.stepId, pid
-                );
-                if (recovered && recovered.trim().length > 0) {
-                  finalResult = finalResult || { providerId: pid, meta: {} };
-                  finalResult.text = recovered;
-                  finalResult.softError = finalResult.softError || {
-                    message: providerError?.message || String(providerError),
-                  };
-                } else {
-                  reject(providerError);
-                  return;
-                }
-              }
-
-              if (finalResult?.text) {
-                // 3. Parse Output
-                let outputData = null;
-                try {
-                  outputData = parseOutputFn(finalResult.text);
-                  if (outputData && typeof outputData === "object") {
-                    outputData.providerId = pid;
-                    if (outputData.pipeline && typeof outputData.pipeline === "object") {
-                      outputData.pipeline.providerId = pid;
-                    }
-                  }
-                } catch (parseErr) {
-                  console.warn(`[StepExecutor] Output parsing failed for ${stepType}:`, parseErr);
-                  // We continue with raw text if parsing fails, but mark it? 
-                  // For now, allow specific parsers to handle robustness or throw.
-                }
-
-                // Prefer cleaned text from outputData if available
-                const canonicalText = (outputData && typeof outputData === "object" && (outputData.text || outputData.cleanedText)) || finalResult.text;
-
-                streamingManager.dispatchPartialDelta(
-                  context.sessionId,
-                  step.stepId,
-                  pid,
-                  canonicalText,
-                  stepType,
-                  true
-                );
-
-                // 4. Persist Context — await so context is in IndexedDB before resolve
-                await persistenceCoordinator.persistProviderContexts(context.sessionId, {
+              // 4. Persist Context — await so context is in IndexedDB before resolve
+              await persistenceCoordinator.persistProviderContexts(
+                context.sessionId,
+                {
                   [pid]: finalResult,
-                }, options.contextRole);
+                },
+                options.contextRole
+              );
 
-                resolve({
-                  providerId: pid,
-                  text: finalResult.text,
-                  status: "completed",
-                  meta: {
-                    ...finalResult.meta,
-                    ...(outputData ? { [`${stepType.toLowerCase()}Output`]: outputData } : {})
-                  },
-                  output: outputData, // Standardize output access
-                  ...(finalResult.softError ? { softError: finalResult.softError } : {}),
-                });
-              } else {
-                reject(new Error(`Empty response from ${stepType} provider`));
-              }
+              resolve({
+                providerId: pid,
+                text: finalResult.text,
+                status: 'completed',
+                meta: {
+                  ...finalResult.meta,
+                  ...(outputData ? { [`${stepType.toLowerCase()}Output`]: outputData } : {}),
+                },
+                output: outputData, // Standardize output access
+                ...(finalResult.softError ? { softError: finalResult.softError } : {}),
+              });
+            } else {
+              reject(new Error(`Empty response from ${stepType} provider`));
             }
-          }
-        );
+          },
+        });
       });
     };
 
@@ -1742,22 +1919,27 @@ export class StepExecutor {
       return await wrappedRunRequest(providerId);
     } catch (error) {
       if (isProviderAuthError(error)) {
-        console.warn(`[StepExecutor] ${stepType} failed with auth error for ${providerId}, attempting fallback...`);
+        console.warn(
+          `[StepExecutor] ${stepType} failed with auth error for ${providerId}, attempting fallback...`
+        );
         const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
         if (fallbackStrategy) {
           try {
             const providerRegistry = this.orchestrator?.registry?.get?.('providerRegistry');
             const availableProviders = providerRegistry?.listProviders?.() || [];
-            const fallbackResolution = await fallbackStrategy(
-              stepType.toLowerCase(),
-              { failedProvider: providerId, availableProviders, authManager }
-            );
+            const fallbackResolution = await fallbackStrategy(stepType.toLowerCase(), {
+              failedProvider: providerId,
+              availableProviders,
+              authManager,
+            });
             const fallbackProvider =
               typeof fallbackResolution === 'string'
                 ? fallbackResolution
                 : fallbackResolution?.fallbackProvider;
             if (fallbackProvider) {
-              console.log(`[StepExecutor] Executing ${stepType} with fallback provider: ${fallbackProvider}`);
+              console.log(
+                `[StepExecutor] Executing ${stepType} with fallback provider: ${fallbackProvider}`
+              );
               return await wrappedRunRequest(fallbackProvider);
             }
           } catch (fallbackError) {
@@ -1779,7 +1961,7 @@ export class StepExecutor {
     let mappingArtifact = payload.mappingArtifact || null;
 
     if (!mappingArtifact) {
-      throw new Error("Singularity mode requires a mapping artifact.");
+      throw new Error('Singularity mode requires a mapping artifact.');
     }
 
     let ConciergeService;
@@ -1789,14 +1971,14 @@ export class StepExecutor {
       ConciergeService = module.ConciergeService;
       handoffV2Enabled = module.HANDOFF_V2_ENABLED === true;
     } catch (e) {
-      console.warn("[StepExecutor] Failed to import ConciergeService:", e);
+      console.warn('[StepExecutor] Failed to import ConciergeService:', e);
       ConciergeService = null;
     }
 
     let singularityPrompt;
 
     if (!ConciergeService) {
-      throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
+      throw new Error('ConciergeService is not available. Cannot execute Singularity step.');
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1807,33 +1989,37 @@ export class StepExecutor {
 
     if (options?.frozenSingularityPrompt) {
       singularityPrompt = options.frozenSingularityPrompt;
-    } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
+    } else if (payload.conciergePrompt && typeof payload.conciergePrompt === 'string') {
       singularityPrompt = payload.conciergePrompt;
     } else if (ConciergeService.buildConciergePrompt) {
       const userMessage = payload.originalPrompt;
-      const opts = promptSeed && typeof promptSeed === "object" ? { ...promptSeed } : {};
+      const opts = promptSeed && typeof promptSeed === 'object' ? { ...promptSeed } : {};
       singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, opts);
     }
 
     if (!singularityPrompt) {
-      throw new Error("Could not determine or build Singularity prompt.");
+      throw new Error('Could not determine or build Singularity prompt.');
     }
 
     const parseSingularityOutput = (text) => {
-      const rawText = String(text || "");
+      const rawText = String(text || '');
 
       let cleanedText = rawText;
       let signal = null;
 
       try {
-        if (handoffV2Enabled && ConciergeService && typeof ConciergeService.parseConciergeOutput === "function") {
+        if (
+          handoffV2Enabled &&
+          ConciergeService &&
+          typeof ConciergeService.parseConciergeOutput === 'function'
+        ) {
           const parsed = ConciergeService.parseConciergeOutput(rawText);
           if (parsed) {
             cleanedText = parsed.userResponse || cleanedText;
             signal = parsed.signal || null;
           }
         }
-      } catch (_) { }
+      } catch (_) {}
 
       const pipeline = {
         userMessage: payload.originalPrompt,
@@ -1858,14 +2044,18 @@ export class StepExecutor {
 
     // Store on context so callers (turnemitter, handleContinueRequest) can
     // surface the actual concierge prompt in the UI / debug panel.
-    if (context && typeof context === "object") {
+    if (context && typeof context === 'object') {
       context.singularityPromptUsed = singularityPrompt;
     }
 
     return this._executeGenericSingleStep(
-      step, context, payload.singularityProvider, singularityPrompt, "Singularity", { ...options, contextRole: "singularity" },
+      step,
+      context,
+      payload.singularityProvider,
+      singularityPrompt,
+      'Singularity',
+      { ...options, contextRole: 'singularity' },
       parseSingularityOutput
     );
   }
-
 }

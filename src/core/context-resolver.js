@@ -2,7 +2,7 @@
 import {
   aggregateBatchOutputs,
   findLatestMappingOutput,
-  extractUserMessage
+  extractUserMessage,
 } from './context-utils.js';
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
 import { parseSemanticMapperOutput } from '../../shared/parsing-utils.js';
@@ -31,27 +31,25 @@ export class ContextResolver {
    */
   async resolve(request) {
     if (!request || !request.type) {
-      throw new Error("[ContextResolver] request.type is required");
+      throw new Error('[ContextResolver] request.type is required');
     }
 
     switch (request.type) {
-      case "initialize":
+      case 'initialize':
         return this._resolveInitialize(request);
-      case "extend":
+      case 'extend':
         return this._resolveExtend(request);
-      case "recompute":
+      case 'recompute':
         return this._resolveRecompute(request);
       default:
-        throw new Error(
-          `[ContextResolver] Unknown request type: ${request.type}`,
-        );
+        throw new Error(`[ContextResolver] Unknown request type: ${request.type}`);
     }
   }
 
   // initialize: starting fresh
   async _resolveInitialize(request) {
     return {
-      type: "initialize",
+      type: 'initialize',
       providers: request.providers || [],
     };
   }
@@ -59,27 +57,19 @@ export class ContextResolver {
   // extend: fetch last turn and extract provider contexts for requested providers
   async _resolveExtend(request) {
     const { sessionId, threadId = DEFAULT_THREAD } = request;
-    if (!sessionId)
-      throw new Error("[ContextResolver] Extend requires sessionId");
+    if (!sessionId) throw new Error('[ContextResolver] Extend requires sessionId');
 
     const session = await this._getSessionMetadata(sessionId);
     if (!session || !session.lastTurnId) {
-      throw new Error(
-        `[ContextResolver] Cannot extend: no lastTurnId for session ${sessionId}`,
-      );
+      throw new Error(`[ContextResolver] Cannot extend: no lastTurnId for session ${sessionId}`);
     }
 
     const lastTurn = await this._getTurn(session.lastTurnId);
-    if (!lastTurn)
-      throw new Error(
-        `[ContextResolver] Last turn ${session.lastTurnId} not found`,
-      );
+    if (!lastTurn) throw new Error(`[ContextResolver] Last turn ${session.lastTurnId} not found`);
 
-    const sessionContexts = await this.sessionManager.getProviderContexts(
-      sessionId,
-      threadId,
-      { contextRole: "batch" },
-    );
+    const sessionContexts = await this.sessionManager.getProviderContexts(sessionId, threadId, {
+      contextRole: 'batch',
+    });
 
     // PERMISSIVE EXTEND LOGIC:
     // 1. Iterate over requested providers
@@ -89,13 +79,13 @@ export class ContextResolver {
     const resolvedContexts = {};
     const forcedResetSet = new Set(request.forcedContextReset || []);
 
-    for (const pid of (request.providers || [])) {
+    for (const pid of request.providers || []) {
       if (forcedResetSet.has(pid)) {
         // Case 1: Forced Reset
         resolvedContexts[pid] = { isNewJoiner: true };
       } else {
         const meta = sessionContexts?.[pid]?.meta;
-        if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+        if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
           resolvedContexts[pid] = meta;
           continue;
         }
@@ -104,7 +94,7 @@ export class ContextResolver {
     }
 
     return {
-      type: "extend",
+      type: 'extend',
       sessionId,
       lastTurnId: lastTurn.id,
       providerContexts: resolvedContexts,
@@ -117,19 +107,14 @@ export class ContextResolver {
   async _resolveRecompute(request) {
     const { sessionId, sourceTurnId, stepType, targetProvider } = request;
     if (!sessionId || !sourceTurnId) {
-      throw new Error(
-        "[ContextResolver] Recompute requires sessionId and sourceTurnId",
-      );
+      throw new Error('[ContextResolver] Recompute requires sessionId and sourceTurnId');
     }
 
     const sourceTurn = await this._getTurn(sourceTurnId);
-    if (!sourceTurn)
-      throw new Error(
-        `[ContextResolver] Source turn ${sourceTurnId} not found`,
-      );
+    if (!sourceTurn) throw new Error(`[ContextResolver] Source turn ${sourceTurnId} not found`);
 
     // NEW: batch recompute - single provider retry using original user message OR custom override
-    if (stepType === "batch") {
+    if (stepType === 'batch') {
       const turnContexts = sourceTurn.providerContexts || {};
       const batchPid = targetProvider ? `${targetProvider}:batch` : null;
 
@@ -142,59 +127,59 @@ export class ContextResolver {
       }
 
       let normalizedTargetContext =
-        targetContext && typeof targetContext === "object" && "meta" in targetContext
+        targetContext && typeof targetContext === 'object' && 'meta' in targetContext
           ? targetContext.meta
           : targetContext;
 
       if (
         targetProvider &&
         (!normalizedTargetContext ||
-          typeof normalizedTargetContext !== "object" ||
-          !("conversationId" in normalizedTargetContext))
+          typeof normalizedTargetContext !== 'object' ||
+          !('conversationId' in normalizedTargetContext))
       ) {
         try {
           const responses = await this._getProviderResponsesForTurn(sourceTurnId);
           const candidates = Array.isArray(responses)
             ? responses.filter(
-              (r) =>
-                r &&
-                r.providerId === targetProvider &&
-                r.responseType === "batch" &&
-                r.meta &&
-                typeof r.meta === "object",
-            )
+                (r) =>
+                  r &&
+                  r.providerId === targetProvider &&
+                  r.responseType === 'batch' &&
+                  r.meta &&
+                  typeof r.meta === 'object'
+              )
             : [];
           candidates.sort((a, b) => {
-            const ai = (a.responseIndex ?? 0);
-            const bi = (b.responseIndex ?? 0);
+            const ai = a.responseIndex ?? 0;
+            const bi = b.responseIndex ?? 0;
             if (bi !== ai) return bi - ai;
-            const at = (a.updatedAt ?? a.createdAt ?? 0);
-            const bt = (b.updatedAt ?? b.createdAt ?? 0);
+            const at = a.updatedAt ?? a.createdAt ?? 0;
+            const bt = b.updatedAt ?? b.createdAt ?? 0;
             return bt - at;
           });
-          if (candidates[0]?.meta && typeof candidates[0].meta === "object") {
+          if (candidates[0]?.meta && typeof candidates[0].meta === 'object') {
             normalizedTargetContext = candidates[0].meta;
           }
-        } catch (_) { }
+        } catch (_) {}
       }
 
       if (
         targetProvider &&
         (!normalizedTargetContext ||
-          typeof normalizedTargetContext !== "object" ||
-          !("conversationId" in normalizedTargetContext))
+          typeof normalizedTargetContext !== 'object' ||
+          !('conversationId' in normalizedTargetContext))
       ) {
         try {
           const sessionContexts = await this.sessionManager.getProviderContexts(
             sessionId,
             DEFAULT_THREAD,
-            { contextRole: "batch" },
+            { contextRole: 'batch' }
           );
           const meta = sessionContexts?.[targetProvider]?.meta;
-          if (meta && typeof meta === "object" && "conversationId" in meta) {
+          if (meta && typeof meta === 'object' && 'conversationId' in meta) {
             normalizedTargetContext = meta;
           }
-        } catch (_) { }
+        } catch (_) {}
       }
 
       const providerContextsAtSourceTurn =
@@ -203,9 +188,10 @@ export class ContextResolver {
           : {};
 
       // Prefer custom userMessage from request (targeted refinement), fallback to original turn text
-      const sourceUserMessage = request.userMessage || await this._getUserMessageForTurn(sourceTurn);
+      const sourceUserMessage =
+        request.userMessage || (await this._getUserMessageForTurn(sourceTurn));
       return {
-        type: "recompute",
+        type: 'recompute',
         sessionId,
         sourceTurnId,
         stepType,
@@ -223,26 +209,26 @@ export class ContextResolver {
     const frozenBatchOutputs = aggregateBatchOutputs(responses);
     if (!frozenBatchOutputs || Object.keys(frozenBatchOutputs).length === 0) {
       throw new Error(
-        `[ContextResolver] Source turn ${sourceTurnId} has no batch outputs in provider_responses`,
+        `[ContextResolver] Source turn ${sourceTurnId} has no batch outputs in provider_responses`
       );
     }
 
     // Determine the latest valid mapping output for this source turn
     const latestMappingOutput = findLatestMappingOutput(
       responses,
-      request.preferredMappingProvider,
+      request.preferredMappingProvider
     );
 
     const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
 
     // Extract frozen prompt metadata for singularity recomputes
-    const singularityResponse = responses.find(r => r.responseType === 'singularity');
+    const singularityResponse = responses.find((r) => r.responseType === 'singularity');
     const frozenSingularityPromptType = singularityResponse?.meta?.frozenSingularityPromptType;
     const frozenSingularityPromptSeed = singularityResponse?.meta?.frozenSingularityPromptSeed;
 
     return {
-      type: "recompute",
+      type: 'recompute',
       sessionId,
       sourceTurnId,
       frozenBatchOutputs,
@@ -259,15 +245,12 @@ export class ContextResolver {
   // ===== helpers =====
   async _getSessionMetadata(sessionId) {
     try {
-      if (
-        this.sessionManager?.adapter?.isReady &&
-        this.sessionManager.adapter.isReady()
-      ) {
-        return await this.sessionManager.adapter.get("sessions", sessionId);
+      if (this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
+        return await this.sessionManager.adapter.get('sessions', sessionId);
       }
       return null;
     } catch (e) {
-      console.error("[ContextResolver] _getSessionMetadata failed:", e);
+      console.error('[ContextResolver] _getSessionMetadata failed:', e);
       return null;
     }
   }
@@ -287,9 +270,8 @@ export class ContextResolver {
     // Last resort: scan backwards for any turn with a mapping response
     if (!structuralTurnId) {
       const adapter = this.sessionManager?.adapter;
-      const adapterReady = adapter && (
-        typeof adapter.isReady === 'function' ? adapter.isReady() : true
-      );
+      const adapterReady =
+        adapter && (typeof adapter.isReady === 'function' ? adapter.isReady() : true);
       if (!adapterReady) return null;
 
       try {
@@ -297,14 +279,14 @@ export class ContextResolver {
         if (Array.isArray(turns)) {
           for (let i = turns.length - 1; i >= 0; i--) {
             const t = turns[i];
-            if (!t || typeof t !== "object") continue;
-            if (t.type !== "ai" && t.role !== "assistant") continue;
+            if (!t || typeof t !== 'object') continue;
+            if (t.type !== 'ai' && t.role !== 'assistant') continue;
             const result = await this._parseMappingFromTurn(t.id);
             if (result) return result;
           }
         }
       } catch (e) {
-        console.debug("[ContextResolver] Failed to scan turns:", e);
+        console.debug('[ContextResolver] Failed to scan turns:', e);
       }
     }
 
@@ -316,7 +298,7 @@ export class ContextResolver {
     try {
       const responses = await this._getProviderResponsesForTurn(turnId);
       const mappingResp = (Array.isArray(responses) ? responses : [])
-        .filter(r => r && r.responseType === 'mapping')
+        .filter((r) => r && r.responseType === 'mapping')
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))[0];
 
       if (!mappingResp?.text) return null;
@@ -335,15 +317,12 @@ export class ContextResolver {
 
   async _getTurn(turnId) {
     try {
-      if (
-        this.sessionManager?.adapter?.isReady &&
-        this.sessionManager.adapter.isReady()
-      ) {
-        return await this.sessionManager.adapter.get("turns", turnId);
+      if (this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
+        return await this.sessionManager.adapter.get('turns', turnId);
       }
       return null;
     } catch (e) {
-      console.error("[ContextResolver] _getTurn failed:", e);
+      console.error('[ContextResolver] _getTurn failed:', e);
       return null;
     }
   }
@@ -361,7 +340,7 @@ export class ContextResolver {
 
   async _getUserMessageForTurn(aiTurn) {
     const userTurnId = aiTurn.userTurnId;
-    if (!userTurnId) return "";
+    if (!userTurnId) return '';
     const userTurn = await this._getTurn(userTurnId);
     return extractUserMessage(userTurn);
   }

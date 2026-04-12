@@ -1,19 +1,8 @@
 // ============================================================================
 // CORE TYPES & ENUMS
 // ============================================================================
-export type ProviderKey =
-  | "claude"
-  | "gemini"
-  | "gemini-pro"
-  | "gemini-exp"
-  | "chatgpt"
-  | "qwen";
-export type ProviderResponseType =
-  | "batch"
-  | "mapping"
-  | "editorial"
-  | "singularity"
-  | "probe";
+export type ProviderKey = 'claude' | 'gemini' | 'gemini-pro' | 'gemini-exp' | 'chatgpt' | 'qwen';
+export type ProviderResponseType = 'batch' | 'mapping' | 'editorial' | 'singularity' | 'probe';
 
 export interface ProbeResult {
   modelIndex: number;
@@ -41,7 +30,7 @@ export interface ProbeSessionResponse {
   modelName: string;
   text: string;
   paragraphs: string[];
-  status: "streaming" | "completed" | "error";
+  status: 'streaming' | 'completed' | 'error';
   error?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -53,7 +42,7 @@ export interface ProbeSession {
   searchResults: ProbeCorpusHit[];
   providerIds: string[];
   responses: Record<string, ProbeSessionResponse>;
-  status: "searching" | "probing" | "complete";
+  status: 'searching' | 'probing' | 'complete';
   createdAt: number;
   updatedAt: number;
 }
@@ -95,14 +84,14 @@ export interface Claim {
   dimension?: string | null; // Optional legacy metadata
   supporters: number[];
   type:
-  | 'factual'
-  | 'prescriptive'
-  | 'cautionary'
-  | 'assertive'
-  | 'uncertain'
-  | 'conditional'
-  | 'contested'
-  | 'speculative';
+    | 'factual'
+    | 'prescriptive'
+    | 'cautionary'
+    | 'assertive'
+    | 'uncertain'
+    | 'conditional'
+    | 'contested'
+    | 'speculative';
   role?: 'anchor' | 'branch' | 'challenger' | 'supplement';
   quote?: string;
   support_count?: number;
@@ -125,17 +114,17 @@ export interface MapperClaim {
 
 export type MapperEdge =
   | {
-    from: string;
-    to: string;
-    type: 'conflicts';
-    question?: string | null;
-  }
+      from: string;
+      to: string;
+      type: 'conflicts';
+      question?: string | null;
+    }
   | {
-    from: string;
-    to: string;
-    type: 'prerequisite';
-    question?: string | null;
-  };
+      from: string;
+      to: string;
+      type: 'prerequisite';
+      question?: string | null;
+    };
 
 export interface UnifiedMapperOutput {
   claims: MapperClaim[];
@@ -190,20 +179,11 @@ export interface ConflictInfo {
   clusterId: string | null;
 }
 
-export interface ConflictCluster {
-  id: string;
-  axis: string;
-  targetId: string;
-  challengerIds: string[];
-  theme: string;
-}
-
 export interface SupportingClaim {
   id: string;
   label: string;
   relationship: 'supports' | 'prerequisite' | 'aligned';
 }
-
 
 export type PrimaryShape = 'convergent' | 'forked' | 'parallel' | 'constrained' | 'sparse';
 
@@ -211,12 +191,11 @@ export interface SecondaryPattern {
   type: any;
   severity: 'high' | 'medium' | 'low';
   data:
-  | ChallengedPatternData
-  | KeystonePatternData
-  | ChainPatternData
-  | FragilePatternData
-  | ConditionalPatternData
-  | DissentPatternData;
+    | ChallengedPatternData
+    | KeystonePatternData
+    | ChainPatternData
+    | FragilePatternData
+    | ConditionalPatternData;
 }
 
 export interface ChallengedPatternData {
@@ -249,38 +228,6 @@ export interface ConditionalPatternData {
   conditions: Array<{ id: string; label: string; branches: string[] }>;
 }
 
-export interface DissentPatternData {
-  voices: Array<{
-    id: string;
-    label: string;
-    text: string;
-    supportRatio: number;
-    insightType: 'leverage_inversion' | 'unique_perspective' | 'edge_case';
-    targets?: string[];
-    insightScore: number;
-  }>;
-  strongestVoice: {
-    id: string;
-    label: string;
-    text: string;
-    supportRatio: number;
-    whyItMatters: string;
-    insightType?: 'leverage_inversion' | 'unique_perspective' | 'edge_case';
-  } | null;
-  suppressedDimensions: string[];
-}
-
-export interface PeakAnalysis {
-  peaks: EnrichedClaim[];
-  hills: EnrichedClaim[];
-  floor: EnrichedClaim[];
-  peakIds: string[];
-  peakConflicts: Edge[];
-  peakTradeoffs: Edge[];
-  peakSupports: Edge[];
-  peakUnconnected: boolean;
-}
-
 export interface GraphAnalysis {
   componentCount: number;
   components: string[][];
@@ -289,10 +236,7 @@ export interface GraphAnalysis {
   hubClaim: string | null;
   hubDominance: number;
   articulationPoints: string[];
-  clusterCohesion: number;
-  localCoherence: number;
 }
-
 
 export interface EnrichedClaim extends Claim {
   derivedType?: Claim['type'];
@@ -315,7 +259,6 @@ export interface EnrichedClaim extends Claim {
   isChainTerminal: boolean;
 
   isHighSupport: boolean;
-  isLeverageInversion: boolean;
   isKeystone: boolean;
   isOutlier: boolean;
   isContested: boolean;
@@ -343,9 +286,9 @@ export interface LinkedClaim {
   // Canonical statement IDs (post mixed-method provenance filter)
   sourceStatementIds: string[];
   sourceStatements: ShadowStatement[];
-  sourceRegionIds: string[];  // which regions the source statements live in
-  supportRatio: number;       // supporters.length / totalModelCount
-  provenanceBulk: number;     // Σ paragraph weights for this claim
+  sourceRegionIds: string[]; // which regions the source statements live in
+  supportRatio: number; // supporters.length / totalModelCount
+  provenanceBulk: number; // Σ paragraph weights for this claim
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -358,19 +301,19 @@ export type ParagraphOrigin = 'competitive-only' | 'claim-centric-only' | 'both'
 export interface MixedParagraphEntry {
   paragraphId: string;
   origin: ParagraphOrigin;
-  claimCentricSim: number | null;  // null if not in claim-centric pool
+  claimCentricSim: number | null; // null if not in claim-centric pool
   claimCentricAboveThreshold: boolean;
   // Competitive allocation diagnostics (from Phase 2 competitive assignment)
-  compWeight: number | null;       // normalized weight: excess / Σ excess
-  compExcess: number | null;       // raw excess above threshold: sim - τ
-  compThreshold: number | null;    // paragraph threshold: μ (N=2) or μ+σ (N≥3)
+  compWeight: number | null; // normalized weight: excess / Σ excess
+  compExcess: number | null; // raw excess above threshold: sim - τ
+  compThreshold: number | null; // paragraph threshold: μ (N=2) or μ+σ (N≥3)
 }
 
 export interface MixedStatementEntry {
   statementId: string;
-  globalSim: number;              // cos(statement, claim)
-  kept: boolean;                  // globalSim >= μ_global
-  fromSupporterModel: boolean;    // statement.modelIndex ∈ claim.supporters
+  globalSim: number; // cos(statement, claim)
+  kept: boolean; // globalSim >= μ_global
+  fromSupporterModel: boolean; // statement.modelIndex ∈ claim.supporters
   paragraphOrigin: ParagraphOrigin;
   paragraphId: string;
   zone: 'core' | 'removed';
@@ -404,12 +347,11 @@ export interface MixedProvenanceClaimResult {
 export interface MixedProvenanceResult {
   perClaim: Record<string, MixedProvenanceClaimResult>;
   // Aggregate diagnostics
-  recoveryRate: number;   // % of final kept stmts also in competitive set
-  expansionRate: number;  // % of final kept stmts NOT in competitive set
-  removalRate: number;    // % of merged-pool stmts removed by μ_global floor
+  recoveryRate: number; // % of final kept stmts also in competitive set
+  expansionRate: number; // % of final kept stmts NOT in competitive set
+  removalRate: number; // % of merged-pool stmts removed by μ_global floor
 }
 
-export type LeverageInversion = any;
 export type CascadeRisk = any;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -421,7 +363,7 @@ export type CascadeRisk = any;
 
 /** Layer C: Evidence mass — how much territory does this claim cover? */
 export interface BlastSurfaceLayerC {
-  canonicalCount: number;       // total canonical statements from mixed provenance
+  canonicalCount: number; // total canonical statements from mixed provenance
   /** Non-exclusive statements (Type 1) — protected by living parents on single prune */
   nonExclusiveCount: number;
   /** Exclusive non-orphan statements (Type 2) — removable on prune */
@@ -472,9 +414,9 @@ export interface BlastSurfaceRiskVector {
 
   /** Certainty decomposition within Type 2 */
   deletionCertainty?: {
-    unconditional: number;   // 2a: twin is unclassified
-    conditional: number;     // 2b: twin in another claim, multiple parents
-    fragile: number;         // 2c: twin exclusive to its host
+    unconditional: number; // 2a: twin is unclassified
+    conditional: number; // 2b: twin in another claim, multiple parents
+    fragile: number; // 2c: twin exclusive to its host
     details: Array<{
       statementId: string;
       twinId: string;
@@ -688,7 +630,11 @@ export interface ProvenanceQualityEntry {
   /** Calibration pool weight (0 = no calibration pool, higher = more confident) */
   refinedCalibrationWeight?: number | null;
   /** Per-rival allegiance breakdown from refinement */
-  refinedRivalAllegiances?: Array<{ claimId: string; rawAllegiance: number; weightedAllegiance: number }>;
+  refinedRivalAllegiances?: Array<{
+    claimId: string;
+    rawAllegiance: number;
+    weightedAllegiance: number;
+  }>;
 }
 
 export interface PassagePruningResult {
@@ -920,7 +866,7 @@ export interface EditorialThread {
 }
 
 export interface EditorialThreadItem {
-  id: string;                  // passageKey or unclaimed group key
+  id: string; // passageKey or unclaimed group key
   role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
 }
 
@@ -928,12 +874,12 @@ export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
   isBothConsensus: boolean;
-  dynamics: "symmetric" | "asymmetric";
+  dynamics: 'symmetric' | 'asymmetric';
 }
 
 export interface MapperArtifact {
-    claims: Claim[];
-    edges: Edge[];
+  claims: Claim[];
+  edges: Edge[];
   id?: string;
   query?: string;
   turn?: number;
@@ -1134,7 +1080,6 @@ export interface PreSemanticInterpretation {
   pipelineGate?: PipelineGateResult;
 }
 
-
 export interface EnrichmentResult {
   enrichedCount: number;
   unenrichedCount: number;
@@ -1145,11 +1090,11 @@ export interface EnrichmentResult {
 }
 
 export type BasinInversionStatus =
-  | "ok"
-  | "undifferentiated"
-  | "no_basin_structure"
-  | "insufficient_data"
-  | "failed";
+  | 'ok'
+  | 'undifferentiated'
+  | 'no_basin_structure'
+  | 'insufficient_data'
+  | 'failed';
 
 export interface BasinInversionPeak {
   index: number;
@@ -1224,16 +1169,14 @@ export interface BasinInversionResult {
         height: number;
         prominenceSigma: number;
       }>;
-      valley:
-        | {
-          T_v: number;
-          depthSigma?: number;
-          valleyDepth?: number;
-          localMu: number;
-          localSigma?: number;
-          curvatureThreshold?: number;
-        }
-        | null;
+      valley: {
+        T_v: number;
+        depthSigma?: number;
+        valleyDepth?: number;
+        localMu: number;
+        localSigma?: number;
+        curvatureThreshold?: number;
+      } | null;
       binnedSamplingDiffers: boolean | null;
       binnedPeakCenters: number[] | null;
     };
@@ -1282,7 +1225,7 @@ export interface CognitiveArtifact {
     paragraphs: PipelineShadowParagraph[];
   };
   geometry: {
-    embeddingStatus: "computed" | "failed";
+    embeddingStatus: 'computed' | 'failed';
     substrate: PipelineSubstrateGraph;
     basinInversion?: BasinInversionResult;
     bayesianBasinInversion?: BasinInversionResult;
@@ -1309,7 +1252,7 @@ export interface CognitiveArtifact {
  */
 export interface UserTurn {
   id: string;
-  type: "user";
+  type: 'user';
   sessionId: string | null;
   threadId: string;
   text: string;
@@ -1338,12 +1281,15 @@ export interface Session {
 
 // Phase types (canonical shapes)
 export interface BatchPhase {
-  responses: Record<string, {
-    text: string;
-    status?: string;
-    modelIndex?: number;
-    meta?: any;
-  }>;
+  responses: Record<
+    string,
+    {
+      text: string;
+      status?: string;
+      modelIndex?: number;
+      meta?: any;
+    }
+  >;
   timestamp: number;
 }
 
@@ -1363,7 +1309,7 @@ export interface SingularityPhase {
 // Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
 export interface AiTurn {
   id: string;
-  type: "ai";
+  type: 'ai';
   userTurnId: string;
   sessionId: string | null;
   threadId: string;
@@ -1407,16 +1353,13 @@ export interface AiTurn {
 // These are the three fundamental requests the UI can send to the backend.
 // ============================================================================
 
-export type PrimitiveWorkflowRequest =
-  | InitializeRequest
-  | ExtendRequest
-  | RecomputeRequest;
+export type PrimitiveWorkflowRequest = InitializeRequest | ExtendRequest | RecomputeRequest;
 
 /**
  * Starts a new conversation thread.
  */
 export interface InitializeRequest {
-  type: "initialize";
+  type: 'initialize';
   sessionId?: string | null; // Optional: can be omitted to let the backend create a new session.
   userMessage: string;
   providers: ProviderKey[];
@@ -1432,7 +1375,7 @@ export interface InitializeRequest {
  * Continues an existing conversation with a new user message.
  */
 export interface ExtendRequest {
-  type: "extend";
+  type: 'extend';
   sessionId: string;
   userMessage: string;
   providers: ProviderKey[];
@@ -1449,7 +1392,7 @@ export interface ExtendRequest {
  * Re-runs a workflow step for a historical turn with a different provider.
  */
 export interface RecomputeRequest {
-  type: "recompute";
+  type: 'recompute';
   sessionId: string;
   sourceTurnId: string;
   stepType: ProviderResponseType;
@@ -1470,10 +1413,7 @@ export interface RecomputeRequest {
 export interface PromptStepPayload {
   prompt: string;
   providers: ProviderKey[];
-  providerContexts?: Record<
-    ProviderKey,
-    { meta: any; continueThread: boolean }
-  >;
+  providerContexts?: Record<ProviderKey, { meta: any; continueThread: boolean }>;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   useThinking?: boolean;
 }
@@ -1483,10 +1423,8 @@ export interface MappingStepPayload {
   sourceStepIds?: string[];
   sourceHistorical?: {
     turnId: string;
-  }
+  };
 }
-
-
 
 export interface SingularityStepPayload {
   singularityProvider: ProviderKey;
@@ -1499,10 +1437,7 @@ export interface SingularityStepPayload {
 export interface WorkflowStep {
   stepId: string;
   type: any;
-  payload:
-  | PromptStepPayload
-  | MappingStepPayload
-  | SingularityStepPayload;
+  payload: PromptStepPayload | MappingStepPayload | SingularityStepPayload;
 }
 
 export interface WorkflowContext {
@@ -1521,12 +1456,10 @@ export interface WorkflowRequest {
 // SECTION 2b: RESOLVED CONTEXT (Output of ContextResolver)
 // ============================================================================
 
-export type ResolvedContext =
-  | ExtendContext
-  | Record<string, unknown>;
+export type ResolvedContext = ExtendContext | Record<string, unknown>;
 
 export interface ExtendContext {
-  type: "extend";
+  type: 'extend';
   sessionId: string;
   lastTurnId: string;
   providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
@@ -1546,7 +1479,7 @@ export type PersistenceResult = {
 };
 
 export type PersistRequest = {
-  type: "initialize" | "extend" | "recompute";
+  type: 'initialize' | 'extend' | 'recompute';
   sessionId: string;
   userMessage?: string;
   canonicalUserTurnId?: string;
@@ -1577,7 +1510,7 @@ export type PersistReturn = {
 // ============================================================================
 
 export interface PartialResultMessage {
-  type: "PARTIAL_RESULT";
+  type: 'PARTIAL_RESULT';
   sessionId: string;
   stepId: string;
   providerId: ProviderKey;
@@ -1587,14 +1520,14 @@ export interface PartialResultMessage {
 // Real-time workflow progress telemetry for UI (optional but recommended)
 
 export interface TurnFinalizedMessage {
-  type: "TURN_FINALIZED";
+  type: 'TURN_FINALIZED';
   sessionId: string;
   userTurnId: string;
   aiTurnId: string;
   turn: {
     user: {
       id: string;
-      type: "user";
+      type: 'user';
       text: string;
       createdAt: number;
       sessionId: string;
@@ -1611,20 +1544,20 @@ export interface TurnFinalizedMessage {
  * Error classification for user-facing messaging and retry logic
  */
 export type ProviderErrorType =
-  | 'rate_limit'      // 429 - Retryable after cooldown
-  | 'auth_expired'    // 401/403 - Requires re-login
-  | 'timeout'         // Request took too long - Retryable
-  | 'circuit_open'    // Too many recent failures - Auto-retry later
-  | 'content_filter'  // Response blocked by provider - Not retryable
-  | 'input_too_long'  // Input exceeds provider limit - Not retryable
-  | 'network'         // Connection failed - Retryable
-  | 'unknown';        // Catch-all - Maybe retryable
+  | 'rate_limit' // 429 - Retryable after cooldown
+  | 'auth_expired' // 401/403 - Requires re-login
+  | 'timeout' // Request took too long - Retryable
+  | 'circuit_open' // Too many recent failures - Auto-retry later
+  | 'content_filter' // Response blocked by provider - Not retryable
+  | 'input_too_long' // Input exceeds provider limit - Not retryable
+  | 'network' // Connection failed - Retryable
+  | 'unknown'; // Catch-all - Maybe retryable
 
 export interface ProviderError {
   type: ProviderErrorType;
   message: string;
   retryable: boolean;
-  retryAfterMs?: number;    // For rate limits
+  retryAfterMs?: number; // For rate limits
   requiresReauth?: boolean; // For auth errors
 }
 
@@ -1635,8 +1568,8 @@ export interface ProviderStatus {
   providerId: string;
   status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed' | 'skipped';
   progress?: number;
-  error?: ProviderError;       // Detailed error info when status === 'failed'
-  skippedReason?: string;      // Why it was skipped (e.g., "circuit open")
+  error?: ProviderError; // Detailed error info when status === 'failed'
+  skippedReason?: string; // Why it was skipped (e.g., "circuit open")
 }
 
 // ============================================================================
@@ -1644,11 +1577,10 @@ export interface ProviderStatus {
 // These are the core data entities representing the application's state.
 // ============================================================================
 
-
 export interface ProviderResponse {
   providerId: string;
   text: string;
-  status: "pending" | "streaming" | "completed" | "error" | "failed" | "skipped";
+  status: 'pending' | 'streaming' | 'completed' | 'error' | 'failed' | 'skipped';
   createdAt: number;
   updatedAt?: number;
   attemptNumber?: number;
@@ -1688,20 +1620,20 @@ export interface Thread {
 // TYPE GUARDS
 // ============================================================================
 export function isPromptPayload(payload: any): payload is PromptStepPayload {
-  return "prompt" in payload && "providers" in payload;
+  return 'prompt' in payload && 'providers' in payload;
 }
 export function isMappingPayload(payload: any): payload is MappingStepPayload {
-  return "mappingProvider" in payload;
+  return 'mappingProvider' in payload;
 }
 export function isSingularityPayload(payload: any): payload is SingularityStepPayload {
-  return "singularityProvider" in payload;
+  return 'singularityProvider' in payload;
 }
 
-export function isUserTurn(turn: any): turn is { type: "user" } {
-  return !!turn && typeof turn === "object" && turn.type === "user";
+export function isUserTurn(turn: any): turn is { type: 'user' } {
+  return !!turn && typeof turn === 'object' && turn.type === 'user';
 }
-export function isAiTurn(turn: any): turn is { type: "ai" } {
-  return !!turn && typeof turn === "object" && turn.type === "ai";
+export function isAiTurn(turn: any): turn is { type: 'ai' } {
+  return !!turn && typeof turn === 'object' && turn.type === 'ai';
 }
 
 // ============================================================================
@@ -1711,7 +1643,7 @@ export function isAiTurn(turn: any): turn is { type: "ai" } {
 export interface TradeoffPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
-  symmetry: "both_consensus" | "both_singular" | "asymmetric";
+  symmetry: 'both_consensus' | 'both_singular' | 'asymmetric';
 }
 
 export interface ConvergencePoint {
@@ -1719,12 +1651,22 @@ export interface ConvergencePoint {
   targetLabel: string;
   sourceIds: string[];
   sourceLabels: string[];
-  edgeType: "prerequisite" | "supports";
+  edgeType: 'prerequisite' | 'supports';
 }
 
-
-
 export type ShadowStatement = PipelineShadowStatement;
+
+export interface StructureLayer {
+  primary: PrimaryShape | 'sparse';
+  causalClaimIds: string[];
+  coverage: number;
+  evidence: string[];
+  involvedModelCount: number;
+  totalModelCount: number;
+  /** forked only — support counts for causalClaimIds[0] (high) and [1] (low), stamped at classify time */
+  claimASupportCount?: number;
+  claimBSupportCount?: number;
+}
 
 export interface StructuralAnalysis {
   edges: Edge[];
@@ -1733,17 +1675,16 @@ export interface StructuralAnalysis {
   };
   claimsWithLeverage: EnrichedClaim[];
   patterns: {
-    leverageInversions: LeverageInversion[];
     cascadeRisks: CascadeRisk[];
     conflicts: ConflictPair[];
     conflictInfos?: ConflictInfo[];
-    conflictClusters?: ConflictCluster[];
     tradeoffs: TradeoffPair[];
     convergencePoints: ConvergencePoint[];
     isolatedClaims: string[];
   };
   graph?: GraphAnalysis;
   shape: ProblemStructure;
+  layers?: StructureLayer[];
 }
 
 export type ProviderConfigEntry = {
@@ -1762,10 +1703,9 @@ export type RetryPolicy = {
   jitter: boolean;
 };
 
-export type OperationFn<
-  TResult = unknown,
-  TContext = Record<string, unknown>,
-> = (context: TContext) => Promise<TResult>;
+export type OperationFn<TResult = unknown, TContext = Record<string, unknown>> = (
+  context: TContext
+) => Promise<TResult>;
 
 export type FallbackStrategy<
   TOperation = unknown,

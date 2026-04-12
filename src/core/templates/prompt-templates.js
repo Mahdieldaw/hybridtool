@@ -1,26 +1,29 @@
 export const PROMPT_TEMPLATES = {
-    withBridgeAndPrior: (basePrompt = "", bridgeContext = "", previousAnswer = "") => `
+  withBridgeAndPrior: (basePrompt = '', bridgeContext = '', previousAnswer = '') =>
+    `
 <prior_context>
-${previousAnswer || ""}
+${previousAnswer || ''}
 </prior_context>
 
 <reactive_bridge>
-${bridgeContext || ""}
+${bridgeContext || ''}
 </reactive_bridge>
 
-${basePrompt || ""}`.trim(),
+${basePrompt || ''}`.trim(),
 
-    withBridgeOnly: (basePrompt = "", bridgeContext = "") => `
+  withBridgeOnly: (basePrompt = '', bridgeContext = '') =>
+    `
 <reactive_bridge>
-${bridgeContext || ""}
+${bridgeContext || ''}
 </reactive_bridge>
 
-${basePrompt || ""}`.trim(),
+${basePrompt || ''}`.trim(),
 
-    withPriorOnly: (basePrompt = "", previousAnswer = "") => `
+  withPriorOnly: (basePrompt = '', previousAnswer = '') =>
+    `
 <prior_context>
-${previousAnswer || ""}
+${previousAnswer || ''}
 </prior_context>
 
-${basePrompt || ""}`.trim(),
+${basePrompt || ''}`.trim(),
 };

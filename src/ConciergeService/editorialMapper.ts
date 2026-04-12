@@ -68,7 +68,7 @@ export function buildPassageIndex(
   shadow: { paragraphs: PipelineShadowParagraph[] },
   claims: Claim[],
   citationSourceOrder: Record<string | number, string>,
-  continuityMap: Map<string, SourceContinuityEntry>,
+  continuityMap: Map<string, SourceContinuityEntry>
 ): { passages: IndexedPassage[]; unclaimed: IndexedUnclaimedGroup[] } {
   const passages: IndexedPassage[] = [];
 
@@ -112,9 +112,10 @@ export function buildPassageIndex(
       }
 
       const continuity = continuityMap.get(passageKey);
-      const modelName = citationSourceOrder[passageEntry.modelIndex + 1]
-        || citationSourceOrder[passageEntry.modelIndex]
-        || `model-${passageEntry.modelIndex}`;
+      const modelName =
+        citationSourceOrder[passageEntry.modelIndex + 1] ||
+        citationSourceOrder[passageEntry.modelIndex] ||
+        `model-${passageEntry.modelIndex}`;
 
       passages.push({
         passageKey,
@@ -159,7 +160,7 @@ export function buildPassageIndex(
 
     const groupKey = `unclaimed:${group.nearestClaimId}:${firstPara.modelIndex}:${firstPara.paragraphIndex}`;
 
-    const paragraphs = group.paragraphs.map(pe => {
+    const paragraphs = group.paragraphs.map((pe) => {
       const sp = paragraphLookup.get(`${pe.modelIndex}:${pe.paragraphIndex}`);
       return {
         paragraphId: pe.paragraphId,
@@ -167,7 +168,7 @@ export function buildPassageIndex(
         paragraphIndex: pe.paragraphIndex,
         text: sp?._fullParagraph || '',
         unclaimedStatementTexts: pe.unclaimedStatementIds
-          .map(sid => statementTextLookup.get(sid) || '')
+          .map((sid) => statementTextLookup.get(sid) || '')
           .filter(Boolean),
       };
     });
@@ -211,7 +212,7 @@ export function buildEditorialPrompt(
     conflictCount: number;
     concentrationSpread: { min: number; max: number; mean: number };
     landscapeComposition: { northStar: number; mechanism: number; eastStar: number; floor: number };
-  },
+  }
 ): string {
   const sections: string[] = [];
 
@@ -236,14 +237,17 @@ ${userQuery}`);
 - Landscape: ${corpusShape.landscapeComposition.northStar} northStar, ${corpusShape.landscapeComposition.mechanism} mechanism, ${corpusShape.landscapeComposition.eastStar} eastStar, ${corpusShape.landscapeComposition.floor} floor`);
 
   // ── Passages ──
-  const passageLines = passages.map(p => {
+  const passageLines = passages.map((p) => {
     const extent = p.paragraphCount > 1 ? ` (${p.paragraphCount} paragraphs)` : '';
-    const conflict = p.conflictClusterIndex !== null ? ` [CONFLICT cluster ${p.conflictClusterIndex}]` : '';
+    const conflict =
+      p.conflictClusterIndex !== null ? ` [CONFLICT cluster ${p.conflictClusterIndex}]` : '';
     const sole = p.isSoleSource ? ' [SOLE SOURCE]' : '';
     const cont = [
       p.continuity.prev ? `prev=${p.continuity.prev}` : null,
       p.continuity.next ? `next=${p.continuity.next}` : null,
-    ].filter(Boolean).join(', ');
+    ]
+      .filter(Boolean)
+      .join(', ');
     const contStr = cont ? ` continuity: ${cont}` : '';
 
     return `### ${p.passageKey}
@@ -259,9 +263,9 @@ ${p.text}`;
 
   // ── Unclaimed groups ──
   if (unclaimed.length > 0) {
-    const unclaimedLines = unclaimed.map(u => {
+    const unclaimedLines = unclaimed.map((u) => {
       const stmts = u.paragraphs
-        .flatMap(p => p.unclaimedStatementTexts)
+        .flatMap((p) => p.unclaimedStatementTexts)
         .map((t, i) => `  ${i + 1}. ${t}`)
         .join('\n');
       return `### ${u.groupKey}
@@ -334,7 +338,7 @@ const VALID_ROLES = new Set(['anchor', 'support', 'context', 'reframe', 'alterna
 export function parseEditorialOutput(
   rawText: string,
   validPassageKeys: Set<string>,
-  validUnclaimedKeys: Set<string>,
+  validUnclaimedKeys: Set<string>
 ): EditorialParseResult {
   const errors: string[] = [];
 
@@ -381,7 +385,10 @@ export function parseEditorialOutput(
     }
 
     // Validate items — drop hallucinated IDs, deduplicate
-    const validItems: Array<{ id: string; role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative' }> = [];
+    const validItems: Array<{
+      id: string;
+      role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
+    }> = [];
     for (const item of thread.items) {
       if (!item || typeof item !== 'object') continue;
       const itemId = typeof item.id === 'string' ? item.id : '';
@@ -402,12 +409,12 @@ export function parseEditorialOutput(
       usedIds.add(itemId);
       validItems.push({
         id: itemId,
-        role: VALID_ROLES.has(role) ? role as any : 'support',
+        role: VALID_ROLES.has(role) ? (role as any) : 'support',
       });
     }
 
     // Require at least one anchor
-    const hasAnchor = validItems.some(i => i.role === 'anchor');
+    const hasAnchor = validItems.some((i) => i.role === 'anchor');
     if (!hasAnchor) {
       if (validItems.length > 0) {
         // Promote first item to anchor
@@ -419,7 +426,13 @@ export function parseEditorialOutput(
       }
     }
 
-    validThreads.push({ id: threadId, label, why_care: whyCare, start_here: startHere, items: validItems });
+    validThreads.push({
+      id: threadId,
+      label,
+      why_care: whyCare,
+      start_here: startHere,
+      items: validItems,
+    });
   }
 
   if (validThreads.length === 0) {
@@ -427,35 +440,41 @@ export function parseEditorialOutput(
   }
 
   // Ensure exactly one start_here
-  const startCount = validThreads.filter(t => t.start_here).length;
+  const startCount = validThreads.filter((t) => t.start_here).length;
   if (startCount === 0) {
     validThreads[0].start_here = true;
     errors.push('No thread had start_here — defaulted to first thread');
   } else if (startCount > 1) {
     let found = false;
     for (const t of validThreads) {
-      if (t.start_here && !found) { found = true; continue; }
+      if (t.start_here && !found) {
+        found = true;
+        continue;
+      }
       if (t.start_here) t.start_here = false;
     }
     errors.push('Multiple start_here threads — kept only first');
   }
 
   // Validate thread_order
-  const validThreadIds = new Set(validThreads.map(t => t.id));
+  const validThreadIds = new Set(validThreads.map((t) => t.id));
   let threadOrder: string[];
   if (Array.isArray(parsed.thread_order)) {
-    threadOrder = parsed.thread_order.filter((id: unknown) => typeof id === 'string' && validThreadIds.has(id as string)) as string[];
+    threadOrder = parsed.thread_order.filter(
+      (id: unknown) => typeof id === 'string' && validThreadIds.has(id as string)
+    ) as string[];
     // Add any missing thread IDs
     for (const t of validThreads) {
       if (!threadOrder.includes(t.id)) threadOrder.push(t.id);
     }
   } else {
-    threadOrder = validThreads.map(t => t.id);
+    threadOrder = validThreads.map((t) => t.id);
     errors.push('Missing thread_order — using thread array order');
   }
 
   // Parse diagnostics
-  const diag = parsed.diagnostics && typeof parsed.diagnostics === 'object' ? parsed.diagnostics : {};
+  const diag =
+    parsed.diagnostics && typeof parsed.diagnostics === 'object' ? parsed.diagnostics : {};
   const diagnostics = {
     flat_corpus: !!diag.flat_corpus,
     conflict_count: typeof diag.conflict_count === 'number' ? diag.conflict_count : 0,

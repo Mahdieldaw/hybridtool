@@ -78,11 +78,19 @@ function sigma(nums: number[], mu: number): number {
 // ─────────────────────────────────────────────────────────────────────────
 export function computePassageRouting(input: PassageRoutingInput): PassageRoutingResult {
   const t0 = performance.now();
-  const { claimDensityResult, enrichedClaims, validatedConflicts, periphery, queryEmbedding, claimEmbeddings } = input;
+  const {
+    claimDensityResult,
+    enrichedClaims,
+    validatedConflicts,
+    periphery,
+    queryEmbedding,
+    claimEmbeddings,
+  } = input;
   const profiles = claimDensityResult.profiles;
 
   // ── 0. Identify core vs. periphery ────────────────────────────────
-  const filterPeripheral = periphery.corpusMode === 'dominant-core' && periphery.peripheralNodeIds.size > 0;
+  const filterPeripheral =
+    periphery.corpusMode === 'dominant-core' && periphery.peripheralNodeIds.size > 0;
 
   // ── A. Structural contributor classification + concentration/density ──
   const claimProfiles: Record<string, PassageClaimProfile> = {};
@@ -122,7 +130,7 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
 
     // ── Filter paragraphCoverage to core-only when in dominant-core mode ──
     const activeCoverage = filterPeripheral
-      ? profile.paragraphCoverage.filter(pc => !periphery.peripheralNodeIds.has(pc.paragraphId))
+      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
       : profile.paragraphCoverage;
 
     // Group majority paragraph counts by model from active coverage
@@ -180,7 +188,7 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
       maxPassageLength: profile.maxPassageLength,
       meanCoverageInLongestRun: profile.meanCoverageInLongestRun,
       landscapePosition: 'floor', // provisional — set after gate computation
-      isLoadBearing: false,       // provisional
+      isLoadBearing: false, // provisional
       structuralContributors,
       incidentalMentions,
       ...(queryDistance !== undefined ? { queryDistance } : {}),
@@ -189,8 +197,8 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
 
   // ── D. Load-bearing gate ─────────────────────────────────────────────
   // Precondition: MAJ ≥ 1
-  const preconditionPass = Object.values(claimProfiles).filter(p => p.totalMAJ >= 1);
-  const concentrationValues = preconditionPass.map(p => p.concentrationRatio);
+  const preconditionPass = Object.values(claimProfiles).filter((p) => p.totalMAJ >= 1);
+  const concentrationValues = preconditionPass.map((p) => p.concentrationRatio);
   const muConcentration = mean(concentrationValues);
   const sigmaConcentration = sigma(concentrationValues, muConcentration);
   const concentrationThreshold = muConcentration + sigmaConcentration;
@@ -231,7 +239,7 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
   // ── E. Build conflict clusters from validated conflicts ──────────────
   // routing-aligned = validated AND mapper-labeled
   const routingConflictEdges = validatedConflicts.filter(
-    c => c.validated && c.mapperLabeledConflict
+    (c) => c.validated && c.mapperLabeledConflict
   );
 
   const conflictClusters: PassageClaimRouting['conflictClusters'] = [];
@@ -261,8 +269,8 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
         }
       }
       const clusterEdges = routingConflictEdges
-        .filter(e => component.includes(e.edgeFrom) && component.includes(e.edgeTo))
-        .map(e => ({ from: e.edgeFrom, to: e.edgeTo, crossPoolProximity: e.crossPoolProximity }));
+        .filter((e) => component.includes(e.edgeFrom) && component.includes(e.edgeTo))
+        .map((e) => ({ from: e.edgeFrom, to: e.edgeTo, crossPoolProximity: e.crossPoolProximity }));
       conflictClusters.push({ claimIds: component, edges: clusterEdges });
       for (const id of component) claimsInRoutedConflict.add(id);
     }
@@ -274,9 +282,9 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
   for (const c of enrichedClaims) claimMap.set(String(c.id), c);
 
   const loadBearingClaims: PassageRoutedClaim[] = Object.values(claimProfiles)
-    .filter(p => p.isLoadBearing && !claimsInRoutedConflict.has(p.claimId))
+    .filter((p) => p.isLoadBearing && !claimsInRoutedConflict.has(p.claimId))
     .sort((a, b) => b.concentrationRatio - a.concentrationRatio)
-    .map(p => {
+    .map((p) => {
       const c = claimMap.get(p.claimId);
       return {
         claimId: p.claimId,
@@ -293,14 +301,9 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
       };
     });
 
-  const routedClaimIds = [
-    ...claimsInRoutedConflict,
-    ...loadBearingClaims.map(c => c.claimId),
-  ];
+  const routedClaimIds = [...claimsInRoutedConflict, ...loadBearingClaims.map((c) => c.claimId)];
   const routedSet = new Set(routedClaimIds);
-  const passthrough = enrichedClaims
-    .map(c => String(c.id))
-    .filter(id => !routedSet.has(id));
+  const passthrough = enrichedClaims.map((c) => String(c.id)).filter((id) => !routedSet.has(id));
 
   const skipSurvey = conflictClusters.length === 0 && loadBearingClaims.length === 0;
 
@@ -311,8 +314,8 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
     skipSurvey,
     routedClaimIds,
     diagnostics: {
-      concentrationDistribution: Object.values(claimProfiles).map(p => p.concentrationRatio),
-      densityRatioDistribution: Object.values(claimProfiles).map(p => p.densityRatio),
+      concentrationDistribution: Object.values(claimProfiles).map((p) => p.concentrationRatio),
+      densityRatioDistribution: Object.values(claimProfiles).map((p) => p.densityRatio),
       totalClaims: enrichedClaims.length,
       floorCount,
       corpusMode: periphery.corpusMode,
@@ -323,9 +326,8 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
   };
 
   // ── Basin annotations (parallel-cores mode only) ─────────────────────
-  const basinAnnotations = periphery.corpusMode === 'parallel-cores'
-    ? periphery.basinByNodeId
-    : undefined;
+  const basinAnnotations =
+    periphery.corpusMode === 'parallel-cores' ? periphery.basinByNodeId : undefined;
 
   return {
     claimProfiles,
@@ -341,7 +343,6 @@ export function computePassageRouting(input: PassageRoutingInput): PassageRoutin
     meta: { processingTimeMs: performance.now() - t0 },
   };
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────
 // Source continuity: prev/next linking within a model's passage stream
@@ -366,7 +367,14 @@ export function buildSourceContinuityMap(
   const result = new Map<string, SourceContinuityEntry>();
 
   // Collect all passage entries keyed by passageKey, grouped by modelIndex
-  const byModel = new Map<number, Array<{ passageKey: string; claimId: string; entry: import('../../shared/contract').PassageEntry }>>();
+  const byModel = new Map<
+    number,
+    Array<{
+      passageKey: string;
+      claimId: string;
+      entry: import('../../shared/contract').PassageEntry;
+    }>
+  >();
 
   for (const [claimId, profile] of Object.entries(claimDensity.profiles)) {
     for (const p of profile.passages) {

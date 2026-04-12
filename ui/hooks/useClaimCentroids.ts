@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import type { PipelineSubstrateGraph } from "../../shared/contract";
+import { useMemo } from 'react';
+import type { PipelineSubstrateGraph } from '../../shared/contract';
 
 export interface ClaimCentroid {
   claimId: string;
@@ -32,7 +32,7 @@ export interface ClaimCentroid {
 export function useClaimCentroids(
   claims: any[] | null | undefined,
   substrate: PipelineSubstrateGraph | null | undefined,
-  mixedProvenance?: any | null,
+  mixedProvenance?: any | null
 ): ClaimCentroid[] {
   return useMemo(() => {
     if (!claims || !substrate?.nodes?.length) return [];
@@ -44,7 +44,7 @@ export function useClaimCentroids(
     const paraTotalStmts = new Map<string, number>();
 
     for (const node of substrate.nodes) {
-      const pid = String(node?.paragraphId ?? "").trim();
+      const pid = String(node?.paragraphId ?? '').trim();
       if (!pid) continue;
       const x = Number(node?.x);
       const y = Number(node?.y);
@@ -62,7 +62,7 @@ export function useClaimCentroids(
 
     const out: ClaimCentroid[] = [];
     for (const claim of claims) {
-      const claimId = String(claim.id ?? "");
+      const claimId = String(claim.id ?? '');
 
       // Prefer canonical statement IDs from mixed provenance when available
       const mpEntry = perClaim?.[claimId];
@@ -70,8 +70,8 @@ export function useClaimCentroids(
         Array.isArray(mpEntry?.canonicalStatementIds) && mpEntry.canonicalStatementIds.length > 0
           ? mpEntry.canonicalStatementIds
           : null;
-      const stmtIds: string[] = canonicalIds
-        ?? (Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : []);
+      const stmtIds: string[] =
+        canonicalIds ?? (Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : []);
 
       // Resolve statements → paragraphs, counting canonical hits per paragraph
       const paraCanonicalCount = new Map<string, number>();
@@ -83,7 +83,9 @@ export function useClaimCentroids(
 
       // Weighted centroid: weight = canonicalCount / totalCount per paragraph
       const paraCanonicalFractions = new Map<string, number>();
-      let sumX = 0, sumY = 0, totalWeight = 0;
+      let sumX = 0,
+        sumY = 0,
+        totalWeight = 0;
       for (const pid of unique) {
         const pos = paraPosition.get(pid);
         if (!pos) continue;
@@ -98,16 +100,16 @@ export function useClaimCentroids(
 
       out.push({
         claimId,
-        label: String(claim.label ?? claim.id ?? ""),
+        label: String(claim.label ?? claim.id ?? ''),
         x: totalWeight > 0 ? sumX / totalWeight : 0,
         y: totalWeight > 0 ? sumY / totalWeight : 0,
         hasPosition: totalWeight > 0,
         sourceParagraphIds: unique,
         sourceStatementIds: stmtIds.map(String),
         supporters: Array.isArray(claim.supporters) ? claim.supporters : [],
-        provenanceBulk: typeof claim.provenanceBulk === "number" ? claim.provenanceBulk : null,
-        role: String(claim.role ?? ""),
-        type: String(claim.type ?? ""),
+        provenanceBulk: typeof claim.provenanceBulk === 'number' ? claim.provenanceBulk : null,
+        role: String(claim.role ?? ''),
+        type: String(claim.type ?? ''),
         paraCanonicalFractions,
       });
     }

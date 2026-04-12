@@ -3,7 +3,10 @@ import { PassageBlock } from './PassageBlock';
 import type { ResolvedItem } from './usePassageResolver';
 
 interface ContextCollapseProps {
-  items: Array<{ resolved: ResolvedItem; role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative' }>;
+  items: Array<{
+    resolved: ResolvedItem;
+    role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
+  }>;
 }
 
 export const ContextCollapse: React.FC<ContextCollapseProps> = ({ items }) => {
@@ -22,7 +25,9 @@ export const ContextCollapse: React.FC<ContextCollapseProps> = ({ items }) => {
           <svg className="w-3 h-3 rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-          <span>Hide {items.length} context passage{items.length !== 1 ? 's' : ''}</span>
+          <span>
+            Hide {items.length} context passage{items.length !== 1 ? 's' : ''}
+          </span>
         </button>
         {items.map((item, i) => (
           <PassageBlock key={i} resolved={item.resolved} role={item.role} />
@@ -40,7 +45,9 @@ export const ContextCollapse: React.FC<ContextCollapseProps> = ({ items }) => {
       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
       </svg>
-      <span>{items.length} additional passage{items.length !== 1 ? 's' : ''} provide context</span>
+      <span>
+        {items.length} additional passage{items.length !== 1 ? 's' : ''} provide context
+      </span>
     </button>
   );
 };

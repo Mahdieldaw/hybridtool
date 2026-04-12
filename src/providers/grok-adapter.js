@@ -3,7 +3,7 @@
  * HTOS Grok Provider Adapter
  * - Implements ProviderAdapter interface for Grok
  * - Follows Qwen/Claude adapter patterns (no offscreen required)
- * 
+ *
  * Build-phase safe: emitted to dist/adapters/*
  */
 
@@ -53,9 +53,7 @@ export class GrokAdapter {
     try {
       const ctx = Object(providerContext);
       const meta = ctx.meta || providerContext || {};
-      const hasContinuation = Boolean(
-        meta.conversationId || meta.parentResponseId,
-      );
+      const hasContinuation = Boolean(meta.conversationId || meta.parentResponseId);
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
 
       let res;
@@ -67,7 +65,9 @@ export class GrokAdapter {
 
       try {
         const len = (res?.text || '').length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`
+        );
       } catch (_) {}
       return res;
     } catch (e) {
@@ -129,7 +129,6 @@ export class GrokAdapter {
 
       pad(`[Grok Adapter] providerComplete: grok status=success, latencyMs=${response.latencyMs}`);
       return response;
-
     } catch (error) {
       return this._handleError(error, aggregatedText, startTime, req, onChunk, signal, _isRetry);
     }
@@ -216,7 +215,6 @@ export class GrokAdapter {
 
       pad(`[Grok Adapter] Continuation completed in ${response.latencyMs}ms`);
       return response;
-
     } catch (error) {
       return this._handleContinuationError(
         error,
@@ -242,10 +240,10 @@ export class GrokAdapter {
         providerId: this.id,
         ok: false,
         text: aggregatedText || null,
-        errorCode: "RATE_LIMITED",
+        errorCode: 'RATE_LIMITED',
         latencyMs: Date.now() - startTime,
         meta: {
-          error: error?.message || "Rate limit reached.",
+          error: error?.message || 'Rate limit reached.',
           status: error?.status || error?.response?.status || 429,
           headers: error?.headers,
         },
@@ -258,7 +256,9 @@ export class GrokAdapter {
         console.log(`[GrokAdapter] Ambiguous auth error (${error?.status}), retrying once...`);
         return await this.sendPrompt(req, onChunk, signal, true);
       }
-      console.log(`[GrokAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+      console.log(
+        `[GrokAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+      );
       await authManager.markUnauthenticated(this.id);
 
       const authError = createProviderAuthError(this.id, error);
@@ -291,9 +291,9 @@ export class GrokAdapter {
 
     if (_isRetry) {
       const extra = {};
-      if (error && typeof error === "object") {
-        if ("missing" in error) extra.missing = error.missing;
-        if ("status" in error) extra.status = error.status;
+      if (error && typeof error === 'object') {
+        if ('missing' in error) extra.missing = error.missing;
+        if ('status' in error) extra.status = error.status;
       }
       return {
         providerId: this.id,
@@ -328,8 +328,12 @@ export class GrokAdapter {
         meta: {
           error: 'no recovery',
           details: error?.details || error?.message,
-          ...(error && typeof error === "object" && "missing" in error ? { missing: error.missing } : {}),
-          ...(error && typeof error === "object" && "status" in error ? { status: error.status } : {}),
+          ...(error && typeof error === 'object' && 'missing' in error
+            ? { missing: error.missing }
+            : {}),
+          ...(error && typeof error === 'object' && 'status' in error
+            ? { status: error.status }
+            : {}),
         },
       };
     } catch (handledError) {
@@ -343,8 +347,12 @@ export class GrokAdapter {
         meta: {
           error: normalizedHandledError.message,
           details: normalizedHandledError.details,
-          ...(handledError && typeof handledError === "object" && "missing" in handledError ? { missing: handledError.missing } : {}),
-          ...(handledError && typeof handledError === "object" && "status" in handledError ? { status: handledError.status } : {}),
+          ...(handledError && typeof handledError === 'object' && 'missing' in handledError
+            ? { missing: handledError.missing }
+            : {}),
+          ...(handledError && typeof handledError === 'object' && 'status' in handledError
+            ? { status: handledError.status }
+            : {}),
         },
       };
     }
@@ -368,10 +376,10 @@ export class GrokAdapter {
         providerId: this.id,
         ok: false,
         text: aggregatedText || null,
-        errorCode: "RATE_LIMITED",
+        errorCode: 'RATE_LIMITED',
         latencyMs: Date.now() - startTime,
         meta: {
-          error: error?.message || "Rate limit reached.",
+          error: error?.message || 'Rate limit reached.',
           status: error?.status || error?.response?.status || 429,
           headers: error?.headers,
           conversationId: meta.conversationId,
@@ -382,10 +390,21 @@ export class GrokAdapter {
 
     if (isProviderAuthError(error) || this._isGrokAuthError(error)) {
       if (!isDefinitiveAuthError(error) && !this._isGrokAuthError(error) && !_isRetry) {
-        console.log(`[GrokAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
-        return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+        console.log(
+          `[GrokAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`
+        );
+        return await this.sendContinuation(
+          prompt,
+          providerContext,
+          sessionId,
+          onChunk,
+          signal,
+          true
+        );
       }
-      console.log(`[GrokAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+      console.log(
+        `[GrokAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+      );
       await authManager.markUnauthenticated(this.id);
 
       const authError = createProviderAuthError(this.id, error);
@@ -422,9 +441,9 @@ export class GrokAdapter {
 
     if (_isRetry) {
       const extra = {};
-      if (error && typeof error === "object") {
-        if ("missing" in error) extra.missing = error.missing;
-        if ("status" in error) extra.status = error.status;
+      if (error && typeof error === 'object') {
+        if ('missing' in error) extra.missing = error.missing;
+        if ('status' in error) extra.status = error.status;
       }
       return {
         providerId: this.id,
@@ -494,10 +513,7 @@ export class GrokAdapter {
     const type = error?.type;
     const msg = String(error?.message || error || '').toLowerCase();
     return (
-      type === 'login' ||
-      type === 'antiBot' ||
-      msg.includes('login') ||
-      msg.includes('anti-bot')
+      type === 'login' || type === 'antiBot' || msg.includes('login') || msg.includes('anti-bot')
     );
   }
 }

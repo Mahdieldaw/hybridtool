@@ -3,10 +3,7 @@
     "useUnknownInCatchVariables": true,
     "target": "es2022",
     "baseUrl": ".",
-    "lib": [
-      "DOM",
-      "ES2022"
-    ],
+    "lib": ["DOM", "ES2022"],
     "allowJs": true,
     "checkJs": false,
     "noUnusedLocals": true,
@@ -23,35 +20,15 @@
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
     "noEmit": true,
-    "typeRoots": [
-      "./node_modules/@types",
-      "./ui/types"
-    ],
+    "typeRoots": ["./node_modules/@types", "./ui/types"],
     "paths": {
-      "react-window": [
-        "./ui/types/react-window.d.ts"
-      ],
-      "react-window/*": [
-        "./ui/types/react-window.d.ts"
-      ],
-      "@shared/*": [
-        "./shared/*"
-      ]
+      "react-window": ["./ui/types/react-window.d.ts"],
+      "react-window/*": ["./ui/types/react-window.d.ts"],
+      "@shared/*": ["./shared/*"]
     },
-    "types": [
-      "react",
-      "react-dom",
-      "chrome",
-      "node",
-      "jest"
-    ]
+    "types": ["react", "react-dom", "chrome", "node", "jest"]
   },
-  "include": [
-    "./**/*.ts",
-    "./**/*.tsx",
-    "./**/*.d.ts",
-    "./**/*.js"
-  ],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "./**/*.js", "eslint.config.mjs"],
   "exclude": [
     "dist",
     "docs",

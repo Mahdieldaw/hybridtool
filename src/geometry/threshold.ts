@@ -20,11 +20,22 @@ export interface ExtendedSimilarityStats {
 /**
  * Compute full distribution stats from a flat array of similarities.
  */
-export function computeExtendedStatsFromArray(
-  allSims: number[]
-): ExtendedSimilarityStats {
+export function computeExtendedStatsFromArray(allSims: number[]): ExtendedSimilarityStats {
   if (allSims.length === 0) {
-    return { count: 0, min: 0, p10: 0, p25: 0, p50: 0, p75: 0, p80: 0, p90: 0, p95: 0, max: 0, mean: 0, stddev: 0 };
+    return {
+      count: 0,
+      min: 0,
+      p10: 0,
+      p25: 0,
+      p50: 0,
+      p75: 0,
+      p80: 0,
+      p90: 0,
+      p95: 0,
+      max: 0,
+      mean: 0,
+      stddev: 0,
+    };
   }
 
   const sorted = allSims.slice().sort((a, b) => a - b);
@@ -40,16 +51,15 @@ export function computeExtendedStatsFromArray(
   return {
     count: sorted.length,
     min: sorted[0],
-    p10: percentile(0.10),
+    p10: percentile(0.1),
     p25: percentile(0.25),
-    p50: percentile(0.50),
+    p50: percentile(0.5),
     p75: percentile(0.75),
-    p80: percentile(0.80),
-    p90: percentile(0.90),
+    p80: percentile(0.8),
+    p90: percentile(0.9),
     p95: percentile(0.95),
     max: sorted[sorted.length - 1],
     mean,
     stddev: Math.sqrt(variance),
   };
 }
-

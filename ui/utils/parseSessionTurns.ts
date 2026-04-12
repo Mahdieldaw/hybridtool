@@ -1,6 +1,6 @@
-import type { UserTurn, AiTurn, ProviderKey, ProviderResponse } from "../../shared/contract";
-import type { TurnMessage } from "../types";
-import { DEFAULT_THREAD } from "../../shared/messaging";
+import type { UserTurn, AiTurn, ProviderKey, ProviderResponse } from '../../shared/contract';
+import type { TurnMessage } from '../types';
+import { DEFAULT_THREAD } from '../../shared/messaging';
 // hydrateArtifact removed — Tier 3 artifacts are ephemeral (rebuilt on demand)
 
 /**
@@ -20,7 +20,7 @@ export function parseSessionTurns(fullSession: any): {
     // 1. Extract UserTurn
     if (round.user && round.user.text) {
       const userTurn: UserTurn = {
-        type: "user",
+        type: 'user',
         id: round.userTurnId || round.user.id || `user-${round.createdAt}`,
         text: round.user.text,
         createdAt: round.user.createdAt || round.createdAt || Date.now(),
@@ -47,25 +47,21 @@ export function parseSessionTurns(fullSession: any): {
       !!round.mapping?.artifact ||
       !!round.singularityOutput ||
       probeSessions.length > 0 ||
-      typeof round.pipelineStatus === "string";
+      typeof round.pipelineStatus === 'string';
 
     if (hasAnyResponseData || hasAnyCognitiveData) {
-      const normalizeProviderResponse = (
-        resp: any,
-        providerId: string,
-      ): ProviderResponse => {
+      const normalizeProviderResponse = (resp: any, providerId: string): ProviderResponse => {
         const createdAt =
-          typeof resp?.createdAt === "number"
+          typeof resp?.createdAt === 'number'
             ? resp.createdAt
             : round.completedAt || round.createdAt || Date.now();
-        const updatedAt =
-          typeof resp?.updatedAt === "number" ? resp.updatedAt : createdAt;
+        const updatedAt = typeof resp?.updatedAt === 'number' ? resp.updatedAt : createdAt;
         // Tier 3: artifacts are ephemeral — not in the history payload.
         // Survey gates are now on the provider response (Tier 2).
         return {
           providerId: (resp?.providerId as ProviderKey) || (providerId as ProviderKey),
-          text: typeof resp?.text === "string" ? resp.text : "",
-          status: resp?.status || "completed",
+          text: typeof resp?.text === 'string' ? resp.text : '',
+          status: resp?.status || 'completed',
           createdAt,
           updatedAt,
           meta: resp?.meta || {},
@@ -74,14 +70,9 @@ export function parseSessionTurns(fullSession: any): {
         } as ProviderResponse;
       };
 
-      const normalizeProviderResponses = (
-        data: any,
-        providerId: string,
-      ): ProviderResponse[] => {
+      const normalizeProviderResponses = (data: any, providerId: string): ProviderResponse[] => {
         if (Array.isArray(data)) {
-          return data.map((resp) =>
-            normalizeProviderResponse(resp ?? {}, providerId),
-          );
+          return data.map((resp) => normalizeProviderResponse(resp ?? {}, providerId));
         }
         return [normalizeProviderResponse(data ?? {}, providerId)];
       };
@@ -89,66 +80,72 @@ export function parseSessionTurns(fullSession: any): {
       const batchResponses: Record<string, ProviderResponse[]> | undefined =
         Object.keys(providers).length > 0
           ? (Object.fromEntries(
-            Object.entries(providers).map(
-              ([providerId, data]): [string, ProviderResponse[]] => [
+              Object.entries(providers).map(([providerId, data]): [string, ProviderResponse[]] => [
                 providerId,
                 normalizeProviderResponses(data, providerId),
-              ],
-            ),
-          ) as Record<string, ProviderResponse[]>)
+              ])
+            ) as Record<string, ProviderResponse[]>)
           : undefined;
 
       const batchPhaseFromLegacy =
         !round.batch && batchResponses
           ? {
-            responses: Object.fromEntries(
-              Object.entries(batchResponses).map(([pid, arr]) => {
-                const last = (arr as any[])[(arr as any[]).length - 1] as any;
-                return [
-                  pid,
-                  {
-                    text: String(last?.text || ""),
-                    modelIndex: Number(last?.meta?.modelIndex || 0),
-                    status: last?.status || "completed",
-                    meta: last?.meta,
-                  },
-                ];
-              }),
-            ),
-            timestamp: round.completedAt || round.createdAt || Date.now(),
-          }
+              responses: Object.fromEntries(
+                Object.entries(batchResponses).map(([pid, arr]) => {
+                  const last = (arr as any[])[(arr as any[]).length - 1] as any;
+                  return [
+                    pid,
+                    {
+                      text: String(last?.text || ''),
+                      modelIndex: Number(last?.meta?.modelIndex || 0),
+                      status: last?.status || 'completed',
+                      meta: last?.meta,
+                    },
+                  ];
+                })
+              ),
+              timestamp: round.completedAt || round.createdAt || Date.now(),
+            }
           : undefined;
 
       const singularityPhaseFromLegacy =
         !round.singularity && singularityRaw && Object.keys(singularityRaw).length > 0
           ? (() => {
-            let best: any = null;
-            for (const arr of Object.values(singularityRaw)) {
-              const a = Array.isArray(arr) ? arr : [arr];
-              const last = a[a.length - 1];
-              if (!best) best = last;
-              const bestTs = Number(best?.updatedAt || best?.createdAt || 0);
-              const ts = Number(last?.updatedAt || last?.createdAt || 0);
-              if (ts >= bestTs) best = last;
-            }
-            return {
-              prompt: "",
-              output: String(best?.text || ""),
-              timestamp: round.completedAt || round.createdAt || Date.now(),
-            };
-          })()
+              let best: any = null;
+              for (const arr of Object.values(singularityRaw)) {
+                const a = Array.isArray(arr) ? arr : [arr];
+                const last = a[a.length - 1];
+                if (!best) best = last;
+                const bestTs = Number(best?.updatedAt || best?.createdAt || 0);
+                const ts = Number(last?.updatedAt || last?.createdAt || 0);
+                if (ts >= bestTs) best = last;
+              }
+              return {
+                prompt: '',
+                output: String(best?.text || ''),
+                timestamp: round.completedAt || round.createdAt || Date.now(),
+              };
+            })()
           : undefined;
 
       const aiTurn: AiTurn = {
-        type: "ai",
+        type: 'ai',
         id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
         userTurnId: round.userTurnId,
         sessionId: fullSession.sessionId,
         threadId: DEFAULT_THREAD,
         createdAt: round.completedAt || round.createdAt || Date.now(),
-        ...(round.batch ? { batch: round.batch } : batchPhaseFromLegacy ? { batch: batchPhaseFromLegacy } : {}),
+        ...(round.batch
+          ? { batch: round.batch }
+          : batchPhaseFromLegacy
+            ? { batch: batchPhaseFromLegacy }
+            : {}),
         // Tier 3: mapping.artifact is ephemeral — not in history payload
-        ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
+        ...(round.singularity
+          ? { singularity: round.singularity }
+          : singularityPhaseFromLegacy
+            ? { singularity: singularityPhaseFromLegacy }
+            : {}),
         ...(probeSessions.length > 0 ? { probeSessions } : {}),
         ...(round.meta ? { meta: round.meta } : {}),
         pipelineStatus: round.pipelineStatus || undefined,

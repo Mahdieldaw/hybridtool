@@ -18,17 +18,11 @@ export function computeBackoffMs(
   policy: RetryPolicy,
   attempt: number,
   retryAfterMs?: number,
-  retryStage?: string,
+  retryStage?: string
 ): number {
   const stageOverride =
-    retryStage && policy.delayOverrides
-      ? policy.delayOverrides[retryStage]
-      : undefined;
-  if (
-    typeof stageOverride === 'number' &&
-    Number.isFinite(stageOverride) &&
-    stageOverride >= 0
-  ) {
+    retryStage && policy.delayOverrides ? policy.delayOverrides[retryStage] : undefined;
+  if (typeof stageOverride === 'number' && Number.isFinite(stageOverride) && stageOverride >= 0) {
     return Math.floor(stageOverride);
   }
   if (
@@ -90,7 +84,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 export async function retryWithPolicy<T>(
   fn: () => Promise<T>,
   context: RetryContext,
-  policyName?: RetryPolicyName,
+  policyName?: RetryPolicyName
 ): Promise<T> {
   const startedAt = Date.now();
   let attempt = 1;
@@ -103,9 +97,7 @@ export async function retryWithPolicy<T>(
         throw error;
       }
       const retryStage = getRetryStage(error);
-      const policy = policyName
-        ? getPolicy(policyName)
-        : policyForErrorType(classified.type);
+      const policy = policyName ? getPolicy(policyName) : policyForErrorType(classified.type);
       if (!policy) {
         throw error;
       }

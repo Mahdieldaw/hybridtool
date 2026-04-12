@@ -3,15 +3,15 @@
  * Provides comprehensive error handling, recovery strategies, and fallback mechanisms
  */
 
-import { persistenceMonitor } from "../core/PersistenceMonitor";
+import { persistenceMonitor } from '../core/PersistenceMonitor';
 import {
   classifyError,
   isProviderAuthError as _isProviderAuthError,
   isDefinitiveAuthError as _isDefinitiveAuthError,
   isRateLimitError as _isRateLimitError,
   isNetworkError as _isNetworkError,
-} from "../core/error-classifier";
-import { getPolicy } from "../core/retry-policy";
+} from '../core/error-classifier';
+import { getPolicy } from '../core/retry-policy';
 
 // ============================================================
 // Inline types to avoid contract.ts dependencies
@@ -31,10 +31,7 @@ interface RetryPolicy {
   jitter: boolean;
 }
 
-type FallbackStrategy = (
-  operation: unknown,
-  context: Record<string, unknown>,
-) => Promise<unknown>;
+type FallbackStrategy = (operation: unknown, context: Record<string, unknown>) => Promise<unknown>;
 
 interface RecoveryStrategy {
   name: string;
@@ -45,34 +42,34 @@ type OperationFn = (context: Record<string, unknown>) => Promise<unknown>;
 
 // Error codes - union of all possible codes
 type HTOSErrorCode =
-  | "AUTH_REQUIRED"
-  | "MULTI_AUTH_REQUIRED"
-  | "RATE_LIMITED"
-  | "NETWORK_ERROR"
-  | "STORAGE_QUOTA_EXCEEDED"
-  | "INVALID_STATE"
-  | "NOT_FOUND"
-  | "TIMEOUT"
-  | "INDEXEDDB_ERROR"
-  | "INDEXEDDB_UNAVAILABLE"
-  | "SERVICE_WORKER_ERROR"
-  | "INPUT_TOO_LONG"
-  | "UNKNOWN_ERROR"
-  | "CIRCUIT_BREAKER_OPEN"
-  | "FALLBACK_UNSUPPORTED"
-  | "FALLBACK_FAILED"
-  | "CACHE_CORRUPTED"
-  | "NO_CACHE_AVAILABLE"
-  | "DIRECT_UNSUPPORTED"
-  | "NO_RECOVERY_STRATEGY"
-  | "INVALID_RETRY_POLICY"
-  | "RETRY_EXHAUSTED"
-  | "LOCALSTORAGE_SAVE_FAILED"
-  | "LOCALSTORAGE_LOAD_FAILED"
-  | "LOCALSTORAGE_DELETE_FAILED"
-  | "LOCALSTORAGE_LIST_FAILED"
-  | "DIRECT_PERSISTENCE_NOT_IMPLEMENTED"
-  | "DIRECT_SESSION_NOT_IMPLEMENTED";
+  | 'AUTH_REQUIRED'
+  | 'MULTI_AUTH_REQUIRED'
+  | 'RATE_LIMITED'
+  | 'NETWORK_ERROR'
+  | 'STORAGE_QUOTA_EXCEEDED'
+  | 'INVALID_STATE'
+  | 'NOT_FOUND'
+  | 'TIMEOUT'
+  | 'INDEXEDDB_ERROR'
+  | 'INDEXEDDB_UNAVAILABLE'
+  | 'SERVICE_WORKER_ERROR'
+  | 'INPUT_TOO_LONG'
+  | 'UNKNOWN_ERROR'
+  | 'CIRCUIT_BREAKER_OPEN'
+  | 'FALLBACK_UNSUPPORTED'
+  | 'FALLBACK_FAILED'
+  | 'CACHE_CORRUPTED'
+  | 'NO_CACHE_AVAILABLE'
+  | 'DIRECT_UNSUPPORTED'
+  | 'NO_RECOVERY_STRATEGY'
+  | 'INVALID_RETRY_POLICY'
+  | 'RETRY_EXHAUSTED'
+  | 'LOCALSTORAGE_SAVE_FAILED'
+  | 'LOCALSTORAGE_LOAD_FAILED'
+  | 'LOCALSTORAGE_DELETE_FAILED'
+  | 'LOCALSTORAGE_LIST_FAILED'
+  | 'DIRECT_PERSISTENCE_NOT_IMPLEMENTED'
+  | 'DIRECT_SESSION_NOT_IMPLEMENTED';
 
 // ============================================================
 // Provider configuration
@@ -80,38 +77,38 @@ type HTOSErrorCode =
 
 export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
   claude: {
-    displayName: "Claude",
-    loginUrl: "https://claude.ai",
+    displayName: 'Claude',
+    loginUrl: 'https://claude.ai',
     maxInputChars: 100000,
   },
   chatgpt: {
-    displayName: "ChatGPT",
-    loginUrl: "https://chatgpt.com",
+    displayName: 'ChatGPT',
+    loginUrl: 'https://chatgpt.com',
     maxInputChars: 32000,
   },
   gemini: {
-    displayName: "Gemini",
-    loginUrl: "https://gemini.google.com",
+    displayName: 'Gemini',
+    loginUrl: 'https://gemini.google.com',
     maxInputChars: 30000,
   },
-  "gemini-pro": {
-    displayName: "Gemini Pro",
-    loginUrl: "https://gemini.google.com",
+  'gemini-pro': {
+    displayName: 'Gemini Pro',
+    loginUrl: 'https://gemini.google.com',
     maxInputChars: 120000,
   },
-  "gemini-exp": {
-    displayName: "Gemini 2.0",
-    loginUrl: "https://gemini.google.com",
+  'gemini-exp': {
+    displayName: 'Gemini 2.0',
+    loginUrl: 'https://gemini.google.com',
     maxInputChars: 30000,
   },
   qwen: {
-    displayName: "Qwen",
-    loginUrl: "https://qianwen.com",
+    displayName: 'Qwen',
+    loginUrl: 'https://qianwen.com',
     maxInputChars: 30000,
   },
   grok: {
-    displayName: "Grok",
-    loginUrl: "http://grok.com",
+    displayName: 'Grok',
+    loginUrl: 'http://grok.com',
     maxInputChars: 120000,
   },
 };
@@ -119,7 +116,6 @@ export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
 // ============================================================
 // Auth error detection patterns — re-exported from core/error-classifier
 // ============================================================
-
 
 export class HTOSError extends Error {
   name: string;
@@ -133,10 +129,10 @@ export class HTOSError extends Error {
     message: string,
     code: HTOSErrorCode,
     context: Record<string, unknown> = {},
-    recoverable = true,
+    recoverable = true
   ) {
     super(message);
-    this.name = "HTOSError";
+    this.name = 'HTOSError';
     this.code = code;
     this.context = context;
     this.recoverable = recoverable;
@@ -170,33 +166,28 @@ export class ProviderAuthError extends HTOSError {
   providerId: string;
   loginUrl: string;
 
-  constructor(
-    providerId: string,
-    message?: string | null,
-    context: Record<string, unknown> = {},
-  ) {
+  constructor(providerId: string, message?: string | null, context: Record<string, unknown> = {}) {
     const config = PROVIDER_CONFIG[providerId] || {
       displayName: providerId,
-      loginUrl: "the provider website",
+      loginUrl: 'the provider website',
     };
 
     const userMessage =
-      message ||
-      `${config.displayName} session expired. Please log in at ${config.loginUrl}`;
+      message || `${config.displayName} session expired. Please log in at ${config.loginUrl}`;
 
     super(
       userMessage,
-      "AUTH_REQUIRED",
+      'AUTH_REQUIRED',
       {
         ...context,
         providerId,
         loginUrl: config.loginUrl,
         displayName: config.displayName,
       },
-      false,
+      false
     );
 
-    this.name = "ProviderAuthError";
+    this.name = 'ProviderAuthError';
     this.providerId = providerId;
     this.loginUrl = config.loginUrl;
   }
@@ -224,7 +215,7 @@ export { isRateLimitError, isNetworkError };
 export function createProviderAuthError(
   providerId: string,
   originalError: unknown,
-  context: Record<string, unknown> = {},
+  context: Record<string, unknown> = {}
 ): ProviderAuthError {
   const errorObj = originalError as Record<string, unknown> | null;
   return new ProviderAuthError(providerId, undefined, {
@@ -237,7 +228,7 @@ export function createProviderAuthError(
 
 export function createMultiProviderAuthError(
   providerIds: string[] | null | undefined,
-  context = "",
+  context = ''
 ): HTOSError | null {
   if (!providerIds?.length) return null;
 
@@ -246,22 +237,22 @@ export function createMultiProviderAuthError(
   }
 
   const lines = providerIds.map((pid) => {
-    const config = PROVIDER_CONFIG[pid] || { displayName: pid, loginUrl: "" };
+    const config = PROVIDER_CONFIG[pid] || { displayName: pid, loginUrl: '' };
     return `• ${config.displayName}: ${config.loginUrl}`;
   });
 
   const message = context
-    ? `${context}\n\nPlease log in to:\n${lines.join("\n")}`
-    : `Multiple providers need authentication:\n${lines.join("\n")}`;
+    ? `${context}\n\nPlease log in to:\n${lines.join('\n')}`
+    : `Multiple providers need authentication:\n${lines.join('\n')}`;
 
   return new HTOSError(
     message,
-    "MULTI_AUTH_REQUIRED",
+    'MULTI_AUTH_REQUIRED',
     {
       providerIds,
       loginUrls: providerIds.map((pid) => PROVIDER_CONFIG[pid]?.loginUrl),
     },
-    false,
+    false
   );
 }
 
@@ -281,12 +272,12 @@ export function getErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  if (typeof error === "string") {
+  if (typeof error === 'string') {
     return error;
   }
 
   const errorObj = error as Record<string, unknown> | null;
-  if (errorObj?.message && typeof errorObj.message === "string") {
+  if (errorObj?.message && typeof errorObj.message === 'string') {
     return errorObj.message;
   }
 
@@ -297,51 +288,48 @@ export function getErrorMessage(error: unknown): string {
  * Standalone normalizeError function for direct import
  * Creates an HTOSError from any error type with appropriate classification
  */
-export function normalizeError(
-  error: unknown,
-  context: Record<string, unknown> = {},
-): HTOSError {
+export function normalizeError(error: unknown, context: Record<string, unknown> = {}): HTOSError {
   // Already an HTOS error
   if (error instanceof HTOSError) {
     return error;
   }
 
   const errorObj = error as Record<string, unknown> | null;
-  let code: HTOSErrorCode = "UNKNOWN_ERROR";
+  let code: HTOSErrorCode = 'UNKNOWN_ERROR';
   let recoverable = true;
 
   // Check for provider auth errors first
   if (isProviderAuthError(error)) {
-    code = "AUTH_REQUIRED";
+    code = 'AUTH_REQUIRED';
     recoverable = false;
   } else if (isRateLimitError(error)) {
-    code = "RATE_LIMITED";
+    code = 'RATE_LIMITED';
     recoverable = true;
   } else if (isNetworkError(error)) {
-    code = "NETWORK_ERROR";
+    code = 'NETWORK_ERROR';
     recoverable = true;
   }
   // Categorize common errors
-  else if (errorObj?.name === "QuotaExceededError") {
-    code = "STORAGE_QUOTA_EXCEEDED";
+  else if (errorObj?.name === 'QuotaExceededError') {
+    code = 'STORAGE_QUOTA_EXCEEDED';
     recoverable = false;
-  } else if (errorObj?.name === "InvalidStateError") {
-    code = "INVALID_STATE";
-  } else if (errorObj?.name === "NotFoundError") {
-    code = "NOT_FOUND";
-  } else if (errorObj?.name === "NetworkError") {
-    code = "NETWORK_ERROR";
-  } else if (errorObj?.name === "TimeoutError") {
-    code = "TIMEOUT";
-  } else if (typeof errorObj?.message === "string" && errorObj.message.includes("IndexedDB")) {
-    code = "INDEXEDDB_ERROR";
-  } else if (typeof errorObj?.message === "string" && errorObj.message.includes("Service Worker")) {
-    code = "SERVICE_WORKER_ERROR";
+  } else if (errorObj?.name === 'InvalidStateError') {
+    code = 'INVALID_STATE';
+  } else if (errorObj?.name === 'NotFoundError') {
+    code = 'NOT_FOUND';
+  } else if (errorObj?.name === 'NetworkError') {
+    code = 'NETWORK_ERROR';
+  } else if (errorObj?.name === 'TimeoutError') {
+    code = 'TIMEOUT';
+  } else if (typeof errorObj?.message === 'string' && errorObj.message.includes('IndexedDB')) {
+    code = 'INDEXEDDB_ERROR';
+  } else if (typeof errorObj?.message === 'string' && errorObj.message.includes('Service Worker')) {
+    code = 'SERVICE_WORKER_ERROR';
   } else if (
-    (typeof errorObj?.message === "string" && errorObj.message.includes("INPUT_TOO_LONG")) ||
-    errorObj?.code === "INPUT_TOO_LONG"
+    (typeof errorObj?.message === 'string' && errorObj.message.includes('INPUT_TOO_LONG')) ||
+    errorObj?.code === 'INPUT_TOO_LONG'
   ) {
-    code = "INPUT_TOO_LONG";
+    code = 'INPUT_TOO_LONG';
     recoverable = false;
   }
 
@@ -349,7 +337,7 @@ export function normalizeError(
     (errorObj?.message as string) || String(error),
     code,
     { ...context, originalError: error },
-    recoverable,
+    recoverable
   );
 }
 
@@ -373,116 +361,95 @@ export class ErrorHandler {
   }
 
   setupProviderStrategies(): void {
-    this.retryPolicies.set("PROVIDER_RATE_LIMIT", getPolicy("RATE_LIMIT").toLegacyShape());
+    this.retryPolicies.set('PROVIDER_RATE_LIMIT', getPolicy('RATE_LIMIT').toLegacyShape());
   }
 
   setupDefaultStrategies(): void {
-    this.fallbackStrategies.set(
-      "PROVIDER_AUTH_FAILED",
-      async (_operation, context) => {
-        const { failedProvider, availableProviders, authManager } = context;
+    this.fallbackStrategies.set('PROVIDER_AUTH_FAILED', async (_operation, context) => {
+      const { failedProvider, availableProviders, authManager } = context;
 
-        console.warn(`🔄 Provider ${failedProvider} auth failed, checking alternatives`);
+      console.warn(`🔄 Provider ${failedProvider} auth failed, checking alternatives`);
 
-        if (!Array.isArray(availableProviders) || !availableProviders.length || !authManager) {
-          throw new ProviderAuthError(failedProvider as string);
-        }
-
-        const authStatus = await (
-          authManager as { getAuthStatus: () => Promise<Record<string, boolean>> }
-        ).getAuthStatus();
-
-        const fallbackProvider = (availableProviders as string[]).find(
-          (pid) => pid !== failedProvider && authStatus[pid] === true,
-        );
-
-        if (fallbackProvider) {
-          console.log(`🔄 Falling back to ${fallbackProvider}`);
-          return { fallbackProvider, authStatus };
-        }
-
+      if (!Array.isArray(availableProviders) || !availableProviders.length || !authManager) {
         throw new ProviderAuthError(failedProvider as string);
-      },
-    );
+      }
 
-    this.fallbackStrategies.set(
-      "INDEXEDDB_UNAVAILABLE",
-      async (operation, context) => {
-        console.warn("🔄 Falling back to localStorage for:", operation);
+      const authStatus = await (
+        authManager as { getAuthStatus: () => Promise<Record<string, boolean>> }
+      ).getAuthStatus();
 
+      const fallbackProvider = (availableProviders as string[]).find(
+        (pid) => pid !== failedProvider && authStatus[pid] === true
+      );
+
+      if (fallbackProvider) {
+        console.log(`🔄 Falling back to ${fallbackProvider}`);
+        return { fallbackProvider, authStatus };
+      }
+
+      throw new ProviderAuthError(failedProvider as string);
+    });
+
+    this.fallbackStrategies.set('INDEXEDDB_UNAVAILABLE', async (operation, context) => {
+      console.warn('🔄 Falling back to localStorage for:', operation);
+
+      try {
+        switch (operation) {
+          case 'save':
+            return this.saveToLocalStorage(context.key as string, context.data);
+          case 'load':
+            return this.loadFromLocalStorage(context.key as string);
+          case 'delete':
+            return this.deleteFromLocalStorage(context.key as string);
+          case 'list':
+            return this.listFromLocalStorage(context.prefix as string);
+          default:
+            throw new HTOSError('Unsupported fallback operation', 'FALLBACK_UNSUPPORTED');
+        }
+      } catch (error) {
+        throw new HTOSError('Fallback strategy failed', 'FALLBACK_FAILED', {
+          originalError: error,
+        });
+      }
+    });
+
+    this.fallbackStrategies.set('NETWORK_UNAVAILABLE', async (operation, context) => {
+      console.warn('🔄 Falling back to cache for network operation:', operation);
+
+      const cacheKey = `htos_cache_${context.url || context.key}`;
+      const cached = localStorage.getItem(cacheKey);
+
+      if (cached) {
         try {
-          switch (operation) {
-            case "save":
-              return this.saveToLocalStorage(context.key as string, context.data);
-            case "load":
-              return this.loadFromLocalStorage(context.key as string);
-            case "delete":
-              return this.deleteFromLocalStorage(context.key as string);
-            case "list":
-              return this.listFromLocalStorage(context.prefix as string);
-            default:
-              throw new HTOSError(
-                "Unsupported fallback operation",
-                "FALLBACK_UNSUPPORTED",
-              );
-          }
-        } catch (error) {
-          throw new HTOSError("Fallback strategy failed", "FALLBACK_FAILED", {
-            originalError: error,
+          return JSON.parse(cached) as unknown;
+        } catch (parseError) {
+          throw new HTOSError('Cached data corrupted', 'CACHE_CORRUPTED', {
+            parseError,
           });
         }
-      },
-    );
+      }
 
-    this.fallbackStrategies.set(
-      "NETWORK_UNAVAILABLE",
-      async (operation, context) => {
-        console.warn("🔄 Falling back to cache for network operation:", operation);
+      throw new HTOSError('No cached data available', 'NO_CACHE_AVAILABLE');
+    });
 
-        const cacheKey = `htos_cache_${context.url || context.key}`;
-        const cached = localStorage.getItem(cacheKey);
+    this.fallbackStrategies.set('SERVICE_WORKER_UNAVAILABLE', async (operation, context) => {
+      console.warn('🔄 Falling back to direct operation (no service worker):', operation);
 
-        if (cached) {
-          try {
-            return JSON.parse(cached) as unknown;
-          } catch (parseError) {
-            throw new HTOSError("Cached data corrupted", "CACHE_CORRUPTED", {
-              parseError,
-            });
-          }
-        }
-
-        throw new HTOSError("No cached data available", "NO_CACHE_AVAILABLE");
-      },
-    );
-
-    this.fallbackStrategies.set(
-      "SERVICE_WORKER_UNAVAILABLE",
-      async (operation, context) => {
-        console.warn(
-          "🔄 Falling back to direct operation (no service worker):",
-          operation,
-        );
-
-        switch (operation) {
-          case "persistence":
-            return this.directPersistenceOperation(context);
-          case "session":
-            return this.directSessionOperation(context);
-          default:
-            throw new HTOSError(
-              "Direct operation not supported",
-              "DIRECT_UNSUPPORTED",
-            );
-        }
-      },
-    );
+      switch (operation) {
+        case 'persistence':
+          return this.directPersistenceOperation(context);
+        case 'session':
+          return this.directSessionOperation(context);
+        default:
+          throw new HTOSError('Direct operation not supported', 'DIRECT_UNSUPPORTED');
+      }
+    });
   }
 
   setupDefaultRetryPolicies(): void {
-    this.retryPolicies.set("STANDARD", getPolicy("NETWORK").toLegacyShape());
+    this.retryPolicies.set('STANDARD', getPolicy('NETWORK').toLegacyShape());
 
-    this.retryPolicies.set("CRITICAL", {
+    this.retryPolicies.set('CRITICAL', {
       maxRetries: 5,
       baseDelay: 500,
       maxDelay: 5000,
@@ -490,13 +457,10 @@ export class ErrorHandler {
       jitter: true,
     });
 
-    this.retryPolicies.set("CONSERVATIVE", getPolicy("NETWORK_CONSERVATIVE").toLegacyShape());
+    this.retryPolicies.set('CONSERVATIVE', getPolicy('NETWORK_CONSERVATIVE').toLegacyShape());
   }
 
-  async handleError(
-    error: unknown,
-    context: Record<string, unknown> = {},
-  ): Promise<unknown> {
+  async handleError(error: unknown, context: Record<string, unknown> = {}): Promise<unknown> {
     const htosError = this.normalizeError(error, context);
 
     persistenceMonitor.recordError(htosError, context);
@@ -506,7 +470,7 @@ export class ErrorHandler {
       try {
         return await this.attemptRecovery(htosError, context);
       } catch (recoveryError) {
-        console.error("🚨 Recovery failed:", recoveryError);
+        console.error('🚨 Recovery failed:', recoveryError);
       }
     }
 
@@ -520,17 +484,11 @@ export class ErrorHandler {
     return normalizeError(error, context);
   }
 
-  async attemptRecovery(
-    error: HTOSError,
-    context: Record<string, unknown>,
-  ): Promise<unknown> {
+  async attemptRecovery(error: HTOSError, context: Record<string, unknown>): Promise<unknown> {
     const strategy = this.getRecoveryStrategy(error.code);
 
     if (strategy) {
-      console.log(
-        `🔧 Attempting recovery for ${error.code} using strategy:`,
-        strategy.name,
-      );
+      console.log(`🔧 Attempting recovery for ${error.code} using strategy:`, strategy.name);
       return await strategy.execute(error, context);
     }
 
@@ -540,17 +498,15 @@ export class ErrorHandler {
       return await fallbackStrategy(context.operation, context);
     }
 
-    throw new HTOSError(
-      "No recovery strategy available",
-      "NO_RECOVERY_STRATEGY",
-      { originalError: error },
-    );
+    throw new HTOSError('No recovery strategy available', 'NO_RECOVERY_STRATEGY', {
+      originalError: error,
+    });
   }
 
   getRecoveryStrategy(errorCode: HTOSErrorCode): RecoveryStrategy | undefined {
     const strategies: Record<string, RecoveryStrategy> = {
       AUTH_REQUIRED: {
-        name: "Provider Auth Recovery",
+        name: 'Provider Auth Recovery',
         execute: async (error, context) => {
           if (context.authManager && context.providerId) {
             const authManager = context.authManager as {
@@ -563,19 +519,19 @@ export class ErrorHandler {
       },
 
       RATE_LIMITED: {
-        name: "Rate Limit Recovery",
+        name: 'Rate Limit Recovery',
         execute: async (_error, context) => {
           console.log(`⏳ Rate limited by ${context.providerId}, waiting...`);
           return await this.retryWithBackoff(
             context.operation as OperationFn,
             context,
-            "PROVIDER_RATE_LIMIT",
+            'PROVIDER_RATE_LIMIT'
           );
         },
       },
 
       INDEXEDDB_ERROR: {
-        name: "IndexedDB Recovery",
+        name: 'IndexedDB Recovery',
         execute: async (error, context) => {
           if (context.reinitialize) {
             await (context.reinitialize as () => Promise<unknown>)();
@@ -586,7 +542,7 @@ export class ErrorHandler {
       },
 
       TIMEOUT: {
-        name: "Timeout Recovery",
+        name: 'Timeout Recovery',
         execute: async (_error, context) => {
           const newContext = {
             ...context,
@@ -595,7 +551,7 @@ export class ErrorHandler {
           return await this.retryWithBackoff(
             context.operation as OperationFn,
             newContext,
-            "CONSERVATIVE",
+            'CONSERVATIVE'
           );
         },
       },
@@ -606,10 +562,10 @@ export class ErrorHandler {
 
   getFallbackStrategy(errorCode: HTOSErrorCode): FallbackStrategy | null {
     const fallbackMap: Record<string, string> = {
-      INDEXEDDB_ERROR: "INDEXEDDB_UNAVAILABLE",
-      INDEXEDDB_UNAVAILABLE: "INDEXEDDB_UNAVAILABLE",
-      NETWORK_ERROR: "NETWORK_UNAVAILABLE",
-      SERVICE_WORKER_ERROR: "SERVICE_WORKER_UNAVAILABLE",
+      INDEXEDDB_ERROR: 'INDEXEDDB_UNAVAILABLE',
+      INDEXEDDB_UNAVAILABLE: 'INDEXEDDB_UNAVAILABLE',
+      NETWORK_ERROR: 'NETWORK_UNAVAILABLE',
+      SERVICE_WORKER_ERROR: 'SERVICE_WORKER_UNAVAILABLE',
     };
 
     const fallbackKey = fallbackMap[errorCode];
@@ -619,15 +575,13 @@ export class ErrorHandler {
   async retryWithBackoff(
     operation: OperationFn,
     context: Record<string, unknown>,
-    policyName = "STANDARD",
+    policyName = 'STANDARD'
   ): Promise<unknown> {
     const policy = this.retryPolicies.get(policyName);
     if (!policy) {
-      throw new HTOSError(
-        `Retry policy '${policyName}' not found`,
-        "INVALID_RETRY_POLICY",
-        { policyName },
-      );
+      throw new HTOSError(`Retry policy '${policyName}' not found`, 'INVALID_RETRY_POLICY', {
+        policyName,
+      });
     }
     let lastError: unknown;
 
@@ -635,9 +589,7 @@ export class ErrorHandler {
       try {
         if (attempt > 0) {
           const delay = this.calculateDelay(attempt, policy);
-          console.log(
-            `⏳ Retrying in ${delay}ms (attempt ${attempt + 1}/${policy.maxRetries})`,
-          );
+          console.log(`⏳ Retrying in ${delay}ms (attempt ${attempt + 1}/${policy.maxRetries})`);
           await this.sleep(delay);
         }
 
@@ -649,14 +601,11 @@ export class ErrorHandler {
           throw error;
         }
         lastError = error;
-        console.warn(
-          `❌ Attempt ${attempt + 1} failed:`,
-          (error as { message?: string })?.message,
-        );
+        console.warn(`❌ Attempt ${attempt + 1} failed:`, (error as { message?: string })?.message);
       }
     }
 
-    throw new HTOSError("All retry attempts failed", "RETRY_EXHAUSTED", {
+    throw new HTOSError('All retry attempts failed', 'RETRY_EXHAUSTED', {
       attempts: policy.maxRetries,
       lastError,
     });
@@ -682,20 +631,13 @@ export class ErrorHandler {
     this.errorCounts.set(errorCode, count + 1);
   }
 
-  async saveToLocalStorage(
-    key: string,
-    data: unknown,
-  ): Promise<{ success: true; fallback: true }> {
+  async saveToLocalStorage(key: string, data: unknown): Promise<{ success: true; fallback: true }> {
     try {
       const serialized = JSON.stringify(data);
       localStorage.setItem(`htos_fallback_${key}`, serialized);
       return { success: true, fallback: true };
     } catch (error) {
-      throw new HTOSError(
-        "localStorage save failed",
-        "LOCALSTORAGE_SAVE_FAILED",
-        { error },
-      );
+      throw new HTOSError('localStorage save failed', 'LOCALSTORAGE_SAVE_FAILED', { error });
     }
   }
 
@@ -704,11 +646,7 @@ export class ErrorHandler {
       const data = localStorage.getItem(`htos_fallback_${key}`);
       return data ? (JSON.parse(data) as unknown) : null;
     } catch (error) {
-      throw new HTOSError(
-        "localStorage load failed",
-        "LOCALSTORAGE_LOAD_FAILED",
-        { error },
-      );
+      throw new HTOSError('localStorage load failed', 'LOCALSTORAGE_LOAD_FAILED', { error });
     }
   }
 
@@ -717,11 +655,7 @@ export class ErrorHandler {
       localStorage.removeItem(`htos_fallback_${key}`);
       return { success: true, fallback: true };
     } catch (error) {
-      throw new HTOSError(
-        "localStorage delete failed",
-        "LOCALSTORAGE_DELETE_FAILED",
-        { error },
-      );
+      throw new HTOSError('localStorage delete failed', 'LOCALSTORAGE_DELETE_FAILED', { error });
     }
   }
 
@@ -739,32 +673,25 @@ export class ErrorHandler {
 
       return keys;
     } catch (error) {
-      throw new HTOSError(
-        "localStorage list failed",
-        "LOCALSTORAGE_LIST_FAILED",
-        { error },
-      );
+      throw new HTOSError('localStorage list failed', 'LOCALSTORAGE_LIST_FAILED', { error });
     }
   }
 
   async directPersistenceOperation(_context: Record<string, unknown>): Promise<never> {
-    throw new HTOSError(
-      "Direct persistence not implemented",
-      "DIRECT_PERSISTENCE_NOT_IMPLEMENTED",
-    );
+    throw new HTOSError('Direct persistence not implemented', 'DIRECT_PERSISTENCE_NOT_IMPLEMENTED');
   }
 
   async directSessionOperation(_context: Record<string, unknown>): Promise<never> {
     throw new HTOSError(
-      "Direct session management not implemented",
-      "DIRECT_SESSION_NOT_IMPLEMENTED",
+      'Direct session management not implemented',
+      'DIRECT_SESSION_NOT_IMPLEMENTED'
     );
   }
 
   async handleProviderError(
     error: unknown,
     providerId: string,
-    context: Record<string, unknown> = {},
+    context: Record<string, unknown> = {}
   ): Promise<unknown> {
     const htosError = this.normalizeError(error, {
       ...context,
@@ -774,11 +701,11 @@ export class ErrorHandler {
     persistenceMonitor.recordError(htosError, { providerId, ...context });
     this.incrementErrorCount(`${providerId}_${htosError.code}`);
 
-    if (htosError.code === "AUTH_REQUIRED") {
+    if (htosError.code === 'AUTH_REQUIRED') {
       throw createProviderAuthError(providerId, error, context);
     }
 
-    if (htosError.code === "RATE_LIMITED") {
+    if (htosError.code === 'RATE_LIMITED') {
       throw htosError;
     }
 
@@ -786,7 +713,7 @@ export class ErrorHandler {
       try {
         return await this.attemptRecovery(htosError, { ...context, providerId });
       } catch (recoveryError) {
-        if (recoveryError instanceof HTOSError && recoveryError.code === "NO_RECOVERY_STRATEGY") {
+        if (recoveryError instanceof HTOSError && recoveryError.code === 'NO_RECOVERY_STRATEGY') {
           throw htosError;
         }
         throw recoveryError;
@@ -834,7 +761,7 @@ export class ErrorHandler {
 
   reset(): void {
     this.errorCounts.clear();
-    console.log("🔄 Error handler reset");
+    console.log('🔄 Error handler reset');
   }
 }
 
@@ -842,7 +769,7 @@ export class ErrorHandler {
 export const errorHandler = new ErrorHandler();
 
 // Make it available globally for debugging
-if (typeof globalThis !== "undefined") {
+if (typeof globalThis !== 'undefined') {
   (globalThis as Record<string, unknown>).__HTOS_ERROR_HANDLER = errorHandler;
 }
 

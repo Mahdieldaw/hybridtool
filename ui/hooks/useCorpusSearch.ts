@@ -59,53 +59,56 @@ export function useCorpusSearch(aiTurnId: string | null | undefined) {
     }, PROBE_TIMEOUT_MS);
   }, [clearProbeTimeout]);
 
-  const search = useCallback(async (queryText: string) => {
-    const trimmedQuery = queryText.trim();
-    if (!aiTurnId || !trimmedQuery) return;
-    const enabledProviders = getEnabledProbeProviders(probeProvidersEnabled);
+  const search = useCallback(
+    async (queryText: string) => {
+      const trimmedQuery = queryText.trim();
+      if (!aiTurnId || !trimmedQuery) return;
+      const enabledProviders = getEnabledProbeProviders(probeProvidersEnabled);
 
-    setIsSearching(true);
-    expectedProbeCountRef.current = enabledProviders.length;
-    setIsProbing(enabledProviders.length > 0);
-    setProbeResults([]);
-    completedProbeModelsRef.current = new Set();
-    setError(null);
-    clearProbeTimeout();
-
-    try {
-      const data = await api.corpusSearch(aiTurnId, trimmedQuery);
-      const nextResults = data?.results ?? [];
-      setResults(nextResults);
-      if (data?.reason === 'no_embeddings') {
-        setError('No embeddings available for this turn');
-      }
-      const nnParagraphs = nextResults
-        .map((r: CorpusSearchHit) => r?.text || '')
-        .filter(Boolean)
-        .slice(0, 8);
-      if (enabledProviders.length === 0) {
-        expectedProbeCountRef.current = 0;
-        setIsProbing(false);
-        return;
-      }
-      scheduleProbeTimeout();
-      await api.probeQuery(
-        aiTurnId,
-        trimmedQuery,
-        nextResults,
-        nnParagraphs,
-        enabledProviders as string[],
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search failed');
-      setResults([]);
-      setIsProbing(false);
-      expectedProbeCountRef.current = 0;
+      setIsSearching(true);
+      expectedProbeCountRef.current = enabledProviders.length;
+      setIsProbing(enabledProviders.length > 0);
+      setProbeResults([]);
+      completedProbeModelsRef.current = new Set();
+      setError(null);
       clearProbeTimeout();
-    } finally {
-      setIsSearching(false);
-    }
-  }, [aiTurnId, clearProbeTimeout, probeProvidersEnabled, scheduleProbeTimeout]);
+
+      try {
+        const data = await api.corpusSearch(aiTurnId, trimmedQuery);
+        const nextResults = data?.results ?? [];
+        setResults(nextResults);
+        if (data?.reason === 'no_embeddings') {
+          setError('No embeddings available for this turn');
+        }
+        const nnParagraphs = nextResults
+          .map((r: CorpusSearchHit) => r?.text || '')
+          .filter(Boolean)
+          .slice(0, 8);
+        if (enabledProviders.length === 0) {
+          expectedProbeCountRef.current = 0;
+          setIsProbing(false);
+          return;
+        }
+        scheduleProbeTimeout();
+        await api.probeQuery(
+          aiTurnId,
+          trimmedQuery,
+          nextResults,
+          nnParagraphs,
+          enabledProviders as string[]
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Search failed');
+        setResults([]);
+        setIsProbing(false);
+        expectedProbeCountRef.current = 0;
+        clearProbeTimeout();
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [aiTurnId, clearProbeTimeout, probeProvidersEnabled, scheduleProbeTimeout]
+  );
 
   useEffect(() => {
     const onProbeSessionStart = (evt: Event) => {
@@ -189,7 +192,8 @@ export function useCorpusSearch(aiTurnId: string | null | undefined) {
         };
         return copy;
       });
-      const shouldContinueProbing = completedProbeModelsRef.current.size < expectedProbeCountRef.current;
+      const shouldContinueProbing =
+        completedProbeModelsRef.current.size < expectedProbeCountRef.current;
       if (shouldContinueProbing) {
         scheduleProbeTimeout();
       } else {
@@ -202,7 +206,10 @@ export function useCorpusSearch(aiTurnId: string | null | undefined) {
     window.addEventListener('corpus-probe-chunk', onProbeChunk as EventListener);
     window.addEventListener('corpus-probe-complete', onProbeComplete as EventListener);
     return () => {
-      window.removeEventListener('corpus-probe-session-start', onProbeSessionStart as EventListener);
+      window.removeEventListener(
+        'corpus-probe-session-start',
+        onProbeSessionStart as EventListener
+      );
       window.removeEventListener('corpus-probe-chunk', onProbeChunk as EventListener);
       window.removeEventListener('corpus-probe-complete', onProbeComplete as EventListener);
     };

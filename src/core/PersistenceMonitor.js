@@ -17,7 +17,7 @@ export class PersistenceMonitor {
     this.startTime = Date.now();
 
     if (this.isEnabled) {
-      console.log("🔍 HTOS Persistence Monitor initialized");
+      console.log('🔍 HTOS Persistence Monitor initialized');
     }
   }
 
@@ -98,7 +98,7 @@ export class PersistenceMonitor {
       // > 1 second
       console.warn(
         `🐌 Slow operation detected: ${operation.type} took ${operation.duration.toFixed(2)}ms`,
-        operation,
+        operation
       );
     }
   }
@@ -124,7 +124,7 @@ export class PersistenceMonitor {
       this.metrics.errors = this.metrics.errors.slice(-this.maxLogEntries);
     }
 
-    console.error("🚨 HTOS Persistence Error:", errorRecord);
+    console.error('🚨 HTOS Persistence Error:', errorRecord);
   }
 
   /**
@@ -199,16 +199,12 @@ export class PersistenceMonitor {
     const oneHour = 60 * 60 * 1000;
     const oneDay = 24 * oneHour;
 
-    const recentErrors = this.metrics.errors.filter(
-      (e) => now - e.timestamp < oneHour,
-    );
-    const dailyErrors = this.metrics.errors.filter(
-      (e) => now - e.timestamp < oneDay,
-    );
+    const recentErrors = this.metrics.errors.filter((e) => now - e.timestamp < oneHour);
+    const dailyErrors = this.metrics.errors.filter((e) => now - e.timestamp < oneDay);
 
     const errorsByType = {};
     this.metrics.errors.forEach((error) => {
-      const type = error.context?.type || "unknown";
+      const type = error.context?.type || 'unknown';
       errorsByType[type] = (errorsByType[type] || 0) + 1;
     });
 
@@ -234,7 +230,7 @@ export class PersistenceMonitor {
       errorStats,
       recentOperations: recentOps,
       exportedAt: Date.now(),
-      version: "1.0.0",
+      version: '1.0.0',
     };
   }
 
@@ -248,7 +244,7 @@ export class PersistenceMonitor {
     this.metrics.connections.clear();
 
     if (this.isEnabled) {
-      console.log("🧹 HTOS Persistence Monitor metrics cleared");
+      console.log('🧹 HTOS Persistence Monitor metrics cleared');
     }
   }
 
@@ -258,9 +254,9 @@ export class PersistenceMonitor {
   setEnabled(enabled) {
     this.isEnabled = enabled;
     if (enabled) {
-      console.log("🔍 HTOS Persistence Monitor enabled");
+      console.log('🔍 HTOS Persistence Monitor enabled');
     } else {
-      console.log("🔍 HTOS Persistence Monitor disabled");
+      console.log('🔍 HTOS Persistence Monitor disabled');
     }
   }
 
@@ -296,7 +292,7 @@ export class PersistenceMonitor {
     const operationId = this.startOperation(operationType, details);
 
     // If already done, handle immediately
-    if (operation.readyState === "done") {
+    if (operation.readyState === 'done') {
       if (operation.error) {
         this.endOperation(operationId, null, operation.error);
       } else {
@@ -312,8 +308,7 @@ export class PersistenceMonitor {
       };
 
       operation.onerror = (event) => {
-        const error =
-          event.target.error || new Error("IndexedDB operation failed");
+        const error = event.target.error || new Error('IndexedDB operation failed');
         this.endOperation(operationId, null, error);
         reject(error);
       };
@@ -352,7 +347,7 @@ export class PersistenceMonitor {
 export const persistenceMonitor = new PersistenceMonitor();
 
 // Make it available globally for debugging
-if (typeof globalThis !== "undefined") {
+if (typeof globalThis !== 'undefined') {
   globalThis.__HTOS_PERSISTENCE_MONITOR = persistenceMonitor;
 }
 

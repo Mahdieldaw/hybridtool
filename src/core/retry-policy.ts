@@ -1,10 +1,6 @@
 import type { ProviderErrorType } from '../../shared/contract';
 
-export type RetryPolicyName =
-  | 'COLD_START'
-  | 'NETWORK'
-  | 'NETWORK_CONSERVATIVE'
-  | 'RATE_LIMIT';
+export type RetryPolicyName = 'COLD_START' | 'NETWORK' | 'NETWORK_CONSERVATIVE' | 'RATE_LIMIT';
 
 export interface RetryPolicy {
   name: RetryPolicyName;

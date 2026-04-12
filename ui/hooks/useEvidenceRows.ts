@@ -1,5 +1,8 @@
-import { useMemo } from "react";
-import { getProviderAbbreviation, resolveProviderIdFromCitationOrder } from "../utils/provider-helpers";
+import { useMemo } from 'react';
+import {
+  getProviderAbbreviation,
+  resolveProviderIdFromCitationOrder,
+} from '../utils/provider-helpers';
 
 // ============================================================================
 // TYPES
@@ -48,17 +51,17 @@ export interface EvidenceRow {
   inDirectTopN: boolean;
 
   // Claim density (paragraph-level evidence concentration)
-  paraCoverage: number | null;    // fraction of this paragraph's statements owned by selected claim
-  inPassage: boolean;             // part of a contiguous multi-paragraph passage (length >= 2)
-  passageLength: number | null;   // length of containing passage (1 = isolated paragraph)
+  paraCoverage: number | null; // fraction of this paragraph's statements owned by selected claim
+  inPassage: boolean; // part of a contiguous multi-paragraph passage (length >= 2)
+  passageLength: number | null; // length of containing passage (1 = isolated paragraph)
 
   // Statement classification (corpus-level, not claim-relative)
-  sc_claimed: boolean;                 // owned by at least one claim
-  sc_inPassage: boolean;               // claimed + inside a detected passage boundary
-  sc_groupIdx: number | null;          // 1-based unclaimed group index (null if claimed)
-  sc_landscapePos: string | null;      // landscape position of nearest claim (unclaimed only)
-  sc_nearestClaimSim: number | null;   // paragraph cosine to nearest claim (unclaimed only)
-  sc_queryRelevance: number | null;    // per-statement query relevance from classification (unclaimed only)
+  sc_claimed: boolean; // owned by at least one claim
+  sc_inPassage: boolean; // claimed + inside a detected passage boundary
+  sc_groupIdx: number | null; // 1-based unclaimed group index (null if claimed)
+  sc_landscapePos: string | null; // landscape position of nearest claim (unclaimed only)
+  sc_nearestClaimSim: number | null; // paragraph cosine to nearest claim (unclaimed only)
+  sc_queryRelevance: number | null; // per-statement query relevance from classification (unclaimed only)
 
   // Table cell-unit metadata
   isTableCell: boolean;
@@ -83,9 +86,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
           const id = String((v as any)?.statementId ?? (v as any)?.id ?? (v as any)?.sid ?? i);
           return [id, v] as [string, any];
         })
-        .filter(([k]) => k != null && String(k).trim() !== "");
+        .filter(([k]) => k != null && String(k).trim() !== '');
     }
-    if (typeof input === "object") return Object.entries(input);
+    if (typeof input === 'object') return Object.entries(input);
     return [];
   };
 
@@ -93,7 +96,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     if (!input) return [];
     if (Array.isArray(input)) return input;
     if (input instanceof Map) return Array.from(input.values());
-    if (typeof input === "object") return Object.values(input);
+    if (typeof input === 'object') return Object.values(input);
     return [];
   };
 
@@ -102,13 +105,13 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     if (Array.isArray(input)) return input;
     if (input instanceof Map) {
       return Array.from(input.entries()).map(([k, v]) => ({
-        ...(v && typeof v === "object" ? v : {}),
+        ...(v && typeof v === 'object' ? v : {}),
         id: (v as any)?.id ?? (v as any)?.statementId ?? (v as any)?.sid ?? k,
       }));
     }
-    if (typeof input === "object") {
+    if (typeof input === 'object') {
       return Object.entries(input).map(([k, v]) => ({
-        ...(v && typeof v === "object" ? v : {}),
+        ...(v && typeof v === 'object' ? v : {}),
         id: (v as any)?.id ?? (v as any)?.statementId ?? (v as any)?.sid ?? k,
       }));
     }
@@ -116,7 +119,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
   };
   const normalizeStatementId = (stmt: any): string => {
     const id = stmt?.id ?? stmt?.statementId ?? stmt?.sid;
-    return String(id ?? "").trim();
+    return String(id ?? '').trim();
   };
 
   // Global maps — build once per artifact
@@ -127,8 +130,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const queryScoreByStmt = new Map<string, number>();
     const queryScores = a?.geometry?.query?.relevance?.statementScores;
     for (const [stmtId, val] of normalizeEntries(queryScores)) {
-      const qs = typeof val === "number" ? val : (val as any)?.querySimilarity;
-      if (typeof qs === "number" && Number.isFinite(qs)) queryScoreByStmt.set(String(stmtId), qs);
+      const qs = typeof val === 'number' ? val : (val as any)?.querySimilarity;
+      if (typeof qs === 'number' && Number.isFinite(qs)) queryScoreByStmt.set(String(stmtId), qs);
     }
 
     const bsScores: any[] = Array.isArray(a?.blastSurface?.scores) ? a.blastSurface.scores : [];
@@ -149,10 +152,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     // Statement classification lookups (corpus-level)
     const scClaimed = new Set<string>();
     const scInPassage = new Set<string>();
-    const scGroupByStmt = new Map<string, number>();       // stmtId → 1-based group index
-    const scLandscapeByStmt = new Map<string, string>();   // stmtId → landscape position
-    const scNearestSimByStmt = new Map<string, number>();  // stmtId → paragraph best cosine to claim
-    const scQrByStmt = new Map<string, number>();          // stmtId → query relevance
+    const scGroupByStmt = new Map<string, number>(); // stmtId → 1-based group index
+    const scLandscapeByStmt = new Map<string, string>(); // stmtId → landscape position
+    const scNearestSimByStmt = new Map<string, number>(); // stmtId → paragraph best cosine to claim
+    const scQrByStmt = new Map<string, number>(); // stmtId → query relevance
 
     const scData = a?.statementClassification ?? null;
     if (scData) {
@@ -182,7 +185,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
             return best === -Infinity ? null : best;
           })();
           const stmtQr: Record<string, number> = para?.statementQueryRelevance ?? {};
-          const unclaimed: string[] = Array.isArray(para?.unclaimedStatementIds) ? para.unclaimedStatementIds : [];
+          const unclaimed: string[] = Array.isArray(para?.unclaimedStatementIds)
+            ? para.unclaimedStatementIds
+            : [];
           for (const sid of unclaimed) {
             scGroupByStmt.set(sid, groupIdx);
             scLandscapeByStmt.set(sid, landscape);
@@ -207,7 +212,10 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       scNearestSimByStmt,
       scQrByStmt,
       claimLabelMap: new Map<string, string>(
-        normalizeArray(a?.semantic?.claims ?? a?.claims).map(c => [String(c?.id ?? ""), String(c?.label ?? c?.id ?? "")])
+        normalizeArray(a?.semantic?.claims ?? a?.claims).map((c) => [
+          String(c?.id ?? ''),
+          String(c?.label ?? c?.id ?? ''),
+        ])
       ),
     };
   }, [artifact]);
@@ -222,20 +230,20 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       a?.derived?.mixedProvenance ??
       a?.derived?.mixedProvenanceResult ??
       null;
-    const claimProvenance =
-      a?.claimProvenance ??
-      a?.derived?.claimProvenance ??
-      null;
+    const claimProvenance = a?.claimProvenance ?? a?.derived?.claimProvenance ?? null;
     const directTopIds = new Set<string>();
     const claimsArr: any[] = Array.isArray(a?.semantic?.claims)
       ? a.semantic.claims
       : Array.isArray(a?.claims)
         ? a.claims
         : [];
-    const claimObj = claimsArr.find((c: any) => String(c?.id ?? "").trim() === selectedClaimId) ?? null;
-    const sourceIds = Array.isArray(claimObj?.sourceStatementIds) ? claimObj.sourceStatementIds : [];
+    const claimObj =
+      claimsArr.find((c: any) => String(c?.id ?? '').trim() === selectedClaimId) ?? null;
+    const sourceIds = Array.isArray(claimObj?.sourceStatementIds)
+      ? claimObj.sourceStatementIds
+      : [];
     for (const id of sourceIds) {
-      const sid = String(id ?? "").trim();
+      const sid = String(id ?? '').trim();
       if (sid) directTopIds.add(sid);
     }
 
@@ -251,9 +259,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     // Exclusive statement IDs for this claim
     const exclusiveIds = new Set<string>();
     const exclSource = claimProvenance?.claimExclusivity;
-    const exclEntry = exclSource instanceof Map
-      ? exclSource.get(selectedClaimId)
-      : exclSource?.[selectedClaimId];
+    const exclEntry =
+      exclSource instanceof Map ? exclSource.get(selectedClaimId) : exclSource?.[selectedClaimId];
     const excl = exclEntry?.exclusiveIds;
     if (Array.isArray(excl)) {
       for (const id of excl) exclusiveIds.add(String(id));
@@ -265,16 +272,18 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const passageLenByPara = new Map<string, number>();
     const inPassageParas = new Set<string>();
     if (cdProfile) {
-      for (const pc of (cdProfile.paragraphCoverage ?? [])) {
+      for (const pc of cdProfile.paragraphCoverage ?? []) {
         paraCoverageByPara.set(String(pc.paragraphId), pc.coverage);
       }
-      for (const passage of (cdProfile.passages ?? [])) {
+      for (const passage of cdProfile.passages ?? []) {
         const isMulti = passage.length >= 2;
         // Find paragraph IDs in this passage range for this model
-        for (const pc of (cdProfile.paragraphCoverage ?? [])) {
-          if (pc.modelIndex === passage.modelIndex &&
-              pc.paragraphIndex >= passage.startParagraphIndex &&
-              pc.paragraphIndex <= passage.endParagraphIndex) {
+        for (const pc of cdProfile.paragraphCoverage ?? []) {
+          if (
+            pc.modelIndex === passage.modelIndex &&
+            pc.paragraphIndex >= passage.startParagraphIndex &&
+            pc.paragraphIndex <= passage.endParagraphIndex
+          ) {
             passageLenByPara.set(String(pc.paragraphId), passage.length);
             if (isMulti) inPassageParas.add(String(pc.paragraphId));
           }
@@ -301,11 +310,14 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const routeCategory: EvidenceRow['routeCategory'] = (() => {
       if (!selectedClaimId || !routing) return null;
       const inConflict = Array.isArray(routing?.conflictClusters)
-        ? routing.conflictClusters.some((c: any) => Array.isArray(c?.claimIds) && c.claimIds.map(String).includes(selectedClaimId))
+        ? routing.conflictClusters.some(
+            (c: any) =>
+              Array.isArray(c?.claimIds) && c.claimIds.map(String).includes(selectedClaimId)
+          )
         : false;
       if (inConflict) return 'conflict';
       const isolate = Array.isArray(routing?.damageOutliers)
-        ? routing.damageOutliers.some((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+        ? routing.damageOutliers.some((c: any) => String(c?.claimId ?? '') === selectedClaimId)
         : false;
       if (isolate) return 'isolate';
       const passthrough = Array.isArray(routing?.passthrough)
@@ -323,13 +335,15 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
       // 2. Fallback to load-bearing routed claims
       const routed = Array.isArray(artifact?.passageRouting?.routing?.loadBearingClaims)
-        ? artifact.passageRouting.routing.loadBearingClaims.find((c: any) => String(c?.claimId ?? "") === selectedClaimId)
+        ? artifact.passageRouting.routing.loadBearingClaims.find(
+            (c: any) => String(c?.claimId ?? '') === selectedClaimId
+          )
         : null;
       if (typeof routed?.queryDistance === 'number') return routed.queryDistance;
 
       // 3. Fallback to enriched claims metadata
       const ec = Array.isArray(artifact?.claims)
-        ? artifact.claims.find((c: any) => String(c?.id ?? "") === selectedClaimId)
+        ? artifact.claims.find((c: any) => String(c?.id ?? '') === selectedClaimId)
         : null;
       if (typeof ec?.queryDistance === 'number') return ec.queryDistance;
 
@@ -339,28 +353,35 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     return statements.map((stmt): EvidenceRow => {
       const stmtId = normalizeStatementId(stmt);
       const modelIndex = typeof stmt.modelIndex === 'number' ? stmt.modelIndex : 0;
-      const providerId = resolveProviderIdFromCitationOrder(modelIndex, globalMaps?.citationSourceOrder ?? undefined);
+      const providerId = resolveProviderIdFromCitationOrder(
+        modelIndex,
+        globalMaps?.citationSourceOrder ?? undefined
+      );
       const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : null;
 
       // Global fields
       const sim_query = globalMaps?.queryScoreByStmt.get(stmtId) ?? null;
-      const scEntry = (globalMaps?.scClaimed.has(stmtId))
+      const scEntry = globalMaps?.scClaimed.has(stmtId)
         ? (a?.statementClassification?.claimed?.[stmtId] ?? null)
         : null;
       const assignedClaimIds = Array.isArray(scEntry?.claimIds) ? scEntry.claimIds.map(String) : [];
-      const assignedClaimLabels = assignedClaimIds.map((cid: string) => globalMaps?.claimLabelMap.get(cid) ?? cid);
+      const assignedClaimLabels = assignedClaimIds.map(
+        (cid: string) => globalMaps?.claimLabelMap.get(cid) ?? cid
+      );
 
       const fate: EvidenceRow['fate'] = scEntry
-        ? (assignedClaimIds.length >= 2 ? 'supporting' : 'primary')
-        : (stmtId ? 'unclaimed' : null);
+        ? assignedClaimIds.length >= 2
+          ? 'supporting'
+          : 'primary'
+        : stmtId
+          ? 'unclaimed'
+          : null;
 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
       // Exclusivity: single source of truth — claimProvenance.claimExclusivity.
       // A statement is exclusive if no other claim lists it in sourceStatementIds.
-      const isExclusive = selectedClaimId
-        ? (claimMaps?.exclusiveIds.has(stmtId) ?? false)
-        : false;
+      const isExclusive = selectedClaimId ? (claimMaps?.exclusiveIds.has(stmtId) ?? false) : false;
 
       return {
         statementId: stmtId,
@@ -413,7 +434,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         confidence: typeof stmt.confidence === 'number' ? stmt.confidence : 0,
         isExclusive,
 
-        inCompetitive: mixed?.paragraphOrigin === 'competitive-only' || mixed?.paragraphOrigin === 'both',
+        inCompetitive:
+          mixed?.paragraphOrigin === 'competitive-only' || mixed?.paragraphOrigin === 'both',
         inContinuousCore: mixed?.zone === 'core',
         inMixed: mixed != null,
         inDirectTopN: selectedClaimId ? (claimMaps?.directTopIds.has(stmtId) ?? false) : false,

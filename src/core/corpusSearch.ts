@@ -9,8 +9,8 @@ import { cosineSimilarity } from '../clustering/distance';
 
 export interface CorpusSearchHit {
   paragraphId: string;
-  similarity: number;         // raw cosine [-1,1]
-  normalizedSim: number;      // (cos+1)/2 for display [0,1]
+  similarity: number; // raw cosine [-1,1]
+  normalizedSim: number; // (cos+1)/2 for display [0,1]
   modelIndex: number;
   paragraphIndex: number;
 }
@@ -19,7 +19,7 @@ export function searchCorpus(
   queryEmbedding: Float32Array,
   paragraphEmbeddings: Map<string, Float32Array>,
   paragraphMeta: Array<{ id: string; modelIndex: number; paragraphIndex: number }>,
-  maxResults: number = 50,
+  maxResults: number = 50
 ): CorpusSearchHit[] {
   const hits: CorpusSearchHit[] = [];
 

@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import clsx from "clsx";
+import { useState, useRef, useEffect, useMemo } from 'react';
+import clsx from 'clsx';
 
 // ============================================================================
 // TYPES
@@ -106,8 +106,10 @@ function Pill({ metric }: { metric: MetricPill }) {
     if (!open) return;
     const handler = (e: MouseEvent) => {
       if (
-        ref.current && !ref.current.contains(e.target as Node) &&
-        popRef.current && !popRef.current.contains(e.target as Node)
+        ref.current &&
+        !ref.current.contains(e.target as Node) &&
+        popRef.current &&
+        !popRef.current.contains(e.target as Node)
       ) {
         setOpen(false);
       }
@@ -122,12 +124,12 @@ function Pill({ metric }: { metric: MetricPill }) {
         ref={ref}
         type="button"
         className={clsx(
-          "px-2 py-0.5 rounded-full border text-[10px] font-mono font-medium transition-colors whitespace-nowrap",
+          'px-2 py-0.5 rounded-full border text-[10px] font-mono font-medium transition-colors whitespace-nowrap',
           metric.colorClass,
-          metric.histogramData && "cursor-pointer hover:opacity-80"
+          metric.histogramData && 'cursor-pointer hover:opacity-80'
         )}
-        onClick={() => metric.histogramData && setOpen(v => !v)}
-        title={metric.histogramData ? "Click to see distribution" : undefined}
+        onClick={() => metric.histogramData && setOpen((v) => !v)}
+        title={metric.histogramData ? 'Click to see distribution' : undefined}
       >
         {metric.label}={metric.value}
       </button>
@@ -210,20 +212,24 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
     pills.push({
       label: 'D',
       value: D != null ? D.toFixed(3) : '—',
-      colorClass: D == null
-        ? 'border-border-subtle text-text-muted'
-        : D >= 0.10
-          ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
-          : D >= 0.05
-            ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
-            : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
-      histogramData: pairSims.length > 0 ? {
-        values: pairSims,
-        rangeMin: basin?.binMin ?? 0,
-        rangeMax: (basin?.binMin ?? 0) + (basin?.bins?.length ?? 0) * (basin?.binWidth ?? 1),
-        marker: T_v ?? undefined,
-        markerLabel: T_v != null ? `T_v=${T_v.toFixed(3)}` : undefined,
-      } : undefined,
+      colorClass:
+        D == null
+          ? 'border-border-subtle text-text-muted'
+          : D >= 0.1
+            ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+            : D >= 0.05
+              ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
+              : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
+      histogramData:
+        pairSims.length > 0
+          ? {
+              values: pairSims,
+              rangeMin: basin?.binMin ?? 0,
+              rangeMax: (basin?.binMin ?? 0) + (basin?.bins?.length ?? 0) * (basin?.binWidth ?? 1),
+              marker: T_v ?? undefined,
+              markerLabel: T_v != null ? `T_v=${T_v.toFixed(3)}` : undefined,
+            }
+          : undefined,
     });
 
     // T_v
@@ -246,13 +252,14 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
     pills.push({
       label: 'particip',
       value: participationRate != null ? `${Math.round(participationRate * 100)}%` : '—',
-      colorClass: participationRate == null
-        ? 'border-border-subtle text-text-muted'
-        : participationRate >= 0.20
-          ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
-          : participationRate >= 0.05
-            ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
-            : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
+      colorClass:
+        participationRate == null
+          ? 'border-border-subtle text-text-muted'
+          : participationRate >= 0.2
+            ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+            : participationRate >= 0.05
+              ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
+              : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
     });
 
     // Q_spread
@@ -260,29 +267,38 @@ export function ContextStrip({ artifact, className }: ContextStripProps) {
       label: 'Q_spread',
       value: qSpread != null ? qSpread.toFixed(3) : '—',
       colorClass: 'border-border-subtle text-text-muted',
-      histogramData: qValues.length > 0 ? {
-        values: qValues,
-        rangeMin: 0,
-        rangeMax: 1,
-      } : undefined,
+      histogramData:
+        qValues.length > 0
+          ? {
+              values: qValues,
+              rangeMin: 0,
+              rangeMax: 1,
+            }
+          : undefined,
     });
 
     // Status badge
     pills.push({
       label: 'status',
       value: status,
-      colorClass: status === 'ok'
-        ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
-        : (status === 'undifferentiated' || status === 'no_basin_structure')
-          ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
-          : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
+      colorClass:
+        status === 'ok'
+          ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+          : status === 'undifferentiated' || status === 'no_basin_structure'
+            ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
+            : 'border-rose-500/40 text-rose-400 bg-rose-500/10',
     });
 
     return pills;
   }, [artifact]);
 
   return (
-    <div className={clsx("flex items-center gap-2 px-4 py-1.5 border-b border-white/10 bg-black/5 flex-none flex-wrap min-h-[40px]", className)}>
+    <div
+      className={clsx(
+        'flex items-center gap-2 px-4 py-1.5 border-b border-white/10 bg-black/5 flex-none flex-wrap min-h-[40px]',
+        className
+      )}
+    >
       {metrics.map((m) => (
         <Pill key={m.label} metric={m} />
       ))}

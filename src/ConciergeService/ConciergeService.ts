@@ -12,16 +12,16 @@
 export const HANDOFF_V2_ENABLED = false;
 
 import {
-    // Handoff V2
-    ConciergeDelta,
-} from "../../shared/contract";
+  // Handoff V2
+  ConciergeDelta,
+} from '../../shared/contract';
 
 import {
-    parseConciergeOutput,
-    // Handoff V2
-    hasHandoffContent,
-    formatHandoffEcho,
-} from "../../shared/parsing-utils";
+  parseConciergeOutput,
+  // Handoff V2
+  hasHandoffContent,
+  formatHandoffEcho,
+} from '../../shared/parsing-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -32,17 +32,17 @@ import {
  * Contains distilled handoff data and the commit summary.
  */
 export interface PriorContext {
-    handoff: ConciergeDelta | null;
-    committed: string | null;
+  handoff: ConciergeDelta | null;
+  committed: string | null;
 }
 
 /**
  * Options for building the concierge prompt
  */
 export interface ConciergePromptOptions {
-    /** Prior context for fresh spawns after COMMIT or batch re-invoke */
-    priorContext?: PriorContext;
-    evidenceSubstrate?: string;
+  /** Prior context for fresh spawns after COMMIT or batch re-invoke */
+  priorContext?: PriorContext;
+  evidenceSubstrate?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -79,16 +79,16 @@ Rules:
  * Safely escape user message to prevent formatting breaks / fence termination.
  */
 const escapeUserMessage = (msg: string): string => {
-    // Use fenced code block to safely contain any content.
-    // We also defuse </query> to prevent it from breaking XML-like structure in prompts.
-    return '```\n' + msg.replace(/```/g, '\\`\\`\\`').replace(/<\/query>/g, '</ query>') + '\n```';
+  // Use fenced code block to safely contain any content.
+  // We also defuse </query> to prevent it from breaking XML-like structure in prompts.
+  return '```\n' + msg.replace(/```/g, '\\`\\`\\`').replace(/<\/query>/g, '</ query>') + '\n```';
 };
 
 /**
  * Build message for Turn 2: injects handoff protocol before user message.
  */
 export function buildTurn2Message(userMessage: string): string {
-    return HANDOFF_PROTOCOL + `\n\nUser Message:\n${escapeUserMessage(userMessage)}`;
+  return HANDOFF_PROTOCOL + `\n\nUser Message:\n${escapeUserMessage(userMessage)}`;
 }
 
 /**
@@ -96,14 +96,15 @@ export function buildTurn2Message(userMessage: string): string {
  * Allows model to update or carry forward the handoff.
  */
 export function buildTurn3PlusMessage(
-    userMessage: string,
-    pendingHandoff: ConciergeDelta | null
+  userMessage: string,
+  pendingHandoff: ConciergeDelta | null
 ): string {
-    const handoffSection = pendingHandoff && hasHandoffContent(pendingHandoff)
-        ? `\n\n${formatHandoffEcho(pendingHandoff)}`
-        : '';
+  const handoffSection =
+    pendingHandoff && hasHandoffContent(pendingHandoff)
+      ? `\n\n${formatHandoffEcho(pendingHandoff)}`
+      : '';
 
-    return `${handoffSection}\n\nUser Message:\n${escapeUserMessage(userMessage)}`;
+  return `${handoffSection}\n\nUser Message:\n${escapeUserMessage(userMessage)}`;
 }
 
 /**
@@ -111,38 +112,44 @@ export function buildTurn3PlusMessage(
  * Woven into buildConciergePrompt() when priorContext is provided.
  */
 function buildPriorContextSection(priorContext: PriorContext): string {
-    const parts: string[] = [];
+  const parts: string[] = [];
 
-    // What was committed (most important)
-    if (priorContext.committed) {
-        parts.push(`## What's Been Decided\n\n${priorContext.committed}\n`);
+  // What was committed (most important)
+  if (priorContext.committed) {
+    parts.push(`## What's Been Decided\n\n${priorContext.committed}\n`);
+  }
+
+  // Distilled context from prior conversation
+  if (priorContext.handoff && hasHandoffContent(priorContext.handoff)) {
+    parts.push(`## Prior Context\n`);
+
+    const constraints = Array.isArray(priorContext.handoff.constraints)
+      ? priorContext.handoff.constraints
+      : [];
+    const eliminated = Array.isArray(priorContext.handoff.eliminated)
+      ? priorContext.handoff.eliminated
+      : [];
+    const preferences = Array.isArray(priorContext.handoff.preferences)
+      ? priorContext.handoff.preferences
+      : [];
+    const context = Array.isArray(priorContext.handoff.context) ? priorContext.handoff.context : [];
+
+    if (constraints.length > 0) {
+      parts.push(`**Constraints:** ${constraints.join('; ')}`);
     }
-
-    // Distilled context from prior conversation
-    if (priorContext.handoff && hasHandoffContent(priorContext.handoff)) {
-        parts.push(`## Prior Context\n`);
-
-        const constraints = Array.isArray(priorContext.handoff.constraints) ? priorContext.handoff.constraints : [];
-        const eliminated = Array.isArray(priorContext.handoff.eliminated) ? priorContext.handoff.eliminated : [];
-        const preferences = Array.isArray(priorContext.handoff.preferences) ? priorContext.handoff.preferences : [];
-        const context = Array.isArray(priorContext.handoff.context) ? priorContext.handoff.context : [];
-
-        if (constraints.length > 0) {
-            parts.push(`**Constraints:** ${constraints.join('; ')}`);
-        }
-        if (eliminated.length > 0) {
-            parts.push(`**Ruled out:** ${eliminated.join('; ')}`);
-        }
-        if (preferences.length > 0) {
-            parts.push(`**Preferences:** ${preferences.join('; ')}`);
-        }
-        if (context.length > 0) {
-            parts.push(`**Situation:** ${context.join('; ')}`);
-        }
-        parts.push('');
+    if (eliminated.length > 0) {
+      parts.push(`**Ruled out:** ${eliminated.join('; ')}`);
     }
+    if (preferences.length > 0) {
+      parts.push(`**Preferences:** ${preferences.join('; ')}`);
+    }
+    if (context.length > 0) {
+      parts.push(`**Situation:** ${context.join('; ')}`);
+    }
+    parts.push('');
+  }
 
-    return parts.length > 0 ? parts.join('\n') + '\n' : '';
+  return parts.length > 0 ? parts.join('\n') + '\n' : '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -150,24 +157,24 @@ function buildPriorContextSection(priorContext: PriorContext): string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function buildConciergePrompt(
-    userMessage: string,
-    options?: ConciergePromptOptions
+  userMessage: string,
+  options?: ConciergePromptOptions
 ): string {
-    // Mirrors buildTurn2Message / buildTurn3PlusMessage by escaping userMessage to prevent 
-    // breakage of the <query> tag or other structure if userMessage contains sequences 
-    // like </query> or markdown fences.
-    const sanitizedUserMessage = escapeUserMessage(userMessage);
+  // Mirrors buildTurn2Message / buildTurn3PlusMessage by escaping userMessage to prevent
+  // breakage of the <query> tag or other structure if userMessage contains sequences
+  // like </query> or markdown fences.
+  const sanitizedUserMessage = escapeUserMessage(userMessage);
 
-    // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
-    const priorContextSection = options?.priorContext
-        ? buildPriorContextSection(options.priorContext)
-        : '';
+  // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
+  const priorContextSection = options?.priorContext
+    ? buildPriorContextSection(options.priorContext)
+    : '';
 
-    const evidenceSubstrateSection = options?.evidenceSubstrate
-        ? `<EVIDENCE_SUBSTRATE>\n${options.evidenceSubstrate}\n</EVIDENCE_SUBSTRATE>\n\n`
-        : '';
+  const evidenceSubstrateSection = options?.evidenceSubstrate
+    ? `<EVIDENCE_SUBSTRATE>\n${options.evidenceSubstrate}\n</EVIDENCE_SUBSTRATE>\n\n`
+    : '';
 
-    return `Singularity Prompt
+  return `Singularity Prompt
 You are about to answer someone's question.
 
 Not a hypothetical. Not a thought experiment. A real question from a person who needs to move forward.
@@ -197,9 +204,9 @@ The person reading your answer should finish it thinking something they hadn't t
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const ConciergeService = {
-    buildConciergePrompt,
-    buildTurn2Message,
-    buildTurn3PlusMessage,
-    HANDOFF_PROTOCOL,
-    parseConciergeOutput,
+  buildConciergePrompt,
+  buildTurn2Message,
+  buildTurn3PlusMessage,
+  HANDOFF_PROTOCOL,
+  parseConciergeOutput,
 };

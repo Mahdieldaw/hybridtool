@@ -6,13 +6,13 @@
  *
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { ArtifactProcessor } from "../../shared/artifact-processor";
-import { retryWithPolicy } from "../core/retry-orchestrator";
-import { getPolicy } from "../core/retry-policy";
+import { ArtifactProcessor } from '../../shared/artifact-processor';
+import { retryWithPolicy } from '../core/retry-orchestrator';
+import { getPolicy } from '../core/retry-policy';
 
 // Provider-specific debug flag (off by default)
 const GEMINI_DEBUG = false;
-const GEMINI_COLD_START_POLICY = getPolicy("COLD_START");
+const GEMINI_COLD_START_POLICY = getPolicy('COLD_START');
 const GEMINI_COLD_EVENT_WINDOW_MS =
   GEMINI_COLD_START_POLICY.delayOverrides?.cold_event_window ?? 10000;
 
@@ -33,7 +33,7 @@ function getGeminiStreamTimeoutConfig() {
     nullSpamThreshold: 3,
   };
 
-  const root = typeof globalThis !== "undefined" ? globalThis : {};
+  const root = typeof globalThis !== 'undefined' ? globalThis : {};
   const env = root?.process?.env || {};
 
   const globalCfg =
@@ -43,7 +43,7 @@ function getGeminiStreamTimeoutConfig() {
     {};
 
   const toNonNegativeInt = (value, fallback) => {
-    const n = typeof value === "number" ? value : parseInt(String(value), 10);
+    const n = typeof value === 'number' ? value : parseInt(String(value), 10);
     if (!Number.isFinite(n)) return fallback;
     const v = Math.floor(n);
     return v >= 0 ? v : fallback;
@@ -60,15 +60,27 @@ function getGeminiStreamTimeoutConfig() {
   };
 
   return {
-    ttftTimeoutMs: read("ttftTimeoutMs", "HTOS_GEMINI_TTFT_TIMEOUT_MS", defaults.ttftTimeoutMs),
-    readGapTimeoutMs: read("readGapTimeoutMs", "HTOS_GEMINI_READ_GAP_TIMEOUT_MS", defaults.readGapTimeoutMs),
-    meaningfulGapTimeoutMs: read(
-      "meaningfulGapTimeoutMs",
-      "HTOS_GEMINI_MEANINGFUL_GAP_TIMEOUT_MS",
-      defaults.meaningfulGapTimeoutMs,
+    ttftTimeoutMs: read('ttftTimeoutMs', 'HTOS_GEMINI_TTFT_TIMEOUT_MS', defaults.ttftTimeoutMs),
+    readGapTimeoutMs: read(
+      'readGapTimeoutMs',
+      'HTOS_GEMINI_READ_GAP_TIMEOUT_MS',
+      defaults.readGapTimeoutMs
     ),
-    nullSpamWindowMs: read("nullSpamWindowMs", "HTOS_GEMINI_NULL_SPAM_WINDOW_MS", defaults.nullSpamWindowMs),
-    nullSpamThreshold: read("nullSpamThreshold", "HTOS_GEMINI_NULL_SPAM_THRESHOLD", defaults.nullSpamThreshold),
+    meaningfulGapTimeoutMs: read(
+      'meaningfulGapTimeoutMs',
+      'HTOS_GEMINI_MEANINGFUL_GAP_TIMEOUT_MS',
+      defaults.meaningfulGapTimeoutMs
+    ),
+    nullSpamWindowMs: read(
+      'nullSpamWindowMs',
+      'HTOS_GEMINI_NULL_SPAM_WINDOW_MS',
+      defaults.nullSpamWindowMs
+    ),
+    nullSpamThreshold: read(
+      'nullSpamThreshold',
+      'HTOS_GEMINI_NULL_SPAM_THRESHOLD',
+      defaults.nullSpamThreshold
+    ),
   };
 }
 
@@ -76,24 +88,24 @@ function getGeminiStreamTimeoutConfig() {
 // GEMINI MODELS CONFIGURATION
 // =============================================================================
 export const GeminiModels = {
-  "gemini-flash": {
-    id: "gemini-flash",
-    name: "Gemini 2.5 Flash",
-    description: "Fast and efficient model for everyday tasks",
+  'gemini-flash': {
+    id: 'gemini-flash',
+    name: 'Gemini 2.5 Flash',
+    description: 'Fast and efficient model for everyday tasks',
     maxTokens: 9999,
     header: '[1,null,null,null,"fbb127bbb056c959",null,null,0,[4],null,null,1]',
   },
-  "gemini-pro": {
-    id: "gemini-pro",
-    name: "Gemini 2.5 Pro",
-    description: "Advanced model with enhanced reasoning capabilities",
+  'gemini-pro': {
+    id: 'gemini-pro',
+    name: 'Gemini 2.5 Pro',
+    description: 'Advanced model with enhanced reasoning capabilities',
     maxTokens: 9999,
     header: '[1,null,null,null,"5bf011840784117a",null,null,0,[4],null,null,1]',
   },
-  "gemini-exp": {
-    id: "gemini-exp",
-    name: "Gemini 3.0",
-    description: "Latest experimental capability",
+  'gemini-exp': {
+    id: 'gemini-exp',
+    name: 'Gemini 3.0',
+    description: 'Latest experimental capability',
     maxTokens: 9999,
     header: '[1,null,null,null,"9d8ca3786ebdfbea",null,null,0,[4],null,null,1]',
   },
@@ -105,31 +117,31 @@ export const GeminiModels = {
 export class GeminiProviderError extends Error {
   constructor(type, details) {
     super(type);
-    this.name = "GeminiProviderError";
+    this.name = 'GeminiProviderError';
     this.type = type;
     this.details = details;
   }
   get is() {
     return {
-      login: this.type === "login",
-      badToken: this.type === "badToken",
-      failedToExtractToken: this.type === "failedToExtractToken",
-      failedToReadResponse: this.type === "failedToReadResponse",
-      noGeminiAccess: this.type === "noGeminiAccess",
-      streamTimeout: this.type === "streamTimeout",
-      zombieStream: this.type === "zombieStream",
-      aborted: this.type === "aborted",
-      network: this.type === "network",
-      unknown: this.type === "unknown",
+      login: this.type === 'login',
+      badToken: this.type === 'badToken',
+      failedToExtractToken: this.type === 'failedToExtractToken',
+      failedToReadResponse: this.type === 'failedToReadResponse',
+      noGeminiAccess: this.type === 'noGeminiAccess',
+      streamTimeout: this.type === 'streamTimeout',
+      zombieStream: this.type === 'zombieStream',
+      aborted: this.type === 'aborted',
+      network: this.type === 'network',
+      unknown: this.type === 'unknown',
     };
   }
 }
 
 export class ColdStartDetectedError extends Error {
   constructor({ stage, elapsedMs, model, details = {} } = {}) {
-    super(`Gemini cold start detected at ${stage || "stream"}`);
-    this.name = "ColdStartDetectedError";
-    this.stage = stage || "stream";
+    super(`Gemini cold start detected at ${stage || 'stream'}`);
+    this.name = 'ColdStartDetectedError';
+    this.stage = stage || 'stream';
     this.elapsedMs = elapsedMs;
     this.model = model;
     this.details = details;
@@ -161,15 +173,7 @@ export class GeminiSessionApi {
    * @param {string} prompt - The prompt text
    * @param {{ token?: {at: string, bl: string} | null, cursor?: any[], model?: string, signal?: AbortSignal }} options - Request options
    */
-  async ask(
-    prompt,
-    {
-      token = null,
-      cursor = ["", "", ""],
-      model = "gemini-flash",
-      signal,
-    } = {},
-  ) {
+  async ask(prompt, { token = null, cursor = ['', '', ''], model = 'gemini-flash', signal } = {}) {
     let attemptToken = token;
     try {
       return await retryWithPolicy(
@@ -179,16 +183,16 @@ export class GeminiSessionApi {
           return this._askCore(prompt, { token: currentToken, cursor, model, signal });
         },
         {
-          providerId: "gemini",
-          stage: "ask",
+          providerId: 'gemini',
+          stage: 'ask',
           model,
           signal,
         },
-        "COLD_START",
+        'COLD_START'
       );
     } catch (error) {
       if (error instanceof ColdStartDetectedError) {
-        this._throw("unknown", {
+        this._throw('unknown', {
           message: `Gemini cold start retries exhausted at ${error.stage}`,
           stage: error.stage,
           elapsedMs: error.elapsedMs,
@@ -202,13 +206,8 @@ export class GeminiSessionApi {
 
   async _askCore(
     prompt,
-    {
-      token = null,
-      cursor = ["", "", ""],
-      model = "gemini-flash",
-      signal,
-    } = {},
-    retrying = false,
+    { token = null, cursor = ['', '', ''], model = 'gemini-flash', signal } = {},
+    retrying = false
   ) {
     // Use prefetched token if available
     if (!token && this.sharedState?.prefetchedToken) {
@@ -219,37 +218,40 @@ export class GeminiSessionApi {
       token = (await this._fetchToken()) || null;
     }
     if (!token) {
-      throw this._createError("failedToExtractToken", "Missing Gemini token.");
+      throw this._createError('failedToExtractToken', 'Missing Gemini token.');
     }
 
     // Generate collision-resistant request ID
     const reqId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
-    const url =
-      "/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate";
+    const url = '/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate';
 
     // Get model configuration
-    const modelConfig = GeminiModels[model] || GeminiModels["gemini-flash"];
+    const modelConfig = GeminiModels[model] || GeminiModels['gemini-flash'];
 
     const { at, bl } = token;
     const body = new URLSearchParams({
       at,
-      "f.req": JSON.stringify([null, JSON.stringify([[prompt], null, cursor])]),
+      'f.req': JSON.stringify([null, JSON.stringify([[prompt], null, cursor])]),
     });
 
     const internalAbortController = new AbortController();
     if (signal) {
       if (signal.aborted) {
-        try { internalAbortController.abort(); } catch (_) { }
+        try {
+          internalAbortController.abort();
+        } catch (_) {}
       } else {
         try {
           signal.addEventListener(
-            "abort",
+            'abort',
             () => {
-              try { internalAbortController.abort(); } catch (_) { }
+              try {
+                internalAbortController.abort();
+              } catch (_) {}
             },
-            { once: true },
+            { once: true }
           );
-        } catch (_) { }
+        } catch (_) {}
       }
     }
 
@@ -257,36 +259,38 @@ export class GeminiSessionApi {
     let abortHint = null;
     const abortWith = (type, details) => {
       if (!abortHint) abortHint = { type, details };
-      try { internalAbortController.abort(); } catch (_) { }
+      try {
+        internalAbortController.abort();
+      } catch (_) {}
     };
 
     const response = await this._fetch(url, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "x-goog-ext-525001261-jspb": modelConfig.header,
+        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'x-goog-ext-525001261-jspb': modelConfig.header,
       },
       signal: internalAbortController.signal,
       query: {
         bl,
-        rt: "c",
+        rt: 'c',
         _reqid: reqId,
       },
       body,
     });
 
     // Token-refresh retry closure (maintains separation from cold-start logic)
-    const retry = async (msg = "") => {
+    const retry = async (msg = '') => {
       if (retrying) {
-        this._throw("badToken", msg);
+        this._throw('badToken', msg);
       }
       return this._askCore(prompt, { token: null, cursor, model, signal }, true);
     };
 
     if (response.status !== 200) {
-      let responseText = "";
+      let responseText = '';
       if (this.utils?.noThrow) {
-        responseText = await this.utils.noThrow(() => response.text(), null) || "";
+        responseText = (await this.utils.noThrow(() => response.text(), null)) || '';
       } else {
         responseText = await response.text();
       }
@@ -294,7 +298,7 @@ export class GeminiSessionApi {
       if (response.status === 400) {
         return retry(responseText);
       }
-      this._throw("unknown", responseText);
+      this._throw('unknown', responseText);
     }
 
     let parsedLines = [];
@@ -312,7 +316,7 @@ export class GeminiSessionApi {
 
       let ttftMet = false;
       let ttftTimer = setTimeout(() => {
-        abortWith("streamTimeout", { stage: "ttft", timeoutMs: TTFT_TIMEOUT_MS });
+        abortWith('streamTimeout', { stage: 'ttft', timeoutMs: TTFT_TIMEOUT_MS });
       }, TTFT_TIMEOUT_MS);
 
       let lastMeaningfulAt = 0;
@@ -321,7 +325,7 @@ export class GeminiSessionApi {
       let nullSpamCount = 0;
       let coldStartSeenAt = 0;
       const hasMeaningfulTextNow = () =>
-        !!(u && typeof u.text === "string" && u.text.trim().length > 0);
+        !!(u && typeof u.text === 'string' && u.text.trim().length > 0);
 
       const looksLikeNullSpamPayload = (t) => {
         if (!Array.isArray(t) || t.length < 10) return false;
@@ -332,13 +336,13 @@ export class GeminiSessionApi {
           if (nonNullCount > 2) return false;
         }
         const tail = t[t.length - 1];
-        return Array.isArray(tail) && typeof tail[0] === "number";
+        return Array.isArray(tail) && typeof tail[0] === 'number';
       };
 
       const reader = response.body?.getReader?.();
       if (reader) {
         const decoder = new TextDecoder();
-        let buffer = "";
+        let buffer = '';
         let strippedXssi = false;
 
         try {
@@ -349,19 +353,22 @@ export class GeminiSessionApi {
               readResult = await Promise.race([
                 reader.read(),
                 new Promise((_, reject) => {
-                  readTimer = setTimeout(() => reject(new Error("READ_GAP_TIMEOUT")), READ_GAP_TIMEOUT_MS);
+                  readTimer = setTimeout(
+                    () => reject(new Error('READ_GAP_TIMEOUT')),
+                    READ_GAP_TIMEOUT_MS
+                  );
                 }),
               ]);
             } catch (e) {
-              if (String(e)?.includes("READ_GAP_TIMEOUT")) {
+              if (String(e)?.includes('READ_GAP_TIMEOUT')) {
                 if (coldStartSeenAt && !hasMeaningfulTextNow()) {
-                  abortWith("coldStart", {
-                    stage: "read_gap",
+                  abortWith('coldStart', {
+                    stage: 'read_gap',
                     timeoutMs: READ_GAP_TIMEOUT_MS,
                     elapsedMs: Date.now() - coldStartSeenAt,
                   });
                 } else {
-                  abortWith("streamTimeout", { stage: "read_gap", timeoutMs: READ_GAP_TIMEOUT_MS });
+                  abortWith('streamTimeout', { stage: 'read_gap', timeoutMs: READ_GAP_TIMEOUT_MS });
                 }
               }
               throw e;
@@ -375,18 +382,18 @@ export class GeminiSessionApi {
             buffer += decoder.decode(value, { stream: true });
 
             if (!strippedXssi) {
-              buffer = buffer.replace(/^\)\]\}'\s*\n?/, "");
+              buffer = buffer.replace(/^\)\]\}'\s*\n?/, '');
               strippedXssi = true;
             }
 
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
             for (const rawLine of lines) {
               const line = rawLine.trim();
               if (!line) continue;
               if (/^\d+$/.test(line)) continue;
-              if (!line.startsWith("[")) continue;
+              if (!line.startsWith('[')) continue;
 
               let L;
               try {
@@ -398,11 +405,11 @@ export class GeminiSessionApi {
 
               if (!coldStartSeenAt) {
                 try {
-                  const hasColdEvent = Array.isArray(L) && L.some((entry) =>
-                    Array.isArray(entry) && entry[0] === "e" && entry[1] === 4,
-                  );
+                  const hasColdEvent =
+                    Array.isArray(L) &&
+                    L.some((entry) => Array.isArray(entry) && entry[0] === 'e' && entry[1] === 4);
                   if (hasColdEvent) coldStartSeenAt = Date.now();
-                } catch (_) { }
+                } catch (_) {}
               }
 
               parsedLines.push(L);
@@ -410,15 +417,15 @@ export class GeminiSessionApi {
               if (!c && parsedLines.length === 1) {
                 try {
                   c = parsedLines[0]?.[0]?.[5]?.[0] ?? null;
-                } catch (_) { }
+                } catch (_) {}
               }
 
               for (const entry of L) {
-                if (!Array.isArray(entry) || entry[0] !== "wrb.fr") continue;
+                if (!Array.isArray(entry) || entry[0] !== 'wrb.fr') continue;
 
-                if (typeof entry[2] !== "string") {
+                if (typeof entry[2] !== 'string') {
                   const tail = entry[entry.length - 1];
-                  if (Array.isArray(tail) && typeof tail[0] === "number") {
+                  if (Array.isArray(tail) && typeof tail[0] === 'number') {
                     const now = Date.now();
                     if (now - nullSpamWindowStart > NULL_SPAM_WINDOW_MS) {
                       nullSpamWindowStart = now;
@@ -436,7 +443,7 @@ export class GeminiSessionApi {
                   continue;
                 }
 
-                const text = t?.[0]?.[0] || t?.[4]?.[0]?.[1]?.[0] || "";
+                const text = t?.[0]?.[0] || t?.[4]?.[0]?.[1]?.[0] || '';
                 if (text && text.trim().length > 0) {
                   if (ttftTimer) {
                     clearTimeout(ttftTimer);
@@ -447,7 +454,7 @@ export class GeminiSessionApi {
                   const tail = t?.[4]?.[0]?.[0];
                   const nextCursor = tail !== undefined ? [...baseCursor, tail] : baseCursor;
 
-                  if (!u || (typeof text === "string" && text.length >= (u.text?.length || 0))) {
+                  if (!u || (typeof text === 'string' && text.length >= (u.text?.length || 0))) {
                     u = { text, cursor: nextCursor };
                   }
 
@@ -471,21 +478,30 @@ export class GeminiSessionApi {
               }
 
               if (!ttftMet && nullSpamCount >= NULL_SPAM_THRESHOLD) {
-                this._throw("zombieStream", "Gemini stream stalling (timeout): repeated null frames");
+                this._throw(
+                  'zombieStream',
+                  'Gemini stream stalling (timeout): repeated null frames'
+                );
               }
 
               if (ttftMet && lastMeaningfulAt > 0) {
                 const now = Date.now();
-                if (now - lastMeaningfulAt > MEANINGFUL_GAP_TIMEOUT_MS && nullSpamCount >= NULL_SPAM_THRESHOLD) {
-                  this._throw("zombieStream", "Gemini stream stalling (timeout): no meaningful progress");
+                if (
+                  now - lastMeaningfulAt > MEANINGFUL_GAP_TIMEOUT_MS &&
+                  nullSpamCount >= NULL_SPAM_THRESHOLD
+                ) {
+                  this._throw(
+                    'zombieStream',
+                    'Gemini stream stalling (timeout): no meaningful progress'
+                  );
                 }
               }
 
               if (coldStartSeenAt && !hasMeaningfulTextNow()) {
                 const now = Date.now();
                 if (now - coldStartSeenAt >= GEMINI_COLD_EVENT_WINDOW_MS) {
-                  abortWith("coldStart", {
-                    stage: "cold_event_window",
+                  abortWith('coldStart', {
+                    stage: 'cold_event_window',
                     delayMs: GEMINI_COLD_EVENT_WINDOW_MS,
                     elapsedMs: now - coldStartSeenAt,
                   });
@@ -495,16 +511,15 @@ export class GeminiSessionApi {
           }
         } finally {
           if (ttftTimer) clearTimeout(ttftTimer);
-          try { reader.releaseLock(); } catch (_) { }
+          try {
+            reader.releaseLock();
+          } catch (_) {}
         }
       } else {
         const raw = await response.text();
-        const cleaned = raw.replace(/^\)\]\}'\s*\n?/, "").trim();
-        const jsonLines = cleaned
-          .split("\n")
-          .filter((line) => line.trim().startsWith("["));
-        if (jsonLines.length === 0)
-          throw new Error("No JSON lines detected in response");
+        const cleaned = raw.replace(/^\)\]\}'\s*\n?/, '').trim();
+        const jsonLines = cleaned.split('\n').filter((line) => line.trim().startsWith('['));
+        if (jsonLines.length === 0) throw new Error('No JSON lines detected in response');
         parsedLines = jsonLines
           .map((line) => {
             try {
@@ -518,36 +533,32 @@ export class GeminiSessionApi {
     } catch (e) {
       if (this.isOwnError(e)) throw e;
       const hint = Object(abortHint);
-      if (hint.type === "coldStart") {
+      if (hint.type === 'coldStart') {
         throw new ColdStartDetectedError({
-          stage: hint.details?.stage || "stream",
+          stage: hint.details?.stage || 'stream',
           elapsedMs: hint.details?.elapsedMs,
           model,
           details: hint.details,
         });
       }
       if (hint.type) this._throw(hint.type, hint.details);
-      this._throw("failedToReadResponse", { step: "data", error: e });
+      this._throw('failedToReadResponse', { step: 'data', error: e });
     }
 
     // ========================================================================
     // Cold-Start Failure Detection (BEFORE error code check)
     // ========================================================================
-    const hasColdStartSignature = parsedLines.some(line =>
-      line.some(entry =>
-        Array.isArray(entry) &&
-        entry[0] === "e" &&
-        entry[1] === 4
-      )
+    const hasColdStartSignature = parsedLines.some((line) =>
+      line.some((entry) => Array.isArray(entry) && entry[0] === 'e' && entry[1] === 4)
     );
 
-    const hasMeaningfulText = !!(u && typeof u.text === "string" && u.text.trim().length > 0);
+    const hasMeaningfulText = !!(u && typeof u.text === 'string' && u.text.trim().length > 0);
 
     if (hasColdStartSignature && !hasMeaningfulText) {
       throw new ColdStartDetectedError({
-        stage: "payload_signature",
+        stage: 'payload_signature',
         model,
-        details: { signature: ["e", 4] },
+        details: { signature: ['e', 4] },
       });
     }
     // ========================================================================
@@ -556,12 +567,12 @@ export class GeminiSessionApi {
     try {
       c = parsedLines[0]?.[0]?.[5]?.[0] ?? null;
     } catch (e) {
-      this._throw("failedToReadResponse", { step: "errorCode", error: e });
+      this._throw('failedToReadResponse', { step: 'errorCode', error: e });
     }
 
     if (c === 9) {
       // Treat code 9 as access issue
-      this._throw("noGeminiAccess");
+      this._throw('noGeminiAccess');
     }
     if (c === 7) {
       // Bad token or session mismatch — refresh token for retry
@@ -577,9 +588,9 @@ export class GeminiSessionApi {
     for (const L of parsedLines) {
       const found = L.find((entry) => {
         try {
-          if (typeof entry[2] !== "string") return false;
+          if (typeof entry[2] !== 'string') return false;
           const t = JSON.parse(entry[2]);
-          const text = t[0]?.[0] || t[4]?.[0]?.[1]?.[0] || "";
+          const text = t[0]?.[0] || t[4]?.[0]?.[1]?.[0] || '';
 
           if (text && text.trim().length > 0) {
             const baseCursor = Array.isArray(t?.[1]) ? t[1] : [];
@@ -589,7 +600,9 @@ export class GeminiSessionApi {
             return true;
           }
           return false;
-        } catch (e) { return false; }
+        } catch (e) {
+          return false;
+        }
       });
       if (found) break;
     }
@@ -599,29 +612,31 @@ export class GeminiSessionApi {
       for (const L of parsedLines) {
         const found = L.find((entry) => {
           try {
-            if (typeof entry[2] !== "string") return false;
+            if (typeof entry[2] !== 'string') return false;
             const t = JSON.parse(entry[2]);
 
             // Skip keep-alives (no t[4])
             if (!t[4] || !Array.isArray(t[4])) return false;
 
-            const text = t[0]?.[0] || t[4]?.[0]?.[1]?.[0] || "";
+            const text = t[0]?.[0] || t[4]?.[0]?.[1]?.[0] || '';
             const baseCursor = Array.isArray(t?.[1]) ? t[1] : [];
             const tail = t?.[4]?.[0]?.[0];
             const cursor = tail !== undefined ? [...baseCursor, tail] : baseCursor;
 
             u = { text, cursor };
             return true;
-          } catch (e) { return false; }
+          } catch (e) {
+            return false;
+          }
         });
         if (found) break;
       }
     }
 
     if (!u) {
-      this._throw("failedToReadResponse", {
-        step: "answer",
-        error: "No valid text payload found in response lines"
+      this._throw('failedToReadResponse', {
+        step: 'answer',
+        error: 'No valid text payload found in response lines',
       });
     }
 
@@ -633,11 +648,11 @@ export class GeminiSessionApi {
     for (const L of parsedLines) {
       L.forEach((entry) => {
         try {
-          if (typeof entry[2] !== "string") return;
+          if (typeof entry[2] !== 'string') return;
           const t = JSON.parse(entry[2]);
           this._findImmersiveContent(t, immersiveContent);
           this._findImages(t, images);
-        } catch (e) { }
+        } catch (e) {}
       });
     }
 
@@ -659,18 +674,18 @@ export class GeminiSessionApi {
     }
 
     if (GEMINI_DEBUG)
-      console.info("[Gemini] Response received:", {
+      console.info('[Gemini] Response received:', {
         hasText: !!(u && u.text),
-        textLength: (u && u.text && u.text.length) ? u.text.length : 0,
+        textLength: u && u.text && u.text.length ? u.text.length : 0,
         immersiveItems: immersiveContent.length,
         images: images.length,
-        status: response?.status || "unknown",
+        status: response?.status || 'unknown',
         model: modelConfig.name,
       });
 
     return {
-      text: (u && u.text) ? u.text : "",
-      cursor: (u && u.cursor) ? u.cursor : [],
+      text: u && u.text ? u.text : '',
+      cursor: u && u.cursor ? u.cursor : [],
       token,
       modelName: modelConfig.name,
     };
@@ -681,17 +696,17 @@ export class GeminiSessionApi {
    * Structure: [URL, null, width, height, "Title", URL, ID, ...]
    */
   _findImages(obj, results) {
-    if (!obj || typeof obj !== "object") return;
+    if (!obj || typeof obj !== 'object') return;
 
     if (Array.isArray(obj)) {
       // Check signature for Image Data
       if (
         obj.length >= 5 &&
-        typeof obj[0] === "string" &&
-        (obj[0].startsWith("http") || obj[0].startsWith("data:image")) &&
-        typeof obj[2] === "number" && // Width
-        typeof obj[3] === "number" && // Height
-        typeof obj[4] === "string"    // Title
+        typeof obj[0] === 'string' &&
+        (obj[0].startsWith('http') || obj[0].startsWith('data:image')) &&
+        typeof obj[2] === 'number' && // Width
+        typeof obj[3] === 'number' && // Height
+        typeof obj[4] === 'string' // Title
       ) {
         // Check if already added
         if (!results.find((r) => r.url === obj[0])) {
@@ -700,7 +715,7 @@ export class GeminiSessionApi {
             width: obj[2],
             height: obj[3],
             title: obj[4],
-            id: obj[6] // Optional ID
+            id: obj[6], // Optional ID
           });
         }
       }
@@ -714,17 +729,17 @@ export class GeminiSessionApi {
    * Structure: [filename.md, id, title, null, content]
    */
   _findImmersiveContent(obj, results) {
-    if (!obj || typeof obj !== "object") return;
+    if (!obj || typeof obj !== 'object') return;
 
     if (Array.isArray(obj)) {
       // Check signature: [filename, id, title, null, content]
       if (
         obj.length >= 5 &&
-        typeof obj[0] === "string" &&
-        (obj[0].includes(".") || obj[0].length > 0) && // Basic filename check
-        !obj[0].includes("_image_") && // EXCLUDE internal image references
-        typeof obj[2] === "string" && // Title
-        typeof obj[4] === "string" // Content
+        typeof obj[0] === 'string' &&
+        (obj[0].includes('.') || obj[0].length > 0) && // Basic filename check
+        !obj[0].includes('_image_') && // EXCLUDE internal image references
+        typeof obj[2] === 'string' && // Title
+        typeof obj[4] === 'string' // Content
       ) {
         // Check if already added
         if (!results.find((r) => r.identifier === obj[0])) {
@@ -744,32 +759,29 @@ export class GeminiSessionApi {
    * Get maximum tokens for the current model
    */
   get _maxTokens() {
-    return (
-      this.sharedState?.ai?.connections?.get?.("gemini-session")
-        ?.modelMaxTokens || 4096
-    );
+    return this.sharedState?.ai?.connections?.get?.('gemini-session')?.modelMaxTokens || 4096;
   }
 
   /**
    * Fetch authentication token from Gemini
    */
   async _fetchToken() {
-    const response = await this._fetch("/faq");
+    const response = await this._fetch('/faq');
     const t = await response.text();
     let n;
-    if (!t.includes("$authuser")) {
-      this._throw("login");
+    if (!t.includes('$authuser')) {
+      this._throw('login');
     }
     try {
       n = {
-        at: this._extractKeyValue(t, "SNlM0e"),
-        bl: this._extractKeyValue(t, "cfb2h"),
+        at: this._extractKeyValue(t, 'SNlM0e'),
+        bl: this._extractKeyValue(t, 'cfb2h'),
       };
       if (!n.at || !n.bl) {
-        throw new Error("Empty token value extracted");
+        throw new Error('Empty token value extracted');
       }
     } catch (e) {
-      this._throw("failedToExtractToken", e);
+      this._throw('failedToExtractToken', e);
     }
     return n;
   }
@@ -779,13 +791,13 @@ export class GeminiSessionApi {
    * Improved robustness with type guards and safe array access
    */
   _extractKeyValue(str, key) {
-    if (typeof str !== "string" || typeof key !== "string") return "";
+    if (typeof str !== 'string' || typeof key !== 'string') return '';
     const p1 = str.split(key);
-    if (p1.length < 2) return "";
+    if (p1.length < 2) return '';
     const p2 = p1[1].split('":"');
-    if (p2.length < 2) return "";
+    if (p2.length < 2) return '';
     const p3 = p2[1].split('"');
-    return p3[0] || "";
+    return p3[0] || '';
   }
 
   /**
@@ -796,10 +808,10 @@ export class GeminiSessionApi {
     let url = `https://gemini.google.com${path}`;
     if (options.query) {
       const params = new URLSearchParams(options.query).toString();
-      url += (url.includes("?") ? "&" : "?") + params;
+      url += (url.includes('?') ? '&' : '?') + params;
       delete options.query;
     }
-    options.credentials = "include";
+    options.credentials = 'include';
     return await this.fetch(url, options);
   }
 
@@ -814,11 +826,11 @@ export class GeminiSessionApi {
         const msg = e instanceof Error ? e.message : String(e);
         let err;
         if (this.isOwnError(e)) err = e;
-        else if (String(e) === "TypeError: Failed to fetch")
-          err = this._createError("network", msg);
-        else if (String(e) === "AbortError: The user aborted a request.")
-          err = this._createError("aborted", msg);
-        else err = this._createError("unknown", msg);
+        else if (String(e) === 'TypeError: Failed to fetch')
+          err = this._createError('network', msg);
+        else if (String(e) === 'AbortError: The user aborted a request.')
+          err = this._createError('aborted', msg);
+        else err = this._createError('unknown', msg);
         if (err.details) this._logError(err.message, err.details);
         else this._logError(err.message);
         throw err;
@@ -836,7 +848,7 @@ export class GeminiSessionApi {
 
   _logError(...args) {
     if (this._logs) {
-      console.error("GeminiSessionApi:", ...args);
+      console.error('GeminiSessionApi:', ...args);
     }
   }
 }
@@ -885,7 +897,7 @@ export class GeminiProviderController {
 export default GeminiProviderController;
 
 // Build-phase safe: Browser global compatibility
-if (typeof window !== "undefined") {
-  window["HTOS"] = window["HTOS"] || {};
-  window["HTOS"]["GeminiProvider"] = GeminiProviderController;
+if (typeof window !== 'undefined') {
+  window['HTOS'] = window['HTOS'] || {};
+  window['HTOS']['GeminiProvider'] = GeminiProviderController;
 }

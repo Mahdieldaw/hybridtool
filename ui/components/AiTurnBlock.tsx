@@ -1,11 +1,11 @@
 // ui/components/AiTurnBlock.tsx - FIXED ALIGNMENT
-import React, { useState, useEffect, useMemo } from "react";
-import { useAtomValue } from "jotai";
-import type { AiTurn, ProbeSession, ProbeSessionResponse } from "../../shared/contract";
-import { useSingularityOutput } from "../hooks/useSingularityOutput";
-import { activeProbeDraftFamily } from "../state/atoms";
+import React, { useState, useEffect, useMemo } from 'react';
+import { useAtomValue } from 'jotai';
+import type { AiTurn, ProbeSession, ProbeSessionResponse } from '../../shared/contract';
+import { useSingularityOutput } from '../hooks/useSingularityOutput';
+import { activeProbeDraftFamily } from '../state/atoms';
 
-import { CognitiveOutputRenderer } from "./cognitive/CognitiveOutputRenderer";
+import { CognitiveOutputRenderer } from './cognitive/CognitiveOutputRenderer';
 
 // --- Helper Functions ---
 
@@ -13,10 +13,7 @@ interface AiTurnBlockProps {
   aiTurn: AiTurn;
 }
 
-
-const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
-  aiTurn,
-}) => {
+const AiTurnBlock: React.FC<AiTurnBlockProps> = ({ aiTurn }) => {
   // --- CONNECTED STATE LOGIC ---
 
   const singularityState = useSingularityOutput(aiTurn.id);
@@ -26,7 +23,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const probeSessions = useMemo<ProbeSession[]>(() => {
     const persisted = aiTurn.probeSessions || [];
     if (!activeProbeDraft) return persisted;
-    const alreadyPersisted = persisted.some(s => s.id === activeProbeDraft.id);
+    const alreadyPersisted = persisted.some((s) => s.id === activeProbeDraft.id);
     if (alreadyPersisted) return persisted;
     return [...persisted, activeProbeDraft];
   }, [aiTurn.probeSessions, activeProbeDraft]);
@@ -34,24 +31,16 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   // --- PRESENTATION LOGIC ---
 
   const userPrompt: string | null =
-    (aiTurn as any)?.userPrompt ??
-    (aiTurn as any)?.prompt ??
-    (aiTurn as any)?.input ??
-    null;
-
-
+    (aiTurn as any)?.userPrompt ?? (aiTurn as any)?.prompt ?? (aiTurn as any)?.input ?? null;
 
   // --- NEW: Crown Move Handler (Recompute) - REMOVED for historical turns ---
   // The crown is now static for historical turns. Recompute is handled via the button below.
-
 
   return (
     <div className="turn-block pb-32 mt-4">
       {userPrompt && (
         <div className="user-prompt-block mt-24 mb-8">
-          <div className="text-xs text-text-muted mb-1.5">
-            Your Prompt
-          </div>
+          <div className="text-xs text-text-muted mb-1.5">Your Prompt</div>
           <div className="bg-surface border border-border-subtle rounded-lg p-3 text-text-secondary">
             {userPrompt}
           </div>
@@ -62,18 +51,15 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
         <div className="ai-turn-content flex flex-col gap-3">
           <div className="flex justify-center w-full transition-all duration-300 px-4">
             <div className="w-full max-w-7xl">
-              <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
-
+              <div
+                className="flex-1 flex flex-col relative min-w-0"
+                style={{ maxWidth: '820px', margin: '0 auto' }}
+              >
                 {aiTurn.type === 'ai' ? (
-                  <CognitiveOutputRenderer
-                    aiTurn={aiTurn}
-                    singularityState={singularityState}
-                  />
+                  <CognitiveOutputRenderer aiTurn={aiTurn} singularityState={singularityState} />
                 ) : null}
 
-                {probeSessions.length > 0 && (
-                  <ProbeSessionsPanel sessions={probeSessions} />
-                )}
+                {probeSessions.length > 0 && <ProbeSessionsPanel sessions={probeSessions} />}
               </div>
             </div>
           </div>
@@ -108,12 +94,12 @@ const ProbeSessionsPanel: React.FC<ProbeSessionsPanelProps> = ({ sessions }) => 
       <div className="text-[11px] uppercase tracking-widest text-text-muted font-bold">
         Probes ({sessions.length})
       </div>
-      {sessions.map(session => (
+      {sessions.map((session) => (
         <ProbeSessionCard
           key={session.id}
           session={session}
           isExpanded={expandedId === session.id}
-          onToggle={() => setExpandedId(prev => prev === session.id ? null : session.id)}
+          onToggle={() => setExpandedId((prev) => (prev === session.id ? null : session.id))}
         />
       ))}
     </div>
@@ -128,14 +114,18 @@ interface ProbeSessionCardProps {
 
 const ProbeSessionCard: React.FC<ProbeSessionCardProps> = ({ session, isExpanded, onToggle }) => {
   const statusColor =
-    session.status === 'complete' ? 'text-emerald-400' :
-    session.status === 'probing'  ? 'text-brand-300' :
-    'text-text-muted';
+    session.status === 'complete'
+      ? 'text-emerald-400'
+      : session.status === 'probing'
+        ? 'text-brand-300'
+        : 'text-text-muted';
 
   const statusLabel =
-    session.status === 'complete' ? 'Complete' :
-    session.status === 'probing'  ? 'Probing…' :
-    'Searching…';
+    session.status === 'complete'
+      ? 'Complete'
+      : session.status === 'probing'
+        ? 'Probing…'
+        : 'Searching…';
 
   const responses = Object.values(session.responses || {}) as ProbeSessionResponse[];
 
@@ -162,7 +152,7 @@ const ProbeSessionCard: React.FC<ProbeSessionCardProps> = ({ session, isExpanded
               {session.status === 'searching' ? 'Searching corpus…' : 'Awaiting probe responses…'}
             </div>
           ) : (
-            responses.map(resp => (
+            responses.map((resp) => (
               <div key={resp.providerId} className="px-4 py-3">
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-[11px] font-medium text-text-muted capitalize">

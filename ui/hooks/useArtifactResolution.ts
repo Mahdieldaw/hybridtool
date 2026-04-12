@@ -8,32 +8,32 @@
  * are preserved verbatim from DecisionMapSheet.
  */
 
-import { useMemo, useEffect } from "react";
-import { useAtomValue } from "jotai";
+import { useMemo, useEffect } from 'react';
+import { useAtomValue } from 'jotai';
 import {
   turnAtomFamily,
   mappingProviderAtom,
   mappingRecomputeSelectionByRoundAtom,
   activeRecomputeStateAtom,
-} from "../state/atoms";
-import { useProviderArtifact } from "./useProviderArtifact";
-import { normalizeProviderId } from "../utils/provider-id-mapper";
-import type { AiTurnWithUI } from "../types";
+} from '../state/atoms';
+import { useProviderArtifact } from './useProviderArtifact';
+import { normalizeProviderId } from '../utils/provider-id-mapper';
+import type { AiTurnWithUI } from '../types';
 
 function isAiTurn(turn: unknown): turn is AiTurnWithUI {
-  return !!turn && typeof turn === "object" && (turn as any).type === "ai";
+  return !!turn && typeof turn === 'object' && (turn as any).type === 'ai';
 }
 
 function normalizeArtifactCandidate(input: unknown): any | null {
   if (!input) return null;
-  if (typeof input === "object") return input as any;
-  if (typeof input !== "string") return null;
+  if (typeof input === 'object') return input as any;
+  if (typeof input !== 'string') return null;
   const raw = input.trim();
   if (!raw) return null;
-  if (!(raw.startsWith("{") || raw.startsWith("["))) return null;
+  if (!(raw.startsWith('{') || raw.startsWith('['))) return null;
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
     return null;
   }
@@ -59,21 +59,23 @@ export function useArtifactResolution(turnId: string | null | undefined): Artifa
   const mappingSelectionByRound = useAtomValue(mappingRecomputeSelectionByRoundAtom);
   const activeRecomputeState = useAtomValue(activeRecomputeStateAtom);
 
-  const aiTurn = useAtomValue(
-    useMemo(
-      () => turnAtomFamily(String(turnId || "")),
-      [turnId],
-    ),
-  ) as AiTurnWithUI | undefined;
+  const aiTurn = useAtomValue(useMemo(() => turnAtomFamily(String(turnId || '')), [turnId])) as
+    | AiTurnWithUI
+    | undefined;
   const aiTurnSafe: AiTurnWithUI | null = isAiTurn(aiTurn) ? aiTurn : null;
 
   const activeMappingPid = useMemo(() => {
     // 1. Explicit user selection THIS session for THIS turn overrides everything
-    const explicitForTurn = aiTurnSafe?.userTurnId ? mappingSelectionByRound[aiTurnSafe.userTurnId] : null;
+    const explicitForTurn = aiTurnSafe?.userTurnId
+      ? mappingSelectionByRound[aiTurnSafe.userTurnId]
+      : null;
     if (explicitForTurn) return explicitForTurn;
 
     // 2. If a recompute is actively running for this turn, focus on it
-    if (activeRecomputeState?.aiTurnId === aiTurnSafe?.id && activeRecomputeState?.stepType === "mapping") {
+    if (
+      activeRecomputeState?.aiTurnId === aiTurnSafe?.id &&
+      activeRecomputeState?.stepType === 'mapping'
+    ) {
       return activeRecomputeState.providerId;
     }
 
@@ -105,13 +107,13 @@ export function useArtifactResolution(turnId: string | null | undefined): Artifa
   // Tier 3: read ephemeral artifact from Jotai atom
   const { artifact: artifactFromAtom, rebuild: rebuildArtifact } = useProviderArtifact(
     aiTurnSafe?.id,
-    activeMappingPid,
+    activeMappingPid
   );
   const mappingArtifact = useMemo(() => {
     if (!artifactFromAtom) return null;
     const parsed = normalizeArtifactCandidate(artifactFromAtom);
-    return (parsed || artifactFromAtom) && typeof (parsed || artifactFromAtom) === "object"
-      ? (parsed || artifactFromAtom)
+    return (parsed || artifactFromAtom) && typeof (parsed || artifactFromAtom) === 'object'
+      ? parsed || artifactFromAtom
       : null;
   }, [artifactFromAtom]);
 
@@ -132,7 +134,10 @@ export function useArtifactResolution(turnId: string | null | undefined): Artifa
 
   const artifactWithCitations = useMemo(() => {
     if (!mappingArtifact || !citationSourceOrder) return mappingArtifact;
-    const existing = (mappingArtifact as any)?.citationSourceOrder ?? (mappingArtifact as any)?.meta?.citationSourceOrder ?? null;
+    const existing =
+      (mappingArtifact as any)?.citationSourceOrder ??
+      (mappingArtifact as any)?.meta?.citationSourceOrder ??
+      null;
     if (existing) return mappingArtifact;
     return { ...(mappingArtifact as any), citationSourceOrder };
   }, [mappingArtifact, citationSourceOrder]);

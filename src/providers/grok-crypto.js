@@ -1,9 +1,9 @@
 /**
- *`src/providers/grok-crypto.js`  
+ *`src/providers/grok-crypto.js`
  * HTOS Grok Crypto Module
  * - secp256k1 key generation and challenge signing
  * - Uses @noble/secp256k1 (pure JS, no DOM dependencies)
- * 
+ *
  * Build-phase safe: runs in Service Worker
  */
 
@@ -76,7 +76,7 @@ function hexToBytes(hex) {
 
 /**
  * Generate secp256k1 keypair for Grok authentication
- * 
+ *
  * @returns {{ privateKey: string, userPublicKey: number[] }}
  *   - privateKey: Base64-encoded 32-byte private key
  *   - userPublicKey: Array of bytes (compressed public key, 33 bytes)
@@ -84,14 +84,14 @@ function hexToBytes(hex) {
 export function generateKeys() {
   // Generate 32 random bytes for private key
   const privateKeyBytes = randomBytes(32);
-  
+
   // Get compressed public key (33 bytes, starts with 02 or 03)
   const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
-  
+
   // Encode private key as base64 (matching Python's xor/b64encode pattern)
   // Python: t = ''.join(chr(e[n]) for n in range(len(e))); b64encode(t.encode('latin-1'))
   const privateKeyB64 = bytesToBase64(privateKeyBytes);
-  
+
   return {
     privateKey: privateKeyB64,
     userPublicKey: Array.from(publicKeyBytes),
@@ -104,7 +104,7 @@ export function generateKeys() {
 
 /**
  * Sign a challenge with the private key
- * 
+ *
  * @param {Uint8Array} challengeData - Raw challenge bytes from server
  * @param {string} privateKeyB64 - Base64-encoded private key
  * @returns {Promise<{ challenge: string, signature: string }>}
@@ -114,16 +114,16 @@ export function generateKeys() {
 export async function signChallenge(challengeData, privateKeyB64) {
   // Decode private key
   const privateKeyBytes = base64ToBytes(privateKeyB64);
-  
+
   // Hash the challenge data
   const messageHash = sha256(challengeData);
-  
+
   // Sign using secp256k1 (returns Signature object)
   const signature = await secp256k1.signAsync(messageHash, privateKeyBytes);
-  
+
   // Get compact signature (64 bytes: r || s)
   const sigBytes = signature.toCompactRawBytes();
-  
+
   return {
     challenge: bytesToBase64(challengeData),
     signature: bytesToBase64(sigBytes.slice(0, 64)),
@@ -134,11 +134,4 @@ export async function signChallenge(challengeData, privateKeyB64) {
 // EXPORTS (additional utilities for signature module)
 // ═══════════════════════════════════════════════════════════════════════════
 
-export { 
-  randomBytes, 
-  bytesToBase64, 
-  base64ToBytes, 
-  bytesToHex, 
-  hexToBytes,
-  sha256 
-};
+export { randomBytes, bytesToBase64, base64ToBytes, bytesToHex, hexToBytes, sha256 };

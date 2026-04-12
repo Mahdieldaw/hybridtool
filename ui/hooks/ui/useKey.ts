@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from "react";
-import { useEventListener } from "usehooks-ts";
+import { useCallback, useEffect, useRef } from 'react';
+import { useEventListener } from 'usehooks-ts';
 
 type KeyCallback = (event: KeyboardEvent) => void;
 
@@ -19,5 +19,5 @@ export function useKey(key: string, callback: KeyCallback) {
     [key]
   );
 
-  useEventListener("keydown", handleKeyDown);
+  useEventListener('keydown', handleKeyDown);
 }

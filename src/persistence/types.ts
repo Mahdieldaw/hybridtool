@@ -1,6 +1,6 @@
 // src/persistence/types.ts
 
-import type { ProviderResponseType } from "../../shared/contract";
+import type { ProviderResponseType } from '../../shared/contract';
 
 // Store configuration types
 export interface StoreConfig {
@@ -57,7 +57,7 @@ export interface ThreadRecord {
 // 3. Turns Store
 export interface BaseTurnRecord {
   id: string;
-  type: "user" | "ai";
+  type: 'user' | 'ai';
   sessionId: string;
   threadId: string;
   createdAt: number;
@@ -71,18 +71,21 @@ export interface BaseTurnRecord {
 }
 
 export interface UserTurnRecord extends BaseTurnRecord {
-  type: "user";
+  type: 'user';
   text: string;
 }
 
 export interface AiTurnRecord extends BaseTurnRecord {
-  type: "ai";
+  type: 'ai';
   userTurnId: string;
-  meta?: {
-    branchPointTurnId?: string;
-    replacesId?: string;
-    isHistoricalRerun?: boolean;
-  } | object | string;
+  meta?:
+    | {
+        branchPointTurnId?: string;
+        replacesId?: string;
+        isHistoricalRerun?: boolean;
+      }
+    | object
+    | string;
 
   // Serialized phase data (stored as JSON blobs)
   batch?: object | string;
@@ -113,7 +116,7 @@ export interface ProviderResponseRecord {
   responseType: ProviderResponseType;
   responseIndex: number;
   text: string;
-  status: "pending" | "streaming" | "completed" | "error" | "cancelled";
+  status: 'pending' | 'streaming' | 'completed' | 'error' | 'cancelled';
   meta?: any;
   attemptNumber?: number;
   createdAt: number;
@@ -166,18 +169,18 @@ export interface MetadataRecord {
 // 10. Embeddings Store
 // Geometry-layer embeddings: immutable per turn, independent of mapper
 export interface EmbeddingRecord {
-  id: string;                          // alias of aiTurnId for generic utilities
-  aiTurnId: string;                    // primary key
-  statementEmbeddings?: ArrayBuffer;   // packed Float32Array rows
-  paragraphEmbeddings?: ArrayBuffer;   // packed Float32Array rows
+  id: string; // alias of aiTurnId for generic utilities
+  aiTurnId: string; // primary key
+  statementEmbeddings?: ArrayBuffer; // packed Float32Array rows
+  paragraphEmbeddings?: ArrayBuffer; // packed Float32Array rows
   queryEmbedding?: ArrayBuffer | null; // single vector (may be absent)
   meta: {
-    embeddingModelId: string;          // "bge-base-en-v1.5"
-    dimensions: number;                // 768
+    embeddingModelId: string; // "bge-base-en-v1.5"
+    dimensions: number; // 768
     statementCount?: number;
     paragraphCount?: number;
-    statementIndex?: string[];         // ordered statement IDs → row mapping
-    paragraphIndex?: string[];         // ordered paragraph IDs → row mapping
+    statementIndex?: string[]; // ordered statement IDs → row mapping
+    paragraphIndex?: string[]; // ordered paragraph IDs → row mapping
     hasStatements?: boolean;
     hasParagraphs?: boolean;
     hasQuery?: boolean;
@@ -189,14 +192,14 @@ export interface EmbeddingRecord {
 
 // Mapper-layer claim embeddings: per provider per turn
 export interface ClaimEmbeddingRecord {
-  id: string;                          // "{aiTurnId}:{providerId}"
+  id: string; // "{aiTurnId}:{providerId}"
   aiTurnId: string;
   providerId: string;
-  claimEmbeddings: ArrayBuffer;        // packed Float32Array rows
+  claimEmbeddings: ArrayBuffer; // packed Float32Array rows
   meta: {
     dimensions: number;
     claimCount: number;
-    claimIndex: string[];              // ordered claim IDs → row mapping
+    claimIndex: string[]; // ordered claim IDs → row mapping
     timestamp: number;
   };
   createdAt: number;

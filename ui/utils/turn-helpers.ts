@@ -1,9 +1,8 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
-import type { UserTurn, ProviderKey } from "../../shared/contract";
-import type { AiTurnWithUI } from "../types";
-import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
-import { DEFAULT_THREAD } from "../../shared/messaging";
-
+import type { UserTurn, ProviderKey } from '../../shared/contract';
+import type { AiTurnWithUI } from '../types';
+import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
+import { DEFAULT_THREAD } from '../../shared/messaging';
 
 export function createOptimisticAiTurn(
   aiTurnId: string,
@@ -13,32 +12,32 @@ export function createOptimisticAiTurn(
   singularityProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
-  requestedFeatures?: { mapping: boolean; singularity: boolean },
+  requestedFeatures?: { mapping: boolean; singularity: boolean }
 ): AiTurnWithUI {
   const now = timestamp || Date.now();
 
   const pendingBatch = activeProviders.length
     ? {
-      responses: Object.fromEntries(
-        activeProviders.map((pid, index) => [
-          String(pid),
-          {
-            text: "",
-            modelIndex: index,
-            status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(pid))
-              ? "streaming"
-              : "pending",
-          },
-        ]),
-      ),
-      timestamp: now,
-    }
+        responses: Object.fromEntries(
+          activeProviders.map((pid, index) => [
+            String(pid),
+            {
+              text: '',
+              modelIndex: index,
+              status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(pid))
+                ? 'streaming'
+                : 'pending',
+            },
+          ])
+        ),
+        timestamp: now,
+      }
     : undefined;
 
   const effectiveUserTurnId = explicitUserTurnId || userTurn.id;
 
   return {
-    type: "ai",
+    type: 'ai',
     id: aiTurnId,
     createdAt: now,
     sessionId: userTurn.sessionId,
@@ -55,28 +54,22 @@ export function createOptimisticAiTurn(
   };
 }
 
-
 export function applyStreamingTurnUpdate(
   aiTurn: AiTurnWithUI,
   updates: Array<{
     providerId: string;
     text: string;
     status: string;
-    responseType:
-    | "batch"
-    | "mapping"
-    | "singularity";
+    responseType: 'batch' | 'mapping' | 'singularity';
     isReplace?: boolean;
-  }>,
+  }>
 ) {
   updates.forEach(({ providerId, text: delta, status, responseType, isReplace }) => {
-    if (responseType === "batch") {
+    if (responseType === 'batch') {
       if (!aiTurn.batch) aiTurn.batch = { responses: {}, timestamp: Date.now() };
       const batch = aiTurn.batch;
       const existing = batch.responses[providerId];
-      const nextText = isReplace
-        ? delta
-        : `${existing?.text || ""}${delta}`;
+      const nextText = isReplace ? delta : `${existing?.text || ''}${delta}`;
       batch.responses[providerId] = {
         text: nextText,
         modelIndex: existing?.modelIndex ?? 0,
@@ -85,33 +78,42 @@ export function applyStreamingTurnUpdate(
       };
       batch.timestamp = Date.now();
       aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
-    } else if (responseType === "singularity") {
+    } else if (responseType === 'singularity') {
       const existing = aiTurn.singularity;
-      const nextText = isReplace
-        ? delta
-        : `${existing?.output || ""}${delta}`;
+      const nextText = isReplace ? delta : `${existing?.output || ''}${delta}`;
       aiTurn.singularity = {
-        prompt: existing?.prompt || "",
+        prompt: existing?.prompt || '',
         output: nextText,
         timestamp: Date.now(),
         status,
       };
       aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
-    } else if (responseType === "mapping") {
+    } else if (responseType === 'mapping') {
       const existingArtifact = aiTurn.mapping?.artifact as any;
-      const existingNarrative = existingArtifact?.semantic?.narrative || "";
+      const existingNarrative = existingArtifact?.semantic?.narrative || '';
       const nextText = isReplace ? delta : `${existingNarrative}${delta}`;
       aiTurn.mapping = {
         artifact: {
-          shadow: existingArtifact?.shadow || { statements: [], paragraphs: [], audit: {}, delta: null },
-          geometry: existingArtifact?.geometry || { embeddingStatus: "none", substrate: { nodes: [], mutualEdges: [] } },
+          shadow: existingArtifact?.shadow || {
+            statements: [],
+            paragraphs: [],
+            audit: {},
+            delta: null,
+          },
+          geometry: existingArtifact?.geometry || {
+            embeddingStatus: 'none',
+            substrate: { nodes: [], mutualEdges: [] },
+          },
           semantic: {
             claims: existingArtifact?.semantic?.claims || [],
             edges: existingArtifact?.semantic?.edges || [],
             conditionals: existingArtifact?.semantic?.conditionals || [],
             narrative: nextText,
           },
-          traversal: existingArtifact?.traversal || { forcingPoints: [], graph: { claims: [], edges: [], conditionals: [], tiers: [], maxTier: 0 } },
+          traversal: existingArtifact?.traversal || {
+            forcingPoints: [],
+            graph: { claims: [], edges: [], conditionals: [], tiers: [], maxTier: 0 },
+          },
         } as any,
         timestamp: Date.now(),
       };
@@ -126,7 +128,7 @@ export function applyStreamingTurnUpdate(
  */
 export function normalizeBackendRoundsToTurns(
   rawTurns: any[],
-  sessionId: string,
+  sessionId: string
 ): Array<UserTurn | AiTurnWithUI> {
   if (!rawTurns) return [];
   const normalized: Array<UserTurn | AiTurnWithUI> = [];
@@ -137,7 +139,7 @@ export function normalizeBackendRoundsToTurns(
     // 1. Extract UserTurn
     if (round.user && round.user.text) {
       const userTurn: UserTurn = {
-        type: "user",
+        type: 'user',
         id: round.userTurnId || round.user.id || `user-${round.createdAt}`,
         text: round.user.text,
         createdAt: round.user.createdAt || round.createdAt || Date.now(),
@@ -154,7 +156,9 @@ export function normalizeBackendRoundsToTurns(
       const fallbackTimestamp = round.completedAt || round.createdAt || Date.now();
       const batch = round.batch
         ? { ...round.batch, timestamp: round.batch?.timestamp ?? fallbackTimestamp }
-        : (round.providers ? { responses: round.providers, timestamp: fallbackTimestamp } : undefined);
+        : round.providers
+          ? { responses: round.providers, timestamp: fallbackTimestamp }
+          : undefined;
       const mapping = round.mapping
         ? { ...round.mapping, timestamp: round.mapping?.timestamp ?? fallbackTimestamp }
         : undefined;
@@ -162,7 +166,7 @@ export function normalizeBackendRoundsToTurns(
         ? { ...round.singularity, timestamp: round.singularity?.timestamp ?? fallbackTimestamp }
         : undefined;
       const aiTurn: AiTurnWithUI = {
-        type: "ai",
+        type: 'ai',
         id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
         userTurnId: round.userTurnId,
         sessionId: sessionId,
@@ -182,4 +186,3 @@ export function normalizeBackendRoundsToTurns(
 
   return normalized;
 }
-

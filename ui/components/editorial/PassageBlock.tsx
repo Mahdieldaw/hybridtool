@@ -29,7 +29,9 @@ export const PassageBlock: React.FC<PassageBlockProps> = ({ resolved, role }) =>
       <div className="relative pl-4 border-l-2 border-dashed border-l-white/20 py-3 px-4">
         {/* Provenance label */}
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-text-muted font-medium uppercase tracking-wider">{ROLE_LABELS[role]}</span>
+          <span className="text-xs text-text-muted font-medium uppercase tracking-wider">
+            {ROLE_LABELS[role]}
+          </span>
           <span className="text-xs text-text-muted italic">unclaimed</span>
         </div>
         {/* Text */}
@@ -59,21 +61,20 @@ export const PassageBlock: React.FC<PassageBlockProps> = ({ resolved, role }) =>
       className={clsx(
         'relative py-3 px-4 border-l-2',
         borderColor,
-        role === 'anchor' && 'bg-white/[0.02]',
+        role === 'anchor' && 'bg-white/[0.02]'
       )}
     >
       {/* Provenance label + model name (top-right, muted, not selectable) */}
       <div className="flex items-center justify-between mb-2 select-none pointer-events-none">
-        <span className="text-xs text-text-muted font-medium uppercase tracking-wider">{ROLE_LABELS[role]}</span>
+        <span className="text-xs text-text-muted font-medium uppercase tracking-wider">
+          {ROLE_LABELS[role]}
+        </span>
         <span className="text-xs text-text-muted">{resolved.modelName}</span>
       </div>
 
       {/* Passage extent indicator for 3+ paragraphs */}
       {isMultiParagraph && (
-        <div
-          className="absolute left-0 top-8 bottom-2 w-px bg-white/10"
-          aria-hidden
-        />
+        <div className="absolute left-0 top-8 bottom-2 w-px bg-white/10" aria-hidden />
       )}
 
       {/* Passage text — original model words, paragraph breaks preserved */}

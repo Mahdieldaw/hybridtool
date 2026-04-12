@@ -1,6 +1,6 @@
 /**
  * HTOS Lifecycle Manager - Simplified
- * 
+ *
  * Strategy: Track activity for business logic only.
  * Keep-alive is handled by the offscreen document heartbeat.
  */

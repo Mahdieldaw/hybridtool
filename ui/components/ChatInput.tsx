@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import { useAtom, useSetAtom, useAtomValue } from "jotai";
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import {
   chatInputValueAtom,
   selectedModelsAtom,
@@ -21,13 +21,13 @@ import {
   dismissedExplorationTurnIdAtom,
   explorationInputModeOverrideAtom,
   probeProvidersEnabledAtom,
-} from "../state/atoms";
-import { useChat } from "../hooks/chat/useChat";
-import api from "../services/extension-api";
-import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { getProviderName } from "../utils/provider-helpers";
-import { PROVIDER_LIMITS } from "../../shared/provider-limits";
-import { CouncilOrbs } from "./CouncilOrbs";
+} from '../state/atoms';
+import { useChat } from '../hooks/chat/useChat';
+import api from '../services/extension-api';
+import { LLM_PROVIDERS_CONFIG } from '../constants';
+import { getProviderName } from '../utils/provider-helpers';
+import { PROVIDER_LIMITS } from '../../shared/provider-limits';
+import { CouncilOrbs } from './CouncilOrbs';
 
 interface ChatInputProps {
   onStartMapping?: (prompt: string) => void;
@@ -71,52 +71,75 @@ const ChatInput = ({
 
   // Exploration mode: probe vs new-query routing
   const latestCompletedTurnId = useAtomValue(latestCompletedAiTurnIdAtom);
-  const [dismissedExplorationTurnId, setDismissedExplorationTurnId] = useAtom(dismissedExplorationTurnIdAtom);
-  const [explorationModeOverride, setExplorationModeOverride] = useAtom(explorationInputModeOverrideAtom);
+  const [dismissedExplorationTurnId, setDismissedExplorationTurnId] = useAtom(
+    dismissedExplorationTurnIdAtom
+  );
+  const [explorationModeOverride, setExplorationModeOverride] = useAtom(
+    explorationInputModeOverrideAtom
+  );
   const [probeProvidersEnabled] = useAtom(probeProvidersEnabledAtom);
 
   // Show the bar when there's a completed turn that hasn't been dismissed and no active streaming
-  const showExplorationBar = !!latestCompletedTurnId && dismissedExplorationTurnId !== latestCompletedTurnId && !isLoading;
+  const showExplorationBar =
+    !!latestCompletedTurnId && dismissedExplorationTurnId !== latestCompletedTurnId && !isLoading;
   // Default: probe mode. Overridden to "new" by explicit user action.
-  const isProbeMode = showExplorationBar && explorationModeOverride !== "new";
-
+  const isProbeMode = showExplorationBar && explorationModeOverride !== 'new';
 
   // Callbacks
-  const handleSend = useCallback((prompt: string) => {
-    const mode = isContinuationMode ? "continuation" : "new";
-    sendMessage(prompt, mode);
-  }, [sendMessage, isContinuationMode]);
+  const handleSend = useCallback(
+    (prompt: string) => {
+      const mode = isContinuationMode ? 'continuation' : 'new';
+      sendMessage(prompt, mode);
+    },
+    [sendMessage, isContinuationMode]
+  );
 
-  const onContinuation = useCallback(async (prompt: string) => {
-    if (activeTarget && currentSessionId) {
-      try {
-        setActiveRecomputeState({
-          aiTurnId: activeTarget.aiTurnId,
-          stepType: "batch",
-          providerId: activeTarget.providerId
-        });
-        const primitive: any = {
-          type: "recompute",
-          sessionId: currentSessionId,
-          sourceTurnId: activeTarget.aiTurnId,
-          stepType: "batch",
-          targetProvider: activeTarget.providerId,
-          userMessage: prompt,
-          useThinking: false,
-        };
-        await api.executeWorkflow(primitive);
-        setActiveTarget(null);
-      } catch (error: any) {
-        console.error("Failed to execute targeted recompute:", error);
-        setToast({ id: Date.now(), message: `Failed to branch ${activeTarget.providerId}: ${error.message || "Unknown error"}`, type: "error" });
-        setActiveRecomputeState(null);
+  const onContinuation = useCallback(
+    async (prompt: string) => {
+      if (activeTarget && currentSessionId) {
+        try {
+          setActiveRecomputeState({
+            aiTurnId: activeTarget.aiTurnId,
+            stepType: 'batch',
+            providerId: activeTarget.providerId,
+          });
+          const primitive: any = {
+            type: 'recompute',
+            sessionId: currentSessionId,
+            sourceTurnId: activeTarget.aiTurnId,
+            stepType: 'batch',
+            targetProvider: activeTarget.providerId,
+            userMessage: prompt,
+            useThinking: false,
+          };
+          await api.executeWorkflow(primitive);
+          setActiveTarget(null);
+        } catch (error: any) {
+          console.error('Failed to execute targeted recompute:', error);
+          setToast({
+            id: Date.now(),
+            message: `Failed to branch ${activeTarget.providerId}: ${error.message || 'Unknown error'}`,
+            type: 'error',
+          });
+          setActiveRecomputeState(null);
+        }
+        return;
       }
-      return;
-    }
-    sendMessage(prompt, "continuation");
-  }, [sendMessage, activeTarget, currentSessionId, setActiveTarget, setActiveRecomputeState, setToast]);
+      sendMessage(prompt, 'continuation');
+    },
+    [
+      sendMessage,
+      activeTarget,
+      currentSessionId,
+      setActiveTarget,
+      setActiveRecomputeState,
+      setToast,
+    ]
+  );
 
-  const onAbort = useCallback(() => { void abort(); }, [abort]);
+  const onAbort = useCallback(() => {
+    void abort();
+  }, [abort]);
 
   const onHeightChange = setChatInputHeight;
   const onCancelTarget = () => setActiveTarget(null);
@@ -131,15 +154,15 @@ const ChatInput = ({
         setActiveTarget(null);
       }
     };
-    document.body.addEventListener("click", handleClickOutside);
-    return () => document.body.removeEventListener("click", handleClickOutside);
+    document.body.addEventListener('click', handleClickOutside);
+    return () => document.body.removeEventListener('click', handleClickOutside);
   }, [activeTarget, setActiveTarget]);
 
   // Input Length Validation State
   const [selectedModels] = useAtom(selectedModelsAtom);
   const [maxLength, setMaxLength] = useState<number>(Infinity);
   const [warnThreshold, setWarnThreshold] = useState<number>(Infinity);
-  const [limitingProvider, setLimitingProvider] = useState<string>("");
+  const [limitingProvider, setLimitingProvider] = useState<string>('');
 
   const inputLength = prompt.length;
   const isOverLimit = inputLength > maxLength;
@@ -149,16 +172,18 @@ const ChatInput = ({
   useEffect(() => {
     let minMax = Infinity;
     let minWarn = Infinity;
-    let provider = "";
+    let provider = '';
 
     const activeProviders = Object.entries(selectedModels)
       .filter(([_, isSelected]) => isSelected)
       .map(([id]) => id);
 
-    const providersToCheck = activeProviders.length > 0 ? activeProviders : ['chatgpt', 'claude', 'gemini'];
+    const providersToCheck =
+      activeProviders.length > 0 ? activeProviders : ['chatgpt', 'claude', 'gemini'];
 
-    providersToCheck.forEach(pid => {
-      const limitConfig = PROVIDER_LIMITS[pid as keyof typeof PROVIDER_LIMITS] || PROVIDER_LIMITS['chatgpt'];
+    providersToCheck.forEach((pid) => {
+      const limitConfig =
+        PROVIDER_LIMITS[pid as keyof typeof PROVIDER_LIMITS] || PROVIDER_LIMITS['chatgpt'];
 
       if (limitConfig.maxInputChars < minMax) {
         minMax = limitConfig.maxInputChars;
@@ -174,7 +199,7 @@ const ChatInput = ({
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
       const newHeight = Math.min(scrollHeight, 120);
       textareaRef.current.style.height = `${newHeight}px`;
@@ -193,7 +218,11 @@ const ChatInput = ({
   const executeSend = (text: string) => {
     const trimmed = text.trim();
     if (isOverLimit) {
-      setToast({ id: Date.now(), message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`, type: "error" });
+      setToast({
+        id: Date.now(),
+        message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`,
+        type: 'error',
+      });
       return;
     }
 
@@ -203,7 +232,7 @@ const ChatInput = ({
         .filter(([, enabled]) => enabled)
         .map(([id]) => id);
       void probeTurn(latestCompletedTurnId, trimmed, enabledProviders);
-      setPrompt("");
+      setPrompt('');
       return;
     }
 
@@ -216,40 +245,46 @@ const ChatInput = ({
       handleSend(trimmed);
     }
 
-    setPrompt("");
+    setPrompt('');
   };
 
   const handleSubmit = (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     if (isLoading || !prompt.trim()) return;
     if (isOverLimit) {
-      setToast({ id: Date.now(), message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`, type: "error" });
+      setToast({
+        id: Date.now(),
+        message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`,
+        type: 'error',
+      });
       return;
     }
 
     executeSend(prompt);
   };
 
-  const buttonText = isProbeMode ? "Probe" : (isContinuationMode ? "Continue" : "Send");
+  const buttonText = isProbeMode ? 'Probe' : isContinuationMode ? 'Continue' : 'Send';
   const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit;
   const showMappingBtn = canShowMapping && !!prompt.trim();
   const showAbortBtn = !!onAbort && isLoading;
 
-  const providerName = activeTarget ? getProviderName(activeTarget.providerId) : "";
+  const providerName = activeTarget ? getProviderName(activeTarget.providerId) : '';
   const workflowProgress = useAtomValue(workflowProgressAtom);
   const latestAiTurn = React.useMemo(() => {
     for (let i = turnIds.length - 1; i >= 0; i -= 1) {
       const t = turnsMap.get(turnIds[i]);
-      if (t && (t as any).type === "ai") return t as any;
+      if (t && (t as any).type === 'ai') return t as any;
     }
     return null;
   }, [turnIds, turnsMap]);
-  const isInProgress = latestAiTurn?.pipelineStatus === "in_progress";
+  const isInProgress = latestAiTurn?.pipelineStatus === 'in_progress';
   const showConfigOrbs = !isRoundActive && !isInProgress;
 
   return (
-    <div ref={containerRef} className="flex justify-center flex-col items-center pointer-events-auto">
-
+    <div
+      ref={containerRef}
+      className="flex justify-center flex-col items-center pointer-events-auto"
+    >
       {showConfigOrbs && (
         <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
@@ -264,11 +299,11 @@ const ChatInput = ({
                 chrome?.storage?.local?.set?.({
                   provider_lock_settings: {
                     singularity_locked: true,
-                    singularity_provider: pid
-                  }
+                    singularity_provider: pid,
+                  },
                 });
               } catch (e) {
-                console.error("Failed to save singularity selection:", e);
+                console.error('Failed to save singularity selection:', e);
               }
             }}
           />
@@ -276,7 +311,6 @@ const ChatInput = ({
       )}
 
       <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
-
         {/* === Exploration mode bar === */}
         {showExplorationBar && (
           <div className="w-full flex items-center gap-2 mb-1 animate-in slide-in-from-top-1 duration-150">
@@ -284,21 +318,23 @@ const ChatInput = ({
               <button
                 type="button"
                 onClick={() => setExplorationModeOverride(null)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${isProbeMode ? "bg-brand-500/20 text-brand-300" : "text-text-muted hover:text-text-secondary"}`}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${isProbeMode ? 'bg-brand-500/20 text-brand-300' : 'text-text-muted hover:text-text-secondary'}`}
               >
                 Probe
               </button>
               <button
                 type="button"
-                onClick={() => setExplorationModeOverride("new")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${!isProbeMode ? "bg-surface-highlight text-text-primary" : "text-text-muted hover:text-text-secondary"}`}
+                onClick={() => setExplorationModeOverride('new')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${!isProbeMode ? 'bg-surface-highlight text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
               >
                 New Query
               </button>
             </div>
             <button
               type="button"
-              onClick={() => latestCompletedTurnId && setDismissedExplorationTurnId(latestCompletedTurnId)}
+              onClick={() =>
+                latestCompletedTurnId && setDismissedExplorationTurnId(latestCompletedTurnId)
+              }
               className="ml-auto text-text-muted hover:text-text-secondary p-1 rounded hover:bg-surface-highlight transition-colors text-sm leading-none cursor-pointer"
               aria-label="Dismiss exploration mode"
               title="Dismiss"
@@ -332,15 +368,15 @@ const ChatInput = ({
               activeTarget
                 ? `Continue conversation with ${providerName}...`
                 : isProbeMode
-                  ? "Probe the evidence corpus for this turn..."
+                  ? 'Probe the evidence corpus for this turn...'
                   : isContinuationMode
-                    ? "Continue the conversation with your follow-up message..."
-                    : "Ask anything... Singularity will orchestrate multiple AI models for you."
+                    ? 'Continue the conversation with your follow-up message...'
+                    : 'Ask anything... Singularity will orchestrate multiple AI models for you.'
             }
             rows={1}
             className={`w-full min-h-[34px] px-3 py-1.5 bg-transparent border-none text-text-primary text-[15px] font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted`}
             onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-              if (e.key === "Enter" && !e.shiftKey && prompt.trim()) {
+              if (e.key === 'Enter' && !e.shiftKey && prompt.trim()) {
                 e.preventDefault();
                 handleSubmit(e);
               }
@@ -349,17 +385,22 @@ const ChatInput = ({
           />
 
           {(isWarning || isOverLimit) && (
-            <div className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${isOverLimit
-              ? "bg-intent-danger/10 border-intent-danger/30 text-intent-danger"
-              : "bg-intent-warning/10 border-intent-warning/30 text-intent-warning"
-              }`}>
+            <div
+              className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${
+                isOverLimit
+                  ? 'bg-intent-danger/10 border-intent-danger/30 text-intent-danger'
+                  : 'bg-intent-warning/10 border-intent-warning/30 text-intent-warning'
+              }`}
+            >
               {isOverLimit ? (
                 <span>
-                  ⚠️ Input too long for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
+                  ⚠️ Input too long for {limitingProvider} ({inputLength.toLocaleString()} /{' '}
+                  {maxLength.toLocaleString()})
                 </span>
               ) : (
                 <span>
-                  Approaching limit for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
+                  Approaching limit for {limitingProvider} ({inputLength.toLocaleString()} /{' '}
+                  {maxLength.toLocaleString()})
                 </span>
               )}
             </div>
@@ -377,9 +418,7 @@ const ChatInput = ({
               <div className="loading-spinner"></div>
             ) : (
               <>
-                <span className="text-base">
-                  {(isContinuationMode ? "💬" : "✨")}
-                </span>
+                <span className="text-base">{isContinuationMode ? '💬' : '✨'}</span>
                 <span>{buttonText}</span>
               </>
             )}
@@ -403,19 +442,17 @@ const ChatInput = ({
             type="button"
             onClick={() => {
               onStartMapping?.(prompt.trim());
-              setPrompt("");
+              setPrompt('');
             }}
             disabled={isLoading || mappingActive}
-            title={mappingTooltip || "Mapping with selected models"}
+            title={mappingTooltip || 'Mapping with selected models'}
             className={`px-3 h-[34px] bg-chip-soft border border-border-subtle rounded-2xl text-text-secondary font-semibold cursor-pointer flex items-center gap-2 min-w-[100px] justify-center hover:bg-surface-highlight ${isLoading || mappingActive ? 'opacity-50' : 'opacity-100'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
           >
             <span className="text-base">🧩</span>
             <span>Mapping</span>
           </button>
         )}
-
       </div>
-
     </div>
   );
 };

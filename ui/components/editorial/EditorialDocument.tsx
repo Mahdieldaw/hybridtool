@@ -26,10 +26,13 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
   const threadRefs = useRef<Map<string, HTMLElement>>(new Map());
   const [focusedThreadIndex, setFocusedThreadIndex] = useState(-1);
 
-  const sortedThreads = useMemo(() =>
-    [...ast.threads].sort((a, b) =>
-      ast.thread_order.indexOf(a.id) - ast.thread_order.indexOf(b.id)
-    ), [ast.threads, ast.thread_order]);
+  const sortedThreads = useMemo(
+    () =>
+      [...ast.threads].sort(
+        (a, b) => ast.thread_order.indexOf(a.id) - ast.thread_order.indexOf(b.id)
+      ),
+    [ast.threads, ast.thread_order]
+  );
 
   // Serialize the full editorial document to plain text for copying
   const documentText = useMemo(() => {
@@ -85,10 +88,13 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [focusedThreadIndex, sortedThreads]);
 
-  const setThreadRef = useCallback((threadId: string) => (el: HTMLElement | null) => {
-    if (el) threadRefs.current.set(threadId, el);
-    else threadRefs.current.delete(threadId);
-  }, []);
+  const setThreadRef = useCallback(
+    (threadId: string) => (el: HTMLElement | null) => {
+      if (el) threadRefs.current.set(threadId, el);
+      else threadRefs.current.delete(threadId);
+    },
+    []
+  );
 
   const handleJumpToThread = useCallback((threadId: string) => {
     const el = threadRefs.current.get(threadId);
@@ -107,26 +113,32 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
           className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors px-2 py-1 rounded-md hover:bg-surface-highlight/30"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 6h16M4 12h16M4 18h16"
+            />
           </svg>
           <span>Columns</span>
         </button>
         <div className="flex items-center gap-2">
-          <CopyButton
-            text={documentText}
-            label="Copy editorial document"
-            variant="icon"
-          />
+          <CopyButton text={documentText} label="Copy editorial document" variant="icon" />
           <button
             type="button"
             onClick={onClose}
             className="text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full p-2 transition-colors"
             aria-label="Close editorial surface"
           >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
         </div>
       </div>
 

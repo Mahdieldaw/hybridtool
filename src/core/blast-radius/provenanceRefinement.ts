@@ -65,9 +65,7 @@ interface PassageMember {
   coverageFraction: number;
 }
 
-function buildPassageMembership(
-  densityResult: ClaimDensityResult,
-): Map<string, PassageMember[]> {
+function buildPassageMembership(densityResult: ClaimDensityResult): Map<string, PassageMember[]> {
   // Key: `${modelIndex}:${paragraphIndex}` → list of passages that contain it
   const membership = new Map<string, PassageMember[]>();
 
@@ -106,9 +104,7 @@ interface ParaCoverageItem {
   coverage: number;
 }
 
-function buildParaCoverage(
-  densityResult: ClaimDensityResult,
-): Map<string, ParaCoverageItem[]> {
+function buildParaCoverage(densityResult: ClaimDensityResult): Map<string, ParaCoverageItem[]> {
   const map = new Map<string, ParaCoverageItem[]>();
   for (const [claimId, profile] of Object.entries(densityResult.profiles)) {
     for (const pc of profile.paragraphCoverage) {
@@ -136,7 +132,7 @@ function computeAllegiance(
   statementOwnership: Map<string, Set<string>>,
   statementEmbeddings: Map<string, Float32Array>,
   claimEmbeddings: Map<string, Float32Array>,
-  passageMembership: Map<string, PassageMember[]>,
+  passageMembership: Map<string, PassageMember[]>
 ): { allegiance: AllegianceSignal; primaryClaim: string | null } {
   const para = paraById.get(paragraphId);
 
@@ -161,7 +157,7 @@ function computeAllegiance(
     }
   }
 
-  const rivalClaimIds = assignedClaims.filter(id => id !== dominantClaimId);
+  const rivalClaimIds = assignedClaims.filter((id) => id !== dominantClaimId);
 
   // ── Tier 1: Locally-calibrated allegiance ───────────────────────────
   if (para && stmtEmb) {
@@ -176,9 +172,8 @@ function computeAllegiance(
       }
     }
 
-    const calibrationWeight = para.statementIds.length > 0
-      ? calibrationPool.length / para.statementIds.length
-      : 0;
+    const calibrationWeight =
+      para.statementIds.length > 0 ? calibrationPool.length / para.statementIds.length : 0;
 
     if (calibrationPool.length >= 2) {
       const dominantCentroid = claimEmbeddings.get(dominantClaimId);
@@ -190,8 +185,8 @@ function computeAllegiance(
           if (!rivalCentroid) continue;
 
           // Calibration baseline: how do dominant-exclusive statements split between centroids?
-          const calDominantSims = calibrationPool.map(e => cosineSimilarity(e, dominantCentroid));
-          const calRivalSims = calibrationPool.map(e => cosineSimilarity(e, rivalCentroid));
+          const calDominantSims = calibrationPool.map((e) => cosineSimilarity(e, dominantCentroid));
+          const calRivalSims = calibrationPool.map((e) => cosineSimilarity(e, rivalCentroid));
 
           const meanCalDom = mean(calDominantSims);
           const meanCalRiv = mean(calRivalSims);
@@ -347,7 +342,7 @@ function computeAllegiance(
 
 function computePassageDominance(
   para: ShadowParagraph | undefined,
-  passageMembership: Map<string, PassageMember[]>,
+  passageMembership: Map<string, PassageMember[]>
 ): PassageDominanceSignal {
   if (!para) {
     return { inPassage: false, passageOwner: null, coverageFraction: 0, passageLength: 0 };
@@ -387,7 +382,7 @@ function computeSignalStrength(text: string): SignalStrengthSignal {
 // ── Main ────────────────────────────────────────────────────────────────
 
 export function computeProvenanceRefinement(
-  input: ProvenanceRefinementInput,
+  input: ProvenanceRefinementInput
 ): ProvenanceRefinementResult {
   const start = nowMs();
   const {
@@ -446,7 +441,7 @@ export function computeProvenanceRefinement(
       statementOwnership,
       statementEmbeddings,
       claimEmbeddings,
-      passageMembership,
+      passageMembership
     );
 
     // Signal 2 — Passage dominance (instrument only)
@@ -463,7 +458,7 @@ export function computeProvenanceRefinement(
 
     // Build secondary claims: assigned minus primary, ordered
     const secondaryClaims = primaryClaim
-      ? assignedClaims.filter(id => id !== primaryClaim)
+      ? assignedClaims.filter((id) => id !== primaryClaim)
       : [...assignedClaims];
 
     entries[stmtId] = {
@@ -477,8 +472,8 @@ export function computeProvenanceRefinement(
     };
   }
 
-  const totalJoint = resolvedByCalibration + resolvedByCentroidFallback
-    + resolvedByPassageDominance + unresolved;
+  const totalJoint =
+    resolvedByCalibration + resolvedByCentroidFallback + resolvedByPassageDominance + unresolved;
 
   return {
     entries,

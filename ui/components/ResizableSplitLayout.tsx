@@ -6,100 +6,109 @@ import React, { useRef, useState, useCallback } from 'react';
 import clsx from 'clsx';
 
 interface ResizableSplitLayoutProps {
-    leftPane: React.ReactNode;
-    rightPane: React.ReactNode;
-    isSplitOpen: boolean;
-    ratio?: number; // Optional: Initial or controlled percentage (0-100)
-    onRatioChange?: (ratio: number) => void;
-    minRatio?: number;
-    maxRatio?: number;
-    dividerContent?: React.ReactNode;
-    className?: string;
-    style?: React.CSSProperties;
-    rightPaneFullWidth?: boolean;
+  leftPane: React.ReactNode;
+  rightPane: React.ReactNode;
+  isSplitOpen: boolean;
+  ratio?: number; // Optional: Initial or controlled percentage (0-100)
+  onRatioChange?: (ratio: number) => void;
+  minRatio?: number;
+  maxRatio?: number;
+  dividerContent?: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+  rightPaneFullWidth?: boolean;
 }
 
 export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
-    leftPane,
-    rightPane,
-    isSplitOpen,
-    ratio: controlledRatio,
-    onRatioChange,
-    minRatio = 20,
-    maxRatio = 80,
-    dividerContent,
-    className,
-    style,
-    rightPaneFullWidth = false,
+  leftPane,
+  rightPane,
+  isSplitOpen,
+  ratio: controlledRatio,
+  onRatioChange,
+  minRatio = 20,
+  maxRatio = 80,
+  dividerContent,
+  className,
+  style,
+  rightPaneFullWidth = false,
 }) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 55);
-    const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 55);
+  const [isDragging, setIsDragging] = useState(false);
 
-    // Use controlled ratio if provided, otherwise internal
-    const ratio = controlledRatio ?? internalRatio;
+  // Use controlled ratio if provided, otherwise internal
+  const ratio = controlledRatio ?? internalRatio;
 
-    // Calculate grid columns based on split state
-    const dividerWidth = rightPaneFullWidth ? 0 : 6;
-    const gridTemplateColumns = isSplitOpen
-        ? rightPaneFullWidth
-            ? `0fr 0px 1fr`
-            : `${ratio}fr ${dividerWidth}px ${100 - ratio}fr`
-        : '1fr';
+  // Calculate grid columns based on split state
+  const dividerWidth = rightPaneFullWidth ? 0 : 6;
+  const gridTemplateColumns = isSplitOpen
+    ? rightPaneFullWidth
+      ? `0fr 0px 1fr`
+      : `${ratio}fr ${dividerWidth}px ${100 - ratio}fr`
+    : '1fr';
 
-    const handlePointerDown = useCallback((e: React.PointerEvent) => {
-        if (!isSplitOpen || rightPaneFullWidth) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDragging(true);
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isSplitOpen || rightPaneFullWidth) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
 
-        // Capture pointer to handle moves outside the divider
-        (e.target as Element).setPointerCapture(e.pointerId);
-    }, [isSplitOpen, rightPaneFullWidth]);
+      // Capture pointer to handle moves outside the divider
+      (e.target as Element).setPointerCapture(e.pointerId);
+    },
+    [isSplitOpen, rightPaneFullWidth]
+  );
 
-    const handlePointerMove = useCallback((e: React.PointerEvent) => {
-        if (!isDragging || !containerRef.current) return;
-        e.preventDefault();
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isDragging || !containerRef.current) return;
+      e.preventDefault();
 
-        const rect = containerRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const totalWidth = rect.width;
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const totalWidth = rect.width;
 
-        let newRatio = (x / totalWidth) * 100;
+      let newRatio = (x / totalWidth) * 100;
 
-        // Clamp ratio
-        newRatio = Math.max(minRatio, Math.min(maxRatio, newRatio));
+      // Clamp ratio
+      newRatio = Math.max(minRatio, Math.min(maxRatio, newRatio));
 
-        if (onRatioChange) {
-            onRatioChange(newRatio);
-        } else {
-            setInternalRatio(newRatio);
-        }
-    }, [isDragging, minRatio, maxRatio, onRatioChange]);
+      if (onRatioChange) {
+        onRatioChange(newRatio);
+      } else {
+        setInternalRatio(newRatio);
+      }
+    },
+    [isDragging, minRatio, maxRatio, onRatioChange]
+  );
 
-    const handlePointerUp = useCallback((e: React.PointerEvent) => {
-        if (!isDragging) return;
-        e.preventDefault();
-        setIsDragging(false);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        (e.target as Element).releasePointerCapture(e.pointerId);
-    }, [isDragging]);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!isDragging) return;
+      e.preventDefault();
+      setIsDragging(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      (e.target as Element).releasePointerCapture(e.pointerId);
+    },
+    [isDragging]
+  );
 
-    return (
-        <div
-            ref={containerRef}
-            className={clsx("h-full w-full overflow-hidden", className)}
-            style={{
-                ...style,
-                display: 'grid',
-                gridTemplateColumns,
-                transition: isDragging ? 'none' : 'grid-template-columns 75ms ease-out',
-            }}
-        >
-            {/* ============================================
+  return (
+    <div
+      ref={containerRef}
+      className={clsx('h-full w-full overflow-hidden', className)}
+      style={{
+        ...style,
+        display: 'grid',
+        gridTemplateColumns,
+        transition: isDragging ? 'none' : 'grid-template-columns 75ms ease-out',
+      }}
+    >
+      {/* ============================================
                 LEFT PANE - GRID CELL 1
                 ============================================
                 Grid cell properties:
@@ -107,42 +116,40 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
                 - overflow: hidden (clip overflowing content)
                 - Grid automatically constrains to track size
                 ============================================ */}
-            <div
-                className="h-full min-w-0 overflow-hidden"
-                style={{
-                    gridColumn: '1',
-                }}
-            >
-                {leftPane}
-            </div>
+      <div
+        className="h-full min-w-0 overflow-hidden"
+        style={{
+          gridColumn: '1',
+        }}
+      >
+        {leftPane}
+      </div>
 
-            {/* ============================================
+      {/* ============================================
                 DIVIDER + RIGHT PANE (only if split open)
                 ============================================ */}
-            {isSplitOpen && (
-                <>
-                    {/* DIVIDER - GRID CELL 2 (6px track) */}
-                    <div
-                        className="h-full bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative select-none touch-none"
-                        style={{
-                            gridColumn: '2',
-                            opacity: rightPaneFullWidth ? 0 : 1,
-                        }}
-                        onPointerDown={handlePointerDown}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                    >
-                        {/* Divider Content (Orbs) */}
-                        <div
-                            className="absolute top-0 bottom-0 left-0 w-0 flex flex-col items-center justify-center overflow-visible pointer-events-none"
-                        >
-                            <div className="pointer-events-auto transform -translate-x-[calc(100%+6px)]">
-                                {dividerContent}
-                            </div>
-                        </div>
-                    </div>
+      {isSplitOpen && (
+        <>
+          {/* DIVIDER - GRID CELL 2 (6px track) */}
+          <div
+            className="h-full bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative select-none touch-none"
+            style={{
+              gridColumn: '2',
+              opacity: rightPaneFullWidth ? 0 : 1,
+            }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          >
+            {/* Divider Content (Orbs) */}
+            <div className="absolute top-0 bottom-0 left-0 w-0 flex flex-col items-center justify-center overflow-visible pointer-events-none">
+              <div className="pointer-events-auto transform -translate-x-[calc(100%+6px)]">
+                {dividerContent}
+              </div>
+            </div>
+          </div>
 
-                    {/* ============================================
+          {/* ============================================
                         RIGHT PANE - GRID CELL 3
                         ============================================
                         CRITICAL GRID PROPERTIES:
@@ -155,18 +162,18 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
                         Flexbox: Content can expand parent
                         Grid: Parent size is fixed, content must fit
                         ============================================ */}
-                    <div
-                        className="h-full min-w-0 overflow-hidden"
-                        style={{
-                            gridColumn: '3',
-                        }}
-                    >
-                        {rightPane}
-                    </div>
-                </>
-            )}
-        </div>
-    );
+          <div
+            className="h-full min-w-0 overflow-hidden"
+            style={{
+              gridColumn: '3',
+            }}
+          >
+            {rightPane}
+          </div>
+        </>
+      )}
+    </div>
+  );
 };
 
 // ============================================

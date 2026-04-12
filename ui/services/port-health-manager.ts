@@ -28,18 +28,15 @@ export class PortHealthManager {
   private readyTimeout: number | null = null;
 
   constructor(
-    private portName: string = "htos-popup",
+    private portName: string = 'htos-popup',
     private options: {
       onHealthy?: () => void;
       onUnhealthy?: () => void;
       onReconnect?: () => void;
-    } = {},
-  ) { }
+    } = {}
+  ) {}
 
-  connect(
-    messageHandler: (msg: any) => void,
-    onDisconnect?: () => void,
-  ): chrome.runtime.Port {
+  connect(messageHandler: (msg: any) => void, onDisconnect?: () => void): chrome.runtime.Port {
     this.messageHandler = messageHandler;
     this.onDisconnectCallback = onDisconnect;
 
@@ -54,14 +51,13 @@ export class PortHealthManager {
     this.isConnected = false;
     // Note: reconnectAttempts is not reset here to allow backoff to continue across attempts
 
-
     this.port.onMessage.addListener(this.handleMessage.bind(this));
     this.port.onDisconnect.addListener(this.handleDisconnect.bind(this));
 
     this.lastPongTimestamp = Date.now();
     this.startHealthCheck();
 
-    console.log("[PortHealthManager] Connected to service worker");
+    console.log('[PortHealthManager] Connected to service worker');
     return this.port;
   }
 
@@ -74,7 +70,7 @@ export class PortHealthManager {
       });
 
       this.readyTimeout = window.setTimeout(() => {
-        this.cleanupReadyPromise("Connection timeout after 10s");
+        this.cleanupReadyPromise('Connection timeout after 10s');
       }, 10000);
     }
     return this.readyPromise;
@@ -97,9 +93,9 @@ export class PortHealthManager {
     if (!this.port) return;
 
     try {
-      this.port.postMessage({ type: "KEEPALIVE_PING", timestamp: Date.now() });
+      this.port.postMessage({ type: 'KEEPALIVE_PING', timestamp: Date.now() });
     } catch (error) {
-      console.warn("[PortHealthManager] Failed to send keepalive ping:", error);
+      console.warn('[PortHealthManager] Failed to send keepalive ping:', error);
       this.handleUnhealthyPort();
     }
   }
@@ -121,7 +117,7 @@ export class PortHealthManager {
 
   private async sendMessageWithTimeout<T = any>(
     message: any,
-    timeoutMs: number,
+    timeoutMs: number
   ): Promise<T | null> {
     try {
       const p = new Promise<T>((resolve, reject) => {
@@ -141,9 +137,7 @@ export class PortHealthManager {
 
       return (await Promise.race([
         p,
-        new Promise<null>((resolve) =>
-          window.setTimeout(() => resolve(null), timeoutMs),
-        ),
+        new Promise<null>((resolve) => window.setTimeout(() => resolve(null), timeoutMs)),
       ])) as T | null;
     } catch {
       return null;
@@ -160,8 +154,8 @@ export class PortHealthManager {
     this.swProbePromise = (async () => {
       try {
         const resp = await this.sendMessageWithTimeout(
-          { type: "GET_HEALTH_STATUS", timestamp: Date.now() },
-          this.SW_PROBE_TIMEOUT_MS,
+          { type: 'GET_HEALTH_STATUS', timestamp: Date.now() },
+          this.SW_PROBE_TIMEOUT_MS
         );
         return !!resp;
       } finally {
@@ -189,13 +183,9 @@ export class PortHealthManager {
       if (this.lastPongTimestamp !== before) return;
 
       if (didWake) {
-        console.warn(
-          "[PortHealthManager] SW responsive but port stalled, reconnecting",
-        );
+        console.warn('[PortHealthManager] SW responsive but port stalled, reconnecting');
       } else {
-        console.warn(
-          "[PortHealthManager] No pong received, port may be unhealthy",
-        );
+        console.warn('[PortHealthManager] No pong received, port may be unhealthy');
       }
       this.handleUnhealthyPort();
     } finally {
@@ -207,18 +197,18 @@ export class PortHealthManager {
     // Any inbound traffic indicates the port is alive; update timestamp first
     this.lastPongTimestamp = Date.now();
 
-    if (message.type === "KEEPALIVE_PONG") {
+    if (message.type === 'KEEPALIVE_PONG') {
       if (!this.isConnected) {
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        console.log("[PortHealthManager] Port healthy again");
+        console.log('[PortHealthManager] Port healthy again');
         this.options.onHealthy?.();
       }
       return;
     }
 
-    if (message.type === "HANDLER_READY") {
-      console.log("[PortHealthManager] Service worker handler ready");
+    if (message.type === 'HANDLER_READY') {
+      console.log('[PortHealthManager] Service worker handler ready');
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.options.onHealthy?.();
@@ -235,9 +225,9 @@ export class PortHealthManager {
   }
 
   private handleDisconnect() {
-    console.log("[PortHealthManager] Port disconnected (idle or closed)");
+    console.log('[PortHealthManager] Port disconnected (idle or closed)');
     this.isConnected = false;
-    this.cleanupReadyPromise("Port disconnected");
+    this.cleanupReadyPromise('Port disconnected');
 
     this.options.onUnhealthy?.();
     this.onDisconnectCallback?.();
@@ -249,9 +239,9 @@ export class PortHealthManager {
   private handleUnhealthyPort() {
     if (!this.isConnected) return;
 
-    console.log("[PortHealthManager] Port unhealthy, attempting reconnect");
+    console.log('[PortHealthManager] Port unhealthy, attempting reconnect');
     this.isConnected = false;
-    this.cleanupReadyPromise("Port became unhealthy");
+    this.cleanupReadyPromise('Port became unhealthy');
     this.options.onUnhealthy?.();
 
     this.disconnect({ suppressReconnect: true });
@@ -260,9 +250,11 @@ export class PortHealthManager {
 
   private attemptReconnect() {
     if (this.isReconnecting) return;
-    
+
     if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
-      console.error(`[PortHealthManager] Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Stopping.`);
+      console.error(
+        `[PortHealthManager] Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Stopping.`
+      );
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
         this.reconnectTimeout = null;
@@ -279,7 +271,7 @@ export class PortHealthManager {
     const delay = Math.min(rawDelay, this.RECONNECT_MAX_DELAY_MS);
 
     console.log(
-      `[PortHealthManager] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})`,
+      `[PortHealthManager] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})`
     );
 
     if (this.reconnectTimeout) {
@@ -310,7 +302,7 @@ export class PortHealthManager {
     if (this.port) {
       try {
         this.port.disconnect();
-      } catch (e) { }
+      } catch (e) {}
       this.port = null;
     }
   }

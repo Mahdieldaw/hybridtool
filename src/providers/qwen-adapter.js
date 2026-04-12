@@ -10,7 +10,7 @@ import {
   isDefinitiveAuthError,
   isNetworkError,
   createProviderAuthError,
-  normalizeError
+  normalizeError,
 } from '../utils/ErrorHandler';
 
 const QWEN_ADAPTER_DEBUG = false;
@@ -20,7 +20,7 @@ const pad = (...args) => {
 
 export class QwenAdapter {
   constructor(controller) {
-    this.id = "qwen";
+    this.id = 'qwen';
     this.capabilities = {
       needsDNR: true, // To set origin/referer headers
       needsOffscreen: false,
@@ -36,7 +36,7 @@ export class QwenAdapter {
 
   async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
-    let aggregatedText = "";
+    let aggregatedText = '';
     let responseContext = {};
 
     const meta = req?.meta || {};
@@ -66,7 +66,7 @@ export class QwenAdapter {
             latencyMs: Date.now() - startTime,
             meta: { ...responseContext },
           });
-        },
+        }
       );
 
       return {
@@ -83,7 +83,9 @@ export class QwenAdapter {
           console.log(`[QwenAdapter] Ambiguous auth error (${error?.status}), retrying once...`);
           return await this.sendPrompt(req, onChunk, signal, true);
         }
-        console.log(`[QwenAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        console.log(
+          `[QwenAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+        );
         await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
@@ -121,7 +123,7 @@ export class QwenAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -144,10 +146,10 @@ export class QwenAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: "no_recovery",
+          errorCode: 'no_recovery',
           latencyMs: Date.now() - startTime,
           meta: {
-            error: "no recovery",
+            error: 'no recovery',
             details: error?.details || error?.message,
             ...meta,
           },
@@ -162,7 +164,7 @@ export class QwenAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: normalizedHandledError.code || "unknown",
+          errorCode: normalizedHandledError.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalizedHandledError.message,
@@ -178,7 +180,7 @@ export class QwenAdapter {
   async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     const meta = providerContext?.meta || providerContext || {};
-    let aggregatedText = "";
+    let aggregatedText = '';
     let responseContext = {};
 
     if (!meta.sessionId) {
@@ -187,8 +189,8 @@ export class QwenAdapter {
         providerId: this.id,
         ok: false,
         text: null,
-        errorCode: "continuation_failed",
-        meta: { error: "Missing sessionId for continuation." },
+        errorCode: 'continuation_failed',
+        meta: { error: 'Missing sessionId for continuation.' },
       };
     }
 
@@ -216,7 +218,7 @@ export class QwenAdapter {
             latencyMs: Date.now() - startTime,
             meta: { ...responseContext },
           });
-        },
+        }
       );
 
       return {
@@ -230,10 +232,21 @@ export class QwenAdapter {
     } catch (error) {
       if (isProviderAuthError(error) || this._isQwenAuthError(error)) {
         if (!isDefinitiveAuthError(error) && !this._isQwenAuthError(error) && !_isRetry) {
-          console.log(`[QwenAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
-          return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+          console.log(
+            `[QwenAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`
+          );
+          return await this.sendContinuation(
+            prompt,
+            providerContext,
+            sessionId,
+            onChunk,
+            signal,
+            true
+          );
         }
-        console.log(`[QwenAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        console.log(
+          `[QwenAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+        );
         await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
@@ -271,7 +284,7 @@ export class QwenAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -292,7 +305,7 @@ export class QwenAdapter {
               sessionId,
               onChunk,
               signal,
-              true,
+              true
             );
           },
         });
@@ -302,10 +315,10 @@ export class QwenAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: "no_recovery",
+          errorCode: 'no_recovery',
           latencyMs: Date.now() - startTime,
           meta: {
-            error: "no recovery",
+            error: 'no recovery',
             details: error?.details || error?.message,
             suppressed: error?.suppressed,
             ...meta,
@@ -321,7 +334,7 @@ export class QwenAdapter {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: normalizedHandledError.code || "unknown",
+          errorCode: normalizedHandledError.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalizedHandledError.message,
@@ -334,7 +347,13 @@ export class QwenAdapter {
     }
   }
 
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined
+  ) {
     try {
       const ctx = Object(providerContext);
       const meta = ctx.meta || providerContext || {};
@@ -349,9 +368,11 @@ export class QwenAdapter {
       }
 
       try {
-        const len = (res?.text || "").length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
-      } catch (_) { }
+        const len = (res?.text || '').length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`
+        );
+      } catch (_) {}
       return res;
     } catch (e) {
       console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));

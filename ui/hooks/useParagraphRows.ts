@@ -1,5 +1,8 @@
-import { useMemo } from "react";
-import { getProviderAbbreviation, resolveProviderIdFromCitationOrder } from "../utils/provider-helpers";
+import { useMemo } from 'react';
+import {
+  getProviderAbbreviation,
+  resolveProviderIdFromCitationOrder,
+} from '../utils/provider-helpers';
 
 // ============================================================================
 // TYPES
@@ -34,8 +37,8 @@ export interface ParagraphRow {
   compThreshold: number | null;
 
   // Claim density (paragraph-level evidence concentration)
-  paraCoverage: number | null;    // fraction of this paragraph's statements owned by selected claim
-  passageLength: number | null;   // length of containing passage (1 = isolated)
+  paraCoverage: number | null; // fraction of this paragraph's statements owned by selected claim
+  passageLength: number | null; // length of containing passage (1 = isolated)
 }
 
 // ============================================================================
@@ -53,10 +56,12 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
   const nodeMap = useMemo(() => {
     if (!artifact) return null;
     const a = artifact;
-    const nodes: any[] = Array.isArray(a?.geometry?.substrate?.nodes) ? a.geometry.substrate.nodes : [];
+    const nodes: any[] = Array.isArray(a?.geometry?.substrate?.nodes)
+      ? a.geometry.substrate.nodes
+      : [];
     const map = new Map<string, any>();
     for (const node of nodes) {
-      const id = String(node?.paragraphId ?? node?.id ?? "").trim();
+      const id = String(node?.paragraphId ?? node?.id ?? '').trim();
       if (id) map.set(id, node);
     }
     return map;
@@ -78,7 +83,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
       : [];
     const map = new Map<string, any>();
     for (const entry of merged) {
-      const id = String(entry?.paragraphId ?? "").trim();
+      const id = String(entry?.paragraphId ?? '').trim();
       if (id) map.set(id, entry);
     }
     return map;
@@ -92,16 +97,18 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
     if (!cdProfile) return null;
 
     const coverageByPara = new Map<string, number>();
-    for (const pc of (cdProfile.paragraphCoverage ?? [])) {
+    for (const pc of cdProfile.paragraphCoverage ?? []) {
       coverageByPara.set(String(pc.paragraphId), pc.coverage);
     }
 
     const passageLenByPara = new Map<string, number>();
-    for (const passage of (cdProfile.passages ?? [])) {
-      for (const pc of (cdProfile.paragraphCoverage ?? [])) {
-        if (pc.modelIndex === passage.modelIndex &&
-            pc.paragraphIndex >= passage.startParagraphIndex &&
-            pc.paragraphIndex <= passage.endParagraphIndex) {
+    for (const passage of cdProfile.passages ?? []) {
+      for (const pc of cdProfile.paragraphCoverage ?? []) {
+        if (
+          pc.modelIndex === passage.modelIndex &&
+          pc.paragraphIndex >= passage.startParagraphIndex &&
+          pc.paragraphIndex <= passage.endParagraphIndex
+        ) {
           passageLenByPara.set(String(pc.paragraphId), passage.length);
         }
       }
@@ -122,14 +129,14 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
       const stmtById = new Map<string, any>();
       const stmts: any[] = Array.isArray(a?.shadow?.statements) ? a.shadow.statements : [];
       for (const s of stmts) {
-        const id = String(s?.id ?? s?.statementId ?? s?.sid ?? "").trim();
+        const id = String(s?.id ?? s?.statementId ?? s?.sid ?? '').trim();
         if (id) stmtById.set(id, s);
       }
 
       paragraphs = Array.from(nodeMap.entries()).map(([paraId, node]) => {
         const stmtIds: string[] = Array.isArray(node.statementIds) ? node.statementIds : [];
         const stmtTexts = stmtIds
-          .map(sid => stmtById.get(sid))
+          .map((sid) => stmtById.get(sid))
           .filter(Boolean)
           .map((s: any) => String(s.text ?? s.statement ?? s.content ?? ''));
         return {
@@ -145,7 +152,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
     }
 
     return paragraphs.map((para): ParagraphRow => {
-      const paraId = String(para.id ?? "").trim();
+      const paraId = String(para.id ?? '').trim();
       const node = nodeMap?.get(paraId) ?? null;
       const mixed = mixedParaMap?.get(paraId) ?? null;
 
@@ -156,7 +163,10 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         typeof v === 'number' && Number.isFinite(v) ? v : null;
 
       const modelIndex = typeof para.modelIndex === 'number' ? para.modelIndex : 0;
-      const providerId = resolveProviderIdFromCitationOrder(modelIndex, citationSourceOrder ?? undefined);
+      const providerId = resolveProviderIdFromCitationOrder(
+        modelIndex,
+        citationSourceOrder ?? undefined
+      );
       const providerAbbrev = providerId ? getProviderAbbreviation(providerId) : null;
 
       return {
@@ -176,9 +186,10 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
 
         origin: mixed?.origin ?? null,
         claimCentricSim: fin(mixed?.claimCentricSim),
-        claimCentricAboveThreshold: typeof mixed?.claimCentricAboveThreshold === 'boolean'
-          ? mixed.claimCentricAboveThreshold
-          : null,
+        claimCentricAboveThreshold:
+          typeof mixed?.claimCentricAboveThreshold === 'boolean'
+            ? mixed.claimCentricAboveThreshold
+            : null,
 
         compWeight: fin(mixed?.compWeight),
         compExcess: fin(mixed?.compExcess),

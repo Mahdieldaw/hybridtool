@@ -3,8 +3,14 @@ import { PassageBlock } from './PassageBlock';
 import type { ResolvedItem } from './usePassageResolver';
 
 interface ConflictPairProps {
-  anchor: { resolved: ResolvedItem; role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative' };
-  alternative: { resolved: ResolvedItem; role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative' };
+  anchor: {
+    resolved: ResolvedItem;
+    role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
+  };
+  alternative: {
+    resolved: ResolvedItem;
+    role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
+  };
 }
 
 export const ConflictPair: React.FC<ConflictPairProps> = ({ anchor, alternative }) => {

@@ -30,14 +30,15 @@ export const ThreadSection = forwardRef<HTMLElement, ThreadSectionProps>(
     }
 
     // Group by role
-    const anchors = resolvedItems.filter(i => i.role === 'anchor');
-    const supports = resolvedItems.filter(i => i.role === 'support');
-    const reframes = resolvedItems.filter(i => i.role === 'reframe');
-    const alternatives = resolvedItems.filter(i => i.role === 'alternative');
-    const contexts = resolvedItems.filter(i => i.role === 'context');
+    const anchors = resolvedItems.filter((i) => i.role === 'anchor');
+    const supports = resolvedItems.filter((i) => i.role === 'support');
+    const reframes = resolvedItems.filter((i) => i.role === 'reframe');
+    const alternatives = resolvedItems.filter((i) => i.role === 'alternative');
+    const contexts = resolvedItems.filter((i) => i.role === 'context');
 
     // Check for conflict pairs (anchor + alternative from same conflict cluster)
-    const conflictPairs: Array<{ anchor: ResolvedThreadItem; alternative: ResolvedThreadItem }> = [];
+    const conflictPairs: Array<{ anchor: ResolvedThreadItem; alternative: ResolvedThreadItem }> =
+      [];
     const usedAlternatives = new Set<string>();
 
     for (const anchor of anchors) {
@@ -56,7 +57,7 @@ export const ThreadSection = forwardRef<HTMLElement, ThreadSectionProps>(
       }
     }
 
-    const standaloneAlternatives = alternatives.filter(a => !usedAlternatives.has(a.itemId));
+    const standaloneAlternatives = alternatives.filter((a) => !usedAlternatives.has(a.itemId));
 
     return (
       <section ref={ref} className="mb-16" id={`thread-${thread.id}`}>
@@ -93,11 +94,7 @@ export const ThreadSection = forwardRef<HTMLElement, ThreadSectionProps>(
         {conflictPairs.length > 0 && (
           <div className="flex flex-col gap-4 px-6 mt-4">
             {conflictPairs.map((pair, i) => (
-              <ConflictPair
-                key={i}
-                anchor={pair.anchor}
-                alternative={pair.alternative}
-              />
+              <ConflictPair key={i} anchor={pair.anchor} alternative={pair.alternative} />
             ))}
           </div>
         )}
@@ -122,7 +119,7 @@ export const ThreadSection = forwardRef<HTMLElement, ThreadSectionProps>(
         )}
       </section>
     );
-  },
+  }
 );
 
 ThreadSection.displayName = 'ThreadSection';

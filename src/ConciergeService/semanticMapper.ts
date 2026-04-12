@@ -11,7 +11,7 @@
 import type { UnifiedMapperOutput } from '../../shared/contract';
 import {
   parseSemanticMapperOutput as baseParseOutput,
-  extractJsonFromContent
+  extractJsonFromContent,
 } from '../../shared/parsing-utils';
 
 type RawModelResponse = {
@@ -77,11 +77,11 @@ Do not synthesize a verdict. Do not pick sides. End with exactly "This naturally
 
 **The Map.** After the narrative, output a <map> in valid JSON with two arrays: claims and edges.
 
-A claim is a distinct idea, approach, or insight the models brought to the terrain — not one they reflected from the input. Each should be something visible only from reading the responses together: a convergence, a tension, or a singular contribution. Forge each into a canonical label of six words maximum.
+A claim is a distinct idea, approach, or insight the models brought to the terrain — not one they reflected from the input. Each should be something visible only from reading the responses together: a convergence, a tension, or a singular contribution. Forge each into a canonical label of two words maximum.
 
 Each claim:
 - id: sequential from claim_1
-- label: a verb-phrase — something another model could support, oppose, or pull against
+- label: a concise two-word noun phrase that names the core idea. Internally, identify the action or transformation first, then express it as a concept (not a verb phrase).
 - text: the reasoning or mechanism behind the claim (one paragraph maximum)
 - supporters: array of model indices that clearly advanced this position. Passing mention does not count.
 
@@ -137,7 +137,7 @@ export function parseSemanticMapperOutput(
   }
 
   const parsedMap = extractJsonFromContent(
-    (mapContent && mapContent.trim().length > 0) ? mapContent : normalizedText,
+    mapContent && mapContent.trim().length > 0 ? mapContent : normalizedText
   ) as any | null;
 
   const result = baseParseOutput(rawResponse);
@@ -147,9 +147,7 @@ export function parseSemanticMapperOutput(
 
     const obj = parsed as Record<string, unknown>;
 
-    const hasClaimStructure =
-      Array.isArray(obj.claims) &&
-      Array.isArray(obj.edges);
+    const hasClaimStructure = Array.isArray(obj.claims) && Array.isArray(obj.edges);
 
     return hasClaimStructure;
   }
@@ -159,9 +157,9 @@ export function parseSemanticMapperOutput(
   const warnings = result.warnings ? [...result.warnings] : [];
   let narrative = hasAnyTags
     ? normalizedText
-      .replace(mapTagPattern, '')
-      .replace(narrativeTagPattern, (_m, content) => String(content || '').trim())
-      .trim()
+        .replace(mapTagPattern, '')
+        .replace(narrativeTagPattern, (_m, content) => String(content || '').trim())
+        .trim()
     : '';
 
   if (!output) {
@@ -190,6 +188,6 @@ export function parseSemanticMapperOutput(
     output,
     narrative,
     errors,
-    warnings
+    warnings,
   };
 }

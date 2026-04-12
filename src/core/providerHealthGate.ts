@@ -47,7 +47,7 @@ export async function runWithProviderHealth<T>(
   providerId: string,
   stage: string,
   fn: () => Promise<T>,
-  options?: RunWithHealthOptions,
+  options?: RunWithHealthOptions
 ): Promise<T> {
   const startedAt = Date.now();
   const check = tracker?.shouldAttempt?.(providerId);

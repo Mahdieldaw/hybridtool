@@ -23,7 +23,7 @@ export class ContextManager {
     workflowContexts,
     previousResults,
     resolvedContext,
-    stepType = "step",
+    stepType = 'step'
   ) {
     const providerContexts = {};
 
@@ -36,17 +36,16 @@ export class ContextManager {
       try {
         wdbg(
           `[ContextManager] ${stepType} using workflow-cached context for ${providerId}: ${Object.keys(
-            workflowContexts[providerId],
-          ).join(",")}`,
+            workflowContexts[providerId]
+          ).join(',')}`
         );
-      } catch (_) { }
+      } catch (_) {}
       return providerContexts;
     }
 
     // Tier 2: ResolvedContext (for recompute - historical contexts)
-    if (resolvedContext && resolvedContext.type === "recompute") {
-      const historicalContext =
-        resolvedContext.providerContextsAtSourceTurn?.[providerId];
+    if (resolvedContext && resolvedContext.type === 'recompute') {
+      const historicalContext = resolvedContext.providerContextsAtSourceTurn?.[providerId];
       if (historicalContext) {
         providerContexts[providerId] = {
           meta: historicalContext,
@@ -54,9 +53,9 @@ export class ContextManager {
         };
         try {
           wdbg(
-            `[ContextManager] ${stepType} using historical context from ResolvedContext for ${providerId}`,
+            `[ContextManager] ${stepType} using historical context from ResolvedContext for ${providerId}`
           );
-        } catch (_) { }
+        } catch (_) {}
         return providerContexts;
       }
     }
@@ -64,7 +63,7 @@ export class ContextManager {
     // Tier 2: Fallback to batch step context for backwards compatibility
     if (payload.continueFromBatchStep && previousResults) {
       const batchResult = previousResults.get(payload.continueFromBatchStep);
-      if (batchResult?.status === "completed" && batchResult.result?.results) {
+      if (batchResult?.status === 'completed' && batchResult.result?.results) {
         const providerResult = batchResult.result.results[providerId];
         if (providerResult?.meta) {
           providerContexts[providerId] = {
@@ -73,9 +72,9 @@ export class ContextManager {
           };
           try {
             wdbg(
-              `[ContextManager] ${stepType} continuing conversation for ${providerId} via batch step`,
+              `[ContextManager] ${stepType} continuing conversation for ${providerId} via batch step`
             );
-          } catch (_) { }
+          } catch (_) {}
           return providerContexts;
         }
       }
@@ -85,7 +84,7 @@ export class ContextManager {
     try {
       const persisted = await this.sessionManager.getProviderContexts(
         context.sessionId,
-        context.threadId || DEFAULT_THREAD,
+        context.threadId || DEFAULT_THREAD
       );
       const persistedMeta = persisted?.[providerId]?.meta;
       if (persistedMeta && Object.keys(persistedMeta).length > 0) {
@@ -96,13 +95,13 @@ export class ContextManager {
         try {
           wdbg(
             `[ContextManager] ${stepType} using persisted context for ${providerId}: ${Object.keys(
-              persistedMeta,
-            ).join(",")}`,
+              persistedMeta
+            ).join(',')}`
           );
-        } catch (_) { }
+        } catch (_) {}
         return providerContexts;
       }
-    } catch (_) { }
+    } catch (_) {}
 
     return providerContexts;
   }

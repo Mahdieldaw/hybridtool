@@ -1,6 +1,6 @@
 // src/core/connection-handler.js
 
-import { WorkflowEngine } from "./workflow-engine.js";
+import { WorkflowEngine } from './workflow-engine.js';
 import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
 import { authManager } from './auth-manager.js';
 import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging.js';
@@ -25,7 +25,7 @@ export class ConnectionHandler {
     this.port = port;
     this.services = null;
     this._servicesProvider = null;
-    if (typeof servicesOrProvider === "function") {
+    if (typeof servicesOrProvider === 'function') {
       this._servicesProvider = servicesOrProvider;
     } else {
       this.services = servicesOrProvider;
@@ -60,20 +60,20 @@ export class ConnectionHandler {
     this.port.onDisconnect.addListener(() => this._cleanup());
 
     this.isInitialized = true;
-    console.log("[ConnectionHandler] Initialized for port:", this.port.name);
+    console.log('[ConnectionHandler] Initialized for port:', this.port.name);
 
     // Signal that handler is ready to receive/queue messages
     try {
-      this.port.postMessage({ type: "HANDLER_READY" });
-    } catch (_) { }
+      this.port.postMessage({ type: 'HANDLER_READY' });
+    } catch (_) {}
 
     void this._ensureBackendReady().catch((error) => {
       try {
         this.port?.postMessage({
-          type: "INITIALIZATION_FAILED",
+          type: 'INITIALIZATION_FAILED',
           error: error?.message || String(error),
         });
-      } catch (_) { }
+      } catch (_) {}
     });
   }
 
@@ -83,19 +83,19 @@ export class ConnectionHandler {
 
     this.backendInitPromise = (async () => {
       if (!this.services) {
-        if (!this._servicesProvider) throw new Error("Services provider not configured");
+        if (!this._servicesProvider) throw new Error('Services provider not configured');
         this.services = await this._servicesProvider();
       }
 
-      if (!this.services) throw new Error("Services unavailable");
-      if (!this.port) throw new Error("Port closed during initialization");
+      if (!this.services) throw new Error('Services unavailable');
+      if (!this.port) throw new Error('Port closed during initialization');
 
       this.lifecycleManager = this.services.lifecycleManager || null;
 
       this.workflowEngine = new WorkflowEngine(
         this.services.orchestrator,
         this.services.sessionManager,
-        this.port,
+        this.port
       );
     })().catch((e) => {
       this.backendInitPromise = null;
@@ -110,7 +110,7 @@ export class ConnectionHandler {
    * retries on reconnect don't fan out duplicate provider requests.
    */
   _buildIdempotencyKey(executeRequest) {
-    if (!executeRequest || typeof executeRequest !== "object") return null;
+    if (!executeRequest || typeof executeRequest !== 'object') return null;
     const clientUserTurnId =
       executeRequest.clientUserTurnId ||
       executeRequest.userTurnId ||
@@ -118,20 +118,20 @@ export class ConnectionHandler {
       null;
 
     try {
-      if (executeRequest.type === "initialize") {
+      if (executeRequest.type === 'initialize') {
         if (!clientUserTurnId) return null;
         return `idem:init:${clientUserTurnId}`;
       }
-      if (executeRequest.type === "extend") {
+      if (executeRequest.type === 'extend') {
         if (!clientUserTurnId || !executeRequest.sessionId) return null;
         return `idem:${executeRequest.sessionId}:${clientUserTurnId}`;
       }
-      if (executeRequest.type === "recompute") {
+      if (executeRequest.type === 'recompute') {
         const { sessionId, sourceTurnId, stepType, targetProvider } = executeRequest;
         if (!sessionId || !sourceTurnId || !stepType || !targetProvider) return null;
         return `idem:recompute:${sessionId}:${sourceTurnId}:${stepType}:${targetProvider}`;
       }
-    } catch (_) { }
+    } catch (_) {}
     return null;
   }
 
@@ -144,20 +144,20 @@ export class ConnectionHandler {
       const adapter = this.services?.sessionManager?.adapter;
       if (!adapter) return;
 
-      const aiTurn = await adapter.get("turns", aiTurnId);
-      if (!aiTurn || (aiTurn.type !== "ai" && aiTurn.role !== "assistant")) return;
+      const aiTurn = await adapter.get('turns', aiTurnId);
+      if (!aiTurn || (aiTurn.type !== 'ai' && aiTurn.role !== 'assistant')) return;
 
       const userTurnId = aiTurn.userTurnId;
-      const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
+      const userTurn = userTurnId ? await adapter.get('turns', userTurnId) : null;
 
       const resps = await adapter.getResponsesByTurnId(aiTurnId);
       const batchResponses = {};
       for (const r of resps || []) {
-        if (!r || r.responseType !== "batch") continue;
+        if (!r || r.responseType !== 'batch') continue;
         const entry = {
           providerId: r.providerId,
-          text: r.text || "",
-          status: r.status || "completed",
+          text: r.text || '',
+          status: r.status || 'completed',
           createdAt: r.createdAt || Date.now(),
           updatedAt: r.updatedAt || r.createdAt || Date.now(),
           meta: r.meta || {},
@@ -178,56 +178,55 @@ export class ConnectionHandler {
         !!aiTurn.singularity;
       if (!hasAny) return;
 
-      const batchPhase = Object.keys(batchResponses || {}).length > 0
-        ? {
-          responses: Object.fromEntries(
-            Object.entries(batchResponses).map(([pid, arr]) => {
-              const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
-              return [
-                pid,
-                {
-                  text: last?.text || "",
-                  modelIndex: last?.meta?.modelIndex ?? 0,
-                  status: last?.status || "completed",
-                  meta: last?.meta,
-                },
-              ];
-            }),
-          ),
-        }
-        : undefined;
+      const batchPhase =
+        Object.keys(batchResponses || {}).length > 0
+          ? {
+              responses: Object.fromEntries(
+                Object.entries(batchResponses).map(([pid, arr]) => {
+                  const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
+                  return [
+                    pid,
+                    {
+                      text: last?.text || '',
+                      modelIndex: last?.meta?.modelIndex ?? 0,
+                      status: last?.status || 'completed',
+                      meta: last?.meta,
+                    },
+                  ];
+                })
+              ),
+            }
+          : undefined;
 
       const finalBatch = aiTurn.batch || batchPhase;
       const finalMapping = aiTurn.mapping;
       const finalSingularity = aiTurn.singularity;
 
-
-
       this.port?.postMessage({
-        type: "TURN_FINALIZED",
+        type: 'TURN_FINALIZED',
         sessionId: sessionId,
         userTurnId: userTurnId,
         aiTurnId: aiTurnId,
         turn: {
           user: userTurn
             ? {
-              id: userTurn.id,
-              type: "user",
-              text: userTurn.text || userTurn.content || "",
-              createdAt: userTurn.createdAt || Date.now(),
-              sessionId,
-            }
+                id: userTurn.id,
+                type: 'user',
+                text: userTurn.text || userTurn.content || '',
+                createdAt: userTurn.createdAt || Date.now(),
+                sessionId,
+              }
             : {
-              id: userTurnId || "unknown",
-              type: "user",
-              text: "",
-              createdAt: Date.now(),
-              sessionId,
-            },
+                id: userTurnId || 'unknown',
+                type: 'user',
+                text: '',
+                createdAt: Date.now(),
+                sessionId,
+              },
           ai: {
             id: aiTurnId,
-            type: "ai",
-            userTurnId: userTurnId || "unknown",
+            type: 'ai',
+            userTurnId: userTurnId || 'unknown',
             sessionId,
             threadId: aiTurn.threadId || DEFAULT_THREAD,
             createdAt: aiTurn.createdAt || Date.now(),
@@ -240,7 +239,7 @@ export class ConnectionHandler {
         },
       });
     } catch (e) {
-      console.warn("[ConnectionHandler] Failed to emit TURN_FINALIZED from persistence:", e);
+      console.warn('[ConnectionHandler] Failed to emit TURN_FINALIZED from persistence:', e);
     }
   }
 
@@ -252,61 +251,59 @@ export class ConnectionHandler {
     return async (message) => {
       if (!message || !message.type) return;
 
-      if (message.type === "KEEPALIVE_PING") {
+      if (message.type === 'KEEPALIVE_PING') {
         this.port.postMessage({
-          type: "KEEPALIVE_PONG",
+          type: 'KEEPALIVE_PONG',
           timestamp: Date.now(),
         });
         return;
       }
 
-      if (message.type !== "reconnect") {
+      if (message.type !== 'reconnect') {
         await this._ensureBackendReady();
       }
 
       try {
-        if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === "function") {
+        if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === 'function') {
           this.lifecycleManager.recordActivity();
         }
-      } catch (_) { }
+      } catch (_) {}
 
       console.log(`[ConnectionHandler] Received: ${message.type}`);
 
       try {
         switch (message.type) {
-          case "EXECUTE_WORKFLOW":
+          case 'EXECUTE_WORKFLOW':
             await this._handleExecuteWorkflow(message);
             break;
           case 'RETRY_PROVIDERS':
             await this._handleRetryProviders(message);
             break;
 
-          case "reconnect":
+          case 'reconnect':
             this.port.postMessage({
-              type: "reconnect_ack",
+              type: 'reconnect_ack',
               serverTime: Date.now(),
             });
             break;
 
-          case "abort":
+          case 'abort':
             await this._handleAbort(message);
             break;
-          case "CONTINUE_COGNITIVE_WORKFLOW":
+          case 'CONTINUE_COGNITIVE_WORKFLOW':
             if (this.workflowEngine) {
               await this.workflowEngine.handleContinueCognitiveRequest(message.payload);
             }
             break;
-          case "PROBE_QUERY":
+          case 'PROBE_QUERY':
             await this._handleProbeQuery(message);
             break;
 
           default:
-            console.warn(
-              `[ConnectionHandler] Unknown message type: ${message.type}`,
-            );
+            console.warn(`[ConnectionHandler] Unknown message type: ${message.type}`);
         }
       } catch (error) {
-        console.error("[ConnectionHandler] Message handling failed:", error);
+        console.error('[ConnectionHandler] Message handling failed:', error);
         this._sendError(message, error);
       }
     };
@@ -337,10 +334,9 @@ export class ConnectionHandler {
   }
 
   _buildFreshProbeContexts(providerIds) {
-    return Object.fromEntries((providerIds || []).map((providerId) => [
-      providerId,
-      { meta: {}, continueThread: false },
-    ]));
+    return Object.fromEntries(
+      (providerIds || []).map((providerId) => [providerId, { meta: {}, continueThread: false }])
+    );
   }
 
   _buildProbeSessionRecord({
@@ -364,7 +360,7 @@ export class ConnectionHandler {
           createdAt: now,
           updatedAt: now,
         },
-      ]),
+      ])
     );
     return {
       id: probeSessionId,
@@ -389,9 +385,9 @@ export class ConnectionHandler {
       providerIds: Array.isArray(providerIds) ? providerIds : [],
       modelIndices: Array.isArray(providerIds)
         ? providerIds.map((providerId) => ({
-          providerId,
-          modelIndex: indices?.get(providerId) || 0,
-        }))
+            providerId,
+            modelIndex: indices?.get(providerId) || 0,
+          }))
         : [],
     });
   }
@@ -401,9 +397,7 @@ export class ConnectionHandler {
     if (!adapter) return null;
     const turn = await adapter.get('turns', aiTurnId);
     if (!turn) return null;
-    const probeSessions = Array.isArray(turn.probeSessions)
-      ? [...turn.probeSessions]
-      : [];
+    const probeSessions = Array.isArray(turn.probeSessions) ? [...turn.probeSessions] : [];
     const existingIndex = probeSessions.findIndex((session) => session?.id === probeSessionId);
     const nextValue = updater(existingIndex >= 0 ? probeSessions[existingIndex] : null, turn);
     if (!nextValue) return turn;
@@ -423,9 +417,7 @@ export class ConnectionHandler {
 
   async _enqueueProbePersistence(aiTurnId, task) {
     const previous = this._probePersistenceQueues.get(aiTurnId) || Promise.resolve();
-    const current = previous
-      .catch(() => undefined)
-      .then(task);
+    const current = previous.catch(() => undefined).then(task);
     this._probePersistenceQueues.set(aiTurnId, current);
     try {
       return await current;
@@ -448,7 +440,8 @@ export class ConnectionHandler {
     const responses = await adapter.getResponsesByTurnId(aiTurnId);
     const used = new Set();
 
-    const mappingOrder = turn?.mapping?.artifact?.citationSourceOrder || turn?.mapping?.citationSourceOrder || {};
+    const mappingOrder =
+      turn?.mapping?.artifact?.citationSourceOrder || turn?.mapping?.citationSourceOrder || {};
     for (const [k] of Object.entries(mappingOrder || {})) {
       const n = Number(k);
       if (Number.isFinite(n) && n > 0) used.add(n);
@@ -490,17 +483,22 @@ export class ConnectionHandler {
 
     const sessionId = turn.sessionId || '';
     const existingResponses = await adapter.getResponsesByTurnId(aiTurnId);
-    const sameProvider = (existingResponses || []).filter((r) => r?.providerId === providerId && r?.responseType === 'probe');
-    const nextResponseIndex = sameProvider.length > 0
-      ? Math.max(...sameProvider.map((r) => Number(r?.responseIndex) || 0)) + 1
-      : 0;
+    const sameProvider = (existingResponses || []).filter(
+      (r) => r?.providerId === providerId && r?.responseType === 'probe'
+    );
+    const nextResponseIndex =
+      sameProvider.length > 0
+        ? Math.max(...sameProvider.map((r) => Number(r?.responseIndex) || 0)) + 1
+        : 0;
 
     const citationSourceOrder = {
       ...(turn?.mapping?.artifact?.citationSourceOrder || turn?.mapping?.citationSourceOrder || {}),
       [modelIndex]: providerId,
     };
 
-    const paragraphTexts = (geometryResult?.shadowParagraphs || []).map((p) => p?._fullParagraph || '').filter(Boolean);
+    const paragraphTexts = (geometryResult?.shadowParagraphs || [])
+      .map((p) => p?._fullParagraph || '')
+      .filter(Boolean);
     const probeResponseId = `pr-${sessionId}-${aiTurnId}-${providerId}-probe-${nextResponseIndex}-${now}`;
     await adapter.put('provider_responses', {
       id: probeResponseId,
@@ -579,19 +577,15 @@ export class ConnectionHandler {
           text: text || '',
           paragraphs: paragraphTexts,
           status: 'completed',
-          createdAt:
-            baseSession.responses?.[providerId]?.createdAt ||
-            baseSession.createdAt ||
-            now,
+          createdAt: baseSession.responses?.[providerId]?.createdAt || baseSession.createdAt || now,
           updatedAt: now,
         },
       };
-      const providerIds = Array.from(
-        new Set([...(baseSession.providerIds || []), providerId]),
-      );
+      const providerIds = Array.from(new Set([...(baseSession.providerIds || []), providerId]));
       const responseStatuses = Object.values(nextResponses).map((response) => response?.status);
-      const isComplete = providerIds.length > 0
-        && providerIds.every((pid) => {
+      const isComplete =
+        providerIds.length > 0 &&
+        providerIds.every((pid) => {
           const status = nextResponses[pid]?.status;
           return status === 'completed' || status === 'error';
         });
@@ -635,20 +629,29 @@ export class ConnectionHandler {
     const sessionManager = this.services?.sessionManager;
     if (!orchestrator || !providerRegistry || !sessionManager?.adapter) return;
 
-    const requestedProviders = Array.isArray(enabledProviders) && enabledProviders.length > 0
-      ? Array.from(new Set(enabledProviders.map((providerId) => String(providerId || '').toLowerCase()).filter(Boolean)))
-      : [];
+    const requestedProviders =
+      Array.isArray(enabledProviders) && enabledProviders.length > 0
+        ? Array.from(
+            new Set(
+              enabledProviders
+                .map((providerId) => String(providerId || '').toLowerCase())
+                .filter(Boolean)
+            )
+          )
+        : [];
     const probeProviders = requestedProviders.filter((pid) => providerRegistry.isAvailable(pid));
-    const probeSessionId = incomingProbeSessionId || `probe-${aiTurnId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const probeSessionId =
+      incomingProbeSessionId ||
+      `probe-${aiTurnId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const normalizedSearchResults = Array.isArray(searchResults)
       ? searchResults.map((result) => ({
-        paragraphId: result?.paragraphId || '',
-        similarity: Number(result?.similarity || 0),
-        normalizedSim: Number(result?.normalizedSim || 0),
-        modelIndex: Number(result?.modelIndex || 0),
-        paragraphIndex: Number(result?.paragraphIndex || 0),
-        text: String(result?.text || ''),
-      }))
+          paragraphId: result?.paragraphId || '',
+          similarity: Number(result?.similarity || 0),
+          normalizedSim: Number(result?.normalizedSim || 0),
+          modelIndex: Number(result?.modelIndex || 0),
+          paragraphIndex: Number(result?.paragraphIndex || 0),
+          text: String(result?.text || ''),
+        }))
       : [];
     const sessionStartedAt = Date.now();
     if (probeProviders.length === 0) {
@@ -661,10 +664,17 @@ export class ConnectionHandler {
             providerIds: [],
             indices: new Map(),
             now: sessionStartedAt,
-          }),
-        ),
+          })
+        )
       );
-      this._postProbeSessionStart(aiTurnId, probeSessionId, queryText, normalizedSearchResults, [], new Map());
+      this._postProbeSessionStart(
+        aiTurnId,
+        probeSessionId,
+        queryText,
+        normalizedSearchResults,
+        [],
+        new Map()
+      );
       return;
     }
 
@@ -679,10 +689,17 @@ export class ConnectionHandler {
           providerIds: probeProviders,
           indices,
           now: sessionStartedAt,
-        }),
-      ),
+        })
+      )
     );
-    this._postProbeSessionStart(aiTurnId, probeSessionId, queryText, normalizedSearchResults, probeProviders, indices);
+    this._postProbeSessionStart(
+      aiTurnId,
+      probeSessionId,
+      queryText,
+      normalizedSearchResults,
+      probeProviders,
+      indices
+    );
 
     const prompt = this._buildProbePrompt(queryText, nnParagraphs);
     const pending = new Set(probeProviders);
@@ -695,17 +712,21 @@ export class ConnectionHandler {
         providerContexts,
         onPartial: (providerId, chunk) => {
           const modelIndex = indices.get(providerId) || 0;
-          const rawText = typeof chunk === 'string' ? chunk : (chunk?.text || '');
+          const rawText = typeof chunk === 'string' ? chunk : chunk?.text || '';
           // Compute delta: if the new text starts with what we already sent,
           // it's a full-replacement provider (like Qwen) — only send the new suffix.
           const previousText = probeAccumulated.get(providerId) || '';
           // Detect full-replacement chunks (like Qwen) vs incremental chunks.
           // Full-replacement: new text contains all previously sent text as a prefix.
           // Incremental: new text is just the delta to append.
-          const isFullReplacement = rawText.length >= previousText.length && rawText.startsWith(previousText);
+          const isFullReplacement =
+            rawText.length >= previousText.length && rawText.startsWith(previousText);
           const newAccumulated = isFullReplacement ? rawText : previousText + rawText;
           probeAccumulated.set(providerId, newAccumulated);
-          const delta = newAccumulated.length > previousText.length ? newAccumulated.slice(previousText.length) : '';
+          const delta =
+            newAccumulated.length > previousText.length
+              ? newAccumulated.slice(previousText.length)
+              : '';
           if (!delta) return; // nothing new
           this.port?.postMessage({
             type: 'PROBE_CHUNK',
@@ -734,15 +755,17 @@ export class ConnectionHandler {
                 content: text,
               });
               const now = Date.now();
-              await this._enqueueProbePersistence(aiTurnId, () => this._persistProbeResult({
-                aiTurnId,
-                probeSessionId,
-                providerId,
-                modelIndex,
-                text,
-                geometryResult,
-                now,
-              }));
+              await this._enqueueProbePersistence(aiTurnId, () =>
+                this._persistProbeResult({
+                  aiTurnId,
+                  probeSessionId,
+                  providerId,
+                  modelIndex,
+                  text,
+                  geometryResult,
+                  now,
+                })
+              );
 
               this.port?.postMessage({
                 type: 'PROBE_COMPLETE',
@@ -753,12 +776,14 @@ export class ConnectionHandler {
                   modelName: this._providerDisplayName(providerId),
                   providerId,
                   text,
-                  paragraphs: (geometryResult?.shadowParagraphs || []).map((p) => p?._fullParagraph || '').filter(Boolean),
+                  paragraphs: (geometryResult?.shadowParagraphs || [])
+                    .map((p) => p?._fullParagraph || '')
+                    .filter(Boolean),
                   embeddings: geometryResult?.packed?.meta
                     ? {
-                      paragraphIds: geometryResult.packed.meta.paragraphIndex || [],
-                      dimensions: geometryResult.packed.meta.dimensions || 0,
-                    }
+                        paragraphIds: geometryResult.packed.meta.paragraphIndex || [],
+                        dimensions: geometryResult.packed.meta.dimensions || 0,
+                      }
                     : undefined,
                 },
               });
@@ -795,23 +820,23 @@ export class ConnectionHandler {
   async _handleRetryProviders(message) {
     const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
     if (!sessionId || !aiTurnId || !Array.isArray(providerIds) || providerIds.length === 0) {
-      console.warn("[ConnectionHandler] Invalid RETRY_PROVIDERS payload", message);
+      console.warn('[ConnectionHandler] Invalid RETRY_PROVIDERS payload', message);
       return;
     }
 
-    const scope = retryScope === "mapping" ? "mapping" : "batch";
+    const scope = retryScope === 'mapping' ? 'mapping' : 'batch';
 
     try {
-      if (this.workflowEngine && typeof this.workflowEngine.handleRetryRequest === "function") {
+      if (this.workflowEngine && typeof this.workflowEngine.handleRetryRequest === 'function') {
         await this.workflowEngine.handleRetryRequest(message);
       }
-    } catch (_) { }
+    } catch (_) {}
 
     for (const providerId of providerIds) {
-      if (!providerId || typeof providerId !== "string") continue;
+      if (!providerId || typeof providerId !== 'string') continue;
       await this._handleExecuteWorkflow({
         payload: {
-          type: "recompute",
+          type: 'recompute',
           sessionId,
           sourceTurnId: aiTurnId,
           stepType: scope,
@@ -821,8 +846,6 @@ export class ConnectionHandler {
     }
   }
 
-
-
   /**
    * Handle EXECUTE_WORKFLOW message
    */
@@ -830,37 +853,38 @@ export class ConnectionHandler {
     let executeRequest = message.payload;
     let resolvedContext = null;
 
-    const VALID_TYPES = ["initialize", "extend", "recompute"];
+    const VALID_TYPES = ['initialize', 'extend', 'recompute'];
 
     // Recompute guard: prevent concurrent recomputes for the same turn+provider+step.
     let _recomputeKey = null;
-    if (executeRequest?.type === "recompute") {
+    if (executeRequest?.type === 'recompute') {
       const { sessionId, sourceTurnId, stepType, targetProvider } = executeRequest;
       _recomputeKey = `${sessionId}:${sourceTurnId}:${stepType}:${targetProvider}`;
       if (this._activeRecomputes.has(_recomputeKey)) {
-        console.warn(`[ConnectionHandler] Recompute already active for ${_recomputeKey}, skipping duplicate`);
+        console.warn(
+          `[ConnectionHandler] Recompute already active for ${_recomputeKey}, skipping duplicate`
+        );
         return;
       }
       this._activeRecomputes.add(_recomputeKey);
     }
 
     if (!executeRequest || !VALID_TYPES.includes(executeRequest.type)) {
-      const errorMsg = `Invalid request type: ${executeRequest?.type}. Must be one of: ${VALID_TYPES.join(", ")}`;
+      const errorMsg = `Invalid request type: ${executeRequest?.type}. Must be one of: ${VALID_TYPES.join(', ')}`;
       console.error(`[ConnectionHandler] ${errorMsg}`);
 
       try {
         this.port.postMessage({
-          type: "WORKFLOW_COMPLETE",
-          sessionId: executeRequest?.sessionId || "unknown",
+          type: 'WORKFLOW_COMPLETE',
+          sessionId: executeRequest?.sessionId || 'unknown',
           error: errorMsg,
         });
-      } catch (_) { }
+      } catch (_) {}
 
       return;
     }
 
     try {
-
       // ========================================================================
       // Idempotency Guard: short-circuit duplicate requests
       // Minimal behavior per invariants:
@@ -871,24 +895,20 @@ export class ConnectionHandler {
       const idemKeyEarly = this._buildIdempotencyKey(executeRequest);
       if (idemKeyEarly && this.services?.sessionManager?.adapter) {
         try {
-          const existing = await this.services.sessionManager.adapter.get(
-            "metadata",
-            idemKeyEarly,
-          );
+          const existing = await this.services.sessionManager.adapter.get('metadata', idemKeyEarly);
           if (existing && existing.entityId) {
-            const sessionIdForEmit =
-              existing.sessionId || executeRequest.sessionId || "unknown";
+            const sessionIdForEmit = existing.sessionId || executeRequest.sessionId || 'unknown';
             const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
             const userTurnIdEarly =
               executeRequest?.clientUserTurnId ||
               executeRequest?.userTurnId ||
               histUserTurnId ||
-              "unknown";
+              'unknown';
 
             try {
-              if (executeRequest?.type !== "recompute") {
+              if (executeRequest?.type !== 'recompute') {
                 this.port.postMessage({
-                  type: "TURN_CREATED",
+                  type: 'TURN_CREATED',
                   sessionId: sessionIdForEmit,
                   userTurnId: userTurnIdEarly,
                   aiTurnId: existing.entityId,
@@ -896,22 +916,21 @@ export class ConnectionHandler {
                   mappingProvider: executeRequest.mapper || null,
                 });
               }
-            } catch (_) { }
+            } catch (_) {}
 
             // If we already have responses → emit finalized; otherwise return without recompute
             try {
-              const responses = await this.services.sessionManager.adapter.getResponsesByTurnId(existing.entityId);
+              const responses = await this.services.sessionManager.adapter.getResponsesByTurnId(
+                existing.entityId
+              );
               const hasAny = Array.isArray(responses) && responses.length > 0;
               if (hasAny) {
-                await this._emitFinalizedFromPersistence(
-                  sessionIdForEmit,
-                  existing.entityId,
-                );
+                await this._emitFinalizedFromPersistence(sessionIdForEmit, existing.entityId);
               }
-            } catch (_) { }
+            } catch (_) {}
             return; // ✅ Duplicate handled via rehydrate only
           }
-        } catch (_) { }
+        } catch (_) {}
       }
 
       // ========================================================================
@@ -919,41 +938,42 @@ export class ConnectionHandler {
       // ========================================================================
       const isPrimitive =
         executeRequest &&
-        typeof executeRequest.type === "string" &&
-        ["initialize", "extend", "recompute"].includes(executeRequest.type);
+        typeof executeRequest.type === 'string' &&
+        ['initialize', 'extend', 'recompute'].includes(executeRequest.type);
       if (!isPrimitive) {
         const errMsg =
           '[ConnectionHandler] Non-primitive request rejected. Use {type:"initialize"|"extend"|"recompute"} primitives only.';
         console.error(errMsg, { received: executeRequest });
         try {
           this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: executeRequest?.sessionId || "unknown",
-            stepId: "validate-primitive",
-            status: "failed",
+            type: 'WORKFLOW_STEP_UPDATE',
+            sessionId: executeRequest?.sessionId || 'unknown',
+            stepId: 'validate-primitive',
+            status: 'failed',
             error:
-              "Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.",
+              'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.',
             // Attach recompute metadata when applicable
-            isRecompute: executeRequest?.type === "recompute",
+            isRecompute: executeRequest?.type === 'recompute',
             sourceTurnId: executeRequest?.sourceTurnId,
           });
           this.port.postMessage({
-            type: "WORKFLOW_COMPLETE",
-            sessionId: executeRequest?.sessionId || "unknown",
-            error: "Legacy ExecuteWorkflowRequest is no longer supported.",
+            type: 'WORKFLOW_COMPLETE',
+            sessionId: executeRequest?.sessionId || 'unknown',
+            error: 'Legacy ExecuteWorkflowRequest is no longer supported.',
           });
-        } catch (_) { }
+        } catch (_) {}
         return;
       }
 
       // Phase 5 path: Resolve → Map → Compile → Execute
-      console.log(
-        `[ConnectionHandler] Processing ${executeRequest.type} primitive`,
-      );
+      console.log(`[ConnectionHandler] Processing ${executeRequest.type} primitive`);
 
-      if (executeRequest.type === "recompute") {
-        if (executeRequest.stepType === "singularity") {
-          if (this.workflowEngine && typeof this.workflowEngine.handleContinueCognitiveRequest === "function") {
+      if (executeRequest.type === 'recompute') {
+        if (executeRequest.stepType === 'singularity') {
+          if (
+            this.workflowEngine &&
+            typeof this.workflowEngine.handleContinueCognitiveRequest === 'function'
+          ) {
             await this.workflowEngine.handleContinueCognitiveRequest({
               sessionId: executeRequest.sessionId,
               aiTurnId: executeRequest.sourceTurnId,
@@ -963,7 +983,9 @@ export class ConnectionHandler {
               useThinking: !!executeRequest.useThinking,
             });
           } else {
-            console.warn("[ConnectionHandler] Singularity recompute requested but workflowEngine is not ready");
+            console.warn(
+              '[ConnectionHandler] Singularity recompute requested but workflowEngine is not ready'
+            );
           }
           return;
         }
@@ -971,13 +993,10 @@ export class ConnectionHandler {
 
       // Step 1: Resolve context
       try {
-        resolvedContext =
-          await this.services.contextResolver.resolve(executeRequest);
-        console.log(
-          `[ConnectionHandler] Context resolved: ${resolvedContext.type}`,
-        );
+        resolvedContext = await this.services.contextResolver.resolve(executeRequest);
+        console.log(`[ConnectionHandler] Context resolved: ${resolvedContext.type}`);
       } catch (e) {
-        console.error("[ConnectionHandler] Context resolution failed:", e);
+        console.error('[ConnectionHandler] Context resolution failed:', e);
         throw e;
       }
 
@@ -985,11 +1004,11 @@ export class ConnectionHandler {
       try {
         await this._applyPreflightSmartDefaults(executeRequest);
       } catch (e) {
-        console.warn("[ConnectionHandler] Preflight smart-defaults failed:", e);
+        console.warn('[ConnectionHandler] Preflight smart-defaults failed:', e);
       }
 
       // Step 3: No mapping needed - compiler accepts primitives + resolvedContext
-      console.log("[ConnectionHandler] Passing primitive directly to compiler");
+      console.log('[ConnectionHandler] Passing primitive directly to compiler');
 
       // ========================================================================
       // Validation
@@ -997,31 +1016,22 @@ export class ConnectionHandler {
       const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
       // Prefer primitive's clientUserTurnId; fall back to legacy userTurnId
       const userTurnId =
-        executeRequest?.clientUserTurnId ||
-        executeRequest?.userTurnId ||
-        histUserTurnId;
+        executeRequest?.clientUserTurnId || executeRequest?.userTurnId || histUserTurnId;
       const hasBatch =
-        Array.isArray(executeRequest?.providers) &&
-        executeRequest.providers.length > 0;
+        Array.isArray(executeRequest?.providers) && executeRequest.providers.length > 0;
 
       // Generate session ID if needed
-      if (!executeRequest?.sessionId || executeRequest.sessionId === "") {
+      if (!executeRequest?.sessionId || executeRequest.sessionId === '') {
         executeRequest.sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        console.log(
-          "[ConnectionHandler] Generated session ID:",
-          executeRequest.sessionId,
-        );
+        console.log('[ConnectionHandler] Generated session ID:', executeRequest.sessionId);
       }
 
       // ========================================================================
       // Compile
       // ========================================================================
-      const workflowRequest = this.services.compiler.compile(
-        executeRequest,
-        resolvedContext,
-      );
+      const workflowRequest = this.services.compiler.compile(executeRequest, resolvedContext);
 
-      if (executeRequest.type === "recompute" && executeRequest.sourceTurnId) {
+      if (executeRequest.type === 'recompute' && executeRequest.sourceTurnId) {
         workflowRequest.context = {
           ...(workflowRequest.context || {}),
           canonicalAiTurnId: executeRequest.sourceTurnId,
@@ -1029,17 +1039,17 @@ export class ConnectionHandler {
       }
 
       const firstPromptStep = Array.isArray(workflowRequest?.steps)
-        ? workflowRequest.steps.find((s) => s && s.type === "prompt")
+        ? workflowRequest.steps.find((s) => s && s.type === 'prompt')
         : null;
       const effectiveProviders =
         Array.isArray(firstPromptStep?.payload?.providers) &&
-          firstPromptStep.payload.providers.length > 0
+        firstPromptStep.payload.providers.length > 0
           ? firstPromptStep.payload.providers
-          : (executeRequest.providers || []);
+          : executeRequest.providers || [];
       // ========================================================================
       // TURN_CREATED message
       // ========================================================================
-      const createsNewTurn = executeRequest.type !== "recompute" && hasBatch;
+      const createsNewTurn = executeRequest.type !== 'recompute' && hasBatch;
       if (createsNewTurn) {
         const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         workflowRequest.context = {
@@ -1050,16 +1060,15 @@ export class ConnectionHandler {
 
         try {
           this.port.postMessage({
-            type: "TURN_CREATED",
-            sessionId:
-              workflowRequest.context.sessionId || executeRequest.sessionId,
+            type: 'TURN_CREATED',
+            sessionId: workflowRequest.context.sessionId || executeRequest.sessionId,
             userTurnId,
             aiTurnId,
             // ✅ Include actual providers being used so UI doesn't guess from stale state
             providers: effectiveProviders,
             mappingProvider: executeRequest.mapper || null,
           });
-        } catch (_) { }
+        } catch (_) {}
 
         try {
           const key = `inflight:${workflowRequest.context.sessionId}:${aiTurnId}`;
@@ -1068,11 +1077,11 @@ export class ConnectionHandler {
             ...workflowRequest.context,
             runId,
           };
-          await this.services.sessionManager.adapter.put("metadata", {
+          await this.services.sessionManager.adapter.put('metadata', {
             key,
             sessionId: workflowRequest.context.sessionId,
             entityId: aiTurnId,
-            type: "inflight_workflow",
+            type: 'inflight_workflow',
             requestType: executeRequest.type,
             userMessage: executeRequest.userMessage,
             userTurnId,
@@ -1085,54 +1094,53 @@ export class ConnectionHandler {
           // Also record idempotency mapping so reconnect retries don't duplicate fanout
           const idemKey = this._buildIdempotencyKey(executeRequest);
           if (idemKey) {
-            await this.services.sessionManager.adapter.put("metadata", {
+            await this.services.sessionManager.adapter.put('metadata', {
               key: idemKey,
               sessionId: workflowRequest.context.sessionId,
               entityId: aiTurnId,
-              type: "request_idempotency",
+              type: 'request_idempotency',
               requestType: executeRequest.type,
               createdAt: Date.now(),
               updatedAt: Date.now(),
             });
           }
-        } catch (_) { }
+        } catch (_) {}
       }
-
 
       // ========================================================================
       // Execute
       // ========================================================================
       const engine = this.workflowEngine;
       if (!engine) {
-        throw new Error("WorkflowEngine not initialized");
+        throw new Error('WorkflowEngine not initialized');
       }
       await engine.execute(workflowRequest, resolvedContext);
 
       try {
         const key = `inflight:${workflowRequest.context.sessionId}:${workflowRequest.context.canonicalAiTurnId}`;
-        await this.services.sessionManager.adapter.delete("metadata", key);
-      } catch (_) { }
+        await this.services.sessionManager.adapter.delete('metadata', key);
+      } catch (_) {}
     } catch (error) {
-      console.error("[ConnectionHandler] Workflow failed:", error);
+      console.error('[ConnectionHandler] Workflow failed:', error);
       try {
         const msg = error instanceof Error ? error.message : String(error);
         this.port?.postMessage({
-          type: "WORKFLOW_STEP_UPDATE",
-          sessionId: executeRequest?.sessionId || "unknown",
-          stepId: "handler-error",
-          status: "failed",
+          type: 'WORKFLOW_STEP_UPDATE',
+          sessionId: executeRequest?.sessionId || 'unknown',
+          stepId: 'handler-error',
+          status: 'failed',
           error: msg,
           // Attach recompute metadata when applicable
-          isRecompute: executeRequest?.type === "recompute",
+          isRecompute: executeRequest?.type === 'recompute',
           sourceTurnId: executeRequest?.sourceTurnId,
         });
         this.port?.postMessage({
-          type: "WORKFLOW_COMPLETE",
-          sessionId: executeRequest?.sessionId || "unknown",
+          type: 'WORKFLOW_COMPLETE',
+          sessionId: executeRequest?.sessionId || 'unknown',
           error: msg,
         });
       } catch (e) {
-        console.error("[ConnectionHandler] Failed to send error message:", e);
+        console.error('[ConnectionHandler] Failed to send error message:', e);
       }
     } finally {
       if (_recomputeKey) this._activeRecomputes.delete(_recomputeKey);
@@ -1145,7 +1153,6 @@ export class ConnectionHandler {
    */
   // Legacy hydration helper removed: session hydration now handled by persistence-backed readers
 
-
   /**
    * Preflight authorization check and smart-defaults routing.
    * - Runs after Context Resolution, before Compilation.
@@ -1155,8 +1162,6 @@ export class ConnectionHandler {
    * - Applies ephemeral fallback when a locked provider is unavailable.
    */
   async _applyPreflightSmartDefaults(executeRequest) {
-
-
     // Use centralized AuthManager
     const authStatus = await authManager.getAuthStatus();
     const availableProviders = this.services.providerRegistry?.listProviders?.() || [];
@@ -1188,9 +1193,7 @@ export class ConnectionHandler {
 
     // ONLY fail if zero providers available
     const hasAnyProvider =
-      result.providers.length > 0 ||
-      result.mapper !== null ||
-      result.singularity !== null;
+      result.providers.length > 0 || result.mapper !== null || result.singularity !== null;
 
     if (!hasAnyProvider) {
       const attempted = [
@@ -1199,10 +1202,12 @@ export class ConnectionHandler {
         executeRequest.singularity,
       ].filter(Boolean);
 
-      const errorMsg = createAuthErrorMessage(
-        attempted,
-        'Pre-workflow validation found no authorized providers'
-      ) || `No authorized providers available. Attempted: ${attempted.join(', ')}. Please log in to at least one AI service.`;
+      const errorMsg =
+        createAuthErrorMessage(
+          attempted,
+          'Pre-workflow validation found no authorized providers'
+        ) ||
+        `No authorized providers available. Attempted: ${attempted.join(', ')}. Please log in to at least one AI service.`;
 
       throw new Error(errorMsg);
     }
@@ -1222,10 +1227,10 @@ export class ConnectionHandler {
    */
   _sendError(originalMessage, error) {
     this.port.postMessage({
-      type: "WORKFLOW_STEP_UPDATE",
-      sessionId: originalMessage.payload?.sessionId || "unknown",
-      stepId: "handler-error",
-      status: "failed",
+      type: 'WORKFLOW_STEP_UPDATE',
+      sessionId: originalMessage.payload?.sessionId || 'unknown',
+      stepId: 'handler-error',
+      status: 'failed',
       error: error.message || String(error),
     });
   }
@@ -1234,7 +1239,7 @@ export class ConnectionHandler {
    * Cleanup on disconnect
    */
   _cleanup() {
-    console.log("[ConnectionHandler] Cleaning up connection");
+    console.log('[ConnectionHandler] Cleaning up connection');
 
     // Remove message listener
     if (this.messageHandler) {

@@ -2,10 +2,10 @@
  * Reactive Context Bridge
  * Matches user messages against previous turn's claim structure
  * to inject relevant context into the next batch prompt.
- * 
+ *
  * Zero external dependencies. Optimized for browser extensions.
  */
-import { Claim, Edge } from "../../shared/contract";
+import { Claim, Edge } from '../../shared/contract';
 
 // ============================================================================
 // TYPES
@@ -28,8 +28,8 @@ interface TermIndex {
 // ============================================================================
 
 interface TermRelations {
-  related: Map<string, Set<string>>;    // Terms in supporting claims
-  opposing: Map<string, Set<string>>;   // Terms in conflicting claims
+  related: Map<string, Set<string>>; // Terms in supporting claims
+  opposing: Map<string, Set<string>>; // Terms in conflicting claims
 }
 
 interface TermIndexWithRelations extends TermIndex {
@@ -56,30 +56,153 @@ export type StoredAnalysis = { claims: Claim[]; edges: Edge[] };
 // ============================================================================
 
 const STOPWORDS = new Set([
-  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has',
-  'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may',
-  'might', 'must', 'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at',
-  'by', 'from', 'as', 'into', 'through', 'during', 'before', 'after',
-  'about', 'between', 'under', 'again', 'then', 'once', 'here', 'there',
-  'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more', 'most',
-  'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
-  'so', 'than', 'too', 'very', 'just', 'and', 'but', 'if', 'or', 'because',
-  'what', 'which', 'who', 'this', 'that', 'these', 'those',
-  'i', 'me', 'my', 'we', 'you', 'your', 'he', 'him', 'she', 'her',
-  'it', 'its', 'they', 'them', 'their', 'want', 'like', 'think', 'know',
-  'use', 'make', 'get', 'go', 'say', 'see', 'come', 'take'
+  'the',
+  'a',
+  'an',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'could',
+  'should',
+  'may',
+  'might',
+  'must',
+  'can',
+  'to',
+  'of',
+  'in',
+  'for',
+  'on',
+  'with',
+  'at',
+  'by',
+  'from',
+  'as',
+  'into',
+  'through',
+  'during',
+  'before',
+  'after',
+  'about',
+  'between',
+  'under',
+  'again',
+  'then',
+  'once',
+  'here',
+  'there',
+  'when',
+  'where',
+  'why',
+  'how',
+  'all',
+  'each',
+  'few',
+  'more',
+  'most',
+  'other',
+  'some',
+  'such',
+  'no',
+  'nor',
+  'not',
+  'only',
+  'own',
+  'same',
+  'so',
+  'than',
+  'too',
+  'very',
+  'just',
+  'and',
+  'but',
+  'if',
+  'or',
+  'because',
+  'what',
+  'which',
+  'who',
+  'this',
+  'that',
+  'these',
+  'those',
+  'i',
+  'me',
+  'my',
+  'we',
+  'you',
+  'your',
+  'he',
+  'him',
+  'she',
+  'her',
+  'it',
+  'its',
+  'they',
+  'them',
+  'their',
+  'want',
+  'like',
+  'think',
+  'know',
+  'use',
+  'make',
+  'get',
+  'go',
+  'say',
+  'see',
+  'come',
+  'take',
 ]);
 
 const TECH_TERMS = new Set([
-  'react', 'vue', 'svelte', 'angular', 'node', 'typescript', 'javascript',
-  'python', 'rust', 'go', 'aws', 'gcp', 'azure', 'docker', 'kubernetes',
-  'postgresql', 'mongodb', 'redis', 'graphql', 'rest', 'api', 'sdk', 'cli',
-  'mvp', 'saas', 'b2b', 'b2c', 'ui', 'ux'
+  'react',
+  'vue',
+  'svelte',
+  'angular',
+  'node',
+  'typescript',
+  'javascript',
+  'python',
+  'rust',
+  'go',
+  'aws',
+  'gcp',
+  'azure',
+  'docker',
+  'kubernetes',
+  'postgresql',
+  'mongodb',
+  'redis',
+  'graphql',
+  'rest',
+  'api',
+  'sdk',
+  'cli',
+  'mvp',
+  'saas',
+  'b2b',
+  'b2c',
+  'ui',
+  'ux',
 ]);
 
 // ✅ FIX: Compile tech term regex once at module level (Performance Fix)
 const TECH_TERM_REGEX = new RegExp(
-  `\\b(${Array.from(TECH_TERMS).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
+  `\\b(${Array.from(TECH_TERMS)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')})\\b`,
   'gi'
 );
 
@@ -109,9 +232,8 @@ function levenshtein(a: string, b: string, maxDistance: number = Infinity): numb
     let minInRow = i;
 
     for (let j = 1; j <= b.length; j++) {
-      const val = a[i - 1] === b[j - 1]
-        ? row[j - 1]
-        : Math.min(row[j - 1] + 1, prev + 1, row[j] + 1);
+      const val =
+        a[i - 1] === b[j - 1] ? row[j - 1] : Math.min(row[j - 1] + 1, prev + 1, row[j] + 1);
       row[j - 1] = prev;
       prev = val;
       if (val < minInRow) minInRow = val;
@@ -146,7 +268,7 @@ function ngramSimilarity(a: string, b: string, n: number = 2): number {
   const ngramsB = getNgrams(b);
 
   let intersection = 0;
-  ngramsA.forEach(ng => {
+  ngramsA.forEach((ng) => {
     if (ngramsB.has(ng)) intersection++;
   });
 
@@ -194,20 +316,20 @@ function stem(word: string): string {
   if (word.length <= 3) return word; // Don't stem very short words
 
   return word
-    .replace(/ies$/, 'y')        // "stories" → "story"
-    .replace(/ing$/, '')         // "running" → "run"
-    .replace(/ed$/, '')          // "walked" → "walk"
-    .replace(/ly$/, '')          // "quickly" → "quick"
-    .replace(/ment$/, '')        // "development" → "develop"
-    .replace(/ness$/, '')        // "happiness" → "happi"
-    .replace(/ity$/, '')         // "simplicity" → "simplic"
-    .replace(/ation$/, 'ate')    // "validation" → "validate"
-    .replace(/tion$/, 't')       // "connection" → "connect"
-    .replace(/sion$/, 's')       // "decision" → "decis"
-    .replace(/able$/, '')        // "readable" → "read"
-    .replace(/ible$/, '')        // "visible" → "vis"
-    .replace(/ful$/, '')         // "helpful" → "help"
-    .replace(/less$/, '');       // "helpless" → "help"
+    .replace(/ies$/, 'y') // "stories" → "story"
+    .replace(/ing$/, '') // "running" → "run"
+    .replace(/ed$/, '') // "walked" → "walk"
+    .replace(/ly$/, '') // "quickly" → "quick"
+    .replace(/ment$/, '') // "development" → "develop"
+    .replace(/ness$/, '') // "happiness" → "happi"
+    .replace(/ity$/, '') // "simplicity" → "simplic"
+    .replace(/ation$/, 'ate') // "validation" → "validate"
+    .replace(/tion$/, 't') // "connection" → "connect"
+    .replace(/sion$/, 's') // "decision" → "decis"
+    .replace(/able$/, '') // "readable" → "read"
+    .replace(/ible$/, '') // "visible" → "vis"
+    .replace(/ful$/, '') // "helpful" → "help"
+    .replace(/less$/, ''); // "helpless" → "help"
 }
 
 /**
@@ -220,7 +342,8 @@ function extractProperNouns(text: string): string[] {
   // Skip first word (might be capitalized as sentence start)
   for (let i = 1; i < words.length; i++) {
     const word = words[i].replace(/[^a-zA-Z0-9]/g, '');
-    if (word.length > 1 && /^[A-Z]/.test(word)) { // Enforce start with uppercase letter
+    if (word.length > 1 && /^[A-Z]/.test(word)) {
+      // Enforce start with uppercase letter
       properNouns.push(word);
     }
   }
@@ -228,7 +351,7 @@ function extractProperNouns(text: string): string[] {
   // Tech terms - single pass with compiled regex
   const matches = text.match(TECH_TERM_REGEX) || [];
 
-  return Array.from(new Set([...properNouns, ...matches.map(m => m.toLowerCase())]));
+  return Array.from(new Set([...properNouns, ...matches.map((m) => m.toLowerCase())]));
 }
 
 /**
@@ -239,13 +362,14 @@ function extractTerms(text: string, isLabel: boolean): string[] {
   const properNouns = extractProperNouns(text);
 
   // Step 2: Normalize and tokenize
-  const normalized = text.toLowerCase()
+  const normalized = text
+    .toLowerCase()
     .replace(/[^a-z0-9-\s]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 2 && !STOPWORDS.has(w));
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 
   // Step 3: Apply stemming
-  const stemmed = normalized.map(stem).filter(w => w.length > 2);
+  const stemmed = normalized.map(stem).filter((w) => w.length > 2);
 
   // Step 4: Extract bigrams from labels (higher signal)
   const bigrams: string[] = [];
@@ -256,12 +380,14 @@ function extractTerms(text: string, isLabel: boolean): string[] {
   }
 
   // Step 5: Combine all term variants (deduped)
-  return Array.from(new Set([
-    ...normalized,                           // Original words
-    ...stemmed,                              // Stemmed variants
-    ...bigrams,                              // Phrase bigrams
-    ...properNouns.map(p => p.toLowerCase()) // Proper nouns
-  ]));
+  return Array.from(
+    new Set([
+      ...normalized, // Original words
+      ...stemmed, // Stemmed variants
+      ...bigrams, // Phrase bigrams
+      ...properNouns.map((p) => p.toLowerCase()), // Proper nouns
+    ])
+  );
 }
 
 // ============================================================================
@@ -273,10 +399,7 @@ function extractTerms(text: string, isLabel: boolean): string[] {
  * Terms in supporting claims become "related" (domain-specific synonyms)
  * Terms in conflicting claims become "opposing"
  */
-function buildTermRelations(
-  edges: Edge[],
-  claimTerms: Map<string, string[]>
-): TermRelations {
+function buildTermRelations(edges: Edge[], claimTerms: Map<string, string[]>): TermRelations {
   const related = new Map<string, Set<string>>();
   const opposing = new Map<string, Set<string>>();
 
@@ -322,10 +445,7 @@ function buildTermRelations(
 /**
  * Build searchable index from claims with term relations
  */
-function buildTermIndex(
-  claims: Claim[],
-  edges: Edge[]
-): TermIndexWithRelations {
+function buildTermIndex(claims: Claim[], edges: Edge[]): TermIndexWithRelations {
   const termCounts = new Map<string, Set<string>>();
   const claimTerms = new Map<string, string[]>();
 
@@ -351,15 +471,13 @@ function buildTermIndex(
 
   termCounts.forEach((claimIds, term) => {
     const frequency = claimIds.size / totalClaims;
-    const weight = frequency < 0.1 ? 0.5 :
-      frequency < 0.3 ? 1.0 :
-        frequency < 0.5 ? 0.7 : 0.3;
+    const weight = frequency < 0.1 ? 0.5 : frequency < 0.3 ? 1.0 : frequency < 0.5 ? 0.7 : 0.3;
 
     terms.set(term, {
       canonical: term,
       claimIds,
       weight,
-      isProperNoun: TECH_TERMS.has(term)
+      isProperNoun: TECH_TERMS.has(term),
     });
   });
 
@@ -376,13 +494,9 @@ function buildTermIndex(
 /**
  * Helper to add scores from a term entry
  */
-function addScores(
-  entry: TermEntry,
-  multiplier: number,
-  scores: Map<string, number>
-): void {
+function addScores(entry: TermEntry, multiplier: number, scores: Map<string, number>): void {
   const boost = entry.isProperNoun ? 2.0 : 1.0;
-  entry.claimIds.forEach(claimId => {
+  entry.claimIds.forEach((claimId) => {
     const current = scores.get(claimId) || 0;
     scores.set(claimId, current + entry.weight * multiplier * boost);
   });
@@ -424,7 +538,7 @@ function matchUserMessage(
     if (!matched) {
       const relatedTerms = termIndex.relations.related.get(userTerm);
       if (relatedTerms) {
-        relatedTerms.forEach(relatedTerm => {
+        relatedTerms.forEach((relatedTerm) => {
           if (termIndex.terms.has(relatedTerm)) {
             addScores(termIndex.terms.get(relatedTerm)!, 0.5, claimScores);
             // Don't break - accumulate all related matches
@@ -454,16 +568,18 @@ function buildBridgeFromIndex(
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
 
-  const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
-    const claim = claims.find(c => c.id === id);
-    if (!claim) return null;
-    return {
-      id,
-      label: claim.label,
-      text: claim.text,
-      matchScore: score
-    };
-  }).filter((c): c is MatchedClaim => c !== null);
+  const matched: MatchedClaim[] = sortedClaims
+    .map(([id, score]) => {
+      const claim = claims.find((c) => c.id === id);
+      if (!claim) return null;
+      return {
+        id,
+        label: claim.label,
+        text: claim.text,
+        matchScore: score,
+      };
+    })
+    .filter((c): c is MatchedClaim => c !== null);
 
   const context = formatBridge(matched);
 
@@ -514,7 +630,11 @@ export function buildReactiveBridgeCached(
   previousAnalysis: StoredAnalysis,
   turnId: string
 ): ReactiveBridge | null {
-  if (!previousAnalysis || !Array.isArray(previousAnalysis.claims) || !Array.isArray(previousAnalysis.edges)) {
+  if (
+    !previousAnalysis ||
+    !Array.isArray(previousAnalysis.claims) ||
+    !Array.isArray(previousAnalysis.edges)
+  ) {
     return null;
   }
   // Check cache

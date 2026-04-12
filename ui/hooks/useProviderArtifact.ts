@@ -7,17 +7,17 @@
  * so the rebuild only happens once per turnId::providerId.
  */
 
-import { useCallback, useRef } from "react";
-import { useAtom } from "jotai";
-import { providerArtifactFamily } from "../state/atoms";
+import { useCallback, useRef } from 'react';
+import { useAtom } from 'jotai';
+import { providerArtifactFamily } from '../state/atoms';
 
 export function useProviderArtifact(
   turnId: string | undefined | null,
-  providerId: string | undefined | null,
+  providerId: string | undefined | null
 ) {
   const key = {
-    turnId: turnId || "",
-    providerId: providerId || "",
+    turnId: turnId || '',
+    providerId: providerId || '',
   };
   const [artifact, setArtifact] = useAtom(providerArtifactFamily(key));
   const inflightRef = useRef<string | null>(null);
@@ -31,7 +31,7 @@ export function useProviderArtifact(
 
     chrome.runtime.sendMessage(
       {
-        type: "REGENERATE_EMBEDDINGS",
+        type: 'REGENERATE_EMBEDDINGS',
         payload: { aiTurnId: turnId, providerId },
       },
       (response: any) => {
@@ -41,10 +41,10 @@ export function useProviderArtifact(
         if (chrome.runtime.lastError || !response?.success) return;
 
         const built = response?.data?.artifact;
-        if (built && typeof built === "object") {
+        if (built && typeof built === 'object') {
           setArtifact(built);
         }
-      },
+      }
     );
   }, [turnId, providerId, setArtifact]);
 

@@ -1,6 +1,6 @@
-import React from "react";
-import { useAtom } from "jotai";
-import { alertTextAtom } from "../state/atoms";
+import React from 'react';
+import { useAtom } from 'jotai';
+import { alertTextAtom } from '../state/atoms';
 
 const Banner: React.FC = () => {
   const [alertText, setAlertText] = useAtom(alertTextAtom as any);
@@ -30,4 +30,3 @@ const Banner: React.FC = () => {
 };
 
 export default Banner;
-

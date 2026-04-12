@@ -1,21 +1,21 @@
-import React, { useCallback, useMemo, useState, Suspense, useEffect } from "react";
-import { createPortal } from "react-dom";
-import { Virtuoso } from "react-virtuoso";
-import { useAtomValue, useSetAtom } from "jotai";
+import React, { useCallback, useMemo, useState, Suspense, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Virtuoso } from 'react-virtuoso';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   historySessionsAtom,
   isHistoryLoadingAtom,
   isHistoryPanelOpenAtom,
   currentSessionIdAtom,
-  toastAtom
-} from "../state/atoms";
-import { useChat } from "../hooks/chat/useChat";
-import api from "../services/extension-api";
-import { normalizeBackendRoundsToTurns } from "../utils/turn-helpers";
-import { formatSessionForMarkdown, sanitizeSessionForExport } from "../utils/copy-format-utils";
-import logoIcon from "../assets/brand/logo-icon.png";
-import { PlusIcon, TrashIcon, EllipsisHorizontalIcon, ChevronRightIcon } from "./Icons";
-import { HistorySessionSummary } from "../types";
+  toastAtom,
+} from '../state/atoms';
+import { useChat } from '../hooks/chat/useChat';
+import api from '../services/extension-api';
+import { normalizeBackendRoundsToTurns } from '../utils/turn-helpers';
+import { formatSessionForMarkdown, sanitizeSessionForExport } from '../utils/copy-format-utils';
+import logoIcon from '../assets/brand/logo-icon.png';
+import { PlusIcon, TrashIcon, EllipsisHorizontalIcon, ChevronRightIcon } from './Icons';
+import { HistorySessionSummary } from '../types';
 
 type SessionRowProps = {
   session: HistorySessionSummary;
@@ -26,10 +26,7 @@ type SessionRowProps = {
   showMenu: boolean;
   onRowClick: (session: HistorySessionSummary) => void;
   onToggleSelected: (sessionId: string) => void;
-  onMenuClick: (
-    e: React.MouseEvent<HTMLButtonElement>,
-    sessionId: string,
-  ) => void;
+  onMenuClick: (e: React.MouseEvent<HTMLButtonElement>, sessionId: string) => void;
 };
 
 const SessionRow = React.memo(function SessionRow({
@@ -49,11 +46,12 @@ const SessionRow = React.memo(function SessionRow({
     <div
       className={`
                     group relative rounded-lg border transition-all duration-200 cursor-pointer
-                    ${isActive
-          ? "bg-surface-highlight border-primary-500/50 shadow-sm"
-          : "bg-surface-raised border-transparent hover:border-border-subtle"
-        }
-                    ${isDeleting ? "opacity-50 pointer-events-none" : ""}
+                    ${
+                      isActive
+                        ? 'bg-surface-highlight border-primary-500/50 shadow-sm'
+                        : 'bg-surface-raised border-transparent hover:border-border-subtle'
+                    }
+                    ${isDeleting ? 'opacity-50 pointer-events-none' : ''}
                   `}
       onClick={() => onRowClick(session)}
     >
@@ -74,9 +72,7 @@ const SessionRow = React.memo(function SessionRow({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 text-xs text-text-muted mb-1">
                 <span>
-                  {new Date(
-                    session.lastActivity || session.startTime,
-                  ).toLocaleDateString()}
+                  {new Date(session.lastActivity || session.startTime).toLocaleDateString()}
                 </span>
                 {session.messageCount > 0 && (
                   <span className="bg-surface-highlight px-1.5 py-0.5 rounded-full text-[10px]">
@@ -85,7 +81,7 @@ const SessionRow = React.memo(function SessionRow({
                 )}
               </div>
               <span className="overflow-wrap-anywhere break-words whitespace-normal text-sm font-medium text-text-primary block leading-tight">
-                {session.title || "Untitled Chat"}
+                {session.title || 'Untitled Chat'}
               </span>
             </div>
           </div>
@@ -106,7 +102,7 @@ const SessionRow = React.memo(function SessionRow({
   );
 });
 
-const RenameDialog = React.lazy(() => import("./RenameDialog"));
+const RenameDialog = React.lazy(() => import('./RenameDialog'));
 
 export default function HistoryPanel() {
   // Connected State
@@ -124,14 +120,24 @@ export default function HistoryPanel() {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
-  const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>("");
+  const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>('');
   const [isRenaming, setIsRenaming] = useState<boolean>(false);
   /* New State for Menus */
-  const [activeMenu, setActiveMenu] = useState<{ id: string; top: number; left: number; align: 'top' | 'bottom' } | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [activeMenu, setActiveMenu] = useState<{
+    id: string;
+    top: number;
+    left: number;
+    align: 'top' | 'bottom';
+  } | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   /* New State for Submenu Position */
-  const [exportSubmenuPos, setExportSubmenuPos] = useState<{ top: number; left: number; sessionId: string; align: 'top' | 'bottom' } | null>(null);
+  const [exportSubmenuPos, setExportSubmenuPos] = useState<{
+    top: number;
+    left: number;
+    sessionId: string;
+    align: 'top' | 'bottom';
+  } | null>(null);
 
   const submenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const submenuRef = React.useRef<HTMLDivElement>(null);
@@ -160,7 +166,7 @@ export default function HistoryPanel() {
       sessionId,
       top, // <--- CHANGE THIS: Use the variable you calculated above
       left: rect.right,
-      align
+      align,
     });
   };
 
@@ -187,8 +193,8 @@ export default function HistoryPanel() {
       setActiveMenu(null);
       setExportSubmenuPos(null);
     };
-    window.addEventListener("mousedown", handleClickOutside); // Mousedown is better for immediate closure
-    return () => window.removeEventListener("mousedown", handleClickOutside);
+    window.addEventListener('mousedown', handleClickOutside); // Mousedown is better for immediate closure
+    return () => window.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Derived State
@@ -197,9 +203,7 @@ export default function HistoryPanel() {
       ? sessions
       : sessions.filter((s) => s.title?.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    return [...base].sort(
-      (a, b) => (b.lastActivity || 0) - (a.lastActivity || 0),
-    );
+    return [...base].sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
   }, [sessions, searchTerm]);
 
   // Handlers
@@ -208,10 +212,13 @@ export default function HistoryPanel() {
     setIsHistoryPanelOpen(false);
   }, [newChat, setIsHistoryPanelOpen]);
 
-  const handleSelectSession = useCallback((session: HistorySessionSummary) => {
-    selectChat(session);
-    setIsHistoryPanelOpen(false);
-  }, [selectChat, setIsHistoryPanelOpen]);
+  const handleSelectSession = useCallback(
+    (session: HistorySessionSummary) => {
+      selectChat(session);
+      setIsHistoryPanelOpen(false);
+    },
+    [selectChat, setIsHistoryPanelOpen]
+  );
 
   const handleDeleteChat = async (sessionId: string) => {
     // Track pending deletion
@@ -224,7 +231,7 @@ export default function HistoryPanel() {
     // Optimistically remove from panel
     const prevSessions = sessions;
     setHistorySessions((draft: any) =>
-      draft.filter((s: any) => (s.sessionId || s.id) !== sessionId),
+      draft.filter((s: any) => (s.sessionId || s.id) !== sessionId)
     );
 
     const ok = await deleteChat(sessionId);
@@ -235,28 +242,23 @@ export default function HistoryPanel() {
       const refreshed = (response?.sessions || []).map((s: any) => ({
         id: s.sessionId,
         sessionId: s.sessionId,
-        title: s.title || "Untitled",
+        title: s.title || 'Untitled',
         startTime: s.startTime || Date.now(),
         lastActivity: s.lastActivity || Date.now(),
         messageCount: s.messageCount || 0,
-        firstMessage: s.firstMessage || "",
+        firstMessage: s.firstMessage || '',
         messages: [],
       }));
 
       setHistorySessions(refreshed as any);
 
-      const stillExists = refreshed.some(
-        (s: any) => (s.sessionId || s.id) === sessionId,
-      );
+      const stillExists = refreshed.some((s: any) => (s.sessionId || s.id) === sessionId);
       // If the deleted session was active, clear the chat view immediately
       if (!stillExists && currentSessionId === sessionId) {
         newChat();
       }
     } catch (e) {
-      console.error(
-        "[HistoryPanel] Failed to refresh history after deletion:",
-        e,
-      );
+      console.error('[HistoryPanel] Failed to refresh history after deletion:', e);
       if (!ok) {
         // If the delete call failed and we also failed to refresh, revert UI to previous list
         setHistorySessions(prevSessions as any);
@@ -297,7 +299,7 @@ export default function HistoryPanel() {
         handleSelectSession(session);
       }
     },
-    [deletingIds, handleSelectSession, handleToggleSelected, isBatchMode],
+    [deletingIds, handleSelectSession, handleToggleSelected, isBatchMode]
   );
 
   const handleSessionMenuClick = useCallback(
@@ -307,19 +309,19 @@ export default function HistoryPanel() {
       const rect = e.currentTarget.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const menuHeight = 120;
-      const align = spaceBelow < menuHeight ? "top" : "bottom";
+      const align = spaceBelow < menuHeight ? 'top' : 'bottom';
 
       setActiveMenu((prev) => {
         if (prev && prev.id === sessionId) return null;
         return {
           id: sessionId,
           left: rect.right - 130,
-          top: align === "bottom" ? rect.bottom : rect.top,
+          top: align === 'bottom' ? rect.bottom : rect.top,
           align,
         };
       });
     },
-    [],
+    []
   );
 
   const handleConfirmBatchDelete = async () => {
@@ -333,7 +335,7 @@ export default function HistoryPanel() {
     // Optimistically remove selected sessions
     const prevSessions = sessions;
     setHistorySessions((draft: any) =>
-      draft.filter((s: any) => !ids.includes(s.sessionId || s.id)),
+      draft.filter((s: any) => !ids.includes(s.sessionId || s.id))
     );
 
     try {
@@ -343,16 +345,16 @@ export default function HistoryPanel() {
       const refreshed = (response?.sessions || []).map((s: any) => ({
         id: s.sessionId,
         sessionId: s.sessionId,
-        title: s.title || "Untitled",
+        title: s.title || 'Untitled',
         startTime: s.startTime || Date.now(),
         lastActivity: s.lastActivity || Date.now(),
         messageCount: s.messageCount || 0,
-        firstMessage: s.firstMessage || "",
+        firstMessage: s.firstMessage || '',
         messages: [],
       }));
       setHistorySessions(refreshed as any);
     } catch (e) {
-      console.error("[HistoryPanel] Batch delete failed:", e);
+      console.error('[HistoryPanel] Batch delete failed:', e);
       // revert UI list on failure
       setHistorySessions(prevSessions as any);
     } finally {
@@ -363,13 +365,13 @@ export default function HistoryPanel() {
 
   const openRenameDialog = (sessionId: string, currentTitle: string) => {
     setRenameSessionId(sessionId);
-    setRenameDefaultTitle(currentTitle || "Untitled");
+    setRenameDefaultTitle(currentTitle || 'Untitled');
   };
 
   const closeRenameDialog = () => {
     if (isRenaming) return; // prevent closing during active rename to avoid accidental state issues
     setRenameSessionId(null);
-    setRenameDefaultTitle("");
+    setRenameDefaultTitle('');
   };
 
   const handleRenameChat = async (newTitle: string) => {
@@ -386,14 +388,14 @@ export default function HistoryPanel() {
           return { ...s, title: newTitle };
         }
         return s;
-      }),
+      })
     );
 
     try {
       const res = await api.renameSession(sessionId, newTitle);
 
       if (!res?.updated) {
-        throw new Error("Rename failed");
+        throw new Error('Rename failed');
       }
       // Revalidate with backend list to ensure consistency
       try {
@@ -401,23 +403,20 @@ export default function HistoryPanel() {
         const refreshed = (response?.sessions || []).map((s: any) => ({
           id: s.sessionId,
           sessionId: s.sessionId,
-          title: s.title || "Untitled",
+          title: s.title || 'Untitled',
           startTime: s.startTime || Date.now(),
           lastActivity: s.lastActivity || Date.now(),
           messageCount: s.messageCount || 0,
-          firstMessage: s.firstMessage || "",
+          firstMessage: s.firstMessage || '',
           messages: [],
         }));
         setHistorySessions(refreshed as any);
       } catch (e) {
-        console.warn(
-          "[HistoryPanel] Failed to refresh after rename, keeping optimistic title:",
-          e,
-        );
+        console.warn('[HistoryPanel] Failed to refresh after rename, keeping optimistic title:', e);
       }
       closeRenameDialog();
     } catch (e) {
-      console.error("[HistoryPanel] Rename failed:", e);
+      console.error('[HistoryPanel] Rename failed:', e);
       // revert optimistic update
       setHistorySessions(prevSessions as any);
     } finally {
@@ -425,16 +424,19 @@ export default function HistoryPanel() {
     }
   };
 
-  const handleExportChat = async (sessionId: string, format: 'json-safe' | 'json-full' | 'markdown') => {
+  const handleExportChat = async (
+    sessionId: string,
+    format: 'json-safe' | 'json-full' | 'markdown'
+  ) => {
     try {
       const sessionPayload = await api.getSession(sessionId);
-      if (!sessionPayload) throw new Error("Could not fetch session data");
+      if (!sessionPayload) throw new Error('Could not fetch session data');
 
       // Normalize the raw backend rounds to proper TurnMessage[]
       const normalizedTurns = normalizeBackendRoundsToTurns(sessionPayload.turns || [], sessionId);
       const normalizedSession = {
         ...sessionPayload,
-        turns: normalizedTurns
+        turns: normalizedTurns,
       };
 
       let blob: Blob;
@@ -442,24 +444,25 @@ export default function HistoryPanel() {
 
       if (format === 'markdown') {
         const markdown = formatSessionForMarkdown(normalizedSession);
-        blob = new Blob([markdown], { type: "text/markdown" });
-        filename = `singularity_export_${(normalizedSession.title || "session").replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+        blob = new Blob([markdown], { type: 'text/markdown' });
+        filename = `singularity_export_${(normalizedSession.title || 'session').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
       } else {
         const mode = format === 'json-full' ? 'full' : 'safe';
         const exportData = sanitizeSessionForExport(normalizedSession, mode);
         const jsonString = JSON.stringify(exportData, null, 2);
-        blob = new Blob([jsonString], { type: "application/json" });
+        blob = new Blob([jsonString], { type: 'application/json' });
 
-        const safeTitle = (exportData.session.title || "session").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const safeTitle = (exportData.session.title || 'session')
+          .replace(/[^a-z0-9]/gi, '_')
+          .toLowerCase();
         const suffix = format === 'json-full' ? '_backup' : '';
         filename = `singularity_export_${safeTitle}${suffix}_${exportData.exportedAt}.json`;
       }
 
-
       // Use a timeout to ensure the DOM update happens and separate from the sync stack if needed
       setTimeout(() => {
         const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
+        const link = document.createElement('a');
         link.href = url;
         link.download = filename;
         link.style.display = 'none';
@@ -474,10 +477,10 @@ export default function HistoryPanel() {
         }, 1000);
       }, 0);
 
-      setToast({ id: Date.now(), message: "Export started...", type: "success" });
+      setToast({ id: Date.now(), message: 'Export started...', type: 'success' });
     } catch (error) {
-      console.error("Export failed:", error);
-      setToast({ id: Date.now(), message: "Failed to export session", type: "error" });
+      console.error('Export failed:', error);
+      setToast({ id: Date.now(), message: 'Failed to export session', type: 'error' });
     }
   };
 
@@ -489,7 +492,10 @@ export default function HistoryPanel() {
         className="fixed inset-0 bg-black/50 z-40"
         onClick={(e) => {
           // Don't close if clicking submenu or main menu (already handled by mousedown, but for safety)
-          if (submenuRef.current?.contains(e.target as Node) || menuRef.current?.contains(e.target as Node)) {
+          if (
+            submenuRef.current?.contains(e.target as Node) ||
+            menuRef.current?.contains(e.target as Node)
+          ) {
             return;
           }
           setIsHistoryPanelOpen(false);
@@ -497,134 +503,134 @@ export default function HistoryPanel() {
       />
 
       {/* Portal for Export Submenu */}
-      {exportSubmenuPos && createPortal(
-        <div
-          ref={submenuRef}
-          className="fixed z-[10000] w-48 bg-surface-raised border border-border-subtle rounded-lg shadow-xl flex flex-col py-1"
-          style={{
-            top: exportSubmenuPos.top,
-            left: exportSubmenuPos.left,
-            pointerEvents: 'auto',
-          }}
-          onMouseEnter={() => {
-            if (submenuTimeoutRef.current) {
-              clearTimeout(submenuTimeoutRef.current);
-              submenuTimeoutRef.current = null;
-            }
-          }}
-          onMouseLeave={handleSubmenuLeave}
-          onClick={(e) => {
-            e.stopPropagation();
-          }}
-        >
-          <button
-            type="button"
-            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const sessionId = exportSubmenuPos.sessionId;
-              setActiveMenu(null);
-              setExportSubmenuPos(null);
-              handleExportChat(sessionId, 'json-safe');
-            }}
-          >
-            JSON (Safe)
-          </button>
-          <button
-            type="button"
-            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const sessionId = exportSubmenuPos.sessionId;
-              setActiveMenu(null);
-              setExportSubmenuPos(null);
-              handleExportChat(sessionId, 'json-full');
-            }}
-          >
-            JSON (Full Backup)
-          </button>
-          <button
-            type="button"
-            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const sessionId = exportSubmenuPos.sessionId;
-              setActiveMenu(null);
-              setExportSubmenuPos(null);
-              handleExportChat(sessionId, 'markdown');
-            }}
-          >
-            Markdown
-          </button>
-        </div>,
-        document.body
-      )}
-
-      {/* Portal for Main Menu */}
-      {activeMenu && createPortal(
-        <div
-          ref={menuRef}
-          className="fixed z-[9999] w-32 bg-surface-raised border border-border-subtle rounded-lg shadow-xl flex flex-col py-1"
-          style={{
-            top: activeMenu.align === 'bottom' ? activeMenu.top : undefined,
-            bottom: activeMenu.align === 'top' ? (window.innerHeight - activeMenu.top) : undefined,
-            left: activeMenu.left,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center gap-2 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Find the session title from sessions list
-              const sess = sessions.find(s => (s.sessionId || s.id) === activeMenu.id);
-              if (sess) openRenameDialog(sess.sessionId || sess.id, sess.title);
-              setActiveMenu(null);
-            }}
-          >
-            <span className="text-xs">✏️</span> Rename
-          </button>
-
+      {exportSubmenuPos &&
+        createPortal(
           <div
-            className="relative w-full"
-            onMouseEnter={(e) => {
+            ref={submenuRef}
+            className="fixed z-[10000] w-48 bg-surface-raised border border-border-subtle rounded-lg shadow-xl flex flex-col py-1"
+            style={{
+              top: exportSubmenuPos.top,
+              left: exportSubmenuPos.left,
+              pointerEvents: 'auto',
+            }}
+            onMouseEnter={() => {
               if (submenuTimeoutRef.current) {
                 clearTimeout(submenuTimeoutRef.current);
                 submenuTimeoutRef.current = null;
               }
-              const rect = e.currentTarget.getBoundingClientRect();
-              handleSubmenuEnter(activeMenu.id, rect);
             }}
             onMouseLeave={handleSubmenuLeave}
-          >
-            <button
-              className="w-full text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center justify-between transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-xs">💾</span> Export
-              </div>
-              <ChevronRightIcon className="w-4 h-4 text-text-muted" />
-            </button>
-          </div>
-
-          <div className="h-px bg-border-subtle my-1" />
-
-          <button
-            className="text-left px-3 py-2 text-sm hover:bg-intent-danger/10 text-intent-danger flex items-center gap-2 transition-colors"
             onClick={(e) => {
               e.stopPropagation();
-              handleDeleteChat(activeMenu.id);
-              setActiveMenu(null);
             }}
           >
-            <span className="text-xs">🗑️</span> Delete
-          </button>
-        </div>,
-        document.body
-      )}
+            <button
+              type="button"
+              className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const sessionId = exportSubmenuPos.sessionId;
+                setActiveMenu(null);
+                setExportSubmenuPos(null);
+                handleExportChat(sessionId, 'json-safe');
+              }}
+            >
+              JSON (Safe)
+            </button>
+            <button
+              type="button"
+              className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const sessionId = exportSubmenuPos.sessionId;
+                setActiveMenu(null);
+                setExportSubmenuPos(null);
+                handleExportChat(sessionId, 'json-full');
+              }}
+            >
+              JSON (Full Backup)
+            </button>
+            <button
+              type="button"
+              className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const sessionId = exportSubmenuPos.sessionId;
+                setActiveMenu(null);
+                setExportSubmenuPos(null);
+                handleExportChat(sessionId, 'markdown');
+              }}
+            >
+              Markdown
+            </button>
+          </div>,
+          document.body
+        )}
+
+      {/* Portal for Main Menu */}
+      {activeMenu &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[9999] w-32 bg-surface-raised border border-border-subtle rounded-lg shadow-xl flex flex-col py-1"
+            style={{
+              top: activeMenu.align === 'bottom' ? activeMenu.top : undefined,
+              bottom: activeMenu.align === 'top' ? window.innerHeight - activeMenu.top : undefined,
+              left: activeMenu.left,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center gap-2 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Find the session title from sessions list
+                const sess = sessions.find((s) => (s.sessionId || s.id) === activeMenu.id);
+                if (sess) openRenameDialog(sess.sessionId || sess.id, sess.title);
+                setActiveMenu(null);
+              }}
+            >
+              <span className="text-xs">✏️</span> Rename
+            </button>
+
+            <div
+              className="relative w-full"
+              onMouseEnter={(e) => {
+                if (submenuTimeoutRef.current) {
+                  clearTimeout(submenuTimeoutRef.current);
+                  submenuTimeoutRef.current = null;
+                }
+                const rect = e.currentTarget.getBoundingClientRect();
+                handleSubmenuEnter(activeMenu.id, rect);
+              }}
+              onMouseLeave={handleSubmenuLeave}
+            >
+              <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center justify-between transition-colors">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs">💾</span> Export
+                </div>
+                <ChevronRightIcon className="w-4 h-4 text-text-muted" />
+              </button>
+            </div>
+
+            <div className="h-px bg-border-subtle my-1" />
+
+            <button
+              className="text-left px-3 py-2 text-sm hover:bg-intent-danger/10 text-intent-danger flex items-center gap-2 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteChat(activeMenu.id);
+                setActiveMenu(null);
+              }}
+            >
+              <span className="text-xs">🗑️</span> Delete
+            </button>
+          </div>,
+          document.body
+        )}
 
       <div className="relative w-full h-full bg-surface-base shadow-2xl z-50 flex flex-col border-r border-border-subtle">
         {/* Header */}
@@ -643,7 +649,7 @@ export default function HistoryPanel() {
                 const count = selectedIds ? selectedIds.size : 0;
                 if (count > 0) {
                   const confirmed = window.confirm(
-                    `Delete ${count} selected chat${count === 1 ? "" : "s"}? This cannot be undone.`
+                    `Delete ${count} selected chat${count === 1 ? '' : 's'}? This cannot be undone.`
                   );
                   if (confirmed) {
                     void handleConfirmBatchDelete();
@@ -652,14 +658,17 @@ export default function HistoryPanel() {
                   handleToggleBatchMode();
                 }
               }}
-              className={`relative p-2 rounded-full transition-colors ${isBatchMode
-                ? "bg-intent-danger/15 text-text-secondary hover:bg-intent-danger/20"
-                : "hover:bg-surface-highlight text-text-secondary hover:text-primary-500"
-                }`}
+              className={`relative p-2 rounded-full transition-colors ${
+                isBatchMode
+                  ? 'bg-intent-danger/15 text-text-secondary hover:bg-intent-danger/20'
+                  : 'hover:bg-surface-highlight text-text-secondary hover:text-primary-500'
+              }`}
               title={
                 isBatchMode
-                  ? (selectedIds.size > 0 ? `Delete selected (${selectedIds.size})` : "Exit selection mode")
-                  : "Select chats to delete"
+                  ? selectedIds.size > 0
+                    ? `Delete selected (${selectedIds.size})`
+                    : 'Exit selection mode'
+                  : 'Select chats to delete'
               }
             >
               <TrashIcon className="w-5 h-5" />
@@ -704,7 +713,7 @@ export default function HistoryPanel() {
           ) : (
             <Virtuoso
               data={filteredSessions}
-              style={{ height: "100%" }}
+              style={{ height: '100%' }}
               itemContent={(_, session) => {
                 const sessionId = session.sessionId || session.id;
                 const isActive = currentSessionId === sessionId;

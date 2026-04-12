@@ -10,7 +10,7 @@
  * This is a fast, lightweight check with ZERO dependencies.
  */
 export function containsMath(content: string): boolean {
-    // Simple heuristic: check for $ delimiters
-    // This is a fast check to decide if we should load the heavy math machinery
-    return /\$\$[\s\S]+?\$\$/.test(content) || /\$[\s\S]+?\$/.test(content);
+  // Simple heuristic: check for $ delimiters
+  // This is a fast check to decide if we should load the heavy math machinery
+  return /\$\$[\s\S]+?\$\$/.test(content) || /\$[\s\S]+?\$/.test(content);
 }

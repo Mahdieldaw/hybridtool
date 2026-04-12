@@ -5,27 +5,12 @@
   "background": {
     "service_worker": "bg.js"
   },
-  "permissions": [
-    "alarms",
-    "declarativeNetRequest",
-    "offscreen",
-    "storage",
-    "tabs",
-    "cookies"
-  ],
-  "host_permissions": [
-    "https://*/*",
-    "https://grok.com/*",
-    "http://localhost:3000/*"
-  ],
+  "permissions": ["alarms", "declarativeNetRequest", "offscreen", "storage", "tabs", "cookies"],
+  "host_permissions": ["https://*/*", "https://grok.com/*", "http://localhost:3000/*"],
   "content_scripts": [
     {
-      "matches": [
-        "https://*.openai.com/*"
-      ],
-      "js": [
-        "cs-openai.js"
-      ],
+      "matches": ["https://*.openai.com/*"],
+      "js": ["cs-openai.js"],
       "run_at": "document_start",
       "all_frames": true
     }
@@ -42,16 +27,8 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "oi.html",
-        "oi.js",
-        "src/oi.js",
-        "models/*",
-        "onnx/*"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "resources": ["oi.html", "oi.js", "src/oi.js", "models/*", "onnx/*"],
+      "matches": ["<all_urls>"]
     }
   ],
   "cross_origin_opener_policy": {

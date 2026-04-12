@@ -1,4 +1,3 @@
-
 /**
 `src/providers/grok.js`
  * HTOS Grok Provider Controller
@@ -14,9 +13,9 @@ import {
   between,
   parseVerificationToken,
   parseSvgData,
-  parseXValues
+  parseXValues,
 } from './grok-signature.js';
-import { ProviderDNRGate } from "../core/dnr-utils.js";
+import { ProviderDNRGate } from '../core/dnr-utils.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MODELS CONFIGURATION
@@ -28,7 +27,7 @@ export const GrokModels = {
   'grok-4': { modelMode: 'MODEL_MODE_EXPERT', mode: 'expert' },
   'grok-4-mini-thinking-tahoe': {
     modelMode: 'MODEL_MODE_GROK_4_MINI_THINKING',
-    mode: 'grok-4-mini-thinking'
+    mode: 'grok-4-mini-thinking',
   },
 };
 
@@ -123,11 +122,11 @@ export class GrokProviderError extends Error {
     this.name = 'GrokProviderError';
     this.type = type;
     this.details = details;
-    if (extra && typeof extra === "object") {
-      const isPlainObject = Object.prototype.toString.call(extra) === "[object Object]";
+    if (extra && typeof extra === 'object') {
+      const isPlainObject = Object.prototype.toString.call(extra) === '[object Object]';
       if (isPlainObject) {
         for (const key of Object.keys(extra)) {
-          if (key === "__proto__" || key === "prototype" || key === "constructor") continue;
+          if (key === '__proto__' || key === 'prototype' || key === 'constructor') continue;
           this[key] = extra[key];
         }
       }
@@ -183,7 +182,7 @@ export class GrokSessionApi {
 
   /**
    * Send a message to Grok
-   * 
+   *
    * @param {string} message - User message
    * @param {Object} [options] - Options
    * @param {AbortSignal} [options.signal] - Abort signal
@@ -191,14 +190,18 @@ export class GrokSessionApi {
    * @param {Function} onChunk - Streaming callback
    * @returns {Promise<Object>} Response with text, stream_response, images, extra_data
    */
-  async ask(message, options = /** @type {{ signal?: AbortSignal; extraData?: any }} */ ({}), onChunk = () => { }) {
+  async ask(
+    message,
+    options = /** @type {{ signal?: AbortSignal; extraData?: any }} */ ({}),
+    onChunk = () => {}
+  ) {
     const { signal, extraData } = options;
 
     try {
       try {
-        await ProviderDNRGate.ensureProviderDnrPrereqs("grok");
+        await ProviderDNRGate.ensureProviderDnrPrereqs('grok');
       } catch (e) {
-        console.warn("[GrokProvider] ProviderDNRGate failed", e);
+        console.warn('[GrokProvider] ProviderDNRGate failed', e);
       }
       return await this._startConvo(message, extraData, onChunk, signal);
     } catch (e) {
@@ -315,12 +318,8 @@ export class GrokSessionApi {
       let messageText = text;
       try {
         const parsed = JSON.parse(text);
-        messageText =
-          parsed?.error?.message ||
-          parsed?.message ||
-          parsed?.error ||
-          messageText;
-      } catch (_) { }
+        messageText = parsed?.error?.message || parsed?.message || parsed?.error || messageText;
+      } catch (_) {}
 
       throw this._createError('tooManyRequests', String(messageText || 'Rate limit reached.'), {
         status: 429,
@@ -348,8 +347,9 @@ export class GrokSessionApi {
       method: 'GET',
       credentials: 'include',
       headers: {
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
       },
     });
 
@@ -362,7 +362,10 @@ export class GrokSessionApi {
       if (status === 429) {
         throw this._createError('tooManyRequests', 'Grok rate limited (429)', { status });
       }
-      throw this._createError('network', `Grok page load failed (${status})`, { status, details: text ? text.slice(0, 300) : undefined });
+      throw this._createError('network', `Grok page load failed (${status})`, {
+        status,
+        details: text ? text.slice(0, 300) : undefined,
+      });
     }
 
     const html = await res.text();
@@ -373,7 +376,8 @@ export class GrokSessionApi {
     this._sentryTrace = between(html, '<meta name="sentry-trace" content="', '-');
 
     // Parse scripts
-    const scriptMatches = html.match(/(?:src|href)="(\/_next\/static\/chunks\/[^"]+\.js)[^"]*"/g) || [];
+    const scriptMatches =
+      html.match(/(?:src|href)="(\/_next\/static\/chunks\/[^"]+\.js)[^"]*"/g) || [];
     const scripts = Array.from(
       new Set(
         scriptMatches
@@ -381,8 +385,8 @@ export class GrokSessionApi {
             const mm = m.match(/(?:src|href)="([^"]+)"/);
             return mm ? mm[1] : '';
           })
-          .filter(Boolean),
-      ),
+          .filter(Boolean)
+      )
     );
 
     // Find matching mapping
@@ -399,11 +403,9 @@ export class GrokSessionApi {
       xsidScript: !this._xsidScript,
     };
     if (Object.values(missing).some(Boolean)) {
-      throw this._createError(
-        'unknown',
-        'Grok handshake page is missing required markers',
-        { missing },
-      );
+      throw this._createError('unknown', 'Grok handshake page is missing required markers', {
+        missing,
+      });
     }
 
     this._log('Page loaded, actions:', actions.length, 'xsid script:', xsidScript);
@@ -415,8 +417,9 @@ export class GrokSessionApi {
       credentials: 'include',
       signal,
       headers: {
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
       },
     });
     if (!res.ok) return null;
@@ -427,7 +430,8 @@ export class GrokSessionApi {
     if (!token) return null;
     if (svg) return { token, anim, svg };
 
-    const scriptMatches = html.match(/(?:src|href)="(\/_next\/static\/chunks\/[^"]+\.js)[^"]*"/g) || [];
+    const scriptMatches =
+      html.match(/(?:src|href)="(\/_next\/static\/chunks\/[^"]+\.js)[^"]*"/g) || [];
     const scripts = Array.from(
       new Set(
         scriptMatches
@@ -435,8 +439,8 @@ export class GrokSessionApi {
             const mm = m.match(/(?:src|href)="([^"]+)"/);
             return mm ? mm[1] : '';
           })
-          .filter(Boolean),
-      ),
+          .filter(Boolean)
+      )
     );
 
     const maxFetches = Math.min(60, scripts.length);
@@ -531,16 +535,18 @@ export class GrokSessionApi {
       'next-action': nextAction,
       'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
       'sec-ch-ua-mobile': '?0',
-      'next-router-state-tree': '%5B%22%22%2C%7B%22children%22%3A%5B%22c%22%2C%7B%22children%22%3A%5B%5B%22slug%22%2C%22%22%2C%22oc%22%5D%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D',
-      'baggage': this._baggage,
+      'next-router-state-tree':
+        '%5B%22%22%2C%7B%22children%22%3A%5B%22c%22%2C%7B%22children%22%3A%5B%5B%22slug%22%2C%22%22%2C%22oc%22%5D%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D',
+      baggage: this._baggage,
       'sentry-trace': `${this._sentryTrace}-${this._uuid().replace(/-/g, '').slice(0, 16)}-0`,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-      'accept': 'text/x-component',
-      'origin': 'https://grok.com',
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+      accept: 'text/x-component',
+      origin: 'https://grok.com',
       'sec-fetch-site': 'same-origin',
       'sec-fetch-mode': 'cors',
       'sec-fetch-dest': 'empty',
-      'referer': 'https://grok.com/c',
+      referer: 'https://grok.com/c',
     };
 
     if (this._cRun === 0) {
@@ -665,10 +671,14 @@ export class GrokSessionApi {
               anim: this._anim || null,
               xsidScript: this._xsidScript || null,
               numbersLen: Array.isArray(this._numbers) ? this._numbers.length : 0,
-              pageHasBaggage: !!this._pageHtml && this._pageHtml.includes('<meta name="baggage" content="'),
-              pageHasSentryTrace: !!this._pageHtml && this._pageHtml.includes('<meta name="sentry-trace" content="'),
-              pageHasVerificationToken: !!this._pageHtml && this._pageHtml.includes('grok-site-verification'),
-              pageHasNextChunks: !!this._pageHtml && this._pageHtml.includes('/_next/static/chunks/'),
+              pageHasBaggage:
+                !!this._pageHtml && this._pageHtml.includes('<meta name="baggage" content="'),
+              pageHasSentryTrace:
+                !!this._pageHtml && this._pageHtml.includes('<meta name="sentry-trace" content="'),
+              pageHasVerificationToken:
+                !!this._pageHtml && this._pageHtml.includes('grok-site-verification'),
+              pageHasNextChunks:
+                !!this._pageHtml && this._pageHtml.includes('/_next/static/chunks/'),
             },
           });
         }
@@ -804,18 +814,19 @@ export class GrokSessionApi {
       'sec-ch-ua-platform': '"Windows"',
       'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
       'sec-ch-ua-mobile': '?0',
-      'baggage': this._baggage,
+      baggage: this._baggage,
       'sentry-trace': `${this._sentryTrace}-${this._uuid().replace(/-/g, '').slice(0, 16)}-0`,
-      'traceparent': `00-${this._tokenHex(16)}-${this._tokenHex(8)}-00`,
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+      traceparent: `00-${this._tokenHex(16)}-${this._tokenHex(8)}-00`,
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
       'content-type': 'application/json',
       'x-statsig-id': xsid,
-      'accept': '*/*',
-      'origin': 'https://grok.com',
+      accept: '*/*',
+      origin: 'https://grok.com',
       'sec-fetch-site': 'same-origin',
       'sec-fetch-mode': 'cors',
       'sec-fetch-dest': 'empty',
-      'referer': 'https://grok.com/',
+      referer: 'https://grok.com/',
     };
   }
 
@@ -837,9 +848,7 @@ export class GrokSessionApi {
         const data = JSON.parse(line);
 
         // Extract streaming tokens
-        const token = extraData
-          ? data?.result?.token
-          : data?.result?.response?.token;
+        const token = extraData ? data?.result?.token : data?.result?.response?.token;
         if (token) {
           streamResponse.push(token);
           onChunk({

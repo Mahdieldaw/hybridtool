@@ -1,7 +1,4 @@
-type ResponseType =
-  | "batch"
-  | "mapping"
-  | "singularity";
+type ResponseType = 'batch' | 'mapping' | 'singularity';
 
 interface BatchUpdate {
   providerId: string;
@@ -53,8 +50,8 @@ export class StreamingBuffer {
       entry.deltas = [{ text: delta, ts: Date.now() }];
       entry.isReplace = true;
     } else {
-      // If we previously had a replace pending, we continue appending to it? 
-      // Actually, if a replace happens, it typically resets the stream. 
+      // If we previously had a replace pending, we continue appending to it?
+      // Actually, if a replace happens, it typically resets the stream.
       // Subsequent deltas should append to the replaced text.
       entry.deltas.push({ text: delta, ts: Date.now() });
     }
@@ -84,12 +81,10 @@ export class StreamingBuffer {
     const updates: BatchUpdate[] = [];
 
     this.pendingDeltas.forEach((entry, compositeKey) => {
-      const idx = compositeKey.indexOf(":");
+      const idx = compositeKey.indexOf(':');
       const providerId = idx >= 0 ? compositeKey.slice(idx + 1) : compositeKey;
-      const concatenatedText = entry.deltas.map((d) => d.text).join("");
-      const lastTs = entry.deltas.length
-        ? entry.deltas[entry.deltas.length - 1].ts
-        : Date.now();
+      const concatenatedText = entry.deltas.map((d) => d.text).join('');
+      const lastTs = entry.deltas.length ? entry.deltas[entry.deltas.length - 1].ts : Date.now();
       updates.push({
         providerId,
         text: concatenatedText,

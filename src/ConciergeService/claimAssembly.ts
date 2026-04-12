@@ -3,7 +3,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { ShadowParagraph, ShadowStatement } from '../shadow';
-import type { LinkedClaim, MapperClaim, MixedProvenanceResult, MixedProvenanceClaimResult, MixedParagraphEntry, MixedStatementEntry, ParagraphOrigin } from '../../shared/contract';
+import type {
+  LinkedClaim,
+  MapperClaim,
+  MixedProvenanceResult,
+  MixedProvenanceClaimResult,
+  MixedParagraphEntry,
+  MixedStatementEntry,
+  ParagraphOrigin,
+} from '../../shared/contract';
 import type { Region } from '../geometry/interpretation/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
@@ -12,16 +20,16 @@ import { generateTextEmbeddings } from '../clustering/embeddings';
  * Generate claim embeddings once. Returns embeddings keyed by claim ID.
  */
 export async function generateClaimEmbeddings(
-    claims: Array<{ id: string; label: string; text?: string }>,
+  claims: Array<{ id: string; label: string; text?: string }>
 ): Promise<{ embeddings: Map<string, Float32Array> }> {
-    const claimTexts = claims.map(c => `${c.label}. ${c.text || ''}`);
-    const raw = await generateTextEmbeddings(claimTexts);
-    const embeddings = new Map<string, Float32Array>();
-    for (let idx = 0; idx < claims.length; idx++) {
-        const emb = raw.embeddings.get(String(idx));
-        if (emb) embeddings.set(claims[idx].id, emb);
-    }
-    return { embeddings };
+  const claimTexts = claims.map((c) => `${c.label}. ${c.text || ''}`);
+  const raw = await generateTextEmbeddings(claimTexts);
+  const embeddings = new Map<string, Float32Array>();
+  for (let idx = 0; idx < claims.length; idx++) {
+    const emb = raw.embeddings.get(String(idx));
+    if (emb) embeddings.set(claims[idx].id, emb);
+  }
+  return { embeddings };
 }
 
 /**
@@ -36,432 +44,462 @@ export async function generateClaimEmbeddings(
  * no round-trip through statement IDs.
  */
 export async function reconstructCanonicalProvenance(
-    claims: MapperClaim[],
-    statements: ShadowStatement[],
-    paragraphs: ShadowParagraph[],
-    paragraphEmbeddings: Map<string, Float32Array>,
-    statementEmbeddings: Map<string, Float32Array> | null,
-    precomputedClaimEmbeddings: Map<string, Float32Array>,
-    regions: Region[],
-    totalModelCount: number,
+  claims: MapperClaim[],
+  statements: ShadowStatement[],
+  paragraphs: ShadowParagraph[],
+  paragraphEmbeddings: Map<string, Float32Array>,
+  statementEmbeddings: Map<string, Float32Array> | null,
+  precomputedClaimEmbeddings: Map<string, Float32Array>,
+  regions: Region[],
+  totalModelCount: number
 ): Promise<{
-    claims: LinkedClaim[];
-    mixedProvenanceResult: MixedProvenanceResult;
-    competitiveWeights: Map<string, Map<string, number>>;
-    competitiveExcess: Map<string, Map<string, number>>;
-    competitiveThresholds: Map<string, number>;
+  claims: LinkedClaim[];
+  mixedProvenanceResult: MixedProvenanceResult;
+  competitiveWeights: Map<string, Map<string, number>>;
+  competitiveExcess: Map<string, Map<string, number>>;
+  competitiveThresholds: Map<string, number>;
 }> {
-    const statementsById = new Map(statements.map(s => [s.id, s]));
-    const claimEmbeddings = precomputedClaimEmbeddings;
+  const statementsById = new Map(statements.map((s) => [s.id, s]));
+  const claimEmbeddings = precomputedClaimEmbeddings;
 
-    // Build paragraph-node → region lookup for sourceRegionIds derivation
-    const paragraphToRegionIds = new Map<string, string[]>();
-    for (const region of regions) {
-        if (!Array.isArray(region.nodeIds)) continue;
-        for (const nodeId of region.nodeIds) {
-            const existing = paragraphToRegionIds.get(nodeId);
-            if (existing) {
-                existing.push(region.id);
-            } else {
-                paragraphToRegionIds.set(nodeId, [region.id]);
-            }
-        }
+  // Build paragraph-node → region lookup for sourceRegionIds derivation
+  const paragraphToRegionIds = new Map<string, string[]>();
+  for (const region of regions) {
+    if (!Array.isArray(region.nodeIds)) continue;
+    for (const nodeId of region.nodeIds) {
+      const existing = paragraphToRegionIds.get(nodeId);
+      if (existing) {
+        existing.push(region.id);
+      } else {
+        paragraphToRegionIds.set(nodeId, [region.id]);
+      }
     }
+  }
 
-    // Build statement → paragraph lookup
-    const statementToParagraphId = new Map<string, string>();
-    for (const para of paragraphs) {
-        for (const sid of para.statementIds) {
-            statementToParagraphId.set(sid, para.id);
-        }
+  // Build statement → paragraph lookup
+  const statementToParagraphId = new Map<string, string>();
+  for (const para of paragraphs) {
+    for (const sid of para.statementIds) {
+      statementToParagraphId.set(sid, para.id);
     }
+  }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE 1: Build C×N similarity matrix (claim centroids × paragraphs)
-    // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 1: Build C×N similarity matrix (claim centroids × paragraphs)
+  // ═══════════════════════════════════════════════════════════════
 
-    // Normalize claim embedding keying to claim.id
-    // precomputedClaimEmbeddings are keyed by claim.id
-    const centroidByClaimId = new Map<string, Float32Array>();
+  // Normalize claim embedding keying to claim.id
+  // precomputedClaimEmbeddings are keyed by claim.id
+  const centroidByClaimId = new Map<string, Float32Array>();
+  for (const claim of claims) {
+    const emb = claimEmbeddings.get(claim.id);
+    if (emb) centroidByClaimId.set(claim.id, emb);
+  }
+
+  // simMatrix[paragraphId][claimId] = cosine similarity
+  const simMatrix = new Map<string, Map<string, number>>();
+
+  for (const para of paragraphs) {
+    const paraEmb = paragraphEmbeddings.get(para.id);
+    if (!paraEmb) continue;
+
+    const sims = new Map<string, number>();
     for (const claim of claims) {
-        const emb = claimEmbeddings.get(claim.id);
-        if (emb) centroidByClaimId.set(claim.id, emb);
+      const centroid = centroidByClaimId.get(claim.id);
+      if (!centroid) continue;
+      sims.set(claim.id, cosineSimilarity(centroid, paraEmb));
+    }
+    simMatrix.set(para.id, sims);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 2: Competitive assignment — each paragraph chooses its claims
+  // Each paragraph computes its mean affinity across all claims,
+  // then assigns itself to every claim above that mean.
+  // ═══════════════════════════════════════════════════════════════
+
+  const claimPools = new Map<string, string[]>();
+  for (const claim of claims) {
+    claimPools.set(claim.id, []);
+  }
+
+  // Track linear excess weights per (paragraph, claim)
+  // excess(P, c) = sim(P, c) - (μ_P + σ_P)  — positive for assigned claims only
+  // weight(P, c) = excess(P, c) / Σ excess(P, c') — normalized across assigned claims
+  const rawExcess = new Map<string, Map<string, number>>(); // paraId → claimId → excess
+  const normalizedWeights = new Map<string, Map<string, number>>(); // paraId → claimId → weight
+
+  for (const [paraId, sims] of simMatrix) {
+    const values = Array.from(sims.values());
+    if (values.length === 0) continue;
+
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+
+    // Special case: N=2 uses mean-only threshold to ensure each paragraph assigns to closer claim
+    // N≥3 uses μ + σ for selectivity across larger claim sets
+    let threshold: number;
+    if (claims.length === 2) {
+      threshold = mean;
+    } else {
+      const variance = values.reduce((s, g) => s + (g - mean) ** 2, 0) / values.length;
+      const stddev = Math.sqrt(variance);
+      threshold = mean + stddev; // μ + σ
     }
 
-    // simMatrix[paragraphId][claimId] = cosine similarity
-    const simMatrix = new Map<string, Map<string, number>>();
+    const paraExcess = new Map<string, number>();
+    let totalExcess = 0;
 
-    for (const para of paragraphs) {
+    for (const [claimId, sim] of sims) {
+      if (sim > threshold) {
+        claimPools.get(claimId)!.push(paraId);
+        const excess = sim - threshold;
+        paraExcess.set(claimId, excess);
+        totalExcess += excess;
+      }
+    }
+
+    rawExcess.set(paraId, paraExcess);
+
+    // Normalize weights for this paragraph
+    const paraWeights = new Map<string, number>();
+    if (totalExcess > 0) {
+      for (const [claimId, excess] of paraExcess) {
+        paraWeights.set(claimId, excess / totalExcess);
+      }
+    } else {
+      // Equal weight among assigned claims
+      const count = paraExcess.size;
+      if (count > 0) {
+        for (const claimId of paraExcess.keys()) {
+          paraWeights.set(claimId, 1 / count);
+        }
+      }
+    }
+    normalizedWeights.set(paraId, paraWeights);
+  }
+
+  // Edge case: single claim — mean equals the only value, nothing above mean.
+  // Assign all paragraphs to the sole claim.
+  if (claims.length === 1 && claimPools.get(claims[0].id)!.length === 0) {
+    const allParaIds = Array.from(simMatrix.keys());
+    claimPools.set(claims[0].id, allParaIds);
+    for (const paraId of allParaIds) {
+      let weights = normalizedWeights.get(paraId);
+      if (!weights) {
+        weights = new Map<string, number>();
+        normalizedWeights.set(paraId, weights);
+      }
+      weights.set(claims[0].id, 1);
+    }
+    console.log(
+      '[Provenance] Single-claim guard fired: assigned all',
+      simMatrix.size,
+      'paragraphs'
+    );
+  }
+
+  // Edge case: all centroids identical — every paragraph has identical sims
+  // across claims, so nothing is above mean. Assign all paragraphs to all claims.
+  if (claims.length > 1 && Array.from(claimPools.values()).every((pool) => pool.length === 0)) {
+    const allParaIds = Array.from(simMatrix.keys());
+    for (const claim of claims) {
+      claimPools.set(claim.id, allParaIds);
+    }
+    const uniformWeight = 1 / claims.length;
+    for (const paraId of allParaIds) {
+      let weights = normalizedWeights.get(paraId);
+      if (!weights) {
+        weights = new Map<string, number>();
+        normalizedWeights.set(paraId, weights);
+      }
+      for (const claim of claims) {
+        weights.set(claim.id, uniformWeight);
+      }
+    }
+    console.log(
+      '[Provenance] Degenerate guard fired: all pools were empty, assigned all',
+      simMatrix.size,
+      'paragraphs to all',
+      claims.length,
+      'claims'
+    );
+  }
+
+  // Debug: log pool sizes and centroid availability
+  const poolSummary = claims.map((c) => `${c.id}:${claimPools.get(c.id)?.length ?? 0}`).join(', ');
+  console.log(
+    `[Provenance] Competitive assignment: ${claims.length} claims, ${simMatrix.size} paragraphs, ${centroidByClaimId.size} centroids`
+  );
+  console.log(`[Provenance] Pool sizes: ${poolSummary}`);
+
+  // Build per-paragraph threshold map (paraId → threshold value)
+  const thresholdByParagraph = new Map<string, number>();
+  for (const [paraId, sims] of simMatrix) {
+    const values = Array.from(sims.values());
+    if (values.length === 0) continue;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    if (claims.length === 2) {
+      thresholdByParagraph.set(paraId, mean);
+    } else {
+      const variance = values.reduce((s, g) => s + (g - mean) ** 2, 0) / values.length;
+      thresholdByParagraph.set(paraId, mean + Math.sqrt(variance));
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 3: Mixed-method merge — claim-centric scoring + μ_global filter
+  // Uses claimPools directly (paragraph-level) — no round-trip through
+  // intermediate statement IDs.
+  // ═══════════════════════════════════════════════════════════════
+
+  const paragraphById = new Map(paragraphs.map((p) => [p.id, p]));
+
+  // Aggregate for diagnostics
+  let totalKept = 0;
+  let totalInCompetitive = 0;
+  let totalExpanded = 0;
+  let totalRemoved = 0;
+  let totalMergedStmts = 0;
+
+  const perClaim: Record<string, MixedProvenanceClaimResult> = {};
+
+  // Per-claim canonical results (built during Phase 3, used in Phase 4)
+  const canonicalPerClaim = new Map<
+    string,
+    { canonicalStatementIds: string[]; mergedParaIds: Set<string> }
+  >();
+
+  for (const claim of claims) {
+    const claimEmb = centroidByClaimId.get(claim.id);
+
+    // ── Claim-centric paragraph scoring ───────────────────────────
+    let ccMu = 0;
+    let ccSigma = 0;
+    let ccThreshold = 0;
+    const ccSimByPara = new Map<string, number>();
+
+    if (claimEmb) {
+      const sims: number[] = [];
+      for (const para of paragraphs) {
         const paraEmb = paragraphEmbeddings.get(para.id);
         if (!paraEmb) continue;
-
-        const sims = new Map<string, number>();
-        for (const claim of claims) {
-            const centroid = centroidByClaimId.get(claim.id);
-            if (!centroid) continue;
-            sims.set(claim.id, cosineSimilarity(centroid, paraEmb));
-        }
-        simMatrix.set(para.id, sims);
+        const sim = cosineSimilarity(claimEmb, paraEmb);
+        ccSimByPara.set(para.id, sim);
+        sims.push(sim);
+      }
+      if (sims.length > 0) {
+        ccMu = sims.reduce((a, b) => a + b, 0) / sims.length;
+        const variance = sims.reduce((s, v) => s + (v - ccMu) ** 2, 0) / sims.length;
+        ccSigma = Math.sqrt(variance);
+      }
+      ccThreshold = ccMu + ccSigma;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE 2: Competitive assignment — each paragraph chooses its claims
-    // Each paragraph computes its mean affinity across all claims,
-    // then assigns itself to every claim above that mean.
-    // ═══════════════════════════════════════════════════════════════
-
-    const claimPools = new Map<string, string[]>();
-    for (const claim of claims) {
-        claimPools.set(claim.id, []);
+    // Claim-centric pool: paragraphs above threshold (empty if σ=0)
+    const ccPool = new Set<string>();
+    if (ccSigma > 0) {
+      for (const [paraId, sim] of ccSimByPara) {
+        if (sim > ccThreshold) ccPool.add(paraId);
+      }
     }
 
-    // Track linear excess weights per (paragraph, claim)
-    // excess(P, c) = sim(P, c) - (μ_P + σ_P)  — positive for assigned claims only
-    // weight(P, c) = excess(P, c) / Σ excess(P, c') — normalized across assigned claims
-    const rawExcess = new Map<string, Map<string, number>>(); // paraId → claimId → excess
-    const normalizedWeights = new Map<string, Map<string, number>>(); // paraId → claimId → weight
+    // ── Merge competitive + claim-centric pools ───────────────────
+    const competitiveParas = new Set(claimPools.get(claim.id) ?? []);
+    const allParaIds = new Set<string>([...competitiveParas, ...ccPool]);
 
-    for (const [paraId, sims] of simMatrix) {
-        const values = Array.from(sims.values());
-        if (values.length === 0) continue;
+    const mergedParagraphs: MixedParagraphEntry[] = [];
+    let bothCount = 0;
+    let compOnlyCount = 0;
+    let ccOnlyCount = 0;
 
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    for (const paraId of allParaIds) {
+      const inComp = competitiveParas.has(paraId);
+      const inCC = ccPool.has(paraId);
+      let origin: ParagraphOrigin;
+      if (inComp && inCC) {
+        origin = 'both';
+        bothCount++;
+      } else if (inComp) {
+        origin = 'competitive-only';
+        compOnlyCount++;
+      } else {
+        origin = 'claim-centric-only';
+        ccOnlyCount++;
+      }
 
-        // Special case: N=2 uses mean-only threshold to ensure each paragraph assigns to closer claim
-        // N≥3 uses μ + σ for selectivity across larger claim sets
-        let threshold: number;
-        if (claims.length === 2) {
-            threshold = mean;
-        } else {
-            const variance = values.reduce((s, g) => s + (g - mean) ** 2, 0) / values.length;
-            const stddev = Math.sqrt(variance);
-            threshold = mean + stddev; // μ + σ
-        }
-
-        const paraExcess = new Map<string, number>();
-        let totalExcess = 0;
-
-        for (const [claimId, sim] of sims) {
-            if (sim > threshold) {
-                claimPools.get(claimId)!.push(paraId);
-                const excess = sim - threshold;
-                paraExcess.set(claimId, excess);
-                totalExcess += excess;
-            }
-        }
-
-        rawExcess.set(paraId, paraExcess);
-
-        // Normalize weights for this paragraph
-        const paraWeights = new Map<string, number>();
-        if (totalExcess > 0) {
-            for (const [claimId, excess] of paraExcess) {
-                paraWeights.set(claimId, excess / totalExcess);
-            }
-        } else {
-            // Equal weight among assigned claims
-            const count = paraExcess.size;
-            if (count > 0) {
-                for (const claimId of paraExcess.keys()) {
-                    paraWeights.set(claimId, 1 / count);
-                }
-            }
-        }
-        normalizedWeights.set(paraId, paraWeights);
+      mergedParagraphs.push({
+        paragraphId: paraId,
+        origin,
+        claimCentricSim: ccSimByPara.get(paraId) ?? null,
+        claimCentricAboveThreshold: ccPool.has(paraId),
+        compWeight: normalizedWeights.get(paraId)?.get(claim.id) ?? null,
+        compExcess: rawExcess.get(paraId)?.get(claim.id) ?? null,
+        compThreshold: thresholdByParagraph.get(paraId) ?? null,
+      });
     }
 
-    // Edge case: single claim — mean equals the only value, nothing above mean.
-    // Assign all paragraphs to the sole claim.
-    if (claims.length === 1 && claimPools.get(claims[0].id)!.length === 0) {
-        const allParaIds = Array.from(simMatrix.keys());
-        claimPools.set(claims[0].id, allParaIds);
-        for (const paraId of allParaIds) {
-            let weights = normalizedWeights.get(paraId);
-            if (!weights) {
-                weights = new Map<string, number>();
-                normalizedWeights.set(paraId, weights);
-            }
-            weights.set(claims[0].id, 1);
-        }
-        console.log('[Provenance] Single-claim guard fired: assigned all', simMatrix.size, 'paragraphs');
+    // ── Preservation-by-default statement filter (μ_global floor) ─
+    const allGlobalSims: number[] = [];
+    if (claimEmb && statementEmbeddings) {
+      for (const stmt of statements) {
+        const stmtEmb = statementEmbeddings.get(stmt.id);
+        if (!stmtEmb) continue;
+        allGlobalSims.push(cosineSimilarity(claimEmb, stmtEmb));
+      }
     }
+    const globalMu =
+      allGlobalSims.length > 0
+        ? allGlobalSims.reduce((a, b) => a + b, 0) / allGlobalSims.length
+        : 0;
 
-    // Edge case: all centroids identical — every paragraph has identical sims
-    // across claims, so nothing is above mean. Assign all paragraphs to all claims.
-    if (claims.length > 1 && Array.from(claimPools.values()).every(pool => pool.length === 0)) {
-        const allParaIds = Array.from(simMatrix.keys());
-        for (const claim of claims) {
-            claimPools.set(claim.id, allParaIds);
-        }
-        const uniformWeight = 1 / claims.length;
-        for (const paraId of allParaIds) {
-            let weights = normalizedWeights.get(paraId);
-            if (!weights) {
-                weights = new Map<string, number>();
-                normalizedWeights.set(paraId, weights);
-            }
-            for (const claim of claims) {
-                weights.set(claim.id, uniformWeight);
-            }
-        }
-        console.log('[Provenance] Degenerate guard fired: all pools were empty, assigned all', simMatrix.size, 'paragraphs to all', claims.length, 'claims');
-    }
+    const candidateStatements: MixedStatementEntry[] = [];
+    const stmtIdsSeen = new Set<string>();
 
-    // Debug: log pool sizes and centroid availability
-    const poolSummary = claims.map(c => `${c.id}:${claimPools.get(c.id)?.length ?? 0}`).join(', ');
-    console.log(`[Provenance] Competitive assignment: ${claims.length} claims, ${simMatrix.size} paragraphs, ${centroidByClaimId.size} centroids`);
-    console.log(`[Provenance] Pool sizes: ${poolSummary}`);
+    for (const pEntry of mergedParagraphs) {
+      const para = paragraphById.get(pEntry.paragraphId);
+      if (!para) continue;
+      for (const sid of para.statementIds) {
+        if (stmtIdsSeen.has(sid)) continue;
+        stmtIdsSeen.add(sid);
 
-    // Build per-paragraph threshold map (paraId → threshold value)
-    const thresholdByParagraph = new Map<string, number>();
-    for (const [paraId, sims] of simMatrix) {
-        const values = Array.from(sims.values());
-        if (values.length === 0) continue;
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        if (claims.length === 2) {
-            thresholdByParagraph.set(paraId, mean);
-        } else {
-            const variance = values.reduce((s, g) => s + (g - mean) ** 2, 0) / values.length;
-            thresholdByParagraph.set(paraId, mean + Math.sqrt(variance));
-        }
-    }
+        const stmtObj = statementsById.get(sid);
+        if (!stmtObj) continue;
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE 3: Mixed-method merge — claim-centric scoring + μ_global filter
-    // Uses claimPools directly (paragraph-level) — no round-trip through
-    // intermediate statement IDs.
-    // ═══════════════════════════════════════════════════════════════
-
-    const paragraphById = new Map(paragraphs.map(p => [p.id, p]));
-
-    // Aggregate for diagnostics
-    let totalKept = 0;
-    let totalInCompetitive = 0;
-    let totalExpanded = 0;
-    let totalRemoved = 0;
-    let totalMergedStmts = 0;
-
-    const perClaim: Record<string, MixedProvenanceClaimResult> = {};
-
-    // Per-claim canonical results (built during Phase 3, used in Phase 4)
-    const canonicalPerClaim = new Map<string, { canonicalStatementIds: string[]; mergedParaIds: Set<string> }>();
-
-    for (const claim of claims) {
-        const claimEmb = centroidByClaimId.get(claim.id);
-
-        // ── Claim-centric paragraph scoring ───────────────────────────
-        let ccMu = 0;
-        let ccSigma = 0;
-        let ccThreshold = 0;
-        const ccSimByPara = new Map<string, number>();
-
-        if (claimEmb) {
-            const sims: number[] = [];
-            for (const para of paragraphs) {
-                const paraEmb = paragraphEmbeddings.get(para.id);
-                if (!paraEmb) continue;
-                const sim = cosineSimilarity(claimEmb, paraEmb);
-                ccSimByPara.set(para.id, sim);
-                sims.push(sim);
-            }
-            if (sims.length > 0) {
-                ccMu = sims.reduce((a, b) => a + b, 0) / sims.length;
-                const variance = sims.reduce((s, v) => s + (v - ccMu) ** 2, 0) / sims.length;
-                ccSigma = Math.sqrt(variance);
-            }
-            ccThreshold = ccMu + ccSigma;
-        }
-
-        // Claim-centric pool: paragraphs above threshold (empty if σ=0)
-        const ccPool = new Set<string>();
-        if (ccSigma > 0) {
-            for (const [paraId, sim] of ccSimByPara) {
-                if (sim > ccThreshold) ccPool.add(paraId);
-            }
-        }
-
-        // ── Merge competitive + claim-centric pools ───────────────────
-        const competitiveParas = new Set(claimPools.get(claim.id) ?? []);
-        const allParaIds = new Set<string>([...competitiveParas, ...ccPool]);
-
-        const mergedParagraphs: MixedParagraphEntry[] = [];
-        let bothCount = 0;
-        let compOnlyCount = 0;
-        let ccOnlyCount = 0;
-
-        for (const paraId of allParaIds) {
-            const inComp = competitiveParas.has(paraId);
-            const inCC = ccPool.has(paraId);
-            let origin: ParagraphOrigin;
-            if (inComp && inCC) { origin = 'both'; bothCount++; }
-            else if (inComp) { origin = 'competitive-only'; compOnlyCount++; }
-            else { origin = 'claim-centric-only'; ccOnlyCount++; }
-
-            mergedParagraphs.push({
-                paragraphId: paraId,
-                origin,
-                claimCentricSim: ccSimByPara.get(paraId) ?? null,
-                claimCentricAboveThreshold: ccPool.has(paraId),
-                compWeight: normalizedWeights.get(paraId)?.get(claim.id) ?? null,
-                compExcess: rawExcess.get(paraId)?.get(claim.id) ?? null,
-                compThreshold: thresholdByParagraph.get(paraId) ?? null,
-            });
-        }
-
-        // ── Preservation-by-default statement filter (μ_global floor) ─
-        const allGlobalSims: number[] = [];
+        let globalSim = 0;
         if (claimEmb && statementEmbeddings) {
-            for (const stmt of statements) {
-                const stmtEmb = statementEmbeddings.get(stmt.id);
-                if (!stmtEmb) continue;
-                allGlobalSims.push(cosineSimilarity(claimEmb, stmtEmb));
-            }
-        }
-        const globalMu = allGlobalSims.length > 0
-            ? allGlobalSims.reduce((a, b) => a + b, 0) / allGlobalSims.length
-            : 0;
-
-        const candidateStatements: MixedStatementEntry[] = [];
-        const stmtIdsSeen = new Set<string>();
-
-        for (const pEntry of mergedParagraphs) {
-            const para = paragraphById.get(pEntry.paragraphId);
-            if (!para) continue;
-            for (const sid of para.statementIds) {
-                if (stmtIdsSeen.has(sid)) continue;
-                stmtIdsSeen.add(sid);
-
-                const stmtObj = statementsById.get(sid);
-                if (!stmtObj) continue;
-
-                let globalSim = 0;
-                if (claimEmb && statementEmbeddings) {
-                    const stmtEmb = statementEmbeddings.get(sid);
-                    if (stmtEmb) globalSim = cosineSimilarity(claimEmb, stmtEmb);
-                }
-
-                const kept = globalSim >= globalMu;
-                const fromSupporterModel = Array.isArray(claim.supporters)
-                    ? claim.supporters.includes(stmtObj.modelIndex ?? -1)
-                    : true;
-
-                candidateStatements.push({
-                    statementId: sid,
-                    globalSim,
-                    kept,
-                    fromSupporterModel,
-                    paragraphOrigin: pEntry.origin,
-                    paragraphId: pEntry.paragraphId,
-                    zone: kept ? 'core' : 'removed',
-                });
-            }
+          const stmtEmb = statementEmbeddings.get(sid);
+          if (stmtEmb) globalSim = cosineSimilarity(claimEmb, stmtEmb);
         }
 
-        const canonicalStatements = candidateStatements.filter(s => s.zone === 'core');
-        const canonicalStatementIds = canonicalStatements.map(s => s.statementId);
-        const removedCount = candidateStatements.length - canonicalStatements.length;
+        const kept = globalSim >= globalMu;
+        const fromSupporterModel = Array.isArray(claim.supporters)
+          ? claim.supporters.includes(stmtObj.modelIndex ?? -1)
+          : true;
 
-        totalMergedStmts += candidateStatements.length;
-        totalKept += canonicalStatements.length;
-        totalRemoved += removedCount;
-
-        // Compare against competitive set for diagnostics
-        const compStmtIds = new Set<string>();
-        for (const paraId of competitiveParas) {
-            const para = paragraphById.get(paraId);
-            if (para) for (const sid of para.statementIds) compStmtIds.add(sid);
-        }
-        for (const s of canonicalStatements) {
-            if (compStmtIds.has(s.statementId)) totalInCompetitive++;
-            else totalExpanded++;
-        }
-
-        perClaim[claim.id] = {
-            claimId: claim.id,
-            ccMu,
-            ccSigma,
-            ccThreshold,
-            mergedParagraphs,
-            statements: candidateStatements,
-            globalMu,
-            keptCount: canonicalStatements.length,
-            removedCount,
-            totalCount: candidateStatements.length,
-            bothCount,
-            competitiveOnlyCount: compOnlyCount,
-            claimCentricOnlyCount: ccOnlyCount,
-            coreCount: canonicalStatements.length,
-            canonicalStatementIds,
-        };
-
-        canonicalPerClaim.set(claim.id, { canonicalStatementIds, mergedParaIds: allParaIds });
+        candidateStatements.push({
+          statementId: sid,
+          globalSim,
+          kept,
+          fromSupporterModel,
+          paragraphOrigin: pEntry.origin,
+          paragraphId: pEntry.paragraphId,
+          zone: kept ? 'core' : 'removed',
+        });
+      }
     }
 
-    const recoveryRate = totalKept > 0 ? totalInCompetitive / totalKept : 0;
-    const expansionRate = totalKept > 0 ? totalExpanded / totalKept : 0;
-    const removalRate = totalMergedStmts > 0 ? totalRemoved / totalMergedStmts : 0;
+    const canonicalStatements = candidateStatements.filter((s) => s.zone === 'core');
+    const canonicalStatementIds = canonicalStatements.map((s) => s.statementId);
+    const removedCount = candidateStatements.length - canonicalStatements.length;
 
-    const mixedProvenanceResult: MixedProvenanceResult = { perClaim, recoveryRate, expansionRate, removalRate };
+    totalMergedStmts += candidateStatements.length;
+    totalKept += canonicalStatements.length;
+    totalRemoved += removedCount;
 
-    console.log(`[Provenance] MixedProvenance: recovery=${(recoveryRate * 100).toFixed(1)}% expansion=${(expansionRate * 100).toFixed(1)}% removal=${(removalRate * 100).toFixed(1)}%`);
+    // Compare against competitive set for diagnostics
+    const compStmtIds = new Set<string>();
+    for (const paraId of competitiveParas) {
+      const para = paragraphById.get(paraId);
+      if (para) for (const sid of para.statementIds) compStmtIds.add(sid);
+    }
+    for (const s of canonicalStatements) {
+      if (compStmtIds.has(s.statementId)) totalInCompetitive++;
+      else totalExpanded++;
+    }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE 4: Build LinkedClaim results from canonical statement IDs
-    // ═══════════════════════════════════════════════════════════════
+    perClaim[claim.id] = {
+      claimId: claim.id,
+      ccMu,
+      ccSigma,
+      ccThreshold,
+      mergedParagraphs,
+      statements: candidateStatements,
+      globalMu,
+      keptCount: canonicalStatements.length,
+      removedCount,
+      totalCount: candidateStatements.length,
+      bothCount,
+      competitiveOnlyCount: compOnlyCount,
+      claimCentricOnlyCount: ccOnlyCount,
+      coreCount: canonicalStatements.length,
+      canonicalStatementIds,
+    };
 
-    const results = claims.map((claim) => {
-        const canonical = canonicalPerClaim.get(claim.id);
-        const sourceStatementIds = canonical?.canonicalStatementIds ?? [];
-        const sourceStatements = sourceStatementIds
-            .map(id => statementsById.get(id))
-            .filter((s): s is ShadowStatement => s !== undefined);
+    canonicalPerClaim.set(claim.id, { canonicalStatementIds, mergedParaIds: allParaIds });
+  }
 
-        // Derive region IDs from source statements → paragraphs → regions
-        const matchedRegionIds = new Set<string>();
-        for (const sid of sourceStatementIds) {
-            const pid = statementToParagraphId.get(sid);
-            if (!pid) continue;
-            for (const rid of paragraphToRegionIds.get(pid) || []) matchedRegionIds.add(rid);
-        }
-        const sourceRegionIds = Array.from(matchedRegionIds).sort();
+  const recoveryRate = totalKept > 0 ? totalInCompetitive / totalKept : 0;
+  const expansionRate = totalKept > 0 ? totalExpanded / totalKept : 0;
+  const removalRate = totalMergedStmts > 0 ? totalRemoved / totalMergedStmts : 0;
 
-        const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
-        const supportRatio = totalModelCount > 0 ? supporters.length / totalModelCount : 0;
+  const mixedProvenanceResult: MixedProvenanceResult = {
+    perClaim,
+    recoveryRate,
+    expansionRate,
+    removalRate,
+  };
 
-        // Compute bulk (weighted evidence mass) per claim
-        // bulk uses the merged paragraph set (competitive + claim-centric) for the claim
-        const mergedParaIds = canonical?.mergedParaIds ?? new Set<string>();
-        let bulk = 0;
-        for (const paraId of mergedParaIds) {
-            const w = normalizedWeights.get(paraId)?.get(claim.id) ?? 0;
-            bulk += w;
-        }
+  console.log(
+    `[Provenance] MixedProvenance: recovery=${(recoveryRate * 100).toFixed(1)}% expansion=${(expansionRate * 100).toFixed(1)}% removal=${(removalRate * 100).toFixed(1)}%`
+  );
 
-        return {
-            id: claim.id,
-            label: claim.label,
-            text: claim.text,
-            supporters,
-            support_count: supporters.length,
-            type: 'assertive' as const,
-            role: 'supplement' as const,
-            sourceStatementIds,
-            sourceStatements,
-            sourceRegionIds,
-            supportRatio,
-            provenanceBulk: bulk,
-        };
-    });
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 4: Build LinkedClaim results from canonical statement IDs
+  // ═══════════════════════════════════════════════════════════════
 
-    // Debug: log final statement counts per claim
-    const stmtSummary = results.map(r => `${r.id}:stmts=${r.sourceStatementIds.length}`).join(', ');
-    console.log(`[Provenance] Canonical statement counts: ${stmtSummary}`);
+  const results = claims.map((claim) => {
+    const canonical = canonicalPerClaim.get(claim.id);
+    const sourceStatementIds = canonical?.canonicalStatementIds ?? [];
+    const sourceStatements = sourceStatementIds
+      .map((id) => statementsById.get(id))
+      .filter((s): s is ShadowStatement => s !== undefined);
+
+    // Derive region IDs from source statements → paragraphs → regions
+    const matchedRegionIds = new Set<string>();
+    for (const sid of sourceStatementIds) {
+      const pid = statementToParagraphId.get(sid);
+      if (!pid) continue;
+      for (const rid of paragraphToRegionIds.get(pid) || []) matchedRegionIds.add(rid);
+    }
+    const sourceRegionIds = Array.from(matchedRegionIds).sort();
+
+    const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
+    const supportRatio = totalModelCount > 0 ? supporters.length / totalModelCount : 0;
+
+    // Compute bulk (weighted evidence mass) per claim
+    // bulk uses the merged paragraph set (competitive + claim-centric) for the claim
+    const mergedParaIds = canonical?.mergedParaIds ?? new Set<string>();
+    let bulk = 0;
+    for (const paraId of mergedParaIds) {
+      const w = normalizedWeights.get(paraId)?.get(claim.id) ?? 0;
+      bulk += w;
+    }
 
     return {
-        claims: results,
-        mixedProvenanceResult,
-        competitiveWeights: normalizedWeights,
-        competitiveExcess: rawExcess,
-        competitiveThresholds: thresholdByParagraph,
+      id: claim.id,
+      label: claim.label,
+      text: claim.text,
+      supporters,
+      support_count: supporters.length,
+      type: 'assertive' as const,
+      role: 'supplement' as const,
+      sourceStatementIds,
+      sourceStatements,
+      sourceRegionIds,
+      supportRatio,
+      provenanceBulk: bulk,
     };
+  });
+
+  // Debug: log final statement counts per claim
+  const stmtSummary = results.map((r) => `${r.id}:stmts=${r.sourceStatementIds.length}`).join(', ');
+  console.log(`[Provenance] Canonical statement counts: ${stmtSummary}`);
+
+  return {
+    claims: results,
+    mixedProvenanceResult,
+    competitiveWeights: normalizedWeights,
+    competitiveExcess: rawExcess,
+    competitiveThresholds: thresholdByParagraph,
+  };
 }

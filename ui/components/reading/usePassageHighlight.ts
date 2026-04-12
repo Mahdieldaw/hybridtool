@@ -16,7 +16,7 @@ export interface ParagraphHighlight {
  */
 export function usePassageHighlight(
   artifact: any,
-  focusedClaimId: string | null,
+  focusedClaimId: string | null
 ): Map<string, ParagraphHighlight> {
   return useMemo(() => {
     const map = new Map<string, ParagraphHighlight>();
@@ -54,22 +54,33 @@ export function usePassageHighlight(
           const paraId = paraIdByCoord.get(`${mi}:${pi}`);
           if (paraId) {
             passageIds.add(paraId);
-            map.set(paraId, { state: 'passage', landscapePosition: pos, claimId: focusedClaimId, isLoadBearing });
+            map.set(paraId, {
+              state: 'passage',
+              landscapePosition: pos,
+              claimId: focusedClaimId,
+              isLoadBearing,
+            });
           }
         }
       }
 
       // Mark dispersed (paragraphCoverage entries not already in a passage)
-      const coverage: any[] = Array.isArray(profile?.paragraphCoverage) ? profile.paragraphCoverage : [];
+      const coverage: any[] = Array.isArray(profile?.paragraphCoverage)
+        ? profile.paragraphCoverage
+        : [];
       for (const entry of coverage) {
         if ((entry.coverage ?? 0) <= 0) continue;
         const paraId = String(entry.paragraphId ?? '');
         if (!paraId || passageIds.has(paraId)) continue;
         if (!map.has(paraId)) {
-          map.set(paraId, { state: 'dispersed', landscapePosition: pos, claimId: focusedClaimId, isLoadBearing });
+          map.set(paraId, {
+            state: 'dispersed',
+            landscapePosition: pos,
+            claimId: focusedClaimId,
+            isLoadBearing,
+          });
         }
       }
-
     } else {
       // ── Overview mode ─────────────────────────────────────────────
       // Walk load-bearing claims in landscape priority order.
@@ -83,7 +94,7 @@ export function usePassageHighlight(
       const allClaimIds = Object.keys(densityProfiles);
       // Sort by landscape tier ascending (northStar = 0 wins)
       const sorted = allClaimIds
-        .filter(id => routingProfiles[id]?.isLoadBearing === true)
+        .filter((id) => routingProfiles[id]?.isLoadBearing === true)
         .sort((a, b) => {
           const pa: LandscapePosition = routingProfiles[a]?.landscapePosition ?? 'floor';
           const pb: LandscapePosition = routingProfiles[b]?.landscapePosition ?? 'floor';

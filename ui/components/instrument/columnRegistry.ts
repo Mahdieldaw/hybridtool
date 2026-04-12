@@ -1,5 +1,5 @@
-import type { ParagraphRow } from "../../hooks/useParagraphRows";
-import { getProviderAbbreviation } from "../../utils/provider-helpers";
+import type { ParagraphRow } from '../../hooks/useParagraphRows';
+import { getProviderAbbreviation } from '../../utils/provider-helpers';
 
 // ============================================================================
 // TYPES
@@ -55,7 +55,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'statementId',
     label: 'ID',
-    accessor: r => r.statementId,
+    accessor: (r) => r.statementId,
     type: 'text',
     sortable: true,
     groupable: false,
@@ -66,7 +66,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'text',
     label: 'Text',
-    accessor: r => r.text,
+    accessor: (r) => r.text,
     type: 'text',
     sortable: false,
     groupable: false,
@@ -77,7 +77,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'model',
     label: 'Model',
-    accessor: r => r.providerId ?? r.modelIndex,
+    accessor: (r) => r.providerId ?? r.modelIndex,
     type: 'category',
     format: (v: any) => {
       if (v == null) return '—';
@@ -93,7 +93,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'paragraphId',
     label: 'Para',
-    accessor: r => r.paragraphId,
+    accessor: (r) => r.paragraphId,
     type: 'text',
     sortable: true,
     groupable: true,
@@ -106,7 +106,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'sim_claim',
     label: 'sim_claim',
-    accessor: r => r.sim_claim,
+    accessor: (r) => r.sim_claim,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
@@ -118,7 +118,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'regionId',
     label: 'Region',
-    accessor: r => r.regionId,
+    accessor: (r) => r.regionId,
     type: 'category',
     sortable: true,
     groupable: true,
@@ -129,7 +129,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'sim_query',
     label: 'sim_query',
-    accessor: r => r.sim_query,
+    accessor: (r) => r.sim_query,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
@@ -143,7 +143,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'globalSim',
     label: 'globalSim',
-    accessor: r => r.globalSim,
+    accessor: (r) => r.globalSim,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
@@ -155,7 +155,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'zone',
     label: 'zone',
-    accessor: r => r.zone,
+    accessor: (r) => r.zone,
     type: 'category',
     sortable: true,
     groupable: true,
@@ -166,11 +166,12 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'paragraphOrigin',
     label: 'origin',
-    accessor: r => r.paragraphOrigin,
+    accessor: (r) => r.paragraphOrigin,
     type: 'category',
     sortable: true,
     groupable: true,
-    description: 'Which method contributed this statement: competitive-only, claim-centric-only, or both',
+    description:
+      'Which method contributed this statement: competitive-only, claim-centric-only, or both',
     source: 'built-in',
     category: 'mixed',
   },
@@ -179,18 +180,19 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'tm_twin',
     label: 'tm:twin',
-    accessor: r => r.tm_twin,
+    accessor: (r) => r.tm_twin,
     type: 'boolean',
     sortable: true,
     groupable: true,
-    description: 'Twin map: whether this claim-owned statement has a reciprocal best-match twin in another claim or unclassified pool',
+    description:
+      'Twin map: whether this claim-owned statement has a reciprocal best-match twin in another claim or unclassified pool',
     source: 'built-in',
     category: 'blast',
   },
   {
     id: 'tm_sim',
     label: 'tm:sim',
-    accessor: r => r.tm_sim,
+    accessor: (r) => r.tm_sim,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
@@ -202,7 +204,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'tm_twinId',
     label: 'tm:twinId',
-    accessor: r => r.tm_twinId,
+    accessor: (r) => r.tm_twinId,
     type: 'category',
     sortable: false,
     groupable: false,
@@ -213,7 +215,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'tm_twinText',
     label: 'tm:twinText',
-    accessor: r => r.tm_twinText,
+    accessor: (r) => r.tm_twinText,
     type: 'text',
     sortable: false,
     groupable: false,
@@ -225,23 +227,25 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'routeCategory',
     label: 'route',
-    accessor: r => r.routeCategory,
+    accessor: (r) => r.routeCategory,
     type: 'category',
     sortable: true,
     groupable: true,
-    description: 'Structural routing category: conflict (fork), isolate (misleadingness test), or passthrough (no gate)',
+    description:
+      'Structural routing category: conflict (fork), isolate (misleadingness test), or passthrough (no gate)',
     source: 'built-in',
     category: 'blast',
   },
   {
     id: 'queryDistance',
     label: 'q_dist',
-    accessor: r => r.queryDistance,
+    accessor: (r) => r.queryDistance,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
     groupable: false,
-    description: 'Cosine similarity between claim centroid and query embedding. Lower = claim introduces concepts far from what user asked about.',
+    description:
+      'Cosine similarity between claim centroid and query embedding. Lower = claim introduces concepts far from what user asked about.',
     source: 'built-in',
     category: 'blast',
   },
@@ -250,35 +254,37 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'paraCoverage',
     label: 'paraCovg',
-    accessor: r => r.paraCoverage,
+    accessor: (r) => r.paraCoverage,
     type: 'number',
     format: fmtNum(2),
     sortable: true,
     groupable: false,
-    description: 'Fraction of this paragraph\'s statements owned by the selected claim',
+    description: "Fraction of this paragraph's statements owned by the selected claim",
     source: 'built-in',
     category: 'density',
   },
   {
     id: 'inPassage',
     label: 'passage?',
-    accessor: r => r.inPassage,
+    accessor: (r) => r.inPassage,
     type: 'boolean',
     sortable: true,
     groupable: true,
-    description: 'Part of a contiguous multi-paragraph passage (length >= 2) for the selected claim',
+    description:
+      'Part of a contiguous multi-paragraph passage (length >= 2) for the selected claim',
     source: 'built-in',
     category: 'density',
   },
   {
     id: 'passageLength',
     label: 'passLen',
-    accessor: r => r.passageLength,
+    accessor: (r) => r.passageLength,
     type: 'number',
-    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    format: (v: any) => (v == null ? '—' : String(Math.round(v))),
     sortable: true,
     groupable: false,
-    description: 'Length of the contiguous passage this paragraph belongs to (1 = isolated paragraph)',
+    description:
+      'Length of the contiguous passage this paragraph belongs to (1 = isolated paragraph)',
     source: 'built-in',
     category: 'density',
   },
@@ -287,7 +293,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'sc_inPassage',
     label: 'sc_pass',
-    accessor: r => r.sc_inPassage,
+    accessor: (r) => r.sc_inPassage,
     type: 'boolean',
     sortable: true,
     groupable: true,
@@ -298,9 +304,9 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'sc_groupIdx',
     label: 'group',
-    accessor: r => r.sc_groupIdx,
+    accessor: (r) => r.sc_groupIdx,
     type: 'number',
-    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    format: (v: any) => (v == null ? '—' : String(Math.round(v))),
     sortable: true,
     groupable: true,
     description: 'Unclaimed group index (1-based). Grouped by paragraph cosine to nearest claim.',
@@ -310,18 +316,19 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'sc_landscapePos',
     label: 'sc_pos',
-    accessor: r => r.sc_landscapePos,
+    accessor: (r) => r.sc_landscapePos,
     type: 'category',
     sortable: true,
     groupable: true,
-    description: 'Landscape position of nearest claim for unclaimed statements (northStar/eastStar/mechanism/floor)',
+    description:
+      'Landscape position of nearest claim for unclaimed statements (northStar/eastStar/mechanism/floor)',
     source: 'built-in',
     category: 'metadata',
   },
   {
     id: 'sc_nearestClaimSim',
     label: 'sc_sim',
-    accessor: r => r.sc_nearestClaimSim,
+    accessor: (r) => r.sc_nearestClaimSim,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
@@ -333,7 +340,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'sc_queryRelevance',
     label: 'sc_qr',
-    accessor: r => r.sc_queryRelevance,
+    accessor: (r) => r.sc_queryRelevance,
     type: 'number',
     format: fmtNum(3),
     sortable: true,
@@ -347,7 +354,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'isTableCell',
     label: 'table?',
-    accessor: r => r.isTableCell,
+    accessor: (r) => r.isTableCell,
     type: 'boolean',
     sortable: true,
     groupable: true,
@@ -358,7 +365,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'fate',
     label: 'fate',
-    accessor: r => r.fate,
+    accessor: (r) => r.fate,
     type: 'category',
     sortable: true,
     groupable: true,
@@ -369,7 +376,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'stance',
     label: 'stance',
-    accessor: r => r.stance,
+    accessor: (r) => r.stance,
     type: 'category',
     sortable: true,
     groupable: true,
@@ -380,7 +387,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'isExclusive',
     label: 'exclusive',
-    accessor: r => r.isExclusive,
+    accessor: (r) => r.isExclusive,
     type: 'boolean',
     sortable: true,
     groupable: true,
@@ -391,7 +398,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
   {
     id: 'assignedClaims',
     label: 'Claims',
-    accessor: r => (r.assignedClaimLabels ?? []).join(', '),
+    accessor: (r) => (r.assignedClaimLabels ?? []).join(', '),
     type: 'text',
     sortable: false,
     groupable: false,
@@ -405,9 +412,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
 // COLUMN MAP (ID → ColumnDef)
 // ============================================================================
 
-export const COLUMN_MAP: Map<string, ColumnDef> = new Map(
-  BUILT_IN_COLUMNS.map(c => [c.id, c])
-);
+export const COLUMN_MAP: Map<string, ColumnDef> = new Map(BUILT_IN_COLUMNS.map((c) => [c.id, c]));
 
 // ============================================================================
 // DEFAULT VIEWS
@@ -457,7 +462,16 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'blast-twins',
     label: 'Blast Twins (L1 excl)',
-    columns: ['statementId', 'text', 'model', 'tm_twin', 'tm_sim', 'tm_twinId', 'tm_twinText', 'isExclusive'],
+    columns: [
+      'statementId',
+      'text',
+      'model',
+      'tm_twin',
+      'tm_sim',
+      'tm_twinId',
+      'tm_twinText',
+      'isExclusive',
+    ],
     sortBy: 'tm_sim',
     sortDir: 'desc',
     groupBy: null,
@@ -466,7 +480,16 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'triage-twins',
     label: 'Triage Twin Map',
-    columns: ['statementId', 'text', 'model', 'tm_twin', 'tm_sim', 'tm_twinId', 'tm_twinText', 'isExclusive'],
+    columns: [
+      'statementId',
+      'text',
+      'model',
+      'tm_twin',
+      'tm_sim',
+      'tm_twinId',
+      'tm_twinText',
+      'isExclusive',
+    ],
     sortBy: 'tm_sim',
     sortDir: 'desc',
     groupBy: 'tm_twin',
@@ -483,7 +506,15 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'claim-density',
     label: 'Claim Density',
-    columns: ['statementId', 'text', 'model', 'paragraphId', 'paraCoverage', 'inPassage', 'passageLength'],
+    columns: [
+      'statementId',
+      'text',
+      'model',
+      'paragraphId',
+      'paraCoverage',
+      'inPassage',
+      'passageLength',
+    ],
     sortBy: 'paraCoverage',
     sortDir: 'desc',
     groupBy: 'inPassage',
@@ -491,7 +522,16 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
   {
     id: 'classification',
     label: 'Classification',
-    columns: ['statementId', 'text', 'model', 'fate', 'sc_groupIdx', 'sc_landscapePos', 'sc_nearestClaimSim', 'sc_queryRelevance'],
+    columns: [
+      'statementId',
+      'text',
+      'model',
+      'fate',
+      'sc_groupIdx',
+      'sc_landscapePos',
+      'sc_nearestClaimSim',
+      'sc_queryRelevance',
+    ],
     sortBy: 'sc_groupIdx',
     sortDir: 'asc',
     groupBy: 'fate',
@@ -499,7 +539,7 @@ export const DEFAULT_VIEWS: ViewConfig[] = [
 ];
 
 export const DEFAULT_VIEW_MAP: Map<string, ViewConfig> = new Map(
-  DEFAULT_VIEWS.map(v => [v.id, v])
+  DEFAULT_VIEWS.map((v) => [v.id, v])
 );
 
 // ============================================================================
@@ -551,7 +591,7 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     label: '# stmts',
     accessor: (r: ParagraphRow) => r.statementCount,
     type: 'number',
-    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    format: (v: any) => (v == null ? '—' : String(Math.round(v))),
     sortable: true,
     groupable: false,
     description: 'Number of statements in this paragraph',
@@ -612,7 +652,7 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     label: 'mutDeg',
     accessor: (r: ParagraphRow) => r.mutualRankDegree,
     type: 'number',
-    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    format: (v: any) => (v == null ? '—' : String(Math.round(v))),
     sortable: true,
     groupable: false,
     description: 'Degree in mutual rank recognition graph',
@@ -628,7 +668,8 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     type: 'category',
     sortable: true,
     groupable: true,
-    description: 'Which method contributed this paragraph: competitive-only, claim-centric-only, or both',
+    description:
+      'Which method contributed this paragraph: competitive-only, claim-centric-only, or both',
     source: 'built-in',
     category: 'mixed',
   },
@@ -703,7 +744,7 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     format: fmtNum(2),
     sortable: true,
     groupable: false,
-    description: 'Fraction of this paragraph\'s statements owned by the selected claim',
+    description: "Fraction of this paragraph's statements owned by the selected claim",
     source: 'built-in',
     category: 'density',
   },
@@ -712,17 +753,18 @@ export const PARAGRAPH_COLUMNS: ColumnDef[] = [
     label: 'passLen',
     accessor: (r: ParagraphRow) => r.passageLength,
     type: 'number',
-    format: (v: any) => v == null ? '—' : String(Math.round(v)),
+    format: (v: any) => (v == null ? '—' : String(Math.round(v))),
     sortable: true,
     groupable: false,
-    description: 'Length of the contiguous passage this paragraph belongs to (1 = isolated paragraph)',
+    description:
+      'Length of the contiguous passage this paragraph belongs to (1 = isolated paragraph)',
     source: 'built-in',
     category: 'density',
   },
 ];
 
 export const PARAGRAPH_COLUMN_MAP: Map<string, ColumnDef> = new Map(
-  PARAGRAPH_COLUMNS.map(c => [c.id, c])
+  PARAGRAPH_COLUMNS.map((c) => [c.id, c])
 );
 
 // ============================================================================
@@ -733,7 +775,15 @@ export const PARAGRAPH_VIEWS: ViewConfig[] = [
   {
     id: 'para-overview',
     label: 'Overview',
-    columns: ['paragraphId', 'text', 'model', 'statementCount', 'regionId', 'dominantStance', 'contested'],
+    columns: [
+      'paragraphId',
+      'text',
+      'model',
+      'statementCount',
+      'regionId',
+      'dominantStance',
+      'contested',
+    ],
     sortBy: 'paragraphId',
     sortDir: 'asc',
     groupBy: 'model',
@@ -749,7 +799,17 @@ export const PARAGRAPH_VIEWS: ViewConfig[] = [
   {
     id: 'para-provenance',
     label: 'Provenance',
-    columns: ['paragraphId', 'text', 'model', 'origin', 'claimCentricSim', 'claimCentricAboveThreshold', 'compWeight', 'compExcess', 'compThreshold'],
+    columns: [
+      'paragraphId',
+      'text',
+      'model',
+      'origin',
+      'claimCentricSim',
+      'claimCentricAboveThreshold',
+      'compWeight',
+      'compExcess',
+      'compThreshold',
+    ],
     sortBy: 'claimCentricSim',
     sortDir: 'desc',
     groupBy: 'origin',
@@ -765,5 +825,5 @@ export const PARAGRAPH_VIEWS: ViewConfig[] = [
 ];
 
 export const PARAGRAPH_VIEW_MAP: Map<string, ViewConfig> = new Map(
-  PARAGRAPH_VIEWS.map(v => [v.id, v])
+  PARAGRAPH_VIEWS.map((v) => [v.id, v])
 );

@@ -10,7 +10,7 @@ interface EditorialPreviewProps {
 export const EditorialPreview: React.FC<EditorialPreviewProps> = ({ ast, onExpand }) => {
   const sortedThreads = [...ast.threads].sort((a, b) => {
     const order = ast.thread_order;
-    return (order.indexOf(a.id) - order.indexOf(b.id));
+    return order.indexOf(a.id) - order.indexOf(b.id);
   });
 
   return (
@@ -24,13 +24,11 @@ export const EditorialPreview: React.FC<EditorialPreviewProps> = ({ ast, onExpan
       className="cursor-pointer px-6 py-4 mb-4 border-b border-border-subtle hover:bg-surface-highlight/30 transition-colors text-left w-full"
     >
       {/* Orientation line */}
-      <p className="text-lg text-text-secondary mb-3 leading-relaxed">
-        {ast.orientation}
-      </p>
+      <p className="text-lg text-text-secondary mb-3 leading-relaxed">{ast.orientation}</p>
 
       {/* Thread index (scannable labels) */}
       <div className="flex flex-col gap-2">
-        {sortedThreads.map(thread => (
+        {sortedThreads.map((thread) => (
           <div key={thread.id} className="flex items-start gap-2">
             {thread.start_here && (
               <span className="mt-1.5 w-2 h-2 rounded-full bg-amber-400 shrink-0" />

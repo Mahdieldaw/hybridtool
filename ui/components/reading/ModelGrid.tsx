@@ -52,7 +52,10 @@ export const ModelGrid: React.FC<ModelGridProps> = ({
   return (
     <div className={clsx('grid flex-1 min-h-0 overflow-hidden', gridClass)}>
       {modelIndices.map((modelIndex) => {
-        const pid = resolveProviderIdFromCitationOrder(modelIndex, citationSourceOrder ?? undefined);
+        const pid = resolveProviderIdFromCitationOrder(
+          modelIndex,
+          citationSourceOrder ?? undefined
+        );
         const modelName = pid ? getProviderName(pid) : `Model ${modelIndex}`;
         return (
           <ModelColumn

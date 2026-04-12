@@ -6,11 +6,7 @@
  * fragility dependency — those are downstream consumers.
  */
 
-import type {
-  Edge,
-  EnrichedClaim,
-  ValidatedConflict,
-} from '../../../shared/contract';
+import type { Edge, EnrichedClaim, ValidatedConflict } from '../../../shared/contract';
 import { cosineSimilarity } from '../../clustering/distance';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -29,7 +25,10 @@ function buildClaimStatementSets(claims: EnrichedClaim[]): {
   }
   const exclusiveIds = new Map<string, string[]>();
   for (const [claimId, set] of canonicalSets.entries()) {
-    exclusiveIds.set(claimId, Array.from(set).filter(sid => (ownerCount.get(sid) ?? 0) <= 1));
+    exclusiveIds.set(
+      claimId,
+      Array.from(set).filter((sid) => (ownerCount.get(sid) ?? 0) <= 1)
+    );
   }
   return { canonicalSets, exclusiveIds };
 }
@@ -46,12 +45,26 @@ function computeCrossPoolProximityStatements(
   canonicalA: Set<string>,
   embeddings: Map<string, Float32Array>
 ): number | null {
-  const embsExclA = exclusiveStmtsA.map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-  const embsExclB = exclusiveStmtsB.map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-  const allEmbsA = Array.from(canonicalA).map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
-  const allEmbsB = Array.from(canonicalB).map(s => embeddings.get(s)).filter((e): e is Float32Array => !!e);
+  const embsExclA = exclusiveStmtsA
+    .map((s) => embeddings.get(s))
+    .filter((e): e is Float32Array => !!e);
+  const embsExclB = exclusiveStmtsB
+    .map((s) => embeddings.get(s))
+    .filter((e): e is Float32Array => !!e);
+  const allEmbsA = Array.from(canonicalA)
+    .map((s) => embeddings.get(s))
+    .filter((e): e is Float32Array => !!e);
+  const allEmbsB = Array.from(canonicalB)
+    .map((s) => embeddings.get(s))
+    .filter((e): e is Float32Array => !!e);
 
-  if (embsExclA.length === 0 || embsExclB.length === 0 || allEmbsA.length === 0 || allEmbsB.length === 0) return null;
+  if (
+    embsExclA.length === 0 ||
+    embsExclB.length === 0 ||
+    allEmbsA.length === 0 ||
+    allEmbsB.length === 0
+  )
+    return null;
 
   // A→B: for each exclusive-A statement, max sim to any statement in B's full pool
   let sumAtoB = 0;
@@ -89,7 +102,7 @@ function computeTriangleResidual(
   claimIdA: string,
   claimIdB: string,
   claimEmbeddings: Map<string, Float32Array>,
-  queryEmbedding: Float32Array,
+  queryEmbedding: Float32Array
 ): { residual: number; simAQ: number; simBQ: number } | null {
   const embA = claimEmbeddings.get(claimIdA);
   const embB = claimEmbeddings.get(claimIdB);
@@ -120,9 +133,7 @@ export interface ConflictValidationInput {
  *
  * Returns the full set of ValidatedConflict records (both validated and failed).
  */
-export function computeConflictValidation(
-  input: ConflictValidationInput,
-): ValidatedConflict[] {
+export function computeConflictValidation(input: ConflictValidationInput): ValidatedConflict[] {
   const claims = Array.isArray(input.enrichedClaims) ? input.enrichedClaims : [];
   const edges = Array.isArray(input.edges) ? input.edges : [];
   const stmtEmbeddings = input.statementEmbeddings ?? null;
@@ -135,15 +146,18 @@ export function computeConflictValidation(
   const mapperConflictSet = new Set<string>();
   for (const e of edges) {
     if (e?.type !== 'conflicts') continue;
-    const a = String(e.from), b = String(e.to);
+    const a = String(e.from),
+      b = String(e.to);
     mapperConflictSet.add(`${a}\0${b}`);
     mapperConflictSet.add(`${b}\0${a}`);
   }
 
   // Pass 1: compute proximity and triangle residual for every eligible pair.
   type PairResult = {
-    aId: string; bId: string;
-    exclA: string[]; exclB: string[];
+    aId: string;
+    bId: string;
+    exclA: string[];
+    exclB: string[];
     crossPoolProx: number | null;
     failReason: string | null;
     mapperLabeledConflict: boolean;
@@ -159,8 +173,8 @@ export function computeConflictValidation(
       const bId = String(claims[j].id);
       const canonA = canonicalSets.get(aId) ?? new Set<string>();
       const canonB = canonicalSets.get(bId) ?? new Set<string>();
-      const exclA = Array.from(canonA).filter(sid => !canonB.has(sid));
-      const exclB = Array.from(canonB).filter(sid => !canonA.has(sid));
+      const exclA = Array.from(canonA).filter((sid) => !canonB.has(sid));
+      const exclB = Array.from(canonB).filter((sid) => !canonA.has(sid));
       const mapperLabeledConflict = mapperConflictSet.has(`${aId}\0${bId}`);
 
       let crossPoolProx: number | null = null;
@@ -171,7 +185,13 @@ export function computeConflictValidation(
       } else if (!stmtEmbeddings) {
         failReason = 'no statement embeddings available';
       } else {
-        crossPoolProx = computeCrossPoolProximityStatements(exclA, canonB, exclB, canonA, stmtEmbeddings);
+        crossPoolProx = computeCrossPoolProximityStatements(
+          exclA,
+          canonB,
+          exclB,
+          canonA,
+          stmtEmbeddings
+        );
         if (crossPoolProx === null) {
           failReason = 'embeddings missing for exclusive statements';
         } else {
@@ -180,22 +200,32 @@ export function computeConflictValidation(
       }
 
       // Triangle residual (claim centroids + query)
-      const triangleResult = claimEmbs && queryEmb
-        ? computeTriangleResidual(aId, bId, claimEmbs, queryEmb)
-        : null;
+      const triangleResult =
+        claimEmbs && queryEmb ? computeTriangleResidual(aId, bId, claimEmbs, queryEmb) : null;
       if (triangleResult) residualValues.push(triangleResult.residual);
 
-      pairResults.push({ aId, bId, exclA, exclB, crossPoolProx, failReason, mapperLabeledConflict, triangleResult });
+      pairResults.push({
+        aId,
+        bId,
+        exclA,
+        exclB,
+        crossPoolProx,
+        failReason,
+        mapperLabeledConflict,
+        triangleResult,
+      });
     }
   }
 
   // Derive thresholds from distributions.
-  const muProximity = proximityValues.length > 0
-    ? proximityValues.reduce((a, b) => a + b, 0) / proximityValues.length
-    : null;
-  const muResidual = residualValues.length > 0
-    ? residualValues.reduce((a, b) => a + b, 0) / residualValues.length
-    : null;
+  const muProximity =
+    proximityValues.length > 0
+      ? proximityValues.reduce((a, b) => a + b, 0) / proximityValues.length
+      : null;
+  const muResidual =
+    residualValues.length > 0
+      ? residualValues.reduce((a, b) => a + b, 0) / residualValues.length
+      : null;
 
   // Pass 2: apply threshold and assemble ValidatedConflict records.
   const validatedConflicts: ValidatedConflict[] = [];

@@ -7,7 +7,7 @@ interface PartialChunk {
 }
 
 interface PartialResultMessage {
-  type: "PARTIAL_RESULT";
+  type: 'PARTIAL_RESULT';
   sessionId: string;
   stepId: string;
   providerId: string;
@@ -39,31 +39,31 @@ export class StreamingManager {
   private streamStates: Map<string, StreamState>;
 
   constructor(port: Port | null | undefined) {
-    this.port = port && typeof port.postMessage === 'function' ? port : { postMessage: () => { } };
+    this.port = port && typeof port.postMessage === 'function' ? port : { postMessage: () => {} };
     this.streamStates = new Map<string, StreamState>();
   }
 
   setPort(port: Port | null | undefined) {
-    this.port = port && typeof port.postMessage === 'function' ? port : { postMessage: () => { } };
+    this.port = port && typeof port.postMessage === 'function' ? port : { postMessage: () => {} };
   }
 
   makeDelta(
     sessionId: string | null | undefined,
     stepId: string,
     providerId: string,
-    fullText: string = ""
+    fullText: string = ''
   ): { text: string; isReplace: boolean } {
-    if (!sessionId) return { text: fullText || "", isReplace: false };
+    if (!sessionId) return { text: fullText || '', isReplace: false };
 
     const key = `${sessionId}:${stepId}:${providerId}`;
-    const existingState = this.streamStates.get(key) ?? { text: "" };
+    const existingState = this.streamStates.get(key) ?? { text: '' };
     const prev = existingState.text;
-    let delta = "";
+    let delta = '';
 
     if (prev.length === 0 && fullText && fullText.length > 0) {
       delta = fullText;
       this.streamStates.set(key, { ...existingState, text: fullText });
-      logger.stream("First emission:", {
+      logger.stream('First emission:', {
         providerId,
         textLength: fullText.length,
       });
@@ -82,7 +82,7 @@ export class StreamingManager {
         delta = fullText.slice(prev.length);
         // Standard append updates state
         this.streamStates.set(key, { ...existingState, text: fullText });
-        logger.stream("Incremental append:", {
+        logger.stream('Incremental append:', {
           providerId,
           deltaLen: delta.length,
         });
@@ -90,7 +90,7 @@ export class StreamingManager {
       } else {
         // Divergence: return partial update (or could replace, but stick to slice for now)
         logger.stream(
-          `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`,
+          `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`
         );
         this.streamStates.set(key, { ...existingState, text: fullText });
         return { text: fullText, isReplace: true };
@@ -98,8 +98,8 @@ export class StreamingManager {
     }
 
     if (fullText === prev) {
-      logger.stream("Duplicate call (no-op):", { providerId });
-      return { text: "", isReplace: false };
+      logger.stream('Duplicate call (no-op):', { providerId });
+      return { text: '', isReplace: false };
     }
 
     if (fullText.length < prev.length) {
@@ -108,11 +108,11 @@ export class StreamingManager {
       const isSmallRegression = regression <= 200 || regressionPercent <= 5;
 
       if (isSmallRegression) {
-        // Even small regressions should just sync. 
+        // Even small regressions should just sync.
         // Returning replace ensures UI is correct.
         logger.stream(`Acceptable regression for ${providerId}:`, {
           chars: regression,
-          percent: regressionPercent.toFixed(1) + "%",
+          percent: regressionPercent.toFixed(1) + '%',
         });
         this.streamStates.set(key, { ...existingState, text: fullText });
         return { text: fullText, isReplace: true };
@@ -123,15 +123,12 @@ export class StreamingManager {
       const currentCount = existingState.warnCount ?? 0;
       const WARN_MAX = 2;
       if (currentCount < WARN_MAX && now - lastWarn > 5000) {
-        logger.warn(
-          `[makeDelta] Significant text regression for ${providerId}:`,
-          {
-            prevLen: prev.length,
-            fullLen: fullText.length,
-            regression,
-            regressionPercent: regressionPercent.toFixed(1) + "%",
-          },
-        );
+        logger.warn(`[makeDelta] Significant text regression for ${providerId}:`, {
+          prevLen: prev.length,
+          fullLen: fullText.length,
+          regression,
+          regressionPercent: regressionPercent.toFixed(1) + '%',
+        });
         this.streamStates.set(key, {
           ...existingState,
           text: fullText,
@@ -145,7 +142,7 @@ export class StreamingManager {
       return { text: fullText, isReplace: true };
     }
 
-    return { text: "", isReplace: false };
+    return { text: '', isReplace: false };
   }
 
   clearCache(sessionId: string) {
@@ -160,7 +157,7 @@ export class StreamingManager {
 
     keysToDelete.forEach((key) => this.streamStates.delete(key));
     logger.debug(
-      `[StreamingManager] Cleared ${keysToDelete.length} cache entries for session ${sessionId}`,
+      `[StreamingManager] Cleared ${keysToDelete.length} cache entries for session ${sessionId}`
     );
   }
 
@@ -173,16 +170,16 @@ export class StreamingManager {
     isFinal = false
   ): boolean {
     try {
-      let delta = "";
+      let delta = '';
       let isReplace = false;
 
       if (isFinal) {
         const key = `${sessionId}:${stepId}:${providerId}`;
-        const existingState = this.streamStates.get(key) ?? { text: "" };
+        const existingState = this.streamStates.get(key) ?? { text: '' };
         this.streamStates.set(key, { ...existingState, text });
         delta = text;
         isReplace = true;
-        logger.stream("Final emission (force-replace):", {
+        logger.stream('Final emission (force-replace):', {
           stepId,
           providerId,
           len: text.length,
@@ -200,20 +197,20 @@ export class StreamingManager {
           isReplace: !!isReplace,
         };
         this.port.postMessage({
-          type: "PARTIAL_RESULT",
+          type: 'PARTIAL_RESULT',
           sessionId,
           stepId,
           providerId,
           chunk,
         });
-        logger.stream(label || "Delta", { stepId, providerId, len: delta.length, isReplace });
+        logger.stream(label || 'Delta', { stepId, providerId, len: delta.length, isReplace });
         return true;
       } else {
-        logger.stream("Delta skipped (empty):", { stepId, providerId });
+        logger.stream('Delta skipped (empty):', { stepId, providerId });
         return false;
       }
     } catch (e) {
-      logger.warn("Delta dispatch failed:", {
+      logger.warn('Delta dispatch failed:', {
         stepId,
         providerId,
         error: String(e),
@@ -224,6 +221,6 @@ export class StreamingManager {
 
   getRecoveredText(sessionId: string, stepId: string, providerId: string): string {
     const key = `${sessionId}:${stepId}:${providerId}`;
-    return this.streamStates.get(key)?.text ?? "";
+    return this.streamStates.get(key)?.text ?? '';
   }
 }

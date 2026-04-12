@@ -1,6 +1,6 @@
 // Transaction Utilities for IndexedDB Operations
 
-import { VersionConflictResult, BatchWriteResult } from "./types";
+import { VersionConflictResult, BatchWriteResult } from './types';
 
 /**
  * Maximum number of retry attempts for transient failures
@@ -19,7 +19,7 @@ export async function withTransaction<T>(
   db: IDBDatabase,
   storeNames: string | string[],
   mode: IDBTransactionMode,
-  work: (tx: IDBTransaction) => Promise<T>,
+  work: (tx: IDBTransaction) => Promise<T>
 ): Promise<T> {
   let lastError: Error | null = null;
 
@@ -42,15 +42,11 @@ export async function withTransaction<T>(
       console.warn(`Transaction attempt ${attempt} failed, retrying...`, error);
 
       // Wait before retrying
-      await new Promise((resolve) =>
-        setTimeout(resolve, RETRY_DELAY_MS * attempt),
-      );
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
     }
   }
 
-  throw (
-    lastError || new Error("Transaction failed after maximum retry attempts")
-  );
+  throw lastError || new Error('Transaction failed after maximum retry attempts');
 }
 
 /**
@@ -60,7 +56,7 @@ function executeTransaction<T>(
   db: IDBDatabase,
   storeNames: string | string[],
   mode: IDBTransactionMode,
-  work: (tx: IDBTransaction) => Promise<T>,
+  work: (tx: IDBTransaction) => Promise<T>
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     let transaction: IDBTransaction;
@@ -70,20 +66,16 @@ function executeTransaction<T>(
     } catch (err) {
       const error = err as DOMException;
       const existingStores = Array.from(db.objectStoreNames);
-      const targetStores = Array.isArray(storeNames)
-        ? storeNames
-        : [storeNames];
-      const missing = targetStores.filter(
-        (name) => !existingStores.includes(name),
-      );
+      const targetStores = Array.isArray(storeNames) ? storeNames : [storeNames];
+      const missing = targetStores.filter((name) => !existingStores.includes(name));
       if (missing.length > 0) {
         const friendly = new Error(
-          `SchemaError: Missing object stores [${missing.join(", ")}]; requested=[${targetStores.join(", ")}], existing=[${existingStores.join(", ")}]`,
+          `SchemaError: Missing object stores [${missing.join(', ')}]; requested=[${targetStores.join(', ')}], existing=[${existingStores.join(', ')}]`
         );
-        (friendly as any).name = "NotFoundError";
+        (friendly as any).name = 'NotFoundError';
         return reject(friendly);
       }
-      return reject(error || new Error("Failed to create transaction"));
+      return reject(error || new Error('Failed to create transaction'));
     }
     let workResult: T;
     let workCompleted = false;
@@ -94,9 +86,7 @@ function executeTransaction<T>(
       if (workCompleted && !workRejected) {
         resolve(workResult);
       } else if (!workRejected) {
-        reject(
-          new Error("Transaction completed but work function did not complete"),
-        );
+        reject(new Error('Transaction completed but work function did not complete'));
       }
       // If work was rejected, the rejection was already handled in the catch block
     };
@@ -105,20 +95,14 @@ function executeTransaction<T>(
       if (!workRejected) {
         // Enhance error with schema context if NotFoundError
         const existingStores = Array.from(db.objectStoreNames);
-        const targetStores = Array.isArray(storeNames)
-          ? storeNames
-          : [storeNames];
-        const missing = targetStores.filter(
-          (name) => !existingStores.includes(name),
-        );
-        const baseError =
-          transaction.error ||
-          new Error("Transaction failed with unknown error");
-        if ((baseError as any).name === "NotFoundError" || missing.length > 0) {
+        const targetStores = Array.isArray(storeNames) ? storeNames : [storeNames];
+        const missing = targetStores.filter((name) => !existingStores.includes(name));
+        const baseError = transaction.error || new Error('Transaction failed with unknown error');
+        if ((baseError as any).name === 'NotFoundError' || missing.length > 0) {
           const friendly = new Error(
-            `SchemaError: Missing object stores [${missing.join(", ")}]; requested=[${targetStores.join(", ")}], existing=[${existingStores.join(", ")}]`,
+            `SchemaError: Missing object stores [${missing.join(', ')}]; requested=[${targetStores.join(', ')}], existing=[${existingStores.join(', ')}]`
           );
-          (friendly as any).name = "NotFoundError";
+          (friendly as any).name = 'NotFoundError';
           return reject(friendly);
         }
         reject(baseError);
@@ -127,7 +111,7 @@ function executeTransaction<T>(
 
     transaction.onabort = () => {
       if (!workRejected) {
-        reject(new Error("Transaction was aborted"));
+        reject(new Error('Transaction was aborted'));
       }
     };
 
@@ -144,7 +128,7 @@ function executeTransaction<T>(
         try {
           transaction.abort();
         } catch (abortError) {
-          console.warn("Failed to abort transaction:", abortError);
+          console.warn('Failed to abort transaction:', abortError);
         }
         reject(error);
       });
@@ -160,13 +144,13 @@ function isNonRetryableError(error: unknown): boolean {
   }
 
   const nonRetryableErrors = [
-    "QuotaExceededError",
-    "ConstraintError",
-    "DataError",
-    "InvalidStateError",
-    "NotFoundError",
-    "ReadOnlyError",
-    "VersionError",
+    'QuotaExceededError',
+    'ConstraintError',
+    'DataError',
+    'InvalidStateError',
+    'NotFoundError',
+    'ReadOnlyError',
+    'VersionError',
   ];
 
   return nonRetryableErrors.includes(error.name);
@@ -178,13 +162,13 @@ function isNonRetryableError(error: unknown): boolean {
 export async function batchWrite<T>(
   db: IDBDatabase,
   storeName: string,
-  records: T[],
+  records: T[]
 ): Promise<BatchWriteResult> {
   if (records.length === 0) {
     return { success: true };
   }
 
-  return withTransaction(db, storeName, "readwrite", async (tx) => {
+  return withTransaction(db, storeName, 'readwrite', async (tx) => {
     const store = tx.objectStore(storeName);
     const errors: Error[] = [];
 
@@ -197,7 +181,7 @@ export async function batchWrite<T>(
         request.onerror = (event) => {
           event.preventDefault(); // Prevent transaction abort
           const error = new Error(
-            `Failed to write record at index ${index}: ${request.error?.message}`,
+            `Failed to write record at index ${index}: ${request.error?.message}`
           );
           errors.push(error);
           resolve(); // Don't reject individual failures
@@ -221,13 +205,13 @@ export async function batchWrite<T>(
 export async function batchDelete(
   db: IDBDatabase,
   storeName: string,
-  keys: (string | string[] | number)[],
+  keys: (string | string[] | number)[]
 ): Promise<BatchWriteResult> {
   if (keys.length === 0) {
     return { success: true };
   }
 
-  return withTransaction(db, storeName, "readwrite", async (tx) => {
+  return withTransaction(db, storeName, 'readwrite', async (tx) => {
     const store = tx.objectStore(storeName);
     const errors: Error[] = [];
 
@@ -240,7 +224,7 @@ export async function batchDelete(
         request.onerror = (event) => {
           event.preventDefault(); // Prevent transaction abort
           const error = new Error(
-            `Failed to delete record at index ${index}: ${request.error?.message}`,
+            `Failed to delete record at index ${index}: ${request.error?.message}`
           );
           errors.push(error);
           resolve(); // Don't reject individual failures
@@ -266,22 +250,20 @@ export async function updateWithVersionCheck<T extends { version: number }>(
   storeName: string,
   id: string | string[],
   updates: Partial<T>,
-  expectedVersion: number,
+  expectedVersion: number
 ): Promise<VersionConflictResult> {
-  return withTransaction(db, storeName, "readwrite", async (tx) => {
+  return withTransaction(db, storeName, 'readwrite', async (tx) => {
     const store = tx.objectStore(storeName);
 
     // Get current record
     const getRequest = store.get(id as IDBValidKey);
-    const currentRecord = await new Promise<T | undefined>(
-      (resolve, reject) => {
-        getRequest.onsuccess = () => resolve(getRequest.result);
-        getRequest.onerror = () => reject(getRequest.error);
-      },
-    );
+    const currentRecord = await new Promise<T | undefined>((resolve, reject) => {
+      getRequest.onsuccess = () => resolve(getRequest.result);
+      getRequest.onerror = () => reject(getRequest.error);
+    });
 
     if (!currentRecord) {
-      throw new Error("Record not found");
+      throw new Error('Record not found');
     }
 
     // Check version
@@ -316,9 +298,9 @@ export async function updateWithVersionCheck<T extends { version: number }>(
 export async function multiStoreTransaction<T>(
   db: IDBDatabase,
   storeNames: string[],
-  operations: (stores: Record<string, IDBObjectStore>) => Promise<T>,
+  operations: (stores: Record<string, IDBObjectStore>) => Promise<T>
 ): Promise<T> {
-  return withTransaction(db, storeNames, "readwrite", async (tx) => {
+  return withTransaction(db, storeNames, 'readwrite', async (tx) => {
     // Create a map of store names to store objects
     const stores: Record<string, IDBObjectStore> = {};
     for (const storeName of storeNames) {
@@ -344,7 +326,7 @@ export function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
  */
 export function promisifyCursor<T>(
   request: IDBRequest<IDBCursorWithValue | null>,
-  processor: (cursor: IDBCursorWithValue) => T | Promise<T>,
+  processor: (cursor: IDBCursorWithValue) => T | Promise<T>
 ): Promise<T[]> {
   return new Promise((resolve, reject) => {
     const results: T[] = [];
@@ -380,9 +362,9 @@ export async function countRecords(
   db: IDBDatabase,
   storeName: string,
   indexName?: string,
-  query?: IDBValidKey | IDBKeyRange,
+  query?: IDBValidKey | IDBKeyRange
 ): Promise<number> {
-  return withTransaction(db, storeName, "readonly", async (tx) => {
+  return withTransaction(db, storeName, 'readonly', async (tx) => {
     const store = tx.objectStore(storeName);
     const target = indexName ? store.index(indexName) : store;
 
@@ -397,9 +379,9 @@ export async function countRecords(
 export async function recordExists(
   db: IDBDatabase,
   storeName: string,
-  key: IDBValidKey,
+  key: IDBValidKey
 ): Promise<boolean> {
-  return withTransaction(db, storeName, "readonly", async (tx) => {
+  return withTransaction(db, storeName, 'readonly', async (tx) => {
     const store = tx.objectStore(storeName);
     const request = store.getKey(key);
     const result = await promisifyRequest(request);

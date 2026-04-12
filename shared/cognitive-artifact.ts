@@ -1,7 +1,4 @@
-export function buildCognitiveArtifact(
-  mapper?: any,
-  pipeline?: any,
-): any | null {
+export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null {
   if (!mapper && !pipeline) return null;
 
   // If mapper is already a CognitiveArtifact (has .semantic), pass through
@@ -22,17 +19,15 @@ export function buildCognitiveArtifact(
   const result: any = {
     paragraphClustering: mapper?.paragraphClustering ?? undefined,
     shadow: {
-      statements:
-        pipeline?.shadow?.extraction?.statements ??
-        mapper?.shadow?.statements ??
-        [],
+      statements: pipeline?.shadow?.extraction?.statements ?? mapper?.shadow?.statements ?? [],
       paragraphs: pipeline?.paragraphProjection?.paragraphs ?? [],
     },
     geometry: {
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',
       labels: pipeline?.labels ?? undefined,
       basinInversion: mapper?.basinInversion ?? pipeline?.basinInversion ?? undefined,
-      bayesianBasinInversion: mapper?.bayesianBasinInversion ?? pipeline?.bayesianBasinInversion ?? undefined,
+      bayesianBasinInversion:
+        mapper?.bayesianBasinInversion ?? pipeline?.bayesianBasinInversion ?? undefined,
       substrate: {
         nodes: substrateGraph?.nodes ?? [],
         mutualEdges: substrateGraph?.mutualEdges ?? [],
@@ -40,13 +35,13 @@ export function buildCognitiveArtifact(
       query: pipelineQuery,
       preSemantic: pipeline?.preSemantic
         ? {
-          ...pipeline.preSemantic,
-          regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
-            id: r.id,
-            kind: r.kind,
-            nodeIds: r.nodeIds,
-          })),
-        }
+            ...pipeline.preSemantic,
+            regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
+              id: r.id,
+              kind: r.kind,
+              nodeIds: r.nodeIds,
+            })),
+          }
         : undefined,
       diagnostics: mapper?.diagnostics ?? mapper?.structuralValidation ?? undefined,
       structuralValidation: mapper?.structuralValidation ?? undefined,
@@ -73,14 +68,28 @@ export function buildCognitiveArtifact(
   // is sufficient — no need to touch this file.
   const consumedMapperKeys = new Set([
     // → semantic
-    'claims', 'edges', 'conditionals', 'narrative',
+    'claims',
+    'edges',
+    'conditionals',
+    'narrative',
     // → geometry
-    'diagnostics', 'structuralValidation', 'convergence', 'alignment',
-    'basinInversion', 'bayesianBasinInversion', 'preSemantic',
+    'diagnostics',
+    'structuralValidation',
+    'convergence',
+    'alignment',
+    'basinInversion',
+    'bayesianBasinInversion',
+    'preSemantic',
     // → meta
-    'model_count', 'modelCount', 'query', 'turn', 'timestamp',
+    'model_count',
+    'modelCount',
+    'query',
+    'turn',
+    'timestamp',
     // → special / renamed / nested
-    'paragraphClustering', 'shadow', 'substrate',
+    'paragraphClustering',
+    'shadow',
+    'substrate',
     'id',
   ]);
 

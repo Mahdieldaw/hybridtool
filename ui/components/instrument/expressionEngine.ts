@@ -3,18 +3,37 @@
  * Supports arithmetic, comparison, logic, ternary, and column references.
  */
 
-import type { EvidenceRow } from "../../hooks/useEvidenceRows";
+import type { EvidenceRow } from '../../hooks/useEvidenceRows';
 
 // ============================================================================
 // TOKENIZER
 // ============================================================================
 
 type TokenType =
-  | 'NUMBER' | 'STRING' | 'IDENT' | 'BOOL'
-  | 'PLUS' | 'MINUS' | 'STAR' | 'SLASH' | 'PERCENT'
-  | 'GT' | 'LT' | 'GTE' | 'LTE' | 'EQ' | 'NEQ'
-  | 'AND' | 'OR' | 'NOT' | 'QUESTION' | 'COLON'
-  | 'LPAREN' | 'RPAREN' | 'COMMA' | 'EOF';
+  | 'NUMBER'
+  | 'STRING'
+  | 'IDENT'
+  | 'BOOL'
+  | 'PLUS'
+  | 'MINUS'
+  | 'STAR'
+  | 'SLASH'
+  | 'PERCENT'
+  | 'GT'
+  | 'LT'
+  | 'GTE'
+  | 'LTE'
+  | 'EQ'
+  | 'NEQ'
+  | 'AND'
+  | 'OR'
+  | 'NOT'
+  | 'QUESTION'
+  | 'COLON'
+  | 'LPAREN'
+  | 'RPAREN'
+  | 'COMMA'
+  | 'EOF';
 
 interface Token {
   type: TokenType;
@@ -27,14 +46,17 @@ function tokenize(input: string): Token[] {
 
   while (i < input.length) {
     // Skip whitespace
-    if (/\s/.test(input[i])) { i++; continue; }
+    if (/\s/.test(input[i])) {
+      i++;
+      continue;
+    }
 
     // Numbers
     if (/[0-9]/.test(input[i]) || (input[i] === '.' && /[0-9]/.test(input[i + 1] ?? ''))) {
       let num = '';
       let hasDot = false;
       while (i < input.length && /[0-9.]/.test(input[i])) {
-       if (input[i] === '.') {
+        if (input[i] === '.') {
           if (hasDot) break; // Stop at second decimal
           hasDot = true;
         }
@@ -51,10 +73,19 @@ function tokenize(input: string): Token[] {
       while (i < input.length && input[i] !== quote) {
         if (input[i] === '\\' && i + 1 < input.length) {
           const next = input[i + 1];
-          if (next === quote || next === '\\') { str += next; i += 2; }
-          else if (next === 'n') { str += '\n'; i += 2; }
-          else if (next === 't') { str += '\t'; i += 2; }
-          else { str += next; i += 2; }
+          if (next === quote || next === '\\') {
+            str += next;
+            i += 2;
+          } else if (next === 'n') {
+            str += '\n';
+            i += 2;
+          } else if (next === 't') {
+            str += '\t';
+            i += 2;
+          } else {
+            str += next;
+            i += 2;
+          }
         } else {
           str += input[i++];
         }
@@ -71,39 +102,112 @@ function tokenize(input: string): Token[] {
       while (i < input.length && /[a-zA-Z0-9_$]/.test(input[i])) ident += input[i++];
       if (ident === 'true') tokens.push({ type: 'BOOL', value: true });
       else if (ident === 'false') tokens.push({ type: 'BOOL', value: false });
-      else if (ident === 'null') tokens.push({ type: 'NUMBER', value: NaN }); // treat null as NaN
+      else if (ident === 'null')
+        tokens.push({ type: 'NUMBER', value: NaN }); // treat null as NaN
       else tokens.push({ type: 'IDENT', value: ident });
       continue;
     }
 
     // Two-char operators
     const two = input.slice(i, i + 3);
-    if (two === '===') { tokens.push({ type: 'EQ', value: '===' }); i += 3; continue; }
-    if (two === '!==') { tokens.push({ type: 'NEQ', value: '!==' }); i += 3; continue; }
+    if (two === '===') {
+      tokens.push({ type: 'EQ', value: '===' });
+      i += 3;
+      continue;
+    }
+    if (two === '!==') {
+      tokens.push({ type: 'NEQ', value: '!==' });
+      i += 3;
+      continue;
+    }
     const tw = input.slice(i, i + 2);
-    if (tw === '&&') { tokens.push({ type: 'AND', value: '&&' }); i += 2; continue; }
-    if (tw === '||') { tokens.push({ type: 'OR', value: '||' }); i += 2; continue; }
-    if (tw === '>=') { tokens.push({ type: 'GTE', value: '>=' }); i += 2; continue; }
-    if (tw === '<=') { tokens.push({ type: 'LTE', value: '<=' }); i += 2; continue; }
-    if (tw === '==') { tokens.push({ type: 'EQ', value: '==' }); i += 2; continue; }
-    if (tw === '!=') { tokens.push({ type: 'NEQ', value: '!=' }); i += 2; continue; }
+    if (tw === '&&') {
+      tokens.push({ type: 'AND', value: '&&' });
+      i += 2;
+      continue;
+    }
+    if (tw === '||') {
+      tokens.push({ type: 'OR', value: '||' });
+      i += 2;
+      continue;
+    }
+    if (tw === '>=') {
+      tokens.push({ type: 'GTE', value: '>=' });
+      i += 2;
+      continue;
+    }
+    if (tw === '<=') {
+      tokens.push({ type: 'LTE', value: '<=' });
+      i += 2;
+      continue;
+    }
+    if (tw === '==') {
+      tokens.push({ type: 'EQ', value: '==' });
+      i += 2;
+      continue;
+    }
+    if (tw === '!=') {
+      tokens.push({ type: 'NEQ', value: '!=' });
+      i += 2;
+      continue;
+    }
 
     // Single-char operators
     switch (input[i]) {
-      case '+': tokens.push({ type: 'PLUS', value: '+' }); i++; break;
-      case '-': tokens.push({ type: 'MINUS', value: '-' }); i++; break;
-      case '*': tokens.push({ type: 'STAR', value: '*' }); i++; break;
-      case '/': tokens.push({ type: 'SLASH', value: '/' }); i++; break;
-      case '%': tokens.push({ type: 'PERCENT', value: '%' }); i++; break;
-      case '>': tokens.push({ type: 'GT', value: '>' }); i++; break;
-      case '<': tokens.push({ type: 'LT', value: '<' }); i++; break;
-      case '!': tokens.push({ type: 'NOT', value: '!' }); i++; break;
-      case '?': tokens.push({ type: 'QUESTION', value: '?' }); i++; break;
-      case ':': tokens.push({ type: 'COLON', value: ':' }); i++; break;
-      case '(': tokens.push({ type: 'LPAREN', value: '(' }); i++; break;
-      case ')': tokens.push({ type: 'RPAREN', value: ')' }); i++; break;
-      case ',': tokens.push({ type: 'COMMA', value: ',' }); i++; break;
-      default: i++; // skip unknown characters
+      case '+':
+        tokens.push({ type: 'PLUS', value: '+' });
+        i++;
+        break;
+      case '-':
+        tokens.push({ type: 'MINUS', value: '-' });
+        i++;
+        break;
+      case '*':
+        tokens.push({ type: 'STAR', value: '*' });
+        i++;
+        break;
+      case '/':
+        tokens.push({ type: 'SLASH', value: '/' });
+        i++;
+        break;
+      case '%':
+        tokens.push({ type: 'PERCENT', value: '%' });
+        i++;
+        break;
+      case '>':
+        tokens.push({ type: 'GT', value: '>' });
+        i++;
+        break;
+      case '<':
+        tokens.push({ type: 'LT', value: '<' });
+        i++;
+        break;
+      case '!':
+        tokens.push({ type: 'NOT', value: '!' });
+        i++;
+        break;
+      case '?':
+        tokens.push({ type: 'QUESTION', value: '?' });
+        i++;
+        break;
+      case ':':
+        tokens.push({ type: 'COLON', value: ':' });
+        i++;
+        break;
+      case '(':
+        tokens.push({ type: 'LPAREN', value: '(' });
+        i++;
+        break;
+      case ')':
+        tokens.push({ type: 'RPAREN', value: ')' });
+        i++;
+        break;
+      case ',':
+        tokens.push({ type: 'COMMA', value: ',' });
+        i++;
+        break;
+      default:
+        i++; // skip unknown characters
     }
   }
 
@@ -125,8 +229,12 @@ class Parser {
     this.tokens = tokens;
   }
 
-  private peek(): Token { return this.tokens[this.pos]; }
-  private consume(): Token { return this.tokens[this.pos++]; }
+  private peek(): Token {
+    return this.tokens[this.pos];
+  }
+  private consume(): Token {
+    return this.tokens[this.pos++];
+  }
   private expect(type: TokenType): Token {
     const t = this.consume();
     if (t.type !== type) throw new Error(`Expected ${type}, got ${t.type}`);
@@ -188,7 +296,8 @@ class Parser {
       this.consume();
       const right = this.parseAddSub(env);
       if (left == null || right == null) return null;
-      const l = Number(left), r = Number(right);
+      const l = Number(left),
+        r = Number(right);
       if (t === 'GT') return l > r;
       if (t === 'LT') return l < r;
       if (t === 'GTE') return l >= r;
@@ -204,7 +313,8 @@ class Parser {
       const right = this.parseMulDiv(env);
       if (left == null || right == null) return null;
       if (op === 'PLUS') {
-        if (typeof left === 'string' || typeof right === 'string') return String(left) + String(right);
+        if (typeof left === 'string' || typeof right === 'string')
+          return String(left) + String(right);
         return Number(left) + Number(right);
       }
       return Number(left) - Number(right);
@@ -222,7 +332,8 @@ class Parser {
       const op = this.consume().type;
       const right = this.parseUnary(env);
       if (left == null || right == null) return null;
-      const l = Number(left), r = Number(right);
+      const l = Number(left),
+        r = Number(right);
       if (op === 'STAR') return l * r;
       if (op === 'SLASH') return r === 0 ? null : l / r;
       return l % r;
@@ -300,10 +411,11 @@ class Parser {
     name: string,
     args: (number | string | boolean | null)[]
   ): number | string | boolean | null {
-    const nums = args.map(a => (a == null ? null : Number(a)));
+    const nums = args.map((a) => (a == null ? null : Number(a)));
     switch (name) {
       case 'abs': {
-        const v = nums[0]; return v == null ? null : Math.abs(v);
+        const v = nums[0];
+        return v == null ? null : Math.abs(v);
       }
       case 'max': {
         const valid = nums.filter((v): v is number => v != null);
@@ -314,7 +426,8 @@ class Parser {
         return valid.length === 0 ? null : Math.min(...valid);
       }
       case 'round': {
-        const v = nums[0]; return v == null ? null : Math.round(v);
+        const v = nums[0];
+        return v == null ? null : Math.round(v);
       }
       default:
         throw new Error(`Unknown function: ${name}`);
@@ -341,7 +454,7 @@ export function compileExpression(
 ): CompiledExpression | null {
   try {
     // Validate by parsing with a dummy env
-    const dummyEnv: Env = Object.fromEntries(columnIds.map(id => [id, null]));
+    const dummyEnv: Env = Object.fromEntries(columnIds.map((id) => [id, null]));
     const tokens = tokenize(expression);
     const parser = new Parser(tokens);
     parser.parse(dummyEnv);
@@ -374,7 +487,7 @@ export function compileExpression(
  */
 export function validateExpression(expression: string, columnIds: string[]): string | null {
   try {
-    const dummyEnv: Env = Object.fromEntries(columnIds.map(id => [id, 0]));
+    const dummyEnv: Env = Object.fromEntries(columnIds.map((id) => [id, 0]));
     const tokens = tokenize(expression);
     const parser = new Parser(tokens);
     parser.parse(dummyEnv);

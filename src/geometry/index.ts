@@ -4,15 +4,15 @@
 
 // Types
 export type {
-    NodeLocalStats,
-    GeometricSubstrate,
-    DegenerateSubstrate,
-    DegenerateReason,
-    PairwiseField,
-    PairwiseFieldStats,
-    MutualRankEdge,
-    MutualRankNodeStats,
-    MutualRankGraph,
+  NodeLocalStats,
+  GeometricSubstrate,
+  DegenerateSubstrate,
+  DegenerateReason,
+  PairwiseField,
+  PairwiseFieldStats,
+  MutualRankEdge,
+  MutualRankNodeStats,
+  MutualRankGraph,
 } from './types';
 
 export { isDegenerate } from './types';
@@ -31,15 +31,15 @@ export { buildMutualRankGraph } from './mutualRank';
 export { computeNodeStats } from './nodes';
 
 export type {
-    Region,
-    RegionizationResult,
-    RegionProfile,
-    PreSemanticInterpretation,
-    GateVerdict,
-    PipelineGateResult,
-    InterpretationInputs,
-    ClaimWithProvenance,
-    EdgeList,
+  Region,
+  RegionizationResult,
+  RegionProfile,
+  PreSemanticInterpretation,
+  GateVerdict,
+  PipelineGateResult,
+  InterpretationInputs,
+  ClaimWithProvenance,
+  EdgeList,
 } from './interpretation/types';
 
 export { buildRegions } from './interpretation/regions';

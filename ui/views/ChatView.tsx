@@ -1,6 +1,6 @@
-import React, { useMemo, useEffect, useRef, Suspense } from "react";
-import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import React, { useMemo, useEffect, useRef, Suspense } from 'react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   turnIdsAtom,
   showWelcomeAtom,
@@ -11,34 +11,32 @@ import {
   chatInputHeightAtom,
   splitPaneRatioAtom,
   splitPaneFullWidthAtom,
-} from "../state/atoms";
-import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
-import clsx from "clsx";
+} from '../state/atoms';
+import { ResizableSplitLayout } from '../components/ResizableSplitLayout';
+import clsx from 'clsx';
 
-import MessageRow from "../components/MessageRow";
-import ChatInput from "../components/ChatInput";
-import WelcomeScreen from "../components/WelcomeScreen";
-import { useChat } from "../hooks/chat/useChat";
-import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
-import { safeLazy } from "../utils/safeLazy";
-
+import MessageRow from '../components/MessageRow';
+import ChatInput from '../components/ChatInput';
+import WelcomeScreen from '../components/WelcomeScreen';
+import { useChat } from '../hooks/chat/useChat';
+import { SplitPaneRightPanel } from '../components/SplitPaneRightPanel';
+import { safeLazy } from '../utils/safeLazy';
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
-const CouncilOrbsVertical = safeLazy(() => import("../components/CouncilOrbsVertical").then(m => ({ default: m.CouncilOrbsVertical })));
+const CouncilOrbsVertical = safeLazy(() =>
+  import('../components/CouncilOrbsVertical').then((m) => ({ default: m.CouncilOrbsVertical }))
+);
 
 // Lazy load DecisionMapSheet (named export adapter)
 // Uses safeLazy for robust loading
 const DecisionMapSheet = safeLazy(() =>
-  import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
+  import('../components/DecisionMapSheet').then((module) => ({ default: module.DecisionMapSheet }))
 );
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
-  const [currentSessionId] = useAtom(currentSessionIdAtom as any) as [
-    string | null,
-    any,
-  ];
+  const [currentSessionId] = useAtom(currentSessionIdAtom as any) as [string | null, any];
 
   // Split Pane State
   const isSplitOpen = useAtomValue(isSplitOpenAtom);
@@ -70,24 +68,17 @@ export default function ChatView() {
   const itemContent = useMemo(
     () => (_index: number, turnId: string) => {
       if (!turnId) {
-        return (
-          <div className="p-2 text-intent-danger">
-            Error: Invalid turn ID
-          </div>
-        );
+        return <div className="p-2 text-intent-danger">Error: Invalid turn ID</div>;
       }
       return <MessageRow turnId={turnId} />;
     },
-    [],
+    []
   );
 
   // Memoize Virtuoso Scroller to avoid remounts that can reset scroll position
   type ScrollerProps = Pick<
-    React.DetailedHTMLProps<
-      React.HTMLAttributes<HTMLDivElement>,
-      HTMLDivElement
-    >,
-    "children" | "style" | "tabIndex"
+    React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>,
+    'children' | 'style' | 'tabIndex'
   >;
   const ScrollerComponent = useMemo(
     () =>
@@ -96,19 +87,19 @@ export default function ChatView() {
           {...props}
           data-chat-scroller="true"
           ref={(node) => {
-            if (typeof ref === "function") ref(node as HTMLDivElement | null);
-            else if (ref && "current" in (ref as any))
+            if (typeof ref === 'function') ref(node as HTMLDivElement | null);
+            else if (ref && 'current' in (ref as any))
               (ref as React.MutableRefObject<HTMLDivElement | null>).current =
                 node as HTMLDivElement | null;
           }}
           style={{
             ...(props.style || {}),
-            WebkitOverflowScrolling: "touch",
+            WebkitOverflowScrolling: 'touch',
           }}
           className="h-full min-h-0 overflow-y-auto"
         />
       )),
-    [],
+    []
   );
 
   // Jump-to-turn event listener with optional cross-session loading
@@ -130,24 +121,22 @@ export default function ChatView() {
             if (index !== -1) {
               virtuosoRef.current?.scrollToIndex({
                 index,
-                behavior: "smooth",
-                align: "center",
+                behavior: 'smooth',
+                align: 'center',
               });
             } else {
               // Fallback to DOM query when item is rendered
               const el = document.querySelector(
-                `[data-turn-id="${CSS.escape(targetTurnId)}"]`,
+                `[data-turn-id="${CSS.escape(targetTurnId)}"]`
               ) as HTMLElement | null;
-              if (el && typeof el.scrollIntoView === "function") {
-                el.scrollIntoView({ behavior: "smooth", block: "center" });
+              if (el && typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
               }
             }
             // Brief highlight pulse
             const row =
               document.getElementById(`turn-${targetTurnId}`) ||
-              document.querySelector(
-                `[data-turn-id="${CSS.escape(targetTurnId)}"]`,
-              );
+              document.querySelector(`[data-turn-id="${CSS.escape(targetTurnId)}"]`);
             if (row && row instanceof HTMLElement) {
               row.classList.add('shadow-glow-brand-soft');
               setTimeout(() => {
@@ -160,29 +149,25 @@ export default function ChatView() {
                 if (!aborted) {
                   setActiveSplitPanel({
                     turnId: targetTurnId,
-                    providerId: targetProviderId
+                    providerId: targetProviderId,
                   });
                 }
               }, 120);
             }
           } catch (e) {
-            console.warn("[ChatView] doScroll failed", e);
+            console.warn('[ChatView] doScroll failed', e);
           }
         };
 
         // Cross-session navigation support
-        if (
-          targetSessionId &&
-          currentSessionId &&
-          targetSessionId !== currentSessionId
-        ) {
+        if (targetSessionId && currentSessionId && targetSessionId !== currentSessionId) {
           const summary = {
             id: targetSessionId,
             sessionId: targetSessionId,
             startTime: Date.now(),
             lastActivity: Date.now(),
-            title: "",
-            firstMessage: "",
+            title: '',
+            firstMessage: '',
             messageCount: 0,
             messages: [],
           };
@@ -194,13 +179,13 @@ export default function ChatView() {
           doScroll();
         }
       } catch (e) {
-        console.warn("[ChatView] jump-to-turn handler failed", e);
+        console.warn('[ChatView] jump-to-turn handler failed', e);
       }
     };
-    document.addEventListener("jump-to-turn", handler as EventListener);
+    document.addEventListener('jump-to-turn', handler as EventListener);
     return () => {
       aborted = true;
-      document.removeEventListener("jump-to-turn", handler as EventListener);
+      document.removeEventListener('jump-to-turn', handler as EventListener);
     };
   }, [turnIds, currentSessionId, selectChat, setActiveSplitPanel]);
 
@@ -222,12 +207,12 @@ export default function ChatView() {
               data={turnIds}
               followOutput={(isAtBottom: boolean) => {
                 if (!isAtBottom) return false;
-                return "smooth";
+                return 'smooth';
               }}
               increaseViewportBy={{ top: 300, bottom: 200 }}
               components={{
                 Scroller: ScrollerComponent as unknown as React.ComponentType<any>,
-                Footer: () => <div style={{ height: 24 }} />
+                Footer: () => <div style={{ height: 24 }} />,
               }}
               itemContent={itemContent}
               computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
@@ -235,19 +220,29 @@ export default function ChatView() {
             />
           }
           rightPane={<SplitPaneRightPanel />}
-          dividerContent={isSplitFullWidth ? null : (
-            <div className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2" style={{ cursor: 'default' }}>
-              <Suspense fallback={
-                <div className="flex flex-col items-center gap-3 py-4 w-full">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="w-2 h-2 rounded-full bg-text-secondary/30 animate-pulse" />
-                  ))}
-                </div>
-              }>
-                <CouncilOrbsVertical />
-              </Suspense>
-            </div>
-          )}
+          dividerContent={
+            isSplitFullWidth ? null : (
+              <div
+                className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2"
+                style={{ cursor: 'default' }}
+              >
+                <Suspense
+                  fallback={
+                    <div className="flex flex-col items-center gap-3 py-4 w-full">
+                      {[1, 2, 3].map((i) => (
+                        <div
+                          key={i}
+                          className="w-2 h-2 rounded-full bg-text-secondary/30 animate-pulse"
+                        />
+                      ))}
+                    </div>
+                  }
+                >
+                  <CouncilOrbsVertical />
+                </Suspense>
+              </div>
+            )
+          }
         />
       )}
 
@@ -258,8 +253,8 @@ export default function ChatView() {
 
       <div
         className={clsx(
-          "absolute left-1/2 -translate-x-1/2 max-w-[min(900px,calc(100%-24px))] z-[50] flex flex-col items-center pointer-events-none transition-opacity duration-300",
-          showWelcome ? "bottom-[16px]" : "bottom-0",
+          'absolute left-1/2 -translate-x-1/2 max-w-[min(900px,calc(100%-24px))] z-[50] flex flex-col items-center pointer-events-none transition-opacity duration-300',
+          showWelcome ? 'bottom-[16px]' : 'bottom-0'
         )}
       >
         <ChatInput />

@@ -32,17 +32,17 @@ export async function computeDerivedFields({
   shadowParagraphs,
 
   // Embeddings (already generated)
-  statementEmbeddings,     // Map<string, Float32Array>
-  paragraphEmbeddings,     // Map<string, Float32Array>
-  claimEmbeddings,         // Map<string, Float32Array>
-  queryEmbedding = null,   // Float32Array | null
+  statementEmbeddings, // Map<string, Float32Array>
+  paragraphEmbeddings, // Map<string, Float32Array>
+  claimEmbeddings, // Map<string, Float32Array>
+  queryEmbedding = null, // Float32Array | null
 
   // Geometry (already computed)
   substrate = null,
   preSemantic = null,
   regions = [],
-  geoRecord = null,        // raw packed data for basin inversion
-  basinInversion = null,   // pre-computed basin inversion
+  geoRecord = null, // raw packed data for basin inversion
+  basinInversion = null, // pre-computed basin inversion
 
   // Pre-computed (optional — if provided, skip recomputation)
   existingQueryRelevance = null,
@@ -53,7 +53,6 @@ export async function computeDerivedFields({
 
   // Pre-computed mixed-method provenance (from reconstructCanonicalProvenance)
   mixedProvenanceResult = null,
-
 }) {
   const result = {
     claimProvenance: null,
@@ -122,7 +121,8 @@ export async function computeDerivedFields({
         } else if (geoRecord?.meta?.basinInversion) {
           result.basinInversion = geoRecord.meta.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
-          const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
+          const { computeBasinInversion } =
+            await import('../../../shared/geometry/basinInversionBayesian');
           const dims = geoRecord.meta.dimensions || 384;
           const paraIds = geoRecord.meta.paragraphIndex;
           const view = new Float32Array(geoRecord.paragraphEmbeddings);
@@ -163,7 +163,8 @@ export async function computeDerivedFields({
   try {
     const { identifyPeriphery } = await import('../../geometry/interpretation/periphery');
     const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
-    const preSemanticRegions = geoRecord?.meta?.preSemanticInterpretation?.regions || preSemantic?.regions;
+    const preSemanticRegions =
+      geoRecord?.meta?.preSemanticInterpretation?.regions || preSemantic?.regions;
     periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
 
     const { computeClaimDensity } = await import('../claimDensity');
@@ -173,7 +174,9 @@ export async function computeDerivedFields({
       modelCount,
       periphery.peripheralNodeIds
     );
-    console.log(`[DeterministicPipeline] ClaimDensity: ${Object.keys(result.claimDensityResult.profiles).length} profiles in ${result.claimDensityResult.meta.processingTimeMs.toFixed(0)}ms`);
+    console.log(
+      `[DeterministicPipeline] ClaimDensity: ${Object.keys(result.claimDensityResult.profiles).length} profiles in ${result.claimDensityResult.meta.processingTimeMs.toFixed(0)}ms`
+    );
   } catch (err) {
     console.warn('[DeterministicPipeline] Claim density failed:', getErrorMessage(err));
   }
@@ -183,7 +186,8 @@ export async function computeDerivedFields({
   // canonical sets).
   // This ensures ownership counts match what blast surface will see.
   try {
-    const { computeStatementOwnership, computeClaimExclusivity } = await import('../../ConciergeService/claimProvenance');
+    const { computeStatementOwnership, computeClaimExclusivity } =
+      await import('../../ConciergeService/claimProvenance');
     const ownership = computeStatementOwnership(enrichedClaims);
     result.claimProvenanceExclusivity = computeClaimExclusivity(enrichedClaims, ownership);
     result.statementOwnership = ownership;
@@ -204,8 +208,10 @@ export async function computeDerivedFields({
       const { computeBlastSurface } = await import('../blast-radius/blastSurface');
       // Build conflict claim IDs from raw edges for speculative fate test
       const conflictClaimIds = new Set();
-      for (const e of (parsedEdges || [])) {
-        const t = String(e?.type || '').trim().toLowerCase();
+      for (const e of parsedEdges || []) {
+        const t = String(e?.type || '')
+          .trim()
+          .toLowerCase();
         if (t === 'conflicts' || t === 'conflict') {
           if (e.from) conflictClaimIds.add(e.from);
           if (e.to) conflictClaimIds.add(e.to);
@@ -213,7 +219,7 @@ export async function computeDerivedFields({
       }
 
       result.blastSurfaceResult = computeBlastSurface({
-        claims: enrichedClaims.map(c => ({
+        claims: enrichedClaims.map((c) => ({
           id: c.id,
           label: c.label,
           sourceStatementIds: c.sourceStatementIds,
@@ -224,7 +230,9 @@ export async function computeDerivedFields({
         statementTexts: statementTextsMap,
         conflictClaimIds,
       });
-      console.log(`[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`);
+      console.log(
+        `[DeterministicPipeline] BlastSurface: ${result.blastSurfaceResult.scores.length} claims scored in ${result.blastSurfaceResult.meta.processingTimeMs.toFixed(0)}ms`
+      );
     }
   } catch (err) {
     console.warn('[DeterministicPipeline] Blast surface failed:', getErrorMessage(err));
@@ -236,8 +244,8 @@ export async function computeDerivedFields({
   const EDGE_PREREQUISITE = 'prerequisite';
 
   result.semanticEdges = (parsedEdges || [])
-    .filter(e => e && e.from && e.to)
-    .map(e => {
+    .filter((e) => e && e.from && e.to)
+    .map((e) => {
       const raw = String(e.type || '').trim();
       const t = raw.toLowerCase();
       if (t === 'conflicts' || t === 'conflict') {
@@ -250,16 +258,22 @@ export async function computeDerivedFields({
       }
       return { ...e, type: raw };
     })
-    .filter(e => {
-      const t = String(e.type || '').trim().toLowerCase();
-      return t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE;
+    .filter((e) => {
+      const t = String(e.type || '')
+        .trim()
+        .toLowerCase();
+      return (
+        t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE
+      );
     });
 
   // Derived support edges from conditionals (when no explicit supports exist)
-  const hasAnySupportEdges = result.semanticEdges.some(e => String(e?.type || '') === EDGE_SUPPORTS);
+  const hasAnySupportEdges = result.semanticEdges.some(
+    (e) => String(e?.type || '') === EDGE_SUPPORTS
+  );
   if (!hasAnySupportEdges) {
     const supportKey = new Set();
-    for (const cond of (parsedConditionals || [])) {
+    for (const cond of parsedConditionals || []) {
       const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
       for (let i = 0; i < affected.length; i++) {
         const a = String(affected[i] || '').trim();
@@ -290,8 +304,7 @@ export async function computeDerivedFields({
         if (enrichedClaims.length === 0) return;
 
         // Phase 1: conflict validation (pure geometry, blast-surface-independent)
-        const { computeConflictValidation } =
-          await import('../blast-radius/conflictValidation');
+        const { computeConflictValidation } = await import('../blast-radius/conflictValidation');
         const validatedConflicts = computeConflictValidation({
           enrichedClaims,
           edges: result.semanticEdges,
@@ -302,8 +315,7 @@ export async function computeDerivedFields({
 
         // Phase 2: PASSAGE ROUTING (active layer — evidence concentration)
         if (result.claimDensityResult) {
-          const { computePassageRouting } =
-            await import('../passageRouting');
+          const { computePassageRouting } = await import('../passageRouting');
           result.passageRoutingResult = computePassageRouting({
             claimDensityResult: result.claimDensityResult,
             enrichedClaims,
@@ -321,7 +333,9 @@ export async function computeDerivedFields({
           });
 
           const prDiag = result.passageRoutingResult.routing.diagnostics;
-          console.log(`[DeterministicPipeline] PassageRouting: ${result.passageRoutingResult.gate.loadBearingCount} load-bearing, ${prDiag.floorCount} floor, mode=${prDiag.corpusMode} peripheral=${prDiag.peripheralNodeIds.length}/${(prDiag.largestBasinRatio ?? 0).toFixed(2)} in ${result.passageRoutingResult.meta.processingTimeMs.toFixed(0)}ms`);
+          console.log(
+            `[DeterministicPipeline] PassageRouting: ${result.passageRoutingResult.gate.loadBearingCount} load-bearing, ${prDiag.floorCount} floor, mode=${prDiag.corpusMode} peripheral=${prDiag.peripheralNodeIds.length}/${(prDiag.largestBasinRatio ?? 0).toFixed(2)} in ${result.passageRoutingResult.meta.processingTimeMs.toFixed(0)}ms`
+          );
         }
       } catch (err) {
         console.warn('[DeterministicPipeline] Routing pipeline failed:', getErrorMessage(err));
@@ -342,12 +356,13 @@ export async function computeDerivedFields({
         claimEmbeddings: claimEmbeddings || new Map(),
         claimDensityResult: result.claimDensityResult,
       });
-      console.log(`[DeterministicPipeline] ProvenanceRefinement: ${result.provenanceRefinement.summary.totalJoint} joint stmts (cal=${result.provenanceRefinement.summary.resolvedByCalibration} ctr=${result.provenanceRefinement.summary.resolvedByCentroidFallback} psg=${result.provenanceRefinement.summary.resolvedByPassageDominance} unr=${result.provenanceRefinement.summary.unresolved}) in ${result.provenanceRefinement.meta.processingTimeMs.toFixed(0)}ms`);
+      console.log(
+        `[DeterministicPipeline] ProvenanceRefinement: ${result.provenanceRefinement.summary.totalJoint} joint stmts (cal=${result.provenanceRefinement.summary.resolvedByCalibration} ctr=${result.provenanceRefinement.summary.resolvedByCentroidFallback} psg=${result.provenanceRefinement.summary.resolvedByPassageDominance} unr=${result.provenanceRefinement.summary.unresolved}) in ${result.provenanceRefinement.meta.processingTimeMs.toFixed(0)}ms`
+      );
     }
   } catch (err) {
     console.warn('[DeterministicPipeline] Provenance refinement failed:', getErrorMessage(err));
   }
-
 
   // ── Statement classification (corpus coverage for reading surface) ──
   try {
@@ -364,7 +379,9 @@ export async function computeDerivedFields({
         queryRelevanceScores: result.queryRelevance?.statementScores ?? new Map(),
         statementOwnership: result.statementOwnership,
       });
-      console.log(`[DeterministicPipeline] StatementClassification: ${result.statementClassification.summary.claimedCount} claimed, ${result.statementClassification.summary.unclaimedCount} unclaimed (${result.statementClassification.summary.unclaimedGroupCount} groups) in ${result.statementClassification.meta.processingTimeMs.toFixed(0)}ms`);
+      console.log(
+        `[DeterministicPipeline] StatementClassification: ${result.statementClassification.summary.claimedCount} claimed, ${result.statementClassification.summary.unclaimedCount} unclaimed (${result.statementClassification.summary.unclaimedGroupCount} groups) in ${result.statementClassification.meta.processingTimeMs.toFixed(0)}ms`
+      );
     }
   } catch (err) {
     console.warn('[DeterministicPipeline] Statement classification failed:', getErrorMessage(err));
@@ -393,7 +410,7 @@ export function buildSubstrateGraph({ substrate, regions = [] }) {
   }
 
   return {
-    nodes: (substrate.nodes || []).map(n => {
+    nodes: (substrate.nodes || []).map((n) => {
       const p = n.paragraphId;
       const xy = coords[p] || [0, 0];
       return {
@@ -409,8 +426,10 @@ export function buildSubstrateGraph({ substrate, regions = [] }) {
         y: xy[1],
       };
     }),
-    mutualEdges: (substrate.mutualRankGraph?.edges || []).map(e => ({
-      source: e.source, target: e.target, similarity: e.similarity,
+    mutualEdges: (substrate.mutualRankGraph?.edges || []).map((e) => ({
+      source: e.source,
+      target: e.target,
+      similarity: e.similarity,
     })),
   };
 }
@@ -532,10 +551,8 @@ export async function computePreSurveyPipeline({
 
   if (parsedMappingResult) {
     // StepExecutor already parsed — reuse directly
-    parsedClaims = Array.isArray(parsedMappingResult.claims)
-      ? parsedMappingResult.claims : [];
-    parsedEdges = Array.isArray(parsedMappingResult.edges)
-      ? parsedMappingResult.edges : [];
+    parsedClaims = Array.isArray(parsedMappingResult.claims) ? parsedMappingResult.claims : [];
+    parsedEdges = Array.isArray(parsedMappingResult.edges) ? parsedMappingResult.edges : [];
     parsedNarrative = String(parsedMappingResult.narrative || '').trim();
   } else {
     // Regen path — parse from raw text
@@ -547,13 +564,9 @@ export async function computePreSurveyPipeline({
     if (!parseResult?.success || !parseResult?.output) {
       throw new Error('Failed to parse mapping response text into claims/edges');
     }
-    parsedClaims = Array.isArray(parseResult.output.claims)
-      ? parseResult.output.claims : [];
-    parsedEdges = Array.isArray(parseResult.output.edges)
-      ? parseResult.output.edges : [];
-    parsedNarrative = String(
-      parseResult.output?.narrative || parseResult.narrative || ''
-    ).trim();
+    parsedClaims = Array.isArray(parseResult.output.claims) ? parseResult.output.claims : [];
+    parsedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
+    parsedNarrative = String(parseResult.output?.narrative || parseResult.narrative || '').trim();
   }
 
   if (parsedClaims.length === 0) {
@@ -562,7 +575,9 @@ export async function computePreSurveyPipeline({
 
   const parsedConditionals = [];
 
-  console.log(`[computePreSurveyPipeline] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges`);
+  console.log(
+    `[computePreSurveyPipeline] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges`
+  );
 
   // ── 3. Shadow reconstruction ──────────────────────────────────────
   let shadowStatements = inputShadowStatements;
@@ -608,26 +623,31 @@ export async function computePreSurveyPipeline({
   } else {
     // Regen path — build geometry from scratch
     const { buildGeometricSubstrate } = await import('../../geometry/substrate');
-    const { buildPreSemanticInterpretation } =
-      await import('../../geometry/interpretation');
-    const { computeBasinInversion } = await import('../../../shared/geometry/basinInversionBayesian');
+    const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+    const { computeBasinInversion } =
+      await import('../../../shared/geometry/basinInversionBayesian');
 
     const paraVectors = Array.from(paragraphEmbeddings.values());
     const paraIds = Array.from(paragraphEmbeddings.keys());
-    const basinInversionResult = preBuiltBasinInversion
-      || geoRecord?.meta?.basinInversion
-      || computeBasinInversion(paraIds, paraVectors);
+    const basinInversionResult =
+      preBuiltBasinInversion ||
+      geoRecord?.meta?.basinInversion ||
+      computeBasinInversion(paraIds, paraVectors);
 
     substrate = buildGeometricSubstrate(
       shadowParagraphs,
       paragraphEmbeddings,
       geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
       undefined,
-      basinInversionResult,
+      basinInversionResult
     );
 
     preSemantic = buildPreSemanticInterpretation(
-      substrate, shadowParagraphs, paragraphEmbeddings, undefined, basinInversionResult,
+      substrate,
+      shadowParagraphs,
+      paragraphEmbeddings,
+      undefined,
+      basinInversionResult
     );
 
     regions = preSemantic?.regionization?.regions || [];
@@ -646,20 +666,25 @@ export async function computePreSurveyPipeline({
         });
       }
     } catch (err) {
-      console.warn('[computePreSurveyPipeline] Query relevance failed:', err?.message || String(err));
+      console.warn(
+        '[computePreSurveyPipeline] Query relevance failed:',
+        err?.message || String(err)
+      );
     }
   }
 
   try {
     const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
     enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions || []);
-  } catch (_) { /* non-fatal */ }
+  } catch (_) {
+    /* non-fatal */
+  }
 
   // ── 6. Claim embeddings ───────────────────────────────────────────
   const { generateClaimEmbeddings, reconstructCanonicalProvenance } =
     await import('../../ConciergeService/claimAssembly');
 
-  const mapperClaimsForProvenance = parsedClaims.map(c => ({
+  const mapperClaimsForProvenance = parsedClaims.map((c) => ({
     id: c.id,
     label: c.label,
     text: c.text,
@@ -684,7 +709,7 @@ export async function computePreSurveyPipeline({
     statementEmbeddings,
     claimEmbeddings,
     regions,
-    modelCount,
+    modelCount
   );
 
   const enrichedClaims = provenanceResult.claims;
@@ -728,18 +753,24 @@ export async function computePreSurveyPipeline({
       derived.bayesianBasinInversion = preBuiltBayesianBasinInversion;
     } else if (paragraphEmbeddings?.size > 0) {
       try {
-        const { computeBasinInversionBayesian: _bayesian } = await import('../../../shared/geometry/basinInversionBayesian');
+        const { computeBasinInversionBayesian: _bayesian } =
+          await import('../../../shared/geometry/basinInversionBayesian');
         const _paraIds = Array.from(paragraphEmbeddings.keys());
-        const _paraVecs = _paraIds.map(id => paragraphEmbeddings.get(id));
+        const _paraVecs = _paraIds.map((id) => paragraphEmbeddings.get(id));
         derived.bayesianBasinInversion = _bayesian(_paraIds, _paraVecs);
       } catch (err) {
-        console.warn('[computePreSurveyPipeline] Bayesian basin inversion failed:', getErrorMessage(err));
+        console.warn(
+          '[computePreSurveyPipeline] Bayesian basin inversion failed:',
+          getErrorMessage(err)
+        );
       }
     }
   }
 
   const elapsed = Date.now() - t0;
-  console.log(`[computePreSurveyPipeline] Complete: ${enrichedClaims.length} claims, ${parsedEdges.length} edges in ${elapsed}ms`);
+  console.log(
+    `[computePreSurveyPipeline] Complete: ${enrichedClaims.length} claims, ${parsedEdges.length} edges in ${elapsed}ms`
+  );
 
   return {
     parsedClaims,
@@ -771,19 +802,29 @@ export async function computePreSurveyPipeline({
  * @param {object} preSurvey — return value of computePreSurveyPipeline
  * @param {object} opts
  */
-export async function assembleFromPreSurvey(preSurvey, {
-  queryText = '',
-  modelCount = 1,
-  turn = undefined,
-  statementSemanticDensity = undefined,
-  paragraphSemanticDensity = undefined,
-  claimSemanticDensity = undefined,
-  querySemanticDensity = undefined,
-} = {}) {
+export async function assembleFromPreSurvey(
+  preSurvey,
+  {
+    queryText = '',
+    modelCount = 1,
+    turn = undefined,
+    statementSemanticDensity = undefined,
+    paragraphSemanticDensity = undefined,
+    claimSemanticDensity = undefined,
+    querySemanticDensity = undefined,
+  } = {}
+) {
   const {
-    parsedNarrative, enrichedClaims, derived,
-    shadowStatements, shadowParagraphs, substrate, preSemantic,
-    queryRelevance, regions, claimEmbeddings,
+    parsedNarrative,
+    enrichedClaims,
+    derived,
+    shadowStatements,
+    shadowParagraphs,
+    substrate,
+    preSemantic,
+    queryRelevance,
+    regions,
+    claimEmbeddings,
     citationSourceOrder,
   } = preSurvey;
 
@@ -888,11 +929,7 @@ export async function buildArtifactForProvider({
   };
 }
 
-export async function computeProbeGeometry({
-  modelIndex,
-  content,
-  embeddingConfig = null,
-}) {
+export async function computeProbeGeometry({ modelIndex, content, embeddingConfig = null }) {
   const text = String(content || '').trim();
   if (!text) {
     return {
@@ -906,14 +943,19 @@ export async function computeProbeGeometry({
     };
   }
 
-  const [{ extractShadowStatements, projectParagraphs }, clustering, { buildGeometricSubstrate }, { buildPreSemanticInterpretation }, { packEmbeddingMap }] =
-    await Promise.all([
-      import('../../shadow'),
-      import('../../clustering'),
-      import('../../geometry/substrate'),
-      import('../../geometry/interpretation'),
-      import('../../persistence/embeddingCodec'),
-    ]);
+  const [
+    { extractShadowStatements, projectParagraphs },
+    clustering,
+    { buildGeometricSubstrate },
+    { buildPreSemanticInterpretation },
+    { packEmbeddingMap },
+  ] = await Promise.all([
+    import('../../shadow'),
+    import('../../clustering'),
+    import('../../geometry/substrate'),
+    import('../../geometry/interpretation'),
+    import('../../persistence/embeddingCodec'),
+  ]);
 
   const { DEFAULT_CONFIG, generateStatementEmbeddings, generateEmbeddings } = clustering;
   const config = embeddingConfig || DEFAULT_CONFIG;
@@ -951,7 +993,11 @@ export async function computeProbeGeometry({
   ]);
 
   const substrate = buildGeometricSubstrate(paragraphs, paragraphResult.embeddings);
-  const preSemantic = buildPreSemanticInterpretation(substrate, paragraphs, paragraphResult.embeddings);
+  const preSemantic = buildPreSemanticInterpretation(
+    substrate,
+    paragraphs,
+    paragraphResult.embeddings
+  );
 
   const packedStatements = packEmbeddingMap(statementResult.embeddings, statementResult.dimensions);
   const packedParagraphs = packEmbeddingMap(paragraphResult.embeddings, paragraphResult.dimensions);

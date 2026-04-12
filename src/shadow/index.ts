@@ -12,63 +12,34 @@
 // Guardrail: Pattern definitions are frozen on import to prevent runtime modification
 // ===========================================================================
 
-
 // ===========================================================================
 // EXPORTS
 // ===========================================================================
 
 // Types
-export type {
-    Stance,
-    SignalPatterns,
-} from './StatementTypes';
+export type { Stance, SignalPatterns } from './StatementTypes';
 
-export type {
-    ExclusionRule,
-} from './ExclusionRules';
+export type { ExclusionRule } from './ExclusionRules';
 
-export type {
-    ShadowStatement,
-    ShadowExtractionResult,
-    TableCellMeta,
-} from './ShadowExtractor';
+export type { ShadowStatement, ShadowExtractionResult, TableCellMeta } from './ShadowExtractor';
 
-export type {
-    ShadowParagraph,
-    ParagraphProjectionResult,
-} from './ShadowParagraphProjector';
+export type { ShadowParagraph, ParagraphProjectionResult } from './ShadowParagraphProjector';
 
 // Constants
-export {
-    STANCE_PRIORITY,
-    STANCE_PATTERNS,
-    SIGNAL_PATTERNS,
-} from './StatementTypes';
+export { STANCE_PRIORITY, STANCE_PATTERNS, SIGNAL_PATTERNS } from './StatementTypes';
 
-export {
-    EXCLUSION_RULES,
-} from './ExclusionRules';
+export { EXCLUSION_RULES } from './ExclusionRules';
 
 // Functions - StatementTypes
-export {
-    getStancePriority,
-    classifyStance,
-    detectSignals,
-} from './StatementTypes';
+export { getStancePriority, classifyStance, detectSignals } from './StatementTypes';
 
 // Functions - ExclusionRules
-export {
-    isExcluded,
-} from './ExclusionRules';
+export { isExcluded } from './ExclusionRules';
 
 // Functions - ShadowExtractor
-export {
-    extractShadowStatements,
-} from './ShadowExtractor';
+export { extractShadowStatements } from './ShadowExtractor';
 
-export {
-    projectParagraphs,
-} from './ShadowParagraphProjector';
+export { projectParagraphs } from './ShadowParagraphProjector';
 
 // ===========================================================================
 // LEGACY ALIASES (Migration Support)
@@ -76,6 +47,4 @@ export {
 
 export { extractShadowStatements as executeShadowExtraction } from './ShadowExtractor';
 
-export type {
-    ShadowExtractionResult as TwoPassResult,
-} from './ShadowExtractor';
+export type { ShadowExtractionResult as TwoPassResult } from './ShadowExtractor';

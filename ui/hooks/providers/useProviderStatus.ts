@@ -37,7 +37,7 @@ export interface UseProviderStatusReturn {
 
 export function useProviderStatus(
   options: UseProviderStatusOptions = {},
-  enabled: boolean = true,
+  enabled: boolean = true
 ): UseProviderStatusReturn {
   const [status, setStatus] = useAtom(providerAuthStatusAtom);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -45,11 +45,7 @@ export function useProviderStatus(
 
   useEffect(() => {
     if (!enabled) return;
-    if (
-      typeof chrome === "undefined" ||
-      !chrome?.storage?.local ||
-      !chrome?.runtime?.sendMessage
-    ) {
+    if (typeof chrome === 'undefined' || !chrome?.storage?.local || !chrome?.runtime?.sendMessage) {
       return;
     }
 
@@ -86,7 +82,10 @@ export function useProviderStatus(
     // 3. Listen for live updates from AuthManager
     const listener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
       if (area === 'local' && changes.provider_auth_status) {
-        setStatus((changes.provider_auth_status.newValue as Record<string, boolean>) || ({} as Record<string, boolean>));
+        setStatus(
+          (changes.provider_auth_status.newValue as Record<string, boolean>) ||
+            ({} as Record<string, boolean>)
+        );
       }
     };
 
@@ -106,34 +105,37 @@ export function useProviderStatus(
   /**
    * Verify auth via API (slower but authoritative)
    */
-  const verifyAuth = useCallback(async (providerId?: string) => {
-    if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) {
-      console.warn('[useProviderStatus] Chrome APIs unavailable');
-      return status;
-    }
-    setIsVerifying(true);
-
-    try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'VERIFY_AUTH_TOKEN',
-        payload: providerId ? { providerId } : undefined
-      });
-
-      if (response?.success) {
-        setStatus((prev: Record<string, boolean>) => ({ ...prev, ...response.data }));
-        return response.data;
+  const verifyAuth = useCallback(
+    async (providerId?: string) => {
+      if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) {
+        console.warn('[useProviderStatus] Chrome APIs unavailable');
+        return status;
       }
+      setIsVerifying(true);
 
-      throw new Error(response?.error || 'Verification failed');
-    } finally {
-      setIsVerifying(false);
-    }
-  }, [setStatus]);
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'VERIFY_AUTH_TOKEN',
+          payload: providerId ? { providerId } : undefined,
+        });
+
+        if (response?.success) {
+          setStatus((prev: Record<string, boolean>) => ({ ...prev, ...response.data }));
+          return response.data;
+        }
+
+        throw new Error(response?.error || 'Verification failed');
+      } finally {
+        setIsVerifying(false);
+      }
+    },
+    [setStatus]
+  );
 
   return {
     status,
     manualRefresh,
     verifyAuth,
-    isVerifying
+    isVerifying,
   };
 }

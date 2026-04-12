@@ -7,7 +7,11 @@ interface ThreadIndexProps {
   onJumpToThread: (threadId: string) => void;
 }
 
-export const ThreadIndex: React.FC<ThreadIndexProps> = ({ threads, threadOrder, onJumpToThread }) => {
+export const ThreadIndex: React.FC<ThreadIndexProps> = ({
+  threads,
+  threadOrder,
+  onJumpToThread,
+}) => {
   const sorted = [...threads].sort((a, b) => {
     return threadOrder.indexOf(a.id) - threadOrder.indexOf(b.id);
   });
@@ -28,7 +32,9 @@ export const ThreadIndex: React.FC<ThreadIndexProps> = ({ threads, threadOrder, 
               <span className="mt-1.5 w-2 h-2 rounded-full bg-white/15 shrink-0" />
             )}
             <div className="min-w-0">
-              <span className="text-sm font-medium text-text-primary">{i + 1}. {thread.label}</span>
+              <span className="text-sm font-medium text-text-primary">
+                {i + 1}. {thread.label}
+              </span>
               <span className="text-sm text-text-muted ml-2">{thread.why_care}</span>
             </div>
           </button>

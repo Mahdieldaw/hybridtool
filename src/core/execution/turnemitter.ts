@@ -81,7 +81,6 @@ interface CognitiveArtifact {
   };
 }
 
-
 interface StepPayload {
   providers?: string[];
   mappingProvider?: string;
@@ -170,12 +169,15 @@ interface AiTurn {
   createdAt: number;
   pipelineStatus: string;
   batch?: {
-    responses: Record<string, {
-      text: string;
-      modelIndex: number;
-      status: string;
-      meta?: Record<string, unknown>;
-    }>;
+    responses: Record<
+      string,
+      {
+        text: string;
+        modelIndex: number;
+        status: string;
+        meta?: Record<string, unknown>;
+      }
+    >;
   };
   mapping?: { artifact: CognitiveArtifact };
   singularity?: {
@@ -255,9 +257,7 @@ export class TurnEmitter {
     currentUserMessage: string
   ): void {
     if (resolvedContext?.type === 'recompute') {
-      console.log(
-        '[TurnEmitter] Skipping TURN_FINALIZED for recompute operation'
-      );
+      console.log('[TurnEmitter] Skipping TURN_FINALIZED for recompute operation');
       return;
     }
 
@@ -268,8 +268,7 @@ export class TurnEmitter {
 
     try {
       const timestamp = Date.now();
-      const userTurnId =
-        context?.canonicalUserTurnId ?? this._generateId('user');
+      const userTurnId = context?.canonicalUserTurnId ?? this._generateId('user');
       const aiTurnId = context?.canonicalAiTurnId ?? this._generateId('ai');
 
       const userTurn: UserTurn = {
@@ -286,9 +285,7 @@ export class TurnEmitter {
       let primaryMapper: string | null = null;
 
       const safeSteps = steps ?? [];
-      const stepById = new Map<string, Step>(
-        safeSteps.map((s) => [s.stepId, s])
-      );
+      const stepById = new Map<string, Step>(safeSteps.map((s) => [s.stepId, s]));
 
       stepResults.forEach((value, stepId) => {
         const step = stepById.get(stepId);
@@ -315,8 +312,7 @@ export class TurnEmitter {
               break;
             }
             case 'mapping': {
-              const providerId =
-                result?.providerId ?? step?.payload?.mappingProvider;
+              const providerId = result?.providerId ?? step?.payload?.mappingProvider;
               if (!providerId) return;
               if (!mappingResponses[providerId]) {
                 mappingResponses[providerId] = [];
@@ -335,8 +331,7 @@ export class TurnEmitter {
               break;
             }
             case 'singularity': {
-              const providerId =
-                result?.providerId ?? step?.payload?.singularityProvider;
+              const providerId = result?.providerId ?? step?.payload?.singularityProvider;
               if (!providerId) return;
               if (!singularityResponses[providerId]) {
                 singularityResponses[providerId] = [];
@@ -442,17 +437,14 @@ export class TurnEmitter {
           : undefined;
 
       const cognitiveArtifact = context?.mappingArtifact ?? null;
-      const mappingPhase = cognitiveArtifact
-        ? { artifact: cognitiveArtifact }
-        : undefined;
+      const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact } : undefined;
 
       let inferredSingularityOutput = context?.singularityOutput;
       if (!inferredSingularityOutput) {
         try {
           const firstProviderId = Object.keys(singularityResponses ?? {})[0];
           const arr = firstProviderId ? singularityResponses[firstProviderId] : null;
-          const last =
-            Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
+          const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
           const candidate = last?.meta?.['singularityOutput'];
           if (isSingularityOutput(candidate)) {
             inferredSingularityOutput = candidate;
@@ -467,14 +459,11 @@ export class TurnEmitter {
         inferredSingularityOutput || (typeof promptUsed === 'string' && promptUsed.length > 0)
           ? {
               prompt: promptUsed ?? inferredSingularityOutput?.prompt ?? '',
-              output:
-                inferredSingularityOutput?.output ??
-                inferredSingularityOutput?.text ??
-                '',
+              output: inferredSingularityOutput?.output ?? inferredSingularityOutput?.text ?? '',
               timestamp:
-                (typeof (inferredSingularityOutput as any)?.timestamp === 'number'
+                typeof (inferredSingularityOutput as any)?.timestamp === 'number'
                   ? (inferredSingularityOutput as any).timestamp
-                  : timestamp),
+                  : timestamp,
             }
           : undefined;
       const aiTurn: AiTurn = {
@@ -495,9 +484,7 @@ export class TurnEmitter {
             mapping: safeSteps.some((s) => s.type === 'mapping'),
             singularity: safeSteps.some((s) => s.type === 'singularity'),
           },
-          ...(context?.workflowControl
-            ? { workflowControl: context.workflowControl }
-            : {}),
+          ...(context?.workflowControl ? { workflowControl: context.workflowControl } : {}),
         },
       };
 

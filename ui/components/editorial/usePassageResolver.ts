@@ -32,7 +32,7 @@ export interface PassageResolver {
 
 export function usePassageResolver(
   artifact: any | null,
-  citationSourceOrder: Record<string | number, string> | null,
+  citationSourceOrder: Record<string | number, string> | null
 ): PassageResolver {
   return useMemo(() => {
     if (!artifact) return { resolve: () => null };
@@ -71,7 +71,7 @@ export function usePassageResolver(
     // Statement text lookup for unclaimed groups
     const statementTexts = new Map<string, string>();
     for (const p of paragraphs) {
-      for (const s of (p.statements ?? [])) {
+      for (const s of p.statements ?? []) {
         statementTexts.set(s.id, s.text);
       }
     }
@@ -122,7 +122,7 @@ export function usePassageResolver(
       if (!profile?.passages) return null;
 
       const passageEntry = profile.passages.find(
-        (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex,
+        (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex
       );
       if (!passageEntry) return null;
 
@@ -144,7 +144,9 @@ export function usePassageResolver(
         modelName,
         claimId,
         claimLabel: claimLabels.get(claimId) || claimId,
-        paragraphCount: passageEntry.length ?? (passageEntry.endParagraphIndex - passageEntry.startParagraphIndex + 1),
+        paragraphCount:
+          passageEntry.length ??
+          passageEntry.endParagraphIndex - passageEntry.startParagraphIndex + 1,
         concentrationRatio: rp?.concentrationRatio ?? 0,
         densityRatio: rp?.densityRatio ?? 0,
         landscapePosition: rp?.landscapePosition ?? 'floor',

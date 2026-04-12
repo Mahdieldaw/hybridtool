@@ -6,7 +6,7 @@
  */
 export function packEmbeddingMap(
   map: Map<string, Float32Array>,
-  dimensions: number,
+  dimensions: number
 ): { buffer: ArrayBuffer; index: string[] } {
   const index: string[] = [];
   const totalFloats = map.size * dimensions;
@@ -33,11 +33,13 @@ export function packEmbeddingMap(
 export function unpackEmbeddingMap(
   buffer: ArrayBuffer,
   index: string[],
-  dimensions: number,
+  dimensions: number
 ): Map<string, Float32Array> {
   const expectedBytes = index.length * dimensions * 4;
   if (buffer.byteLength < expectedBytes) {
-    throw new Error(`unpackEmbeddingMap: buffer too small (${buffer.byteLength} bytes) for ${index.length}×${dimensions}`);
+    throw new Error(
+      `unpackEmbeddingMap: buffer too small (${buffer.byteLength} bytes) for ${index.length}×${dimensions}`
+    );
   }
   const view = new Float32Array(buffer);
   const map = new Map<string, Float32Array>();

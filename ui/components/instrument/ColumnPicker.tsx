@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import clsx from "clsx";
-import type { ColumnDef } from "./columnRegistry";
-import { compileExpression, validateExpression } from "./expressionEngine";
-import type { EvidenceRow } from "../../hooks/useEvidenceRows";
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import clsx from 'clsx';
+import type { ColumnDef } from './columnRegistry';
+import { compileExpression, validateExpression } from './expressionEngine';
+import type { EvidenceRow } from '../../hooks/useEvidenceRows';
 
 // ============================================================================
 // CATEGORY LABELS
@@ -18,7 +18,15 @@ const CATEGORY_LABELS: Record<string, string> = {
   computed: 'Computed',
 };
 
-const CATEGORY_ORDER = ['identity', 'geometry', 'continuous', 'mixed', 'blast', 'metadata', 'computed'];
+const CATEGORY_ORDER = [
+  'identity',
+  'geometry',
+  'continuous',
+  'mixed',
+  'blast',
+  'metadata',
+  'computed',
+];
 
 // ============================================================================
 // EXPRESSION INPUT
@@ -36,33 +44,39 @@ function ExpressionInput({
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
-  const handleExprChange = useCallback((val: string) => {
-    setExpr(val);
-    setError(null);
+  const handleExprChange = useCallback(
+    (val: string) => {
+      setExpr(val);
+      setError(null);
 
-    // Autocomplete: find word at cursor
-    const words = val.split(/[\s+\-*/()%,?:<>!=&|]+/);
-    const lastWord = words[words.length - 1];
-    if (lastWord.length >= 1) {
-      const matching = allColumnIds.filter(id =>
-        id.toLowerCase().startsWith(lastWord.toLowerCase()) && id !== lastWord
-      );
-      setSuggestions(matching.slice(0, 6));
-    } else {
+      // Autocomplete: find word at cursor
+      const words = val.split(/[\s+\-*/()%,?:<>!=&|]+/);
+      const lastWord = words[words.length - 1];
+      if (lastWord.length >= 1) {
+        const matching = allColumnIds.filter(
+          (id) => id.toLowerCase().startsWith(lastWord.toLowerCase()) && id !== lastWord
+        );
+        setSuggestions(matching.slice(0, 6));
+      } else {
+        setSuggestions([]);
+      }
+    },
+    [allColumnIds]
+  );
+
+  const applySuggestion = useCallback(
+    (suggestion: string) => {
+      // Replace last partial word with suggestion
+      const parts = expr.split(/(?=[\s+\-*/()%,?:<>!=&|])|(?<=[\s+\-*/()%,?:<>!=&|])/);
+      // Find the last identifier-like token and replace it
+      let i = parts.length - 1;
+      while (i >= 0 && /^[a-zA-Z0-9_$]+$/.test(parts[i])) i--;
+      const newExpr = parts.slice(0, i + 1).join('') + suggestion;
+      setExpr(newExpr);
       setSuggestions([]);
-    }
-  }, [allColumnIds]);
-
-  const applySuggestion = useCallback((suggestion: string) => {
-    // Replace last partial word with suggestion
-    const parts = expr.split(/(?=[\s+\-*/()%,?:<>!=&|])|(?<=[\s+\-*/()%,?:<>!=&|])/);
-    // Find the last identifier-like token and replace it
-    let i = parts.length - 1;
-    while (i >= 0 && /^[a-zA-Z0-9_$]+$/.test(parts[i])) i--;
-    const newExpr = parts.slice(0, i + 1).join('') + suggestion;
-    setExpr(newExpr);
-    setSuggestions([]);
-  }, [expr]);
+    },
+    [expr]
+  );
 
   const handleAdd = useCallback(() => {
     const trimmed = expr.trim();
@@ -89,7 +103,7 @@ function ExpressionInput({
       label: trimLabel,
       accessor: (row: EvidenceRow) => compiled.evaluate(row),
       type: 'number',
-      format: (v: any) => v == null ? '—' : typeof v === 'number' ? v.toFixed(3) : String(v),
+      format: (v: any) => (v == null ? '—' : typeof v === 'number' ? v.toFixed(3) : String(v)),
       sortable: true,
       groupable: false,
       description: `Computed: ${trimmed}`,
@@ -113,7 +127,7 @@ function ExpressionInput({
         <input
           type="text"
           value={label}
-          onChange={e => setLabel(e.target.value)}
+          onChange={(e) => setLabel(e.target.value)}
           placeholder="Column name"
           className="w-full bg-black/20 border border-white/10 rounded-md px-2 py-1 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-brand-500/50"
         />
@@ -121,20 +135,22 @@ function ExpressionInput({
           <input
             type="text"
             value={expr}
-            onChange={e => handleExprChange(e.target.value)}
-            onKeyDown={e => {
+            onChange={(e) => handleExprChange(e.target.value)}
+            onKeyDown={(e) => {
               if (e.key === 'Enter') handleAdd();
               if (e.key === 'Escape') setSuggestions([]);
             }}
             placeholder="e.g. sim_claim - sim_query"
             className={clsx(
-              "w-full bg-black/20 border rounded-md px-2 py-1 text-xs font-mono text-text-primary placeholder:text-text-muted focus:outline-none",
-              error ? "border-rose-500/50 focus:border-rose-500" : "border-white/10 focus:border-brand-500/50"
+              'w-full bg-black/20 border rounded-md px-2 py-1 text-xs font-mono text-text-primary placeholder:text-text-muted focus:outline-none',
+              error
+                ? 'border-rose-500/50 focus:border-rose-500'
+                : 'border-white/10 focus:border-brand-500/50'
             )}
           />
           {suggestions.length > 0 && (
             <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-surface border border-border-subtle rounded-lg shadow-elevated overflow-hidden">
-              {suggestions.map(s => (
+              {suggestions.map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -149,7 +165,8 @@ function ExpressionInput({
         </div>
         {error && <div className="text-[11px] text-rose-400">{error}</div>}
         <div className="text-[10px] text-text-muted leading-relaxed">
-          Columns: {allColumnIds.slice(0, 8).join(', ')}{allColumnIds.length > 8 ? '…' : ''}
+          Columns: {allColumnIds.slice(0, 8).join(', ')}
+          {allColumnIds.length > 8 ? '…' : ''}
         </div>
         <button
           type="button"
@@ -193,8 +210,10 @@ export function ColumnPicker({
     if (!open) return;
     const handler = (e: MouseEvent) => {
       if (
-        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
-        popRef.current && !popRef.current.contains(e.target as Node)
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node) &&
+        popRef.current &&
+        !popRef.current.contains(e.target as Node)
       ) {
         setOpen(false);
       }
@@ -216,19 +235,19 @@ export function ColumnPicker({
   }, [allColumns]);
 
   const visibleSet = new Set(visibleColumnIds);
-  const allColumnIds = useMemo(() => allColumns.map(c => c.id), [allColumns]);
+  const allColumnIds = useMemo(() => allColumns.map((c) => c.id), [allColumns]);
 
   return (
     <div className="relative">
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen((v) => !v)}
         className={clsx(
-          "px-2.5 py-1.5 rounded-lg text-[10px] border transition-colors whitespace-nowrap",
+          'px-2.5 py-1.5 rounded-lg text-[10px] border transition-colors whitespace-nowrap',
           open
-            ? "bg-brand-500/20 border-brand-500 text-text-primary"
-            : "bg-black/20 border-white/10 text-text-muted hover:text-text-primary hover:border-white/20"
+            ? 'bg-brand-500/20 border-brand-500 text-text-primary'
+            : 'bg-black/20 border-white/10 text-text-muted hover:text-text-primary hover:border-white/20'
         )}
       >
         + Columns
@@ -255,7 +274,7 @@ export function ColumnPicker({
             </div>
 
             {/* Column groups */}
-            {CATEGORY_ORDER.map(cat => {
+            {CATEGORY_ORDER.map((cat) => {
               const cols = grouped.get(cat);
               if (!cols || cols.length === 0) return null;
               return (
@@ -263,7 +282,7 @@ export function ColumnPicker({
                   <div className="text-[9px] uppercase tracking-wider text-text-muted font-semibold px-0.5">
                     {CATEGORY_LABELS[cat] ?? cat}
                   </div>
-                  {cols.map(col => (
+                  {cols.map((col) => (
                     <label
                       key={col.id}
                       className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-white/5 cursor-pointer group"

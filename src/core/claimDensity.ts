@@ -32,7 +32,7 @@ export function computeClaimDensity(
   enrichedClaims: MinimalClaim[],
   shadowParagraphs: ShadowParagraph[],
   totalModelCount: number,
-  peripheralNodeIds: Set<string> = new Set(),
+  peripheralNodeIds: Set<string> = new Set()
 ): ClaimDensityResult {
   const t0 = performance.now();
 
@@ -100,10 +100,13 @@ export function computeClaimDensity(
     // PLUS GEOMETRIC CORE: only non-peripheral paragraphs count
     const passages: PassageEntry[] = [];
     for (const [modelIndex, sorted] of byModel) {
-      const strictCore = sorted.filter(pc => pc.coverage > 0.5 && !peripheralNodeIds.has(pc.paragraphId));
+      const strictCore = sorted.filter(
+        (pc) => pc.coverage > 0.5 && !peripheralNodeIds.has(pc.paragraphId)
+      );
       let runStart = 0;
       for (let i = 1; i <= strictCore.length; i++) {
-        const isBreak = i === strictCore.length ||
+        const isBreak =
+          i === strictCore.length ||
           strictCore[i].paragraphIndex !== strictCore[i - 1].paragraphIndex + 1;
         if (isBreak) {
           const runParas = strictCore.slice(runStart, i);
@@ -123,7 +126,7 @@ export function computeClaimDensity(
     // Derived aggregates
     const paragraphCount = paragraphCoverage.length;
     const passageCount = passages.length;
-    const majorityParagraphCount = paragraphCoverage.filter(pc => pc.coverage > 0.5).length;
+    const majorityParagraphCount = paragraphCoverage.filter((pc) => pc.coverage > 0.5).length;
     const modelSpread = byModel.size;
 
     // Longitudinal stats for the "Max Run"
@@ -148,9 +151,10 @@ export function computeClaimDensity(
     }
     const modelsWithPassages = modelsWithPassagesSet.size;
 
-    const meanCoverage = paragraphCount > 0
-      ? paragraphCoverage.reduce((s, pc) => s + pc.coverage, 0) / paragraphCount
-      : 0;
+    const meanCoverage =
+      paragraphCount > 0
+        ? paragraphCoverage.reduce((s, pc) => s + pc.coverage, 0) / paragraphCount
+        : 0;
 
     profiles[claim.id] = {
       claimId: claim.id,

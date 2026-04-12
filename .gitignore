@@ -65,3 +65,17 @@ blast_surface_v2_spec.md
 
 cleanup/
 canon docs/
+
+# Markdown files
+*.md
+
+# Model files
+models/
+onnx/
+oi.js
+
+# Test files
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts

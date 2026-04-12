@@ -2,7 +2,7 @@
  * HTOS ChatGPT Provider Adapter
  * - Implements ProviderAdapter interface for ChatGPT
  * - Wraps ChatGPTSessionApi with auth observation (ChatGPT has internal retries)
- * 
+ *
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { authManager } from '../core/auth-manager.js';
@@ -13,7 +13,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   getErrorMessage,
-  normalizeError
+  normalizeError,
 } from '../utils/ErrorHandler';
 
 // Provider-specific adapter debug flag (off by default)
@@ -24,7 +24,7 @@ const pad = (...args) => {
 
 export class ChatGPTAdapter {
   constructor(controller) {
-    this.id = "chatgpt";
+    this.id = 'chatgpt';
     this.capabilities = {
       needsDNR: false,
       needsOffscreen: true, // Requires oi Arkose/PoW pipeline
@@ -38,12 +38,18 @@ export class ChatGPTAdapter {
   /**
    * Unified ask API: prefer continuation when context identifiers exist, else start new.
    */
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined
+  ) {
     try {
       const ctx = Object(providerContext);
       const meta = ctx.meta || providerContext || {};
       const hasContinuation = Boolean(
-        meta.conversationId || meta.parentMessageId || meta.messageId,
+        meta.conversationId || meta.parentMessageId || meta.messageId
       );
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
 
@@ -55,9 +61,11 @@ export class ChatGPTAdapter {
       }
 
       try {
-        const len = (res?.text || "").length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
-      } catch (_) { }
+        const len = (res?.text || '').length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`
+        );
+      } catch (_) {}
       return res;
     } catch (e) {
       console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, getErrorMessage(e));
@@ -68,14 +76,18 @@ export class ChatGPTAdapter {
   // Compatibility shim: delegate adapter._getAccessToken to controller
   async _getAccessToken() {
     try {
-      if (this.controller && typeof this.controller._getAccessToken === "function") {
+      if (this.controller && typeof this.controller._getAccessToken === 'function') {
         return await this.controller._getAccessToken();
       }
-      if (this.controller && this.controller.chatgptSession && typeof this.controller.chatgptSession._ensureAccessToken === "function") {
+      if (
+        this.controller &&
+        this.controller.chatgptSession &&
+        typeof this.controller.chatgptSession._ensureAccessToken === 'function'
+      ) {
         const token = await this.controller.chatgptSession._ensureAccessToken();
         return { accessToken: token || null };
       }
-      return { error: "no-controller" };
+      return { error: 'no-controller' };
     } catch (e) {
       return { error: getErrorMessage(e) };
     }
@@ -104,7 +116,7 @@ export class ChatGPTAdapter {
     const startTime = Date.now();
     pad(`[ChatGPT Adapter] sendPrompt started (provider=${this.id})`);
 
-    let aggregated = "";
+    let aggregated = '';
 
     try {
       // If Thinking mode requested, route to thinkAsk backend which streams NDJSON
@@ -120,9 +132,11 @@ export class ChatGPTAdapter {
             if (chunk?.id) lastMessageId = chunk.id;
             if (chunk?.model) observedModel = chunk.model;
             if (chunk?.text) aggregated = chunk.text;
-          } catch (_) { }
+          } catch (_) {}
           if (onChunk) {
-            try { onChunk(chunk); } catch (_) { }
+            try {
+              onChunk(chunk);
+            } catch (_) {}
           }
         };
 
@@ -136,24 +150,26 @@ export class ChatGPTAdapter {
             parentMessageId: req.meta?.parentMessageId || req.meta?.messageId,
             think: true,
           },
-          forwardOnChunk,
+          forwardOnChunk
         );
 
         const response = {
           providerId: this.id,
           ok: true,
           id: null,
-          text: result?.text ?? aggregated ?? "",
+          text: result?.text ?? aggregated ?? '',
           partial: false,
           latencyMs: Date.now() - startTime,
           meta: {
-            model: result?.model || observedModel || "auto",
+            model: result?.model || observedModel || 'auto',
             conversationId: conversationId || undefined,
             messageId: lastMessageId || undefined,
             parentMessageId: lastMessageId || undefined,
           },
         };
-        pad(`[ChatGPT Adapter] providerComplete (thinking): chatgpt status=success, latencyMs=${response.latencyMs}`);
+        pad(
+          `[ChatGPT Adapter] providerComplete (thinking): chatgpt status=success, latencyMs=${response.latencyMs}`
+        );
         return response;
       }
 
@@ -168,9 +184,11 @@ export class ChatGPTAdapter {
           if (chunk?.id) lastMessageId = chunk.id;
           if (chunk?.model) observedModel = chunk.model;
           if (chunk?.text) aggregated = chunk.text;
-        } catch (_) { }
+        } catch (_) {}
         if (onChunk) {
-          try { onChunk(chunk); } catch (_) { }
+          try {
+            onChunk(chunk);
+          } catch (_) {}
         }
       };
 
@@ -182,27 +200,28 @@ export class ChatGPTAdapter {
           chatId: req.meta?.conversationId,
           parentMessageId: req.meta?.parentMessageId || req.meta?.messageId,
         },
-        forwardOnChunk,
+        forwardOnChunk
       );
 
       const response = {
         providerId: this.id,
         ok: true,
         id: null,
-        text: result?.text ?? "",
+        text: result?.text ?? '',
         partial: false,
         latencyMs: Date.now() - startTime,
         meta: {
-          model: result?.model || observedModel || "auto",
+          model: result?.model || observedModel || 'auto',
           conversationId: conversationId || undefined,
           messageId: lastMessageId || undefined,
           parentMessageId: lastMessageId || undefined,
         },
       };
 
-      pad(`[ChatGPT Adapter] providerComplete: chatgpt status=success, latencyMs=${response.latencyMs}`);
+      pad(
+        `[ChatGPT Adapter] providerComplete: chatgpt status=success, latencyMs=${response.latencyMs}`
+      );
       return response;
-
     } catch (error) {
       // Unwrap special thrown thinking-result
       if (error && typeof error === 'object') {
@@ -213,10 +232,14 @@ export class ChatGPTAdapter {
       // Auth failure: 401/pattern → definitive, 403 → retry once
       if (isProviderAuthError(error)) {
         if (!isDefinitiveAuthError(error) && !_isRetry) {
-          console.log(`[ChatGPT Adapter] Ambiguous auth error (${error?.status}), retrying once...`);
+          console.log(
+            `[ChatGPT Adapter] Ambiguous auth error (${error?.status}), retrying once...`
+          );
           return await this.sendPrompt(req, onChunk, signal, true);
         }
-        console.log(`[ChatGPT Adapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        console.log(
+          `[ChatGPT Adapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+        );
         await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
@@ -235,7 +258,8 @@ export class ChatGPTAdapter {
 
       if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
         const conversationIdOut = conversationId || req.meta?.conversationId;
-        const parentMessageIdOut = lastMessageId || req.meta?.parentMessageId || req.meta?.messageId;
+        const parentMessageIdOut =
+          lastMessageId || req.meta?.parentMessageId || req.meta?.messageId;
         return {
           providerId: this.id,
           ok: false,
@@ -259,7 +283,7 @@ export class ChatGPTAdapter {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: normalized.code || (type != null ? String(type) : undefined) || "unknown",
+          errorCode: normalized.code || (type != null ? String(type) : undefined) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalized.message,
@@ -284,11 +308,11 @@ export class ChatGPTAdapter {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: "no_recovery",
+          errorCode: 'no_recovery',
           latencyMs: Date.now() - startTime,
           meta: {
-            error: "no recovery",
-            details: normalizeError(error).details || normalizeError(error).message
+            error: 'no recovery',
+            details: normalizeError(error).details || normalizeError(error).message,
           },
         };
       } catch (handledError) {
@@ -297,7 +321,7 @@ export class ChatGPTAdapter {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: normalized.code || "unknown",
+          errorCode: normalized.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalized.message,
@@ -313,7 +337,7 @@ export class ChatGPTAdapter {
     const conversationIdIn = meta.conversationId;
     const parentMessageIdIn = meta.parentMessageId || meta.messageId;
 
-    pad("[ChatGPT Session] Starting continuation with context:", {
+    pad('[ChatGPT Session] Starting continuation with context:', {
       hasConversationId: !!conversationIdIn,
       hasParentId: !!parentMessageIdIn,
     });
@@ -328,13 +352,13 @@ export class ChatGPTAdapter {
         providerId: this.id,
         ok: false,
         text: null,
-        errorCode: "context_missing",
-        meta: { error: "Continuity lost: Missing conversationId." },
+        errorCode: 'context_missing',
+        meta: { error: 'Continuity lost: Missing conversationId.' },
       };
     }
 
     const startTime = Date.now();
-    let aggregated = "";
+    let aggregated = '';
 
     try {
       let conversationId = conversationIdIn || null;
@@ -347,9 +371,11 @@ export class ChatGPTAdapter {
           if (chunk?.id) lastMessageId = chunk.id;
           if (chunk?.model) observedModel = chunk.model;
           if (chunk?.text) aggregated = chunk.text;
-        } catch (_) { }
+        } catch (_) {}
         if (onChunk) {
-          try { onChunk(chunk); } catch (_) { }
+          try {
+            onChunk(chunk);
+          } catch (_) {}
         }
       };
 
@@ -361,18 +387,18 @@ export class ChatGPTAdapter {
           parentMessageId: parentMessageIdIn,
           model: observedModel || undefined,
         },
-        forwardOnChunk,
+        forwardOnChunk
       );
 
       const response = {
         providerId: this.id,
         ok: true,
         id: lastMessageId || null,
-        text: result?.text ?? "",
+        text: result?.text ?? '',
         partial: false,
         latencyMs: Date.now() - startTime,
         meta: {
-          model: result?.model || observedModel || "auto",
+          model: result?.model || observedModel || 'auto',
           conversationId: conversationId || conversationIdIn,
           messageId: lastMessageId || undefined,
           parentMessageId: lastMessageId || parentMessageIdIn || undefined,
@@ -381,15 +407,25 @@ export class ChatGPTAdapter {
 
       pad(`[ChatGPT Session] Continuation completed in ${response.latencyMs}ms`);
       return response;
-
     } catch (error) {
       // Auth failure: 401/pattern → definitive, 403 → retry once
       if (isProviderAuthError(error)) {
         if (!isDefinitiveAuthError(error) && !_isRetry) {
-          console.log(`[ChatGPT Adapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
-          return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+          console.log(
+            `[ChatGPT Adapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`
+          );
+          return await this.sendContinuation(
+            prompt,
+            providerContext,
+            sessionId,
+            onChunk,
+            signal,
+            true
+          );
         }
-        console.log(`[ChatGPT Adapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        console.log(
+          `[ChatGPT Adapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+        );
         await authManager.markUnauthenticated(this.id);
 
         const authError = createProviderAuthError(this.id, error);
@@ -415,7 +451,7 @@ export class ChatGPTAdapter {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: normalized.code || (type != null ? String(type) : undefined) || "unknown",
+          errorCode: normalized.code || (type != null ? String(type) : undefined) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalized.message,
@@ -453,7 +489,7 @@ export class ChatGPTAdapter {
               sessionId,
               onChunk,
               signal,
-              true,
+              true
             );
           },
         });
@@ -464,10 +500,10 @@ export class ChatGPTAdapter {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: "no_recovery",
+          errorCode: 'no_recovery',
           latencyMs: Date.now() - startTime,
           meta: {
-            error: "no recovery",
+            error: 'no recovery',
             details: normalizeError(error).details || normalizeError(error).message,
             conversationId: conversationIdIn,
             parentMessageId: parentMessageIdIn,
@@ -479,7 +515,7 @@ export class ChatGPTAdapter {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: normalized.code || "unknown",
+          errorCode: normalized.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalized.message,

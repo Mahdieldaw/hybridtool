@@ -27,9 +27,13 @@ interface PassageResolution {
   role?: string;
 }
 
-function buildResolver(artifact: CognitiveArtifact, citationSourceOrder: Record<string | number, string>) {
+function buildResolver(
+  artifact: CognitiveArtifact,
+  citationSourceOrder: Record<string | number, string>
+) {
   const paragraphs: PipelineShadowParagraph[] = Array.isArray(artifact?.shadow?.paragraphs)
-    ? artifact.shadow.paragraphs : [];
+    ? artifact.shadow.paragraphs
+    : [];
   const paraLookup = new Map<string, PipelineShadowParagraph>();
   for (const p of paragraphs) {
     paraLookup.set(`${p.modelIndex}:${p.paragraphIndex}`, p);
@@ -46,7 +50,7 @@ function buildResolver(artifact: CognitiveArtifact, citationSourceOrder: Record<
   // Statement text lookup for unclaimed groups
   const statementTexts = new Map<string, string>();
   for (const p of paragraphs) {
-    for (const s of (p.statements ?? [])) {
+    for (const s of p.statements ?? []) {
       statementTexts.set(s.id, s.text);
     }
   }
@@ -92,7 +96,7 @@ function buildResolver(artifact: CognitiveArtifact, citationSourceOrder: Record<
     if (!profile?.passages) return null;
 
     const passageEntry = profile.passages.find(
-      (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex,
+      (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex
     );
     if (!passageEntry) return null;
 
@@ -102,9 +106,10 @@ function buildResolver(artifact: CognitiveArtifact, citationSourceOrder: Record<
       if (sp?._fullParagraph) textParts.push(sp._fullParagraph);
     }
 
-    const modelName = citationSourceOrder[modelIndex + 1]
-      || citationSourceOrder[modelIndex]
-      || `model-${modelIndex}`;
+    const modelName =
+      citationSourceOrder[modelIndex + 1] ||
+      citationSourceOrder[modelIndex] ||
+      `model-${modelIndex}`;
 
     return {
       text: textParts.join('\n\n') || '',
@@ -120,7 +125,7 @@ function buildResolver(artifact: CognitiveArtifact, citationSourceOrder: Record<
 
 function formatEditorialThreads(
   ast: EditorialAST,
-  resolve: (id: string) => PassageResolution | null,
+  resolve: (id: string) => PassageResolution | null
 ): string {
   const lines: string[] = [];
 
@@ -178,7 +183,7 @@ function formatEditorialThreads(
 export function buildEvidenceSubstrate(
   artifact: CognitiveArtifact | null,
   mappingText: string,
-  citationSourceOrder: Record<string | number, string>,
+  citationSourceOrder: Record<string | number, string>
 ): string {
   const sections: string[] = [];
 

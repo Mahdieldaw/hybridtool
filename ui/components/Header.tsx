@@ -1,6 +1,6 @@
-import { useAtom, useSetAtom } from "jotai";
-import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from "../state/atoms";
-import logoIcon from "../assets/brand/logo-icon.png";
+import { useAtom, useSetAtom } from 'jotai';
+import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from '../state/atoms';
+import logoIcon from '../assets/brand/logo-icon.png';
 
 // MenuIcon component (inline for simplicity)
 const MenuIcon = ({ className }: { className?: string }) => (
@@ -35,9 +35,7 @@ const GearIcon = ({ className }: { className?: string }) => (
 );
 
 export default function Header() {
-  const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useAtom(
-    isHistoryPanelOpenAtom,
-  );
+  const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useAtom(isHistoryPanelOpenAtom);
   const setIsSettingsOpen = useSetAtom(isSettingsOpenAtom);
 
   return (
@@ -52,11 +50,7 @@ export default function Header() {
         </button>
         <div className="flex items-center gap-2">
           {/* Orb Icon */}
-          <img
-            src={logoIcon}
-            alt=""
-            className="w-5 h-5"
-          />
+          <img src={logoIcon} alt="" className="w-5 h-5" />
           {/* Wordmark - ALWAYS VISIBLE */}
           <span className="font-semibold text-base tracking-wide">
             <span className="text-text-primary">SINGULAR</span>

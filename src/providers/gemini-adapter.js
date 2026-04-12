@@ -11,7 +11,7 @@ import {
   isDefinitiveAuthError,
   isNetworkError,
   createProviderAuthError,
-  normalizeError
+  normalizeError,
 } from '../utils/ErrorHandler';
 
 const GEMINI_ADAPTER_DEBUG = false;
@@ -20,7 +20,7 @@ const pad = (...args) => {
 };
 
 export class GeminiAdapter {
-  constructor(controller, idOverride = "gemini") {
+  constructor(controller, idOverride = 'gemini') {
     this.id = idOverride;
     this.capabilities = {
       needsDNR: false,
@@ -28,7 +28,7 @@ export class GeminiAdapter {
       supportsStreaming: false, // Non-streaming to avoid canvas/immersive documents
       supportsContinuation: true,
       // Only allow model selection if NOT explicitly Pro (Pro is fixed)
-      supportsModelSelection: this.id !== "gemini-pro",
+      supportsModelSelection: this.id !== 'gemini-pro',
     };
     this.controller = controller;
   }
@@ -49,30 +49,31 @@ export class GeminiAdapter {
     const startTime = Date.now();
     try {
       // Auto-select model based on adapter ID if not specified in request
-      let defaultModel = "gemini-flash";
-      if (this.id === "gemini-pro") defaultModel = "gemini-pro";
-      if (this.id === "gemini-exp") defaultModel = "gemini-exp";
+      let defaultModel = 'gemini-flash';
+      if (this.id === 'gemini-pro') defaultModel = 'gemini-pro';
+      if (this.id === 'gemini-exp') defaultModel = 'gemini-exp';
       const model = req.meta?.model || defaultModel;
 
       pad(`[GeminiAdapter:${this.id}] Sending prompt with model: ${model}`);
 
-      const result = await this.controller.geminiSession.ask(
-        req.originalPrompt,
-        {
-          signal,
-          cursor: req.meta?.cursor,
-          model,
-        }
-      );
+      const result = await this.controller.geminiSession.ask(req.originalPrompt, {
+        signal,
+        cursor: req.meta?.cursor,
+        model,
+      });
 
       // NORMALIZATION LOGIC (From Pro Adapter)
       const normalizedText =
         result?.text ??
         result?.candidates?.[0]?.content ??
-        (typeof result === "string" ? result : JSON.stringify(result));
+        (typeof result === 'string' ? result : JSON.stringify(result));
 
       // 🔍 DETECT GEMINI IMMERSIVE CONTENT
-      if (normalizedText && (normalizedText.includes('googleusercontent.com/immersive_entry_chip') || normalizedText.includes('immersive-editor'))) {
+      if (
+        normalizedText &&
+        (normalizedText.includes('googleusercontent.com/immersive_entry_chip') ||
+          normalizedText.includes('immersive-editor'))
+      ) {
         console.warn(`[GeminiAdapter:${this.id}] 🎨 IMMERSIVE CONTENT DETECTED in response`, {
           textPreview: normalizedText.substring(0, 200),
           fullLength: normalizedText.length,
@@ -97,7 +98,7 @@ export class GeminiAdapter {
             },
           });
         }
-      } catch (_) { }
+      } catch (_) {}
 
       return {
         providerId: this.id,
@@ -121,7 +122,9 @@ export class GeminiAdapter {
           console.log(`[GeminiAdapter] Ambiguous auth error (${error?.status}), retrying once...`);
           return await this.sendPrompt(req, onChunk, signal, true);
         }
-        console.log(`[GeminiAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        console.log(
+          `[GeminiAdapter] Definitive auth failure${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+        );
         await authManager.markUnauthenticated(this.id);
 
         if ((error?.type ?? error?.code) === 'noGeminiAccess') {
@@ -161,7 +164,7 @@ export class GeminiAdapter {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -184,7 +187,7 @@ export class GeminiAdapter {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -197,7 +200,7 @@ export class GeminiAdapter {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: normalizedHandledError.code || "unknown",
+          errorCode: normalizedHandledError.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalizedHandledError.message,
@@ -214,15 +217,15 @@ export class GeminiAdapter {
       const meta = providerContext?.meta || providerContext || {};
       const cursor = providerContext?.cursor ?? meta.cursor;
 
-      let defaultModel = "gemini-flash";
-      if (this.id === "gemini-pro") defaultModel = "gemini-pro";
-      if (this.id === "gemini-exp") defaultModel = "gemini-exp";
+      let defaultModel = 'gemini-flash';
+      if (this.id === 'gemini-pro') defaultModel = 'gemini-pro';
+      if (this.id === 'gemini-exp') defaultModel = 'gemini-exp';
       const model = (providerContext?.model ?? meta.model) || defaultModel;
 
-      // STRICT CONTINUATION: Do NOT fall back to new chat. 
+      // STRICT CONTINUATION: Do NOT fall back to new chat.
       if (!cursor) {
         console.warn(`[GeminiAdapter:${this.id}] Context missing (no cursor)`);
-        throw new Error("Continuity lost: Missing Gemini cursor for this thread.");
+        throw new Error('Continuity lost: Missing Gemini cursor for this thread.');
       }
 
       pad(`[GeminiAdapter:${this.id}] Continuing chat with model: ${model}`);
@@ -237,10 +240,14 @@ export class GeminiAdapter {
       const normalizedText =
         result?.text ??
         result?.candidates?.[0]?.content ??
-        (typeof result === "string" ? result : JSON.stringify(result));
+        (typeof result === 'string' ? result : JSON.stringify(result));
 
       // 🔍 DETECT GEMINI IMMERSIVE CONTENT
-      if (normalizedText && (normalizedText.includes('googleusercontent.com/immersive_entry_chip') || normalizedText.includes('immersive-editor'))) {
+      if (
+        normalizedText &&
+        (normalizedText.includes('googleusercontent.com/immersive_entry_chip') ||
+          normalizedText.includes('immersive-editor'))
+      ) {
         console.warn(`[GeminiAdapter:${this.id}] 🎨 IMMERSIVE CONTENT DETECTED in continuation`, {
           textPreview: normalizedText.substring(0, 200),
           fullLength: normalizedText.length,
@@ -264,7 +271,7 @@ export class GeminiAdapter {
             },
           });
         }
-      } catch (_) { }
+      } catch (_) {}
 
       return {
         providerId: this.id,
@@ -283,10 +290,21 @@ export class GeminiAdapter {
     } catch (error) {
       if (isProviderAuthError(error) || this._isGeminiAuthError(error)) {
         if (!isDefinitiveAuthError(error) && !this._isGeminiAuthError(error) && !_isRetry) {
-          console.log(`[GeminiAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`);
-          return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+          console.log(
+            `[GeminiAdapter] Ambiguous auth error in continuation (${error?.status}), retrying once...`
+          );
+          return await this.sendContinuation(
+            prompt,
+            providerContext,
+            sessionId,
+            onChunk,
+            signal,
+            true
+          );
         }
-        console.log(`[GeminiAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`);
+        console.log(
+          `[GeminiAdapter] Definitive auth failure in continuation${_isRetry ? ' (retry exhausted)' : ''}, marking unauthenticated`
+        );
         await authManager.markUnauthenticated(this.id);
 
         if ((error?.type ?? error?.code) === 'noGeminiAccess') {
@@ -313,7 +331,7 @@ export class GeminiAdapter {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -349,7 +367,7 @@ export class GeminiAdapter {
               sessionId,
               onChunk,
               signal,
-              true,
+              true
             );
           },
         });
@@ -359,7 +377,7 @@ export class GeminiAdapter {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: (error && (error.code || error.type)) || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),
@@ -373,7 +391,7 @@ export class GeminiAdapter {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: normalizedHandledError.code || "unknown",
+          errorCode: normalizedHandledError.code || 'unknown',
           latencyMs: Date.now() - startTime,
           meta: {
             error: normalizedHandledError.message,
@@ -388,7 +406,13 @@ export class GeminiAdapter {
   /**
    * Unified ask API
    */
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined
+  ) {
     try {
       const ctx = Object(providerContext);
       const meta = ctx.meta || providerContext || {};
@@ -404,9 +428,11 @@ export class GeminiAdapter {
       }
 
       try {
-        const len = (res?.text || "").length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
-      } catch (_) { }
+        const len = (res?.text || '').length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`
+        );
+      } catch (_) {}
 
       return res;
     } catch (e) {

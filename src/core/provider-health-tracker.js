@@ -17,13 +17,13 @@ import { isDefinitiveAuthError, isRateLimitError } from './error-classifier';
 
 // Exponential back-off for rate limits: 5s → 10s → 20s → 40s, capped at 60s
 const RATE_LIMIT_BACKOFF_BASE_MS = 5000;
-const RATE_LIMIT_BACKOFF_MAX_MS  = 60000;
+const RATE_LIMIT_BACKOFF_MAX_MS = 60000;
 
 export class ProviderHealthTracker {
   constructor(options = {}) {
-    this.failureThreshold = options.failureThreshold ?? 3;   // Failures before opening
-    this.failureWindowMs  = options.failureWindowMs  ?? 60000; // 1 minute window
-    this.cooldownMs       = options.cooldownMs       ?? 30000; // 30 second cooldown
+    this.failureThreshold = options.failureThreshold ?? 3; // Failures before opening
+    this.failureWindowMs = options.failureWindowMs ?? 60000; // 1 minute window
+    this.cooldownMs = options.cooldownMs ?? 30000; // 30 second cooldown
 
     // providerId → ProviderState
     this._state = new Map();
@@ -34,13 +34,13 @@ export class ProviderHealthTracker {
   _get(providerId) {
     if (!this._state.has(providerId)) {
       this._state.set(providerId, {
-        circuit: 'closed',   // 'closed' | 'open' | 'half-open'
+        circuit: 'closed', // 'closed' | 'open' | 'half-open'
         openedAt: null,
-        failures: [],        // timestamps in the sliding window
+        failures: [], // timestamps in the sliding window
         lastSuccess: null,
-        authInvalid: false,  // sticky: 401/403 → no retry until clearAuthInvalid()
+        authInvalid: false, // sticky: 401/403 → no retry until clearAuthInvalid()
         rateLimitUntil: null, // timestamp: dynamic back-off for 429
-        rateLimitCount: 0,   // consecutive 429s (for exponential back-off)
+        rateLimitCount: 0, // consecutive 429s (for exponential back-off)
       });
     }
     return this._state.get(providerId);
@@ -120,10 +120,12 @@ export class ProviderHealthTracker {
       s.rateLimitCount += 1;
       const backoff = Math.min(
         RATE_LIMIT_BACKOFF_BASE_MS * Math.pow(2, s.rateLimitCount - 1),
-        RATE_LIMIT_BACKOFF_MAX_MS,
+        RATE_LIMIT_BACKOFF_MAX_MS
       );
       s.rateLimitUntil = now + backoff;
-      console.warn(`[HealthTracker] ${providerId}: Rate limited — back-off ${backoff}ms (attempt ${s.rateLimitCount})`);
+      console.warn(
+        `[HealthTracker] ${providerId}: Rate limited — back-off ${backoff}ms (attempt ${s.rateLimitCount})`
+      );
       return;
     }
 
@@ -136,7 +138,7 @@ export class ProviderHealthTracker {
     }
 
     // ── Generic failure — sliding window ─────────────────────────────────────
-    const recent = s.failures.filter(ts => now - ts < this.failureWindowMs);
+    const recent = s.failures.filter((ts) => now - ts < this.failureWindowMs);
     recent.push(now);
     s.failures = recent;
 
