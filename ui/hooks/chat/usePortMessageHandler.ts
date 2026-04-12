@@ -20,14 +20,14 @@ import {
   isSplitOpenAtom,
   hasAutoOpenedPaneAtom,
   providerArtifactFamily,
-} from '../../state/atoms';
-import { activeRecomputeStateAtom, lastStreamingProviderAtom } from '../../state/atoms';
+} from '../../state';
+import { activeRecomputeStateAtom, lastStreamingProviderAtom } from '../../state';
 import { StreamingBuffer } from '../../utils/streaming-buffer';
 import { applyStreamingTurnUpdate, createOptimisticAiTurn } from '../../utils/turn-helpers';
 import { normalizeProviderId } from '../../utils/provider-id-mapper';
 import api from '../../services/extension-api';
 import type { TurnMessage, UserTurn, AiTurnWithUI } from '../../types';
-import type { ProviderKey } from '../../../shared/contract';
+import type { ProviderKey } from '../../../shared/types';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import {
   DEFAULT_THREAD,

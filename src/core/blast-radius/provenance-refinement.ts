@@ -23,12 +23,11 @@ import type {
   RivalAllegiance,
   PassageDominanceSignal,
   SignalStrengthSignal,
-} from '../../../shared/contract';
+} from '../../../shared/types';
 
 // ── Input ───────────────────────────────────────────────────────────────
 
 export interface ProvenanceRefinementInput {
-  enrichedClaims: Array<{ id: string; sourceStatementIds?: string[] }>;
   shadowStatements: ShadowStatement[];
   shadowParagraphs: ShadowParagraph[];
   statementOwnership: Map<string, Set<string>>;
@@ -144,16 +143,6 @@ function computeAllegiance(
     if (assignedClaims.includes(cv.claimId) && cv.coverage > bestCoverage) {
       bestCoverage = cv.coverage;
       dominantClaimId = cv.claimId;
-    }
-  }
-  // If no density data among assignedClaims, fall back to highest coverage
-  // that is still in assignedClaims (avoid picking an unrelated claim).
-  if (bestCoverage < 0 && coverages.length > 0) {
-    for (const cv of coverages) {
-      if (assignedClaims.includes(cv.claimId) && cv.coverage > bestCoverage) {
-        bestCoverage = cv.coverage;
-        dominantClaimId = cv.claimId;
-      }
     }
   }
 

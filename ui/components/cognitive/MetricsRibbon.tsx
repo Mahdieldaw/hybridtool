@@ -7,7 +7,7 @@ import {
   PassageClaimProfile,
   ValidatedConflict,
   StructureLayer,
-} from '../../../shared/contract'; // StructureLayer now properly exported
+} from '../../../shared/types'; // StructureLayer now properly exported
 import { StructuralSummary } from './StructuralSummary';
 
 interface MetricsRibbonProps {

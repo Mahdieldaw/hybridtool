@@ -14,7 +14,7 @@ import {
   currentSessionIdAtom,
   selectedModelsAtom,
   isHistoryPanelOpenAtom,
-} from '../state/atoms';
+} from '../state';
 import api from '../services/extension-api';
 
 // 1. Module-level flag → survives React StrictMode double-mount

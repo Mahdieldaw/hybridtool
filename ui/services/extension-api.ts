@@ -12,7 +12,7 @@ import {
 } from '../../shared/messaging';
 
 import type { HistorySessionSummary, HistoryApiResponse } from '../types';
-import type { PrimitiveWorkflowRequest } from '../../shared/contract';
+import type { PrimitiveWorkflowRequest } from '../../shared/types';
 import { PortHealthManager } from './port-health-manager';
 
 interface BackendApiResponse<T = any> {

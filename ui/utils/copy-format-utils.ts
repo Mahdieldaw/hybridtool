@@ -6,7 +6,7 @@ import {
   isAiTurn,
   Claim,
   Edge,
-} from '../../shared/contract';
+} from '../../shared/types';
 import { TurnMessage } from '../types';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { getProviderName } from './provider-helpers';

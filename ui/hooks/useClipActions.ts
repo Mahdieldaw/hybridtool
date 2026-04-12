@@ -5,7 +5,7 @@ import {
   alertTextAtom,
   mappingProviderAtom,
   singularityProviderAtom,
-} from '../state/atoms';
+} from '../state';
 import { useRoundActions } from './chat/useRoundActions';
 import type { AiTurnWithUI } from '../types';
 

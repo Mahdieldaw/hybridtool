@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentSessionIdAtom, turnIdsAtom, turnsMapAtom, uiPhaseAtom } from '../state/atoms';
+import { currentSessionIdAtom, turnIdsAtom, turnsMapAtom, uiPhaseAtom } from '../state';
 import api from '../services/extension-api';
 import { parseSessionTurns } from '../utils/parse-session-turns';
 

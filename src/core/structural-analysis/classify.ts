@@ -1,6 +1,6 @@
 //(Responsibility: Structure isolation and iterative distribution evaluation)
 
-import { EnrichedClaim, Edge, StructureLayer } from '../../../shared/contract';
+import { EnrichedClaim, Edge, StructureLayer } from '../../../shared/types';
 import { MeasuredCorpus } from './measure';
 /** Minimum prerequisite-chain length to qualify for chain pattern detection */
 export const MIN_CHAIN_LENGTH = 3;

@@ -8,13 +8,13 @@
  */
 
 // Import types from shared contract (runtime types)
-import type { AiTurn, UserTurn } from '../../shared/contract';
+import type { AiTurn, UserTurn } from '../../shared/types';
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
 // =============================================================================
 
-export type { AiTurn, UserTurn } from '../../shared/contract';
+export type { AiTurn, UserTurn } from '../../shared/types';
 
 // Persistence records re-export
 export type {
@@ -56,10 +56,7 @@ export interface LLMProvider {
 }
 
 // Helper type guards re-exported from contract
-export {
-  isUserTurn as isUserTurnContract,
-  isAiTurn as isAiTurnContract,
-} from '../../shared/contract';
+export { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from '../../shared/types';
 
 // =============================================================================
 // HISTORY & SESSION LOADING

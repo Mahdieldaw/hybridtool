@@ -21,7 +21,7 @@ import {
   dismissedExplorationTurnIdAtom,
   explorationInputModeOverrideAtom,
   probeProvidersEnabledAtom,
-} from '../state/atoms';
+} from '../state';
 import { useChat } from '../hooks/chat/useChat';
 import api from '../services/extension-api';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
@@ -386,11 +386,10 @@ const ChatInput = ({
 
           {(isWarning || isOverLimit) && (
             <div
-              className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${
-                isOverLimit
+              className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${isOverLimit
                   ? 'bg-intent-danger/10 border-intent-danger/30 text-intent-danger'
                   : 'bg-intent-warning/10 border-intent-warning/30 text-intent-warning'
-              }`}
+                }`}
             >
               {isOverLimit ? (
                 <span>

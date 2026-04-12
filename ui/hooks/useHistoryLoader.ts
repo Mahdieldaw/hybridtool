@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useAtom } from 'jotai';
 import api from '../services/extension-api';
-import { isHistoryPanelOpenAtom, isHistoryLoadingAtom, historySessionsAtom } from '../state/atoms';
+import { isHistoryPanelOpenAtom, isHistoryLoadingAtom, historySessionsAtom } from '../state';
 import { RawHistorySession, FormattedHistorySession } from '../types';
 
 // The hook now accepts the `isInitialized` flag.

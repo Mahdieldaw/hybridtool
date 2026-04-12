@@ -1,6 +1,6 @@
 import React, { Suspense, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { activeSplitPanelAtom, currentSessionIdAtom } from '../state/atoms';
+import { activeSplitPanelAtom, currentSessionIdAtom } from '../state';
 import { safeLazy } from '../utils/safe-lazy';
 
 // Lazy load ModelResponsePanel - only loads when split view opens

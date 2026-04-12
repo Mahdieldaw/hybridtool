@@ -8,7 +8,7 @@ import {
   isSettingsOpenAtom,
   mappingProviderAtom,
   singularityProviderAtom,
-} from '../state/atoms';
+} from '../state';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { useProviderStatus } from '../hooks/providers/useProviderStatus';
 
@@ -48,9 +48,8 @@ export default function SettingsPanel() {
 
   return (
     <div
-      className={`fixed top-0 w-[350px] h-screen bg-surface-highest/95 backdrop-blur-xl border-l border-border-subtle z-[1100] p-5 overflow-y-auto transition-[right] duration-300 ease-out ${
-        isSettingsOpen ? 'right-0' : '-right-[350px]'
-      }`}
+      className={`fixed top-0 w-[350px] h-screen bg-surface-highest/95 backdrop-blur-xl border-l border-border-subtle z-[1100] p-5 overflow-y-auto transition-[right] duration-300 ease-out ${isSettingsOpen ? 'right-0' : '-right-[350px]'
+        }`}
     >
       <div className="settings-header flex items-center justify-between mb-6">
         <h2 className="settings-title text-lg font-semibold text-text-secondary">
@@ -60,9 +59,8 @@ export default function SettingsPanel() {
           <button
             onClick={handleRefresh}
             title="Check Login Status"
-            className={`p-2 bg-none border-none cursor-pointer rounded transition-all duration-300 text-lg ${
-              isRefreshing ? 'text-brand-500 rotate-180' : 'text-text-muted'
-            }`}
+            className={`p-2 bg-none border-none cursor-pointer rounded transition-all duration-300 text-lg ${isRefreshing ? 'text-brand-500 rotate-180' : 'text-text-muted'
+              }`}
           >
             ↻
           </button>
@@ -134,9 +132,8 @@ export default function SettingsPanel() {
           return (
             <div
               key={provider.id}
-              className={`model-item flex items-center justify-between p-3 bg-chip border border-border-subtle rounded-lg mb-2 transition-all duration-200 ${
-                isAuth ? 'opacity-100' : 'opacity-60'
-              }`}
+              className={`model-item flex items-center justify-between p-3 bg-chip border border-border-subtle rounded-lg mb-2 transition-all duration-200 ${isAuth ? 'opacity-100' : 'opacity-60'
+                }`}
             >
               <div className="model-info flex items-center gap-2">
                 <div className={`model-logo w-4 h-4 rounded ${provider.logoBgClass}`}></div>
@@ -146,9 +143,8 @@ export default function SettingsPanel() {
                 </div>
               </div>
               <div
-                className={`model-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${
-                  selectedModels[provider.id] ? 'bg-brand-500' : 'bg-border-strong'
-                } ${!isAuth ? 'cursor-not-allowed opacity-50' : ''}`}
+                className={`model-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${selectedModels[provider.id] ? 'bg-brand-500' : 'bg-border-strong'
+                  } ${!isAuth ? 'cursor-not-allowed opacity-50' : ''}`}
                 role="switch"
                 aria-checked={!!selectedModels[provider.id]}
                 aria-disabled={!isAuth}
@@ -162,9 +158,8 @@ export default function SettingsPanel() {
                 }}
               >
                 <div
-                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${
-                    selectedModels[provider.id] ? 'left-[22px]' : 'left-0.5'
-                  }`}
+                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${selectedModels[provider.id] ? 'left-[22px]' : 'left-0.5'
+                    }`}
                 />
               </div>
             </div>
@@ -185,14 +180,12 @@ export default function SettingsPanel() {
             role="switch"
             aria-checked={isVisibleMode}
             tabIndex={0}
-            className={`relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${
-              isVisibleMode ? 'bg-brand-500' : 'bg-border-strong'
-            }`}
+            className={`relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${isVisibleMode ? 'bg-brand-500' : 'bg-border-strong'
+              }`}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${
-                isVisibleMode ? 'left-[22px]' : 'left-0.5'
-              }`}
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isVisibleMode ? 'left-[22px]' : 'left-0.5'
+                }`}
             />
           </div>
         </div>
@@ -204,9 +197,8 @@ export default function SettingsPanel() {
             <span className="text-xs text-text-muted mt-0.5">Enable advanced features</span>
           </div>
           <div
-            className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${
-              powerUserMode ? 'bg-brand-500' : 'bg-border-strong'
-            }`}
+            className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${powerUserMode ? 'bg-brand-500' : 'bg-border-strong'
+              }`}
             role="switch"
             aria-checked={powerUserMode}
             tabIndex={0}
@@ -219,9 +211,8 @@ export default function SettingsPanel() {
             }}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${
-                powerUserMode ? 'left-[22px]' : 'left-0.5'
-              }`}
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${powerUserMode ? 'left-[22px]' : 'left-0.5'
+                }`}
             />
           </div>
         </div>
@@ -230,9 +221,8 @@ export default function SettingsPanel() {
         <div className="mode-item flex items-center justify-between p-3 bg-chip border border-border-subtle rounded-lg mb-2">
           <span className="text-text-secondary">Reduced Motion</span>
           <div
-            className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${
-              isReducedMotion ? 'bg-brand-500' : 'bg-border-strong'
-            }`}
+            className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${isReducedMotion ? 'bg-brand-500' : 'bg-border-strong'
+              }`}
             role="switch"
             aria-checked={isReducedMotion}
             tabIndex={0}
@@ -245,9 +235,8 @@ export default function SettingsPanel() {
             }}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${
-                isReducedMotion ? 'left-[22px]' : 'left-0.5'
-              }`}
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isReducedMotion ? 'left-[22px]' : 'left-0.5'
+                }`}
             />
           </div>
         </div>

@@ -9,7 +9,7 @@
 
 import { useCallback, useRef } from 'react';
 import { useAtom } from 'jotai';
-import { providerArtifactFamily } from '../state/atoms';
+import { providerArtifactFamily } from '../state';
 
 export function useProviderArtifact(
   turnId: string | undefined | null,

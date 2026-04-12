@@ -15,7 +15,7 @@ import {
   mappingProviderAtom,
   mappingRecomputeSelectionByRoundAtom,
   activeRecomputeStateAtom,
-} from '../state/atoms';
+} from '../state';
 import { useProviderArtifact } from './useProviderArtifact';
 import { normalizeProviderId } from '../utils/provider-id-mapper';
 import type { AiTurnWithUI } from '../types';

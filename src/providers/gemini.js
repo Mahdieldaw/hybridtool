@@ -7,8 +7,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { ArtifactProcessor } from '../../shared/artifact-processor';
-import { retryWithPolicy } from '../core/retry-orchestrator';
-import { getPolicy } from '../core/retry-policy';
+import { retryWithPolicy, getPolicy } from '../core/errors/retry';
 
 // Provider-specific debug flag (off by default)
 const GEMINI_DEBUG = false;

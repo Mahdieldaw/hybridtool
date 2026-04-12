@@ -3,13 +3,9 @@
 
 import { useCallback } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import {
-  activeRecomputeStateAtom,
-  activeProviderTargetAtom,
-  turnsMapAtom,
-} from '../../state/atoms';
+import { activeRecomputeStateAtom, activeProviderTargetAtom, turnsMapAtom } from '../../state';
 import api from '../../services/extension-api';
-import type { AiTurn, ProviderKey, PrimitiveWorkflowRequest } from '../../../shared/contract';
+import type { AiTurn, ProviderKey, PrimitiveWorkflowRequest } from '../../../shared/types';
 
 /**
  * Hook providing provider-level actions: retry, branch continuation, and targeting.

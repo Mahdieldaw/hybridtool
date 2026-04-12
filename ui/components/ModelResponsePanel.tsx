@@ -13,7 +13,7 @@ import {
   providerErrorsForTurnFamily,
   modelResponsePanelModeFamily,
   splitPaneFullWidthAtom,
-} from '../state/atoms';
+} from '../state';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { useProviderActions } from '../hooks/providers/useProviderActions';
 import { useArtifactResolution } from '../hooks/useArtifactResolution';
@@ -29,7 +29,7 @@ import { formatProviderResponseForMd } from '../utils/copy-format-utils';
 import clsx from 'clsx';
 import { safeLazy } from '../utils/safe-lazy';
 import { PipelineErrorBanner } from './PipelineErrorBanner';
-import type { EditorialAST } from '../../shared/contract';
+import type { EditorialAST } from '../../shared/types';
 
 // Lazy load ArtifactOverlay - only shown when user clicks artifact badge
 const ArtifactOverlay = safeLazy(() =>

@@ -78,7 +78,7 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
   {
     id: 'grok',
     name: 'Grok',
-    color: '#293944ff',
+    color: '#293944',
     logoBgClass: 'bg-sky-500',
     hostnames: ['grok.com'],
     icon: GrokIcon,

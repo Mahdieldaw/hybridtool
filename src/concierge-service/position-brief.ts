@@ -9,17 +9,17 @@
 // - Concierge interprets in context of user's question
 //
 // Concierge sees: Side-by-side boxes (tensions), dividers (buckets)
-// Concierge= does NOT see: Rankings, percentages, shape names, outlier labels
+// Concierge does NOT see: Rankings, percentages, shape names, outlier labels
 // ===========================================================================
 
-import type { StructuralAnalysis, EnrichedClaim, Edge } from '../../shared/contract';
+import type { StructuralAnalysis, EnrichedClaim, Edge } from '../../shared/types';
 
 // ===========================================================================
 // UTILITIES
 // ===========================================================================
 
 /**
- * Shuffle an array in-place (Fisher-Yates)
+ * Return a shuffled copy of an array (Fisher-Yates)
  */
 function shuffle<T>(array: T[]): T[] {
   const shuffled = [...array];

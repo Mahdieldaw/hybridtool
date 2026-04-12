@@ -5,7 +5,7 @@ import { ContextManager } from './execution/context-manager.js';
 import { PersistenceCoordinator } from './execution/persistence-coordinator.js';
 import { TurnEmitter } from './execution/turn-emitter.js';
 import { CognitivePipelineHandler } from './execution/cognitive-pipeline-handler.js';
-import { classifyError } from './error-classifier';
+import { classifyError } from './errors/classifier.js';
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */

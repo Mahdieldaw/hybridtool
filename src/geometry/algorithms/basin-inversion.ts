@@ -4,7 +4,7 @@ import type {
   BasinInversionBridgePair,
   BasinInversionBasin,
   BasinInversionResult,
-} from '../contract';
+} from '../../../shared/types';
 
 function quantile(sortedAscending: number[], p: number): number | null {
   if (sortedAscending.length === 0) return null;
@@ -434,7 +434,6 @@ export function computeBasinInversion(
       binMax: 1,
       binWidth: 1,
       histogram: [],
-      histogramSmoothed: [],
       peaks: [],
       T_low: null,
       T_high: null,
@@ -501,7 +500,6 @@ export function computeBasinInversion(
     histogram[0] = pairCount;
   }
 
-  const histogramSmoothed = histogram.slice();
   const iqr = p25 != null && p75 != null ? p75 - p25 : null;
   const scaleCandidates = [sigma, iqr != null ? iqr / 1.34 : null].filter(
     (v): v is number => v != null && Number.isFinite(v) && v > 0
@@ -822,7 +820,6 @@ export function computeBasinInversion(
     binMax,
     binWidth,
     histogram,
-    histogramSmoothed,
     peaks,
     T_low,
     T_high,

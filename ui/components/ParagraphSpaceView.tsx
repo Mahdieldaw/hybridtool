@@ -5,7 +5,7 @@ import type {
   PipelineRegion,
   PipelineSubstrateEdge,
   PipelineSubstrateGraph,
-} from '../../shared/contract';
+} from '../../shared/types';
 import type { ClaimCentroid } from '../hooks/useClaimCentroids';
 import {
   getProviderAbbreviation,
@@ -591,12 +591,12 @@ export function ParagraphSpaceView({
         return { id, kind, points: poly, allSource, nodeIds };
       })
       .filter(Boolean) as Array<{
-      id: string;
-      kind?: string;
-      points: Point[];
-      allSource: boolean;
-      nodeIds: string[];
-    }>;
+        id: string;
+        kind?: string;
+        points: Point[];
+        allSource: boolean;
+        nodeIds: string[];
+      }>;
   }, [regions, nodeById, showRegionHulls, toX, toY, selectedClaimSourceIds]);
 
   // Derived state for region visibility
@@ -1194,8 +1194,8 @@ export function ParagraphSpaceView({
             const basinColor =
               showBasinColors && typeof basinId === 'number' && Number.isFinite(basinId)
                 ? BASIN_COLORS[
-                    ((basinId % BASIN_COLORS.length) + BASIN_COLORS.length) % BASIN_COLORS.length
-                  ]
+                ((basinId % BASIN_COLORS.length) + BASIN_COLORS.length) % BASIN_COLORS.length
+                ]
                 : null;
             const nodeModelIndex =
               typeof n.modelIndex === 'number' && Number.isFinite(n.modelIndex)
@@ -1270,9 +1270,9 @@ export function ParagraphSpaceView({
                   onClick={
                     hasText
                       ? (e) => {
-                          e.stopPropagation();
-                          setSelectedParagraphId(isParaSelected ? null : id);
-                        }
+                        e.stopPropagation();
+                        setSelectedParagraphId(isParaSelected ? null : id);
+                      }
                       : undefined
                   }
                   style={{ cursor: hasText ? 'pointer' : 'default' }}

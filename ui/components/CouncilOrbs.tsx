@@ -8,7 +8,7 @@ import {
   selectedModelsAtom,
   singularityProviderAtom,
   providerLocksAtom,
-} from '../state/atoms';
+} from '../state';
 import { LLMProvider } from '../types';
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from '../constants';
 import { getProviderColor, getProviderLogo } from '../utils/provider-helpers';
@@ -261,7 +261,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(
           variant === 'divider' && 'council-divider',
           variant === 'historical' && 'council-historical',
           variant === 'active' &&
-            'council-active w-full flex justify-center py-0 px-4 !bg-transparent !shadow-none !border-none',
+          'council-active w-full flex justify-center py-0 px-4 !bg-transparent !shadow-none !border-none',
           shouldDim && 'council-historical-dimmed',
           shouldDimInSplitMode && 'council-tray-dimmed-split'
         )}
@@ -718,19 +718,19 @@ const Orb: React.FC<OrbProps> = ({
           // Unselected: Distinctly "Off" but visible logos. Low opacity (40%) + Grayscale.
           // Hover brings it to life (Full Opacity + Color + Bloom).
           isActiveVariant &&
-            !showAsActive &&
-            'opacity-90 brightness-90 scale-100 hover:opacity-100 hover:brightness-100 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300',
+          !showAsActive &&
+          'opacity-90 brightness-90 scale-100 hover:opacity-100 hover:brightness-100 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300',
 
           // Selected: "On" State. Full Opacity, Color, Glow.
           // Added brightness boost to combat "dullness".
           isActiveVariant &&
-            showAsActive &&
-            'opacity-100 shadow-[0_0_20px_-4px_var(--model-color)] ring-1 ring-[var(--model-color)]/50 scale-125 z-10',
+          showAsActive &&
+          'opacity-100 shadow-[0_0_20px_-4px_var(--model-color)] ring-1 ring-[var(--model-color)]/50 scale-125 z-10',
 
           // Crown Mode Selection Target
           isCrownMode &&
-            !isVoice &&
-            'ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse',
+          !isVoice &&
+          'ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse',
           disabled && 'opacity-50 cursor-not-allowed',
 
           // Per-orb stage transition animations

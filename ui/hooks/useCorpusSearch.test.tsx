@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
 import api from '../services/extension-api';
-import { probeProvidersEnabledAtom } from '../state/atoms';
+import { probeProvidersEnabledAtom } from '../state';
 import { useCorpusSearch } from './useCorpusSearch';
 
 jest.mock('../services/extension-api', () => ({

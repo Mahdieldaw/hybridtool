@@ -106,6 +106,7 @@ function cleanTextForProcessing(raw: string): string {
 function splitIntoSentences(paragraph: string): string[] {
   // Protect common abbreviations and decimals
   const protectedText = paragraph
+    .replace(/(\$?\d+\.\d+)/g, (m) => m.replace('.', '|||'))
     .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|vs|etc|e\.g|i\.e)\./gi, '$1|||')
     .replace(/\b(\d+)\./g, '$1|||');
 

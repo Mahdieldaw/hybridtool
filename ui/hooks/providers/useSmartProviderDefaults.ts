@@ -5,7 +5,7 @@ import {
   mappingProviderAtom,
   singularityProviderAtom,
   providerLocksAtom,
-} from '../../state/atoms';
+} from '../../state';
 import { selectBestProvider, isProviderAuthorized } from '@shared/provider-config';
 import { getProviderLocks, subscribeToLockChanges } from '@shared/provider-locks';
 

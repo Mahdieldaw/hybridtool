@@ -10,7 +10,7 @@ import {
   ConvergencePoint,
   CascadeRisk,
   ConflictPair,
-} from '../../../shared/contract';
+} from '../../../shared/types';
 
 export interface MeasuredCorpus {
   claims: EnrichedClaim[];
@@ -254,9 +254,7 @@ export const measureCorpus = (
   const hubClaim = sigma > 0 && topOut > mu + sigma ? topId : null;
 
   // Population-relative classification sets
-  const salientSet = new Set<string>(
-    rawMetrics.filter((m) => m.k > meanK).map((m) => m.claim.id)
-  );
+  const salientSet = new Set<string>(rawMetrics.filter((m) => m.k > meanK).map((m) => m.claim.id));
 
   // Chain depth BFS — uses isChainRoot from Phase 1, no claim objects needed
   const chainDepthById = new Map<string, number>();

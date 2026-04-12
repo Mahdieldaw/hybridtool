@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { useAtom } from 'jotai';
-import { turnExpandedStateFamily } from '../state/atoms';
-import type { UserTurn } from '../../shared/contract';
+import { turnExpandedStateFamily } from '../state';
+import type { UserTurn } from '../../shared/types';
 import { UserIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
 import MarkdownDisplay from './MarkdownDisplay';
 import { CopyButton } from './CopyButton';

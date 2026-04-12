@@ -6,7 +6,7 @@ import {
   toastAtom,
   providerContextsAtom,
   currentSessionIdAtom,
-} from '../state/atoms';
+} from '../state';
 import { useClipActions } from '../hooks/useClipActions';
 import { useRoundActions } from '../hooks/chat/useRoundActions';
 import { m, AnimatePresence, LazyMotion, domAnimation } from 'framer-motion';

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { PipelineSubstrateGraph } from '../../shared/contract';
+import type { PipelineSubstrateGraph } from '../../shared/types';
 
 export interface ClaimCentroid {
   claimId: string;

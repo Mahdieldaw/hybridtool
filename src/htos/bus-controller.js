@@ -299,7 +299,8 @@ const BusController = {
         result = result ?? null;
         if (!m?.reqId) return;
         try {
-          this._iframe?.contentWindow?.postMessage({ resId: m.reqId, result }, '*');
+          const targetOrigin = this._iframe?.src ? new URL(this._iframe.src).origin : location.origin;
+          this._iframe?.contentWindow?.postMessage({ resId: m.reqId, result }, targetOrigin);
         } catch (e) {
           console.warn('[BusController-os] Failed posting response to iframe:', e);
         }
@@ -396,7 +397,8 @@ const BusController = {
             args,
             reqId: requestId,
           });
-          iframe.contentWindow.postMessage(busMsg, '*');
+          const iframeOrigin = iframe?.src ? new URL(iframe.src).origin : location.origin;
+          iframe.contentWindow.postMessage(busMsg, iframeOrigin);
         } catch (error) {
           console.error('[BusController-os] Failed to forward message to iframe:', error);
           try {
@@ -490,7 +492,7 @@ const BusController = {
         name: e,
         ts: Date.now(),
       }),
-      this._iframe.contentWindow.postMessage(a, '*'),
+      this._iframe.contentWindow.postMessage(a, this._iframe?.src ? new URL(this._iframe.src).origin : location.origin),
       await this._waitForResponseMessage(n)
     );
   },
@@ -503,7 +505,7 @@ const BusController = {
         reqId: n,
       });
 
-    return (parent.postMessage(a, '*'), await this._waitForResponseMessage(n));
+    return (parent.postMessage(a, location.origin), await this._waitForResponseMessage(n));
   },
 
   // =============================================================================
@@ -519,25 +521,44 @@ const BusController = {
 
   async _deserialize(e) {
     if (!utils.is.string(e)) return null;
-    return JSON.parse(e, (_key, n) => {
-      return utils.is.string(n) && n.startsWith('bus.error.')
-        ? new Error(n.slice('bus.error.'.length))
-        : n;
-    });
+    try {
+      return JSON.parse(e, (_key, n) => {
+        return utils.is.string(n) && n.startsWith('bus.error.')
+          ? new Error(n.slice('bus.error.'.length))
+          : n;
+      });
+    } catch (err) {
+      console.warn('[BusController] _deserialize: JSON.parse failed:', err, { input: e?.slice?.(0, 100) });
+      return null;
+    }
   },
 
   // =============================================================================
   // UTILITY METHODS
   // =============================================================================
 
-  _waitForResponseMessage: async (e) =>
-    await new Promise((t) => {
-      const n = ({ data: a }) => {
-        if (!a || a.resId !== e) return;
-        window.removeEventListener('message', n);
-        t(a.result);
+  _waitForResponseMessage: (e) =>
+    new Promise((resolve, reject) => {
+      const TIMEOUT_MS = 30_000;
+      let timer;
+
+      const cleanup = () => {
+        window.removeEventListener('message', handler);
+        clearTimeout(timer);
       };
-      window.addEventListener('message', n);
+
+      const handler = ({ data: a }) => {
+        if (!a || a.resId !== e) return;
+        cleanup();
+        resolve(a.result);
+      };
+
+      window.addEventListener('message', handler);
+
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`[BusController] _waitForResponseMessage timed out after ${TIMEOUT_MS}ms (reqId=${e})`));
+      }, TIMEOUT_MS);
     }),
 
   _callHandlers({ name: e, args: n, argsStr: a }, o) {

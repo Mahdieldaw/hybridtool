@@ -6,7 +6,7 @@ import {
   KeystonePatternData,
   ChainPatternData,
   StructureLayer,
-} from '../../../shared/contract';
+} from '../../../shared/types';
 
 interface StructuralSummaryProps {
   analysis: StructuralAnalysis;
@@ -275,11 +275,10 @@ function buildPatternLine(patterns?: SecondaryPattern[]): SummaryLine | null {
       const data = top.data as ChainPatternData;
       return {
         icon: '→',
-        text: `${data.length}-step dependency chain${
-          data.weakLinks.length > 0
-            ? ` — ${data.weakLinks.length} step${data.weakLinks.length > 1 ? 's' : ''} traced by only one model`
-            : ''
-        }`,
+        text: `${data.length}-step dependency chain${data.weakLinks.length > 0
+          ? ` — ${data.weakLinks.length} step${data.weakLinks.length > 1 ? 's' : ''} traced by only one model`
+          : ''
+          }`,
         color: 'text-blue-400',
       };
     }

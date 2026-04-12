@@ -1,17 +1,17 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
-import { ArtifactProcessor } from '../../../shared/artifact-processor';
+import { ArtifactProcessor } from '../../../shared/artifact-processor.js';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 
 import { authManager } from '../auth-manager.js';
-import { classifyError } from '../error-classifier';
+import { classifyError } from '../errors/classifier.js';
 import { runWithProviderHealth } from '../provider-health-gate.js';
-import { logRetryEvent } from '../retry-telemetry';
+import { logRetryEvent } from '../errors/telemetry.js';
 import {
   errorHandler,
   isProviderAuthError,
   createMultiProviderAuthError,
   getErrorMessage,
-} from '../../utils/error-handler.js';
+} from '../errors/handler.js';
 import { buildReactiveBridge } from '../../services/reactive-bridge.js';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
 import { DEFAULT_CONFIG } from '../../clustering';
@@ -1818,6 +1818,10 @@ export class StepExecutor {
           sessionId: context.sessionId,
           useThinking: options.useThinking || payload.useThinking || false,
           providerContexts,
+          onError: (err) => {
+            console.warn(`[StepExecutor] ${stepType} fanout error for ${pid}:`, err);
+            reject(err);
+          },
           onPartial: (id, chunk) => {
             streamingManager.dispatchPartialDelta(
               context.sessionId,

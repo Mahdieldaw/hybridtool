@@ -1,6 +1,6 @@
 import React from 'react';
 import { m } from 'framer-motion';
-import type { EditorialAST } from '../../../shared/contract';
+import type { EditorialAST } from '../../../shared/types';
 
 interface EditorialPreviewProps {
   ast: EditorialAST;

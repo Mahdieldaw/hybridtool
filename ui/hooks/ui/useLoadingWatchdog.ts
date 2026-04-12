@@ -5,7 +5,7 @@ import {
   alertTextAtom,
   lastActivityAtAtom,
   connectionStatusAtom,
-} from '../../state/atoms';
+} from '../../state';
 
 /**
  * useResponsiveLoadingGuard

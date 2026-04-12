@@ -12,7 +12,7 @@ import type {
   ProviderResponseType,
   ExtendContext,
   ResolvedContext,
-} from '../../shared/contract';
+} from '../../shared/types';
 import type { ProviderResponseRecord, SessionRecord, JsonSafeOpts } from './types';
 
 type LoggerLike = { error: (...args: unknown[]) => void };
@@ -589,7 +589,12 @@ export class SessionManager {
               sequence: Math.max(((existingAi.sequence as number) || 1) - 1, 0),
             });
           }
-        } catch (_) {}
+        } catch (err) {
+          console.warn('[SessionManager] Failed to create missing user turn:', err, {
+            sessionId,
+            aiTurnId,
+          });
+        }
 
         const newContexts = this._extractContextsFromResult(result);
         const { batch, mapping, singularity } = this._extractArtifacts(request);
@@ -730,20 +735,23 @@ export class SessionManager {
     result: PersistenceResult
   ): Promise<PersistReturn> {
     const { sessionId, sourceTurnId, stepType, targetProvider } = request;
+    if (!sourceTurnId) throw new Error('[SessionManager] missing sourceTurnId');
+    if (!targetProvider) throw new Error('[SessionManager] missing targetProvider');
+
     const now = Date.now();
     const adapter = this._requireAdapter();
 
     // 1) Source turn exists?
-    const sourceTurn = (await adapter.get('turns', sourceTurnId!)) as
+    const sourceTurn = (await adapter.get('turns', sourceTurnId)) as
       | Record<string, unknown>
       | undefined;
     if (!sourceTurn) throw new Error(`[SessionManager] Source turn ${sourceTurnId} not found`);
 
     // 2) Extract Result Data
     let output: ProviderOutput | undefined;
-    if (stepType === 'batch') output = result?.batchOutputs?.[targetProvider!];
-    else if (stepType === 'mapping') output = result?.mappingOutputs?.[targetProvider!];
-    else if (stepType === 'singularity') output = result?.singularityOutputs?.[targetProvider!];
+    if (stepType === 'batch') output = result?.batchOutputs?.[targetProvider];
+    else if (stepType === 'mapping') output = result?.mappingOutputs?.[targetProvider];
+    else if (stepType === 'singularity') output = result?.singularityOutputs?.[targetProvider];
 
     if (!output) {
       console.warn(`[SessionManager] No output for ${stepType}/${targetProvider}`);

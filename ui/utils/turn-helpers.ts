@@ -1,5 +1,5 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
-import type { UserTurn, ProviderKey } from '../../shared/contract';
+import type { UserTurn, ProviderKey } from '../../shared/types';
 import type { AiTurnWithUI } from '../types';
 import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 import { DEFAULT_THREAD } from '../../shared/messaging';

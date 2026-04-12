@@ -1,5 +1,5 @@
 import { forwardRef } from 'react';
-import type { EditorialThread } from '../../../shared/contract';
+import type { EditorialThread } from '../../../shared/types';
 import type { PassageResolver, ResolvedItem } from './usePassageResolver';
 import { PassageBlock } from './PassageBlock';
 import { ConflictPair } from './ConflictPair';

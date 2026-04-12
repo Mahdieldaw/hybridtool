@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import api from '../services/extension-api';
-import { probeProvidersEnabledAtom } from '../state/atoms';
+import { probeProvidersEnabledAtom } from '../state';
 
 export interface CorpusSearchHit {
   paragraphId: string;

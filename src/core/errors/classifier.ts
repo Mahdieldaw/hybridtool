@@ -1,6 +1,7 @@
 // src/core/error-classifier.ts
 
-import type { ProviderError, ProviderErrorType } from '../../shared/contract';
+import type { ProviderError, ProviderErrorType } from '../../../shared/types';
+import { ProviderAuthError } from '../../../shared/types/provider';
 
 type ErrorCandidate = {
   name?: unknown;
@@ -368,6 +369,7 @@ export function formatRetryAfter(ms: number): string {
 // ============================================================
 
 export function isProviderAuthError(error: unknown): boolean {
+  if (error instanceof ProviderAuthError) return true;
   const e = asErrorCandidate(error);
   if (e?.name === 'ProviderAuthError') return true;
   if (e?.code === 'AUTH_REQUIRED') return true;
@@ -381,6 +383,7 @@ export function isProviderAuthError(error: unknown): boolean {
  * 403 is ambiguous (capacity gate, anti-bot, geo block) and may be transient.
  */
 export function isDefinitiveAuthError(error: unknown): boolean {
+  if (error instanceof ProviderAuthError) return true;
   const e = asErrorCandidate(error);
   if (e?.name === 'ProviderAuthError') return true;
   if (e?.code === 'AUTH_REQUIRED') return true;

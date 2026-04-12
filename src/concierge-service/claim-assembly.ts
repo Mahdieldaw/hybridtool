@@ -11,7 +11,7 @@ import type {
   MixedParagraphEntry,
   MixedStatementEntry,
   ParagraphOrigin,
-} from '../../shared/contract';
+} from '../../shared/types';
 import type { MeasuredRegion } from '../geometry/types';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';

@@ -3,7 +3,7 @@ import { useAtom } from 'jotai';
 import { useCorpusSearch } from '../../hooks/useCorpusSearch';
 import type { CorpusSearchHit, ProbeSearchResult } from '../../hooks/useCorpusSearch';
 import { resolveProviderIdFromCitationOrder, getProviderName } from '../../utils/provider-helpers';
-import { probeProvidersEnabledAtom } from '../../state/atoms';
+import { probeProvidersEnabledAtom } from '../../state';
 
 interface CorpusSearchPanelProps {
   aiTurnId: string;

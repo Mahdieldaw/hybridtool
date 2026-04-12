@@ -28,7 +28,7 @@ import type {
   MixedResolution,
   MixedStatementResolution,
   MixedDirectionProbe,
-} from '../../../shared/contract';
+} from '../../../shared/types';
 import { cosineSimilarity } from '../../clustering/distance';
 import nlp from 'compromise';
 
@@ -466,7 +466,7 @@ function computeTwinMap(input: {
   > = {};
   const thresholdsPerClaim: Record<string, Record<string, number>> = {};
 
-  let totalEntries = 0;
+  let statementsProcessed = 0;
   let totalWithTwins = 0;
   const allThresholdValues: number[] = [];
 
@@ -500,6 +500,7 @@ function computeTwinMap(input: {
     const candidateIds = Array.from(candidateIdSet);
 
     for (const sid of homeSet) {
+      statementsProcessed++;
       const sEmb = statementEmbeddings.get(sid);
       if (!sEmb) {
         claimTwins[sid] = null;
@@ -567,8 +568,6 @@ function computeTwinMap(input: {
       } else {
         claimTwins[sid] = null;
       }
-
-      totalEntries++;
     }
 
     perClaim[claimId] = claimTwins;
@@ -584,7 +583,7 @@ function computeTwinMap(input: {
     perClaim,
     thresholds: thresholdsPerClaim,
     meta: {
-      totalStatements: totalEntries,
+      totalStatements: statementsProcessed,
       statementsWithTwins: totalWithTwins,
       meanThreshold,
       processingTimeMs: performance.now() - twinStart,

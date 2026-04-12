@@ -1,4 +1,4 @@
-import type { EnrichedClaim } from '../../shared/contract';
+import type { EnrichedClaim } from '../../shared/types';
 
 /**
  * Claim Provenance Utilities
@@ -19,11 +19,9 @@ import type { EnrichedClaim } from '../../shared/contract';
 export function computeStatementOwnership(claims: EnrichedClaim[]): Map<string, Set<string>> {
   const ownership = new Map<string, Set<string>>();
   for (const c of claims) {
-    const claimId = String((c as any)?.id || '').trim();
+    const claimId = String(c?.id || '').trim();
     if (!claimId) continue;
-    const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
-      ? (c as any).sourceStatementIds
-      : [];
+    const sourceIds = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
     for (const sidRaw of sourceIds) {
       const sid = String(sidRaw || '').trim();
       if (!sid) continue;
@@ -58,11 +56,9 @@ export function computeClaimExclusivity(
 ): Map<string, ClaimExclusivity> {
   const result = new Map<string, ClaimExclusivity>();
   for (const c of claims) {
-    const claimId = String((c as any)?.id || '').trim();
+    const claimId = String(c?.id || '').trim();
     if (!claimId) continue;
-    const sourceIds = Array.isArray((c as any)?.sourceStatementIds)
-      ? (c as any).sourceStatementIds
-      : [];
+    const sourceIds = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
     const exclusiveIds: string[] = [];
     const sharedIds: string[] = [];
     for (const sidRaw of sourceIds) {

@@ -36,7 +36,7 @@ import type {
   BasinInversionBridgePair,
   BasinInversionBasin,
   BasinInversionResult,
-} from '../contract';
+} from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -288,7 +288,6 @@ export function computeBasinInversion(
       binMax: 1,
       binWidth: 1,
       histogram: [],
-      histogramSmoothed: [],
       peaks: [],
       T_low: null,
       T_high: null,
@@ -601,7 +600,6 @@ export function computeBasinInversion(
     binMax,
     binWidth,
     histogram,
-    histogramSmoothed: histogram.slice(),
     peaks: [] as BasinInversionPeak[],
     T_low,
     T_high,

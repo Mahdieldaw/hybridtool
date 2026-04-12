@@ -6,10 +6,10 @@ import {
   currentSessionIdAtom,
   isLoadingAtom,
   uiPhaseAtom,
-} from '../../state/atoms';
+} from '../../state';
 import api from '../../services/extension-api';
 
-import { CognitiveArtifact } from '../../../shared/contract';
+import { CognitiveArtifact } from '../../../shared/types';
 
 export type SingularityTransitionOptions = {
   providerId?: string;

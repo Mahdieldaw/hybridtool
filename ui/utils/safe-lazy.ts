@@ -27,11 +27,17 @@ export function safeLazy<T extends React.ComponentType<any>>(
         const errorName = error?.name || '';
         const errorMessage = error?.message || '';
         const isNetworkError =
-          errorName === 'TypeError' || errorMessage.includes('Failed to fetch');
+          (errorName === 'TypeError' && /failed to fetch/i.test(errorMessage)) ||
+          errorMessage.includes('Failed to fetch') ||
+          errorName === 'NetworkError';
         const isChunkError =
           errorName === 'ChunkLoadError' || errorMessage.includes('Loading chunk');
 
-        if ((isNetworkError || isChunkError) && retries < MAX_RETRIES) {
+        if (!isNetworkError && !isChunkError) {
+          throw error;
+        }
+
+        if (retries < MAX_RETRIES) {
           retries++;
           const delay = Math.pow(2, retries) * 1000;
           console.warn(

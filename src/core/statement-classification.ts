@@ -20,7 +20,7 @@ import type {
   ClaimedStatementEntry,
   UnclaimedGroup,
   UnclaimedParagraphEntry,
-} from '../../shared/contract';
+} from '../../shared/types';
 import { computeStatementOwnership } from '../concierge-service/claim-provenance';
 
 // ── Input ───────────────────────────────────────────────────────────────
@@ -167,23 +167,24 @@ export function computeStatementClassification(
   for (const { para, unclaimedIds, claimedIds } of candidates) {
     const paraEmb = paragraphEmbeddings.get(para.id);
 
-    // Compute cosine to all claims (or empty if no embedding)
+    // Skip if there are no claims or no paragraph embedding — cannot compute a nearest claim
+    if (claimEmbList.length === 0 || !paraEmb) continue;
+
+    // Compute cosine to all claims
     const claimSimilarities: Record<string, number> = {};
-    let bestClaimId = claimIds[0] ?? '';
+    let bestClaimId = '';
     let bestSim = -Infinity;
 
-    if (paraEmb && claimEmbList.length > 0) {
-      for (const { id, emb } of claimEmbList) {
-        const sim = cosineSimilarity(paraEmb, emb);
-        claimSimilarities[id] = sim;
-        if (sim > bestSim) {
-          bestSim = sim;
-          bestClaimId = id;
-        }
+    for (const { id, emb } of claimEmbList) {
+      const sim = cosineSimilarity(paraEmb, emb);
+      claimSimilarities[id] = sim;
+      if (sim > bestSim) {
+        bestSim = sim;
+        bestClaimId = id;
       }
-    } else {
-      bestSim = 0;
     }
+
+    if (!bestClaimId) continue;
 
     // Collect per-statement query relevance
     const statementQueryRelevance: Record<string, number> = {};

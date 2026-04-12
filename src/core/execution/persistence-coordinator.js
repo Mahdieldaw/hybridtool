@@ -21,7 +21,7 @@ export class PersistenceCoordinator {
     };
 
     const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
-    stepResults.forEach((value, stepId) => {
+    (stepResults || new Map()).forEach((value, stepId) => {
       const step = stepById.get(stepId);
       if (!step || !value) return;
 

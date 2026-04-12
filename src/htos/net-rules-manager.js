@@ -174,27 +174,35 @@ const NetRulesManager = {
       .filter((rule) => existingKeys && existingKeys.has(rule.key))
       .map((rule) => rule.id);
 
+    // Snapshot state for rollback on failure
+    const prevRules = [...this._rules];
+
     // Track new rules for cleanup
-    this._rules.push(
-      ...filteredRules.map((rule) => ({
-        id: rule.id,
-        key: rule.key,
-        tabIds: rule.condition.tabIds || null,
-      }))
-    );
+    const newEntries = filteredRules.map((rule) => ({
+      id: rule.id,
+      key: rule.key,
+      tabIds: rule.condition.tabIds || null,
+    }));
+    this._rules.push(...newEntries);
 
     const ruleKeys = filteredRules.map((rule) => rule.key);
 
     // Build the payload for the DNR API without mutating original objects (remove the HTOS-internal 'key')
     const addRules = filteredRules.map(({ key, ...r }) => r);
 
-    // Update Chrome declarative net request rules
-    await chrome.declarativeNetRequest.updateSessionRules({
-      addRules: addRules,
-    });
+    try {
+      // Remove replaced rules first to avoid transient duplicates
+      await this._unregisterByIds(rulesToRemove);
 
-    // Remove replaced rules
-    await this._unregisterByIds(rulesToRemove);
+      // Then add new rules to Chrome
+      await chrome.declarativeNetRequest.updateSessionRules({
+        addRules: addRules,
+      });
+    } catch (err) {
+      // Roll back internal state; Chrome state may be partially changed
+      this._rules = prevRules;
+      throw err;
+    }
 
     return isArray ? ruleKeys : ruleKeys[0];
   },
@@ -299,9 +307,9 @@ const NetRulesManager = {
 // =============================================================================
 
 const CSPController = {
-  init() {
+  async init() {
     this._ruleIds = [];
-    this._updateNetRules();
+    await this._updateNetRules();
     // Note: In a real implementation, this would react to settings changes
     // this._updateNetRulesWhenCspSettingsChange();
   },
@@ -325,16 +333,13 @@ const CSPController = {
       ],
     };
 
-    // Example CSP rule - in real implementation this would be configurable
-    const cspRules = [
-      {
-        condition: {
-          urlFilter: '*', // Apply to all URLs
-        },
-        action: removeCspHeaderAction,
-      },
-    ];
+    // CSP rules must be explicitly configured with specific URL patterns.
+    // A blanket urlFilter:'*' would strip CSP headers from every response, which is
+    // both a security risk and a violation of Manifest V3 review guidelines.
+    // Callers should pass targeted URL filters (e.g. 'https://example.com/*') here.
+    const cspRules = [];
 
+    if (cspRules.length === 0) return;
     const ruleKeys = await NetRulesManager.register(cspRules);
     this._ruleIds.push(...utils.ensureArray(ruleKeys));
   },
@@ -491,6 +496,13 @@ const ArkoseController = {
         durationMs,
       });
 
+      // Track in NetRulesManager so ID space stays consistent and tab cleanup works
+      NetRulesManager._rules.push({
+        id: ruleId,
+        key: String(ruleId),
+        tabIds: tabId != null ? [tabId] : null,
+      });
+
       console.debug(`ArkoseController: Injected AE header ${headerName} for tab ${tabId}`);
       return ruleId;
     } catch (error) {
@@ -506,6 +518,8 @@ const ArkoseController = {
   async removeAEHeaderRule(ruleId) {
     try {
       await DNRUtils.removeRule(ruleId);
+      // Sync removal from NetRulesManager tracking
+      NetRulesManager._rules = NetRulesManager._rules.filter((r) => r.id !== ruleId);
       console.debug(`ArkoseController: Removed AE header rule ${ruleId}`);
     } catch (error) {
       console.error('ArkoseController: Failed to remove AE header rule:', error);

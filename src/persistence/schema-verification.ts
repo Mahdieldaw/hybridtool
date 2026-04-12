@@ -34,6 +34,10 @@ export async function verifySchemaAndRepair(autoRepair: boolean): Promise<{
     const db = await openDatabase();
     console.log('[SchemaVerification] Auto-repair completed: database recreated');
     const freshHealth = await checkDatabaseHealth();
+    if (!freshHealth.isHealthy) {
+      console.error('[SchemaVerification] Auto-repair failed: database still unhealthy', freshHealth);
+      throw new Error(`Auto-repair failed: ${freshHealth.issues?.join('; ')}`);
+    }
     return { repaired: true, db, health: freshHealth };
   } catch (error) {
     console.error('[SchemaVerification] verifySchemaAndRepair failed:', error);

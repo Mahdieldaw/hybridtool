@@ -1,5 +1,5 @@
 import { useAtom, useSetAtom } from 'jotai';
-import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from '../state/atoms';
+import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from '../state';
 import logoIcon from '../assets/brand/logo-icon.png';
 
 // MenuIcon component (inline for simplicity)

@@ -8,7 +8,7 @@
 //
 // Severity:
 // - hard: Instant disqualification
-// - soft: Confidence penalty (not yet implemented - future enhancement)
+// - soft: Confidence penalty (applies a 0.7× confidence multiplier per matching rule)
 //
 // Changes require human review (see GUARDRAILS.md)
 // ===========================================================================
@@ -73,7 +73,7 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
   {
     id: 'quoted_material',
     appliesTo: ALL_STANCES,
-    pattern: /^"[^"]{10,}"$|^[=\u201C][^=\u201D]{10,}[=\u201D]$/,
+    pattern: /^"[^"]{10,}"$|^\u201C[^\u201C\u201D]{10,}\u201D$/,
     reason: 'Quoted material, not original claim',
     severity: 'hard',
   },

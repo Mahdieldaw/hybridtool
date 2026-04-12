@@ -101,7 +101,12 @@ export class ContextManager {
         } catch (_) {}
         return providerContexts;
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn(
+        `[ContextManager] getProviderContexts failed for ${providerId} (session=${context.sessionId}, thread=${context.threadId || DEFAULT_THREAD}):`,
+        e
+      );
+    }
 
     return providerContexts;
   }

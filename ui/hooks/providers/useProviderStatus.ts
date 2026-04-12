@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useAtom } from 'jotai';
-import { providerAuthStatusAtom } from '../../state/atoms';
+import { providerAuthStatusAtom } from '../../state';
 import api from '../../services/extension-api';
 
 export interface UseProviderStatusOptions {

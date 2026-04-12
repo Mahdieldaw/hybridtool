@@ -3,7 +3,7 @@
 
 import React, { useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { toastAtom } from '../state/atoms';
+import { toastAtom } from '../state';
 import MarkdownDisplay from './MarkdownDisplay';
 
 export interface Artifact {
@@ -55,7 +55,7 @@ export const ArtifactOverlay: React.FC<ArtifactOverlayProps> = ({ artifact, onCl
         URL.revokeObjectURL(url);
         try {
           document.body.removeChild(a);
-        } catch {}
+        } catch { }
       }, 0);
       setToast({ id: Date.now(), message: 'Download started', type: 'info' });
     } catch (error) {

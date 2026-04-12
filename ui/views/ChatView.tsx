@@ -11,7 +11,7 @@ import {
   chatInputHeightAtom,
   splitPaneRatioAtom,
   splitPaneFullWidthAtom,
-} from '../state/atoms';
+} from '../state';
 import { ResizableSplitLayout } from '../components/ResizableSplitLayout';
 import clsx from 'clsx';
 

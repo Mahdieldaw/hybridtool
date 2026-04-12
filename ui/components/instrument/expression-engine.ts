@@ -263,8 +263,8 @@ class Parser {
     let left = this.parseAnd(env);
     while (this.peek().type === 'OR') {
       this.consume();
-      const right = this.parseAnd(env);
-      left = Boolean(left) || Boolean(right);
+      if (left) return left; // short-circuit: return actual truthy value
+      left = this.parseAnd(env);
     }
     return left;
   }
@@ -273,8 +273,8 @@ class Parser {
     let left = this.parseEquality(env);
     while (this.peek().type === 'AND') {
       this.consume();
-      const right = this.parseEquality(env);
-      left = Boolean(left) && Boolean(right);
+      if (!left) return left; // short-circuit: return actual falsy value
+      left = this.parseEquality(env);
     }
     return left;
   }
@@ -336,7 +336,7 @@ class Parser {
         r = Number(right);
       if (op === 'STAR') return l * r;
       if (op === 'SLASH') return r === 0 ? null : l / r;
-      return l % r;
+      return r === 0 ? null : l % r;
     }
     return left;
   }
@@ -462,6 +462,10 @@ export function compileExpression(
     return null;
   }
 
+  // Tokenize once at compile time; create a fresh Parser per evaluate call
+  // (Parser mutates internal position state and cannot be reused across rows)
+  const cachedTokens = tokenize(expression);
+
   return {
     expression,
     evaluate(row: EvidenceRow): number | string | boolean | null {
@@ -471,8 +475,7 @@ export function compileExpression(
           const val = (row as any)[id];
           env[id] = val === undefined ? null : val;
         }
-        const tokens = tokenize(expression);
-        const parser = new Parser(tokens);
+        const parser = new Parser(cachedTokens);
         return parser.parse(env);
       } catch {
         return null;
@@ -487,7 +490,7 @@ export function compileExpression(
  */
 export function validateExpression(expression: string, columnIds: string[]): string | null {
   try {
-    const dummyEnv: Env = Object.fromEntries(columnIds.map((id) => [id, 0]));
+    const dummyEnv: Env = Object.fromEntries(columnIds.map((id) => [id, null]));
     const tokens = tokenize(expression);
     const parser = new Parser(tokens);
     parser.parse(dummyEnv);

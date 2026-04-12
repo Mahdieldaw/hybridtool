@@ -31,7 +31,7 @@ import type {
 } from './types';
 import { isDegenerate } from './types';
 import { cosineSimilarity } from '../clustering/distance';
-import { computeGapRegionalization } from '../../shared/geometry/gap-regionalization';
+import { computeGapRegionalization } from './algorithms/gap-regionalization';
 
 export type {
   SubstrateInterpretation,

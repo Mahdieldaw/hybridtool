@@ -19,7 +19,7 @@ import {
   activeProbeDraftFamily,
   cleanupTurnAtoms,
   messagesAtom,
-} from '../../state/atoms';
+} from '../../state';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
   ProbeCorpusHit,
@@ -27,7 +27,7 @@ import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
   UserTurn,
-} from '../../../shared/contract';
+} from '../../../shared/types';
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { computeThinkFlag } from '../../../src/think/computeThinkFlag.js';

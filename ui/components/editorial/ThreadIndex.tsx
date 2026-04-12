@@ -1,5 +1,5 @@
 import React from 'react';
-import type { EditorialThread } from '../../../shared/contract';
+import type { EditorialThread } from '../../../shared/types';
 
 interface ThreadIndexProps {
   threads: EditorialThread[];

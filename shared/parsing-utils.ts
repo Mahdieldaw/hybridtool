@@ -1,4 +1,4 @@
-import { Claim, Edge, ConciergeDelta } from './contract';
+import { Claim, Edge, ConciergeDelta } from './types';
 
 /**
  * Shared Parsing Utilities

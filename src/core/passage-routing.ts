@@ -27,7 +27,7 @@ import type {
   PassageRoutedClaim,
   PassageRoutingResult,
   ValidatedConflict,
-} from '../../shared/contract';
+} from '../../shared/types';
 import { cosineSimilarity } from '../clustering/distance';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -372,7 +372,7 @@ export function buildSourceContinuityMap(
     Array<{
       passageKey: string;
       claimId: string;
-      entry: import('../../shared/contract').PassageEntry;
+      entry: import('../../shared/types').PassageEntry;
     }>
   >();
 

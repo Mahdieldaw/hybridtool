@@ -691,8 +691,12 @@ export async function computePreSurveyPipeline({
   try {
     const { enrichStatementsWithGeometry } = await import('../../geometry/annotate');
     enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions || []);
-  } catch (_) {
-    /* non-fatal */
+  } catch (err) {
+    console.warn(
+      '[computePreSurveyPipeline] enrichStatementsWithGeometry failed (non-fatal):',
+      err,
+      { shadowStatements: shadowStatements?.length, shadowParagraphs: shadowParagraphs?.length, regions: regions?.length }
+    );
   }
 
   // ── 6. Claim embeddings ───────────────────────────────────────────

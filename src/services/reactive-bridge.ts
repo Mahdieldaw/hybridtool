@@ -5,7 +5,7 @@
  *
  * Zero external dependencies. Optimized for browser extensions.
  */
-import { Claim, Edge } from '../../shared/contract';
+import { Claim, Edge } from '../../shared/types';
 
 // ============================================================================
 // TYPES
@@ -29,7 +29,6 @@ interface TermIndex {
 
 interface TermRelations {
   related: Map<string, Set<string>>; // Terms in supporting claims
-  opposing: Map<string, Set<string>>; // Terms in conflicting claims
 }
 
 interface TermIndexWithRelations extends TermIndex {
@@ -159,7 +158,6 @@ const STOPWORDS = new Set([
   'use',
   'make',
   'get',
-  'go',
   'say',
   'see',
   'come',
@@ -401,7 +399,6 @@ function extractTerms(text: string, isLabel: boolean): string[] {
  */
 function buildTermRelations(edges: Edge[], claimTerms: Map<string, string[]>): TermRelations {
   const related = new Map<string, Set<string>>();
-  const opposing = new Map<string, Set<string>>();
 
   for (const edge of edges) {
     const termsFrom = claimTerms.get(edge.from) || [];
@@ -423,19 +420,9 @@ function buildTermRelations(edges: Edge[], claimTerms: Map<string, string[]>): T
         }
       }
     }
-
-    if (edge.type === 'conflicts') {
-      // Terms in conflicting claims are opposing
-      for (const termA of termsFrom) {
-        if (!opposing.has(termA)) opposing.set(termA, new Set());
-        for (const termB of termsTo) {
-          if (termA !== termB) opposing.get(termA)!.add(termB);
-        }
-      }
-    }
   }
 
-  return { related, opposing };
+  return { related };
 }
 
 // ============================================================================

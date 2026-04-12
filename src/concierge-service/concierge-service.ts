@@ -14,7 +14,7 @@ export const HANDOFF_V2_ENABLED = false;
 import {
   // Handoff V2
   ConciergeDelta,
-} from '../../shared/contract';
+} from '../../shared/types';
 
 import {
   parseConciergeOutput,

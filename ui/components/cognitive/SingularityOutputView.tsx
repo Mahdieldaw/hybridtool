@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
-import { AiTurn } from '../../../shared/contract';
+import { AiTurn } from '../../../shared/types';
 import MarkdownDisplay from '../MarkdownDisplay';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CopyButton } from '../CopyButton';
@@ -126,7 +126,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
           <>
             <div className="fixed inset-0 z-40" onClick={() => setShowRegenMenu(false)} />
             <div
-              className={`absolute bottom-full mb-2 w-56 py-1 rounded-xl border border-border-subtle bg-surface-raised shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200 
+              className={`absolute bottom-full mb-2 w-56 py-1 rounded-xl border border-border-subtle bg-surface-raised shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200
                             ${variant === 'pill' ? 'left-1/2 -translate-x-1/2' : 'left-0'}`}
             >
               <div className="px-3 py-2 text-[10px] uppercase font-bold text-text-muted border-b border-border-subtle/50 bg-surface-highlight/20">
@@ -143,11 +143,10 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                       key={provider.id}
                       onClick={() => handleProviderSelect(provider.id)}
                       className={`w-full text-left px-3 py-2.5 text-xs transition-colors flex items-center justify-between group
-                                                ${
-                                                  isCurrent
-                                                    ? 'bg-brand-500/5 text-brand-500 font-medium'
-                                                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-highlight'
-                                                }
+                                                ${isCurrent
+                          ? 'bg-brand-500/5 text-brand-500 font-medium'
+                          : 'text-text-secondary hover:text-text-primary hover:bg-surface-highlight'
+                        }
                                             `}
                     >
                       <div className="flex items-center gap-2">

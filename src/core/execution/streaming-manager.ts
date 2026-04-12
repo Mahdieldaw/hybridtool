@@ -78,9 +78,9 @@ export class StreamingManager {
         prefixLen++;
       }
 
-      if (prefixLen >= prev.length * 0.7) {
+      if (prefixLen === prev.length) {
         delta = fullText.slice(prev.length);
-        // Standard append updates state
+        // Standard append: prev is an exact prefix of fullText
         this.streamStates.set(key, { ...existingState, text: fullText });
         logger.stream('Incremental append:', {
           providerId,
@@ -88,7 +88,7 @@ export class StreamingManager {
         });
         return { text: delta, isReplace: false };
       } else {
-        // Divergence: return partial update (or could replace, but stick to slice for now)
+        // Divergence: prev is not a prefix of fullText
         logger.stream(
           `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`
         );
@@ -100,6 +100,13 @@ export class StreamingManager {
     if (fullText === prev) {
       logger.stream('Duplicate call (no-op):', { providerId });
       return { text: '', isReplace: false };
+    }
+
+    if (fullText.length === prev.length) {
+      // Same length but different content — diverged in-place
+      logger.stream(`Equal-length divergence for ${providerId}`);
+      this.streamStates.set(key, { ...existingState, text: fullText });
+      return { text: fullText, isReplace: true };
     }
 
     if (fullText.length < prev.length) {

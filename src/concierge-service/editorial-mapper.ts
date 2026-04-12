@@ -15,7 +15,7 @@ import type {
   EditorialThread,
   LandscapePosition,
   Claim,
-} from '../../shared/contract';
+} from '../../shared/types';
 import type { SourceContinuityEntry } from '../core/passage-routing';
 import { extractJsonFromContent } from '../../shared/parsing-utils';
 

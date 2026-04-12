@@ -194,7 +194,7 @@ export const SIGNAL_PATTERNS: SignalPatterns = {
     /\bconversely\b/i,
     /\bversus\b/i,
     /\bvs\.?\b/i,
-    /\bor\b/i,
+    /\beither\s+.{1,30}\s+or\b/i,
     /\btrade-?off\b/i,
     /\bbalance\b/i,
     /\btension\b/i,

@@ -143,7 +143,7 @@ export class SimpleIndexedDBAdapter {
             ? store.put(clonedValue)
             : key
               ? store.put(clonedValue, key)
-              : store.put(clonedValue);
+              : store.put(clonedValue, clonedValue.id);
           request.onsuccess = () => resolve(clonedValue);
           request.onerror = () => reject(request.error);
         });

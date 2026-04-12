@@ -1,9 +1,9 @@
 // ui/components/AiTurnBlock.tsx - FIXED ALIGNMENT
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
-import type { AiTurn, ProbeSession, ProbeSessionResponse } from '../../shared/contract';
+import type { AiTurn, ProbeSession, ProbeSessionResponse } from '../../shared/types';
 import { useSingularityOutput } from '../hooks/useSingularityOutput';
-import { activeProbeDraftFamily } from '../state/atoms';
+import { activeProbeDraftFamily } from '../state';
 
 import { CognitiveOutputRenderer } from './cognitive/CognitiveOutputRenderer';
 

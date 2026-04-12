@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAtom } from 'jotai';
-import { toastAtom } from '../state/atoms';
+import { toastAtom } from '../state';
 import clsx from 'clsx';
 
 export function Toast() {

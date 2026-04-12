@@ -362,9 +362,10 @@ const EmbeddingController = {
           await ensureWorker();
           const { result } = await sendToWorker('STATUS', {}, 5000);
           sendResponse({ success: true, result });
-        })().catch(() => {
+        })().catch((error) => {
           sendResponse({
-            success: true,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
             result: { ready: false, backend: null, modelId: null },
           });
         });

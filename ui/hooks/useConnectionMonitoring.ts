@@ -1,7 +1,7 @@
 // ui/hooks/useConnectionMonitoring.ts
 import { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
-import { connectionStatusAtom } from '../state/atoms';
+import { connectionStatusAtom } from '../state';
 import api from '../services/extension-api';
 
 // This hook's only job is to instantiate the PortHealthManager

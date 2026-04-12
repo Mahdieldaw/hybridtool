@@ -1,60 +1,15 @@
 // ============================================================================
-// CORE TYPES & ENUMS
+// CONTRACT TYPES — all remaining shared types (pipeline, workflow, persistence)
 // ============================================================================
-export type ProviderKey = 'claude' | 'gemini' | 'gemini-pro' | 'gemini-exp' | 'chatgpt' | 'qwen';
+import type { Claim, Edge, EnrichedClaim } from './graph';
+import type { SecondaryPattern } from './editorial';
+import type { ProviderKey, ProviderError } from './provider';
+import type { AiTurn } from './turns';
+
+// Re-export graph types for internal use across contract types
+export type { Claim, Edge, EnrichedClaim };
+
 export type ProviderResponseType = 'batch' | 'mapping' | 'editorial' | 'singularity' | 'probe';
-
-export interface ProbeResult {
-  modelIndex: number;
-  modelName: string;
-  text: string;
-  paragraphs: string[];
-  embeddings?: {
-    paragraphIds: string[];
-    dimensions: number;
-  };
-}
-
-export interface ProbeCorpusHit {
-  paragraphId: string;
-  similarity: number;
-  normalizedSim: number;
-  modelIndex: number;
-  paragraphIndex: number;
-  text: string;
-}
-
-export interface ProbeSessionResponse {
-  providerId: string;
-  modelIndex: number;
-  modelName: string;
-  text: string;
-  paragraphs: string[];
-  status: 'streaming' | 'completed' | 'error';
-  error?: string;
-  createdAt?: number;
-  updatedAt?: number;
-}
-
-export interface ProbeSession {
-  id: string;
-  queryText: string;
-  searchResults: ProbeCorpusHit[];
-  providerIds: string[];
-  responses: Record<string, ProbeSessionResponse>;
-  status: 'searching' | 'probing' | 'complete';
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface SingularityOutput {
-  text: string;
-  providerId: string;
-  timestamp: number;
-  leakageDetected?: boolean;
-  leakageViolations?: string[];
-  pipeline?: any | null;
-}
 
 /**
  * Concierge Handoff Delta
@@ -75,34 +30,6 @@ export interface ConciergeDelta {
   context: string[];
   /** COMMIT signal - user committed to a plan, triggers fresh spawn. Null if not committed. */
   commit: string | null;
-}
-
-export interface Claim {
-  id: string;
-  label: string;
-  text: string;
-  dimension?: string | null; // Optional legacy metadata
-  supporters: number[];
-  type:
-    | 'factual'
-    | 'prescriptive'
-    | 'cautionary'
-    | 'assertive'
-    | 'uncertain'
-    | 'conditional'
-    | 'contested'
-    | 'speculative';
-  role?: 'anchor' | 'branch' | 'challenger' | 'supplement';
-  quote?: string;
-  support_count?: number;
-  sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
-  sourceCoherence?: number;
-}
-
-export interface Edge {
-  from: string;
-  to: string;
-  type: 'supports' | 'conflicts' | 'tradeoff' | 'prerequisite';
 }
 
 export interface MapperClaim {
@@ -178,54 +105,7 @@ export interface ConflictInfo {
   clusterId: string | null;
 }
 
-export interface SupportingClaim {
-  id: string;
-  label: string;
-  relationship: 'supports' | 'prerequisite' | 'aligned';
-}
-
 export type PrimaryShape = 'convergent' | 'forked' | 'parallel' | 'constrained' | 'sparse';
-
-export interface SecondaryPattern {
-  type: any;
-  severity: 'high' | 'medium' | 'low';
-  data:
-    | ChallengedPatternData
-    | KeystonePatternData
-    | ChainPatternData
-    | FragilePatternData
-    | ConditionalPatternData;
-}
-
-export interface ChallengedPatternData {
-  challenges: Array<{
-    challenger: { id: string; label: string; supportRatio: number };
-    target: { id: string; label: string; supportRatio: number };
-  }>;
-}
-
-export interface KeystonePatternData {
-  keystone: { id: string; label: string; supportRatio: number };
-  dependents: string[];
-  cascadeSize: number;
-}
-
-export interface ChainPatternData {
-  chain: string[];
-  length: number;
-  weakLinks: string[];
-}
-
-export interface FragilePatternData {
-  fragilities: Array<{
-    peak: { id: string; label: string };
-    weakFoundation: { id: string; label: string; supportRatio: number };
-  }>;
-}
-
-export interface ConditionalPatternData {
-  conditions: Array<{ id: string; label: string; branches: string[] }>;
-}
 
 export interface GraphAnalysis {
   componentCount: number;
@@ -235,36 +115,6 @@ export interface GraphAnalysis {
   hubClaim: string | null;
   hubDominance: number;
   articulationPoints: string[];
-}
-
-export interface EnrichedClaim extends Claim {
-  derivedType?: Claim['type'];
-  sourceStatementIds?: string[];
-  sourceStatements?: ShadowStatement[];
-  geometricSignals?: {
-    backedByPeak: boolean;
-    backedByHill: boolean;
-    backedByFloor: boolean;
-    avgGeometricConfidence: number;
-    sourceRegionIds: string[];
-  };
-  supportRatio: number;
-  inDegree: number;
-  outDegree: number;
-  prerequisiteOutDegree: number;
-  conflictEdgeCount: number;
-  hubDominance?: number;
-  isChainRoot: boolean;
-  isChainTerminal: boolean;
-
-  isHighSupport: boolean;
-  isKeystone: boolean;
-  isOutlier: boolean;
-  isContested: boolean;
-  isConditional: boolean;
-  isIsolated: boolean;
-  chainDepth: number;
-  queryDistance?: number;
 }
 
 /**
@@ -566,13 +416,6 @@ export interface ClaimDensityResult {
 
 export type PruningFate = 'REMOVE' | 'KEEP' | 'SKELETONIZE' | 'DROP';
 
-export interface PrunedPassageSpec {
-  claimId: string;
-  modelIndex: number;
-  startParagraphIndex: number;
-  endParagraphIndex: number;
-}
-
 export interface StatementDisposition {
   statementId: string;
   statementText: string;
@@ -634,22 +477,6 @@ export interface ProvenanceQualityEntry {
     rawAllegiance: number;
     weightedAllegiance: number;
   }>;
-}
-
-export interface PassagePruningResult {
-  dispositions: StatementDisposition[];
-  anomalies: ConservationAnomaly[];
-  /** Rule 2 KEEP watchlist — provenance quality instrumentation */
-  provenanceQuality: ProvenanceQualityEntry[];
-  summary: {
-    total: number;
-    removeCount: number;
-    keepCount: number;
-    skeletonizeCount: number;
-    dropCount: number;
-    anomalyCount: number;
-  };
-  meta: { processingTimeMs: number };
 }
 
 // ── Provenance Refinement (canonical provenance assignment) ──────────────
@@ -844,31 +671,6 @@ export interface StatementClassificationResult {
   meta: { processingTimeMs: number };
 }
 
-// ── Editorial AST (editorial model output) ───────────────────────────
-export interface EditorialAST {
-  orientation: string;
-  threads: EditorialThread[];
-  thread_order: string[];
-  diagnostics: {
-    flat_corpus: boolean;
-    conflict_count: number;
-    notes: string;
-  };
-}
-
-export interface EditorialThread {
-  id: string;
-  label: string;
-  why_care: string;
-  start_here: boolean;
-  items: EditorialThreadItem[];
-}
-
-export interface EditorialThreadItem {
-  id: string; // passageKey or unclaimed group key
-  role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
-}
-
 export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
@@ -955,11 +757,6 @@ export interface PipelineShadowExtractionMeta {
   sentencesProcessed: number;
 }
 
-export interface PipelineShadowExtractionResult {
-  statements: PipelineShadowStatement[];
-  meta: PipelineShadowExtractionMeta;
-}
-
 export interface PipelineShadowParagraph {
   id: string;
   modelIndex: number;
@@ -972,27 +769,6 @@ export interface PipelineShadowParagraph {
   signals: { sequence: boolean; tension: boolean; conditional: boolean };
   statements: Array<{ id: string; text: string; stance: any; signals: string[] }>;
   _fullParagraph: string;
-}
-
-export interface PipelineParagraphProjectionResult {
-  paragraphs: PipelineShadowParagraph[];
-  meta: ParagraphProjectionMeta;
-}
-
-export interface PipelineParagraphCluster {
-  id: string;
-  paragraphIds: string[];
-  statementIds: string[];
-  representativeParagraphId: string;
-  cohesion: number;
-  uncertain: boolean;
-  uncertaintyReasons: string[];
-  expansion?: {
-    members: Array<{
-      paragraphId: string;
-      text: string;
-    }>;
-  };
 }
 
 export interface PipelineSubstrateNode {
@@ -1017,10 +793,6 @@ export interface PipelineSubstrateEdge {
 export interface PipelineSubstrateGraph {
   nodes: PipelineSubstrateNode[];
   mutualEdges: PipelineSubstrateEdge[];
-}
-
-export interface CognitivePreSemantic {
-  regions: Array<Pick<PipelineRegion, 'id' | 'kind' | 'nodeIds'>>;
 }
 
 export interface PipelineRegion {
@@ -1159,7 +931,6 @@ export interface BasinInversionResult {
   binMax: number;
   binWidth: number;
   histogram: number[];
-  histogramSmoothed: number[];
   peaks: BasinInversionPeak[];
 
   T_low: number | null;
@@ -1243,49 +1014,6 @@ export interface PipelineDiagnosticsResult {
   stages: Record<string, PipelineDiagnosticsStage>;
 }
 
-export interface CognitiveArtifact {
-  shadow: {
-    statements: PipelineShadowStatement[];
-    paragraphs: PipelineShadowParagraph[];
-  };
-  geometry: {
-    embeddingStatus: 'computed' | 'failed';
-    substrate: PipelineSubstrateGraph;
-    basinInversion?: BasinInversionResult;
-    bayesianBasinInversion?: BasinInversionResult;
-    preSemantic?: PreSemanticInterpretation | CognitivePreSemantic | null;
-    diagnostics?: PipelineDiagnosticsResult | null;
-    structuralValidation?: any | null;
-  };
-  semantic: {
-    claims: Claim[];
-    edges: Edge[];
-    conditionals: any[];
-    narrative?: string;
-  };
-  meta?: {
-    modelCount?: number;
-    query?: string;
-    turn?: number;
-    timestamp?: string;
-  };
-}
-
-/**
- * Canonical domain-level UserTurn and Session (single source of truth)
- */
-export interface UserTurn {
-  id: string;
-  type: 'user';
-  sessionId: string | null;
-  threadId: string;
-  text: string;
-  createdAt: number;
-  updatedAt?: number;
-  userId?: string | null;
-  meta?: Record<string, any> | null;
-}
-
 export interface Session {
   id: string;
   title?: string;
@@ -1319,7 +1047,7 @@ export interface BatchPhase {
 
 export interface MappingPhase {
   /** @deprecated Moved to ephemeral Tier 3. Use buildArtifactForProvider() instead. */
-  artifact?: CognitiveArtifact | any;
+  artifact?: any;
   timestamp: number;
 }
 
@@ -1328,48 +1056,6 @@ export interface SingularityPhase {
   output: string;
   timestamp: number;
   status?: string;
-}
-
-// Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
-export interface AiTurn {
-  id: string;
-  type: 'ai';
-  userTurnId: string;
-  sessionId: string | null;
-  threadId: string;
-  createdAt: number;
-  isComplete?: boolean;
-
-  // Phase data (NEW - canonical)
-  batch?: BatchPhase;
-  mapping?: MappingPhase;
-  singularity?: SingularityPhase;
-
-  // Shadow data is NOT stored on the turn — it is re-extracted from batch text
-  // by buildArtifactForProvider(). See: deterministicPipeline.js
-
-  /** Per-provider mapping responses with full artifacts for provider-aware resolution */
-  mappingResponses?: Record<string, any[]>;
-
-  /** Per-provider singularity responses */
-  singularityResponses?: Record<string, any[]>;
-
-  probeSessions?: ProbeSession[];
-
-  pipelineStatus?: any;
-
-  meta?: {
-    mapper?: string;
-    requestedFeatures?: {
-      mapping?: boolean;
-      singularity?: boolean;
-    };
-    branchPointTurnId?: string;
-    replacesId?: string;
-    isHistoricalRerun?: boolean;
-    isOptimistic?: boolean;
-    [key: string]: any;
-  } | null;
 }
 
 // ============================================================================
@@ -1434,34 +1120,10 @@ export interface RecomputeRequest {
 // These are the low-level, imperative steps produced by the WorkflowCompiler.
 // ============================================================================
 
-export interface PromptStepPayload {
-  prompt: string;
-  providers: ProviderKey[];
-  providerContexts?: Record<ProviderKey, { meta: any; continueThread: boolean }>;
-  providerMeta?: Partial<Record<ProviderKey, any>>;
-  useThinking?: boolean;
-}
-
-export interface MappingStepPayload {
-  mappingProvider: ProviderKey;
-  sourceStepIds?: string[];
-  sourceHistorical?: {
-    turnId: string;
-  };
-}
-
-export interface SingularityStepPayload {
-  singularityProvider: ProviderKey;
-  originalPrompt: string;
-  mapperArtifact?: MapperArtifact;
-  mappingText?: string;
-  mappingMeta?: any;
-}
-
 export interface WorkflowStep {
   stepId: string;
   type: any;
-  payload: PromptStepPayload | MappingStepPayload | SingularityStepPayload;
+  payload: any;
 }
 
 export interface WorkflowContext {
@@ -1565,27 +1227,6 @@ export interface TurnFinalizedMessage {
 // ============================================================================
 
 /**
- * Error classification for user-facing messaging and retry logic
- */
-export type ProviderErrorType =
-  | 'rate_limit' // 429 - Retryable after cooldown
-  | 'auth_expired' // 401/403 - Requires re-login
-  | 'timeout' // Request took too long - Retryable
-  | 'circuit_open' // Too many recent failures - Auto-retry later
-  | 'content_filter' // Response blocked by provider - Not retryable
-  | 'input_too_long' // Input exceeds provider limit - Not retryable
-  | 'network' // Connection failed - Retryable
-  | 'unknown'; // Catch-all - Maybe retryable
-
-export interface ProviderError {
-  type: ProviderErrorType;
-  message: string;
-  retryable: boolean;
-  retryAfterMs?: number; // For rate limits
-  requiresReauth?: boolean; // For auth errors
-}
-
-/**
  * Enhanced provider status in WORKFLOW_PROGRESS
  */
 export interface ProviderStatus {
@@ -1601,33 +1242,6 @@ export interface ProviderStatus {
 // These are the core data entities representing the application's state.
 // ============================================================================
 
-export interface ProviderResponse {
-  providerId: string;
-  text: string;
-  status: 'pending' | 'streaming' | 'completed' | 'error' | 'failed' | 'skipped';
-  createdAt: number;
-  updatedAt?: number;
-  attemptNumber?: number;
-  artifacts?: Array<{
-    title: string;
-    identifier: string;
-    content: string;
-    type: string;
-  }>;
-  meta?: {
-    conversationId?: string;
-    parentMessageId?: string;
-    tokenCount?: number;
-    thinkingUsed?: boolean;
-    _rawError?: string;
-    allAvailableOptions?: string;
-    citationSourceOrder?: Record<string | number, string>;
-    synthesizer?: string;
-    mapper?: string;
-    [key: string]: any; // Keep index signature for genuinely unknown provider metadata, but we've explicitly typed the known ones.
-  };
-}
-
 export interface Thread {
   id: string;
   sessionId: string;
@@ -1638,26 +1252,6 @@ export interface Thread {
   isActive: boolean;
   createdAt: number;
   lastActivity: number;
-}
-
-// ============================================================================
-// TYPE GUARDS
-// ============================================================================
-export function isPromptPayload(payload: any): payload is PromptStepPayload {
-  return 'prompt' in payload && 'providers' in payload;
-}
-export function isMappingPayload(payload: any): payload is MappingStepPayload {
-  return 'mappingProvider' in payload;
-}
-export function isSingularityPayload(payload: any): payload is SingularityStepPayload {
-  return 'singularityProvider' in payload;
-}
-
-export function isUserTurn(turn: any): turn is { type: 'user' } {
-  return !!turn && typeof turn === 'object' && turn.type === 'user';
-}
-export function isAiTurn(turn: any): turn is { type: 'ai' } {
-  return !!turn && typeof turn === 'object' && turn.type === 'ai';
 }
 
 // ============================================================================

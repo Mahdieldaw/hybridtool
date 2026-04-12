@@ -6,7 +6,7 @@
  * fragility dependency — those are downstream consumers.
  */
 
-import type { Edge, EnrichedClaim, ValidatedConflict } from '../../../shared/contract';
+import type { Edge, EnrichedClaim, ValidatedConflict } from '../../../shared/types';
 import { cosineSimilarity } from '../../clustering/distance';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────

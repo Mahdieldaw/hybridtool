@@ -3,15 +3,10 @@
  * Provides comprehensive error handling, recovery strategies, and fallback mechanisms
  */
 
-import { persistenceMonitor } from '../core/persistence-monitor';
-import {
-  classifyError,
-  isProviderAuthError as _isProviderAuthError,
-  isDefinitiveAuthError as _isDefinitiveAuthError,
-  isRateLimitError as _isRateLimitError,
-  isNetworkError as _isNetworkError,
-} from '../core/error-classifier';
-import { getPolicy } from '../core/retry-policy';
+import { persistenceMonitor } from '../persistence-monitor';
+import { classifyError, isRateLimitError, isNetworkError, isProviderAuthError } from './classifier';
+import { getPolicy } from './retry';
+import { HTOSError, ProviderAuthError, type HTOSErrorCode } from '../../../shared/types/provider';
 
 // ============================================================
 // Inline types to avoid contract.ts dependencies
@@ -39,37 +34,6 @@ interface RecoveryStrategy {
 }
 
 type OperationFn = (context: Record<string, unknown>) => Promise<unknown>;
-
-// Error codes - union of all possible codes
-type HTOSErrorCode =
-  | 'AUTH_REQUIRED'
-  | 'MULTI_AUTH_REQUIRED'
-  | 'RATE_LIMITED'
-  | 'NETWORK_ERROR'
-  | 'STORAGE_QUOTA_EXCEEDED'
-  | 'INVALID_STATE'
-  | 'NOT_FOUND'
-  | 'TIMEOUT'
-  | 'INDEXEDDB_ERROR'
-  | 'INDEXEDDB_UNAVAILABLE'
-  | 'SERVICE_WORKER_ERROR'
-  | 'INPUT_TOO_LONG'
-  | 'UNKNOWN_ERROR'
-  | 'CIRCUIT_BREAKER_OPEN'
-  | 'FALLBACK_UNSUPPORTED'
-  | 'FALLBACK_FAILED'
-  | 'CACHE_CORRUPTED'
-  | 'NO_CACHE_AVAILABLE'
-  | 'DIRECT_UNSUPPORTED'
-  | 'NO_RECOVERY_STRATEGY'
-  | 'INVALID_RETRY_POLICY'
-  | 'RETRY_EXHAUSTED'
-  | 'LOCALSTORAGE_SAVE_FAILED'
-  | 'LOCALSTORAGE_LOAD_FAILED'
-  | 'LOCALSTORAGE_DELETE_FAILED'
-  | 'LOCALSTORAGE_LIST_FAILED'
-  | 'DIRECT_PERSISTENCE_NOT_IMPLEMENTED'
-  | 'DIRECT_SESSION_NOT_IMPLEMENTED';
 
 // ============================================================
 // Provider configuration
@@ -108,118 +72,26 @@ export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
   },
   grok: {
     displayName: 'Grok',
-    loginUrl: 'http://grok.com',
+    loginUrl: 'https://grok.com',
     maxInputChars: 120000,
   },
 };
 
 // ============================================================
-// Auth error detection patterns — re-exported from core/error-classifier
+// Provider auth error factory
 // ============================================================
-
-export class HTOSError extends Error {
-  name: string;
-  code: HTOSErrorCode;
-  context: Record<string, unknown>;
-  recoverable: boolean;
-  timestamp: number;
-  id: string;
-
-  constructor(
-    message: string,
-    code: HTOSErrorCode,
-    context: Record<string, unknown> = {},
-    recoverable = true
-  ) {
-    super(message);
-    this.name = 'HTOSError';
-    this.code = code;
-    this.context = context;
-    this.recoverable = recoverable;
-    this.timestamp = Date.now();
-    this.id = `error_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-  }
-
-  get details(): Record<string, unknown> {
-    return this.context;
-  }
-
-  toJSON(): Record<string, unknown> {
-    return {
-      id: this.id,
-      name: this.name,
-      message: this.message,
-      code: this.code,
-      context: this.context,
-      recoverable: this.recoverable,
-      timestamp: this.timestamp,
-      stack: this.stack,
-    };
-  }
-}
-
-// ============================================================
-// Provider-specific error class
-// ============================================================
-
-export class ProviderAuthError extends HTOSError {
-  providerId: string;
-  loginUrl: string;
-
-  constructor(providerId: string, message?: string | null, context: Record<string, unknown> = {}) {
-    const config = PROVIDER_CONFIG[providerId] || {
-      displayName: providerId,
-      loginUrl: 'the provider website',
-    };
-
-    const userMessage =
-      message || `${config.displayName} session expired. Please log in at ${config.loginUrl}`;
-
-    super(
-      userMessage,
-      'AUTH_REQUIRED',
-      {
-        ...context,
-        providerId,
-        loginUrl: config.loginUrl,
-        displayName: config.displayName,
-      },
-      false
-    );
-
-    this.name = 'ProviderAuthError';
-    this.providerId = providerId;
-    this.loginUrl = config.loginUrl;
-  }
-}
-
-// ============================================================
-// Error classification helpers
-// ============================================================
-
-// Delegate to core/error-classifier — keep these exports for backwards compat.
-export function isProviderAuthError(error: unknown): boolean {
-  if (error instanceof ProviderAuthError) return true;
-  return _isProviderAuthError(error);
-}
-
-export function isDefinitiveAuthError(error: unknown): boolean {
-  if (error instanceof ProviderAuthError) return true;
-  return _isDefinitiveAuthError(error);
-}
-
-const isRateLimitError = _isRateLimitError;
-const isNetworkError = _isNetworkError;
-export { isRateLimitError, isNetworkError };
 
 export function createProviderAuthError(
   providerId: string,
   originalError: unknown,
   context: Record<string, unknown> = {}
 ): ProviderAuthError {
+  const config = PROVIDER_CONFIG[providerId] || { displayName: providerId, loginUrl: '' };
   const errorObj = originalError as Record<string, unknown> | null;
   return new ProviderAuthError(providerId, undefined, {
     ...context,
+    displayName: config.displayName,
+    loginUrl: config.loginUrl,
     originalError,
     originalMessage: errorObj?.message,
     originalStatus: errorObj?.status,
@@ -233,7 +105,9 @@ export function createMultiProviderAuthError(
   if (!providerIds?.length) return null;
 
   if (providerIds.length === 1) {
-    return new ProviderAuthError(providerIds[0]);
+    const pid = providerIds[0];
+    const cfg = PROVIDER_CONFIG[pid] || { displayName: pid, loginUrl: '' };
+    return new ProviderAuthError(pid, undefined, { displayName: cfg.displayName, loginUrl: cfg.loginUrl });
   }
 
   const lines = providerIds.map((pid) => {
@@ -371,7 +245,7 @@ export class ErrorHandler {
       console.warn(`🔄 Provider ${failedProvider} auth failed, checking alternatives`);
 
       if (!Array.isArray(availableProviders) || !availableProviders.length || !authManager) {
-        throw new ProviderAuthError(failedProvider as string);
+        throw createProviderAuthError(failedProvider as string, null);
       }
 
       const authStatus = await (
@@ -387,7 +261,7 @@ export class ErrorHandler {
         return { fallbackProvider, authStatus };
       }
 
-      throw new ProviderAuthError(failedProvider as string);
+      throw createProviderAuthError(failedProvider as string, null);
     });
 
     this.fallbackStrategies.set('INDEXEDDB_UNAVAILABLE', async (operation, context) => {

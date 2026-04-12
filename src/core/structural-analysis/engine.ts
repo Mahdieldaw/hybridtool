@@ -1,6 +1,6 @@
 //(Responsibility: Orchestration. Passes the buck without mutating domain models itself).
 
-import { Claim, Edge, PrimaryShape, ProblemStructure } from '../../../shared/contract';
+import { Claim, Edge, PrimaryShape, ProblemStructure } from '../../../shared/types';
 import { measureCorpus } from './measure';
 import { analyzeDistribution, finalizeInteractionProfiles, computeLayers } from './classify';
 import { detectAllSecondaryPatterns } from './patterns';

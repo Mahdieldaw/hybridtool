@@ -8,7 +8,7 @@ import {
   isHistoryPanelOpenAtom,
   currentSessionIdAtom,
   toastAtom,
-} from '../state/atoms';
+} from '../state';
 import { useChat } from '../hooks/chat/useChat';
 import api from '../services/extension-api';
 import { normalizeBackendRoundsToTurns } from '../utils/turn-helpers';
@@ -46,11 +46,10 @@ const SessionRow = React.memo(function SessionRow({
     <div
       className={`
                     group relative rounded-lg border transition-all duration-200 cursor-pointer
-                    ${
-                      isActive
-                        ? 'bg-surface-highlight border-primary-500/50 shadow-sm'
-                        : 'bg-surface-raised border-transparent hover:border-border-subtle'
-                    }
+                    ${isActive
+          ? 'bg-surface-highlight border-primary-500/50 shadow-sm'
+          : 'bg-surface-raised border-transparent hover:border-border-subtle'
+        }
                     ${isDeleting ? 'opacity-50 pointer-events-none' : ''}
                   `}
       onClick={() => onRowClick(session)}
@@ -658,11 +657,10 @@ export default function HistoryPanel() {
                   handleToggleBatchMode();
                 }
               }}
-              className={`relative p-2 rounded-full transition-colors ${
-                isBatchMode
+              className={`relative p-2 rounded-full transition-colors ${isBatchMode
                   ? 'bg-intent-danger/15 text-text-secondary hover:bg-intent-danger/20'
                   : 'hover:bg-surface-highlight text-text-secondary hover:text-primary-500'
-              }`}
+                }`}
               title={
                 isBatchMode
                   ? selectedIds.size > 0

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from '../state/atoms';
+import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from '../state';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
-import type { AiTurn } from '../../shared/contract';
+import type { AiTurn } from '../../shared/types';
 import clsx from 'clsx';
 
 interface CouncilOrbsVerticalProps {

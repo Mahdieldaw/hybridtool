@@ -14,7 +14,7 @@ import type {
   ClaimDensityResult,
   ParagraphCoverageEntry,
   PassageEntry,
-} from '../../shared/contract';
+} from '../../shared/types';
 
 interface MinimalClaim {
   id: string;

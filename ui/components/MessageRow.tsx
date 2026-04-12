@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
-import { activeSplitPanelAtom, turnsMapAtom } from '../state/atoms';
+import { activeSplitPanelAtom, turnsMapAtom } from '../state';
 import UserTurnBlock from './UserTurnBlock';
 import AiTurnBlock from './AiTurnBlock';
 import { TurnMessage } from '../types';

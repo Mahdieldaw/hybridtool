@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
-import type { EditorialAST } from '../../../shared/contract';
+import type { EditorialAST } from '../../../shared/types';
 import { usePassageResolver } from './usePassageResolver';
 import { CopyButton } from '../CopyButton';
 import { OrientationLine } from './OrientationLine';

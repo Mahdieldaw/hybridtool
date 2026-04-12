@@ -1,5 +1,5 @@
-import { classifyError } from './error-classifier';
-import { logRetryEvent } from './retry-telemetry';
+import { classifyError } from './errors/classifier';
+import { logRetryEvent } from './errors/retry';
 
 export interface RunWithHealthOptions {
   nonBlocking?: boolean;
@@ -48,7 +48,7 @@ export async function runWithProviderHealth<T>(
   stage: string,
   fn: () => Promise<T>,
   options?: RunWithHealthOptions
-): Promise<T> {
+): Promise<T | undefined> {
   const startedAt = Date.now();
   const check = tracker?.shouldAttempt?.(providerId);
   if (check && !check.allowed) {
@@ -65,6 +65,7 @@ export async function runWithProviderHealth<T>(
       delayMs: typeof check.retryAfterMs === 'number' ? Math.max(0, check.retryAfterMs) : 0,
       model: options?.model,
     });
+    return undefined;
   }
 
   try {

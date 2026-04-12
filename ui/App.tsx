@@ -14,7 +14,7 @@ import api from './services/extension-api'; // Import API
 
 const SettingsPanel = safeLazy(() => import('./components/SettingsPanel'));
 import { Toast } from './components/Toast';
-import { isHistoryPanelOpenAtom, connectionStatusAtom } from './state/atoms'; // Import connection atom
+import { isHistoryPanelOpenAtom, connectionStatusAtom } from './state'; // Import connection atom
 
 import { useInitialization } from './hooks/useInitialization';
 import { useSessionSync } from './hooks/useSessionSync';

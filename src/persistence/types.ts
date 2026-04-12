@@ -1,6 +1,6 @@
 // src/persistence/types.ts
 
-import type { ProviderResponseType } from '../../shared/contract';
+import type { ProviderResponseType } from '../../shared/types';
 
 // Store configuration types
 export interface StoreConfig {

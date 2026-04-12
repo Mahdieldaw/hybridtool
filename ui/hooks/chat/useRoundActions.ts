@@ -13,9 +13,9 @@ import {
   thinkMappingByRoundAtom,
   activeRecomputeStateAtom,
   alertTextAtom,
-} from '../../state/atoms';
+} from '../../state';
 import api from '../../services/extension-api';
-import type { ProviderKey, PrimitiveWorkflowRequest } from '../../../shared/contract';
+import type { ProviderKey, PrimitiveWorkflowRequest } from '../../../shared/types';
 import type { TurnMessage, AiTurnWithUI } from '../../types';
 
 export function useRoundActions() {

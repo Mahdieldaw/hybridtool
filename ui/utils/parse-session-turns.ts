@@ -1,4 +1,4 @@
-import type { UserTurn, AiTurn, ProviderKey, ProviderResponse } from '../../shared/contract';
+import type { UserTurn, AiTurn, ProviderKey, ProviderResponse } from '../../shared/types';
 import type { TurnMessage } from '../types';
 import { DEFAULT_THREAD } from '../../shared/messaging';
 // hydrateArtifact removed — Tier 3 artifacts are ephemeral (rebuilt on demand)
@@ -16,12 +16,12 @@ export function parseSessionTurns(fullSession: any): {
 
   if (!fullSession?.turns) return { ids: newIds, map: newMap };
 
-  fullSession.turns.forEach((round: any) => {
+  fullSession.turns.forEach((round: any, turnIndex: number) => {
     // 1. Extract UserTurn
     if (round.user && round.user.text) {
       const userTurn: UserTurn = {
         type: 'user',
-        id: round.userTurnId || round.user.id || `user-${round.createdAt}`,
+        id: round.userTurnId || round.user.id || `user-${fullSession.sessionId}-${turnIndex}`,
         text: round.user.text,
         createdAt: round.user.createdAt || round.createdAt || Date.now(),
         sessionId: fullSession.sessionId,
@@ -91,16 +91,19 @@ export function parseSessionTurns(fullSession: any): {
         !round.batch && batchResponses
           ? {
               responses: Object.fromEntries(
-                Object.entries(batchResponses).map(([pid, arr]) => {
+                Object.entries(batchResponses).flatMap(([pid, arr]) => {
+                  if ((arr as any[]).length === 0) return [];
                   const last = (arr as any[])[(arr as any[]).length - 1] as any;
                   return [
-                    pid,
-                    {
-                      text: String(last?.text || ''),
-                      modelIndex: Number(last?.meta?.modelIndex || 0),
-                      status: last?.status || 'completed',
-                      meta: last?.meta,
-                    },
+                    [
+                      pid,
+                      {
+                        text: String(last?.text || ''),
+                        modelIndex: Number(last?.meta?.modelIndex || 0),
+                        status: last?.status || 'completed',
+                        meta: last?.meta,
+                      },
+                    ],
                   ];
                 })
               ),
@@ -130,7 +133,7 @@ export function parseSessionTurns(fullSession: any): {
 
       const aiTurn: AiTurn = {
         type: 'ai',
-        id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
+        id: round.aiTurnId || (round.completedAt ? `ai-${round.completedAt}` : `ai-${round.userTurnId || turnIndex}`),
         userTurnId: round.userTurnId,
         sessionId: fullSession.sessionId,
         threadId: DEFAULT_THREAD,

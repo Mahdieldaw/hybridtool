@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { AiTurn, SecondaryPattern } from '../../../shared/contract';
-import type { EditorialAST } from '../../../shared/contract';
+import { AiTurn, SecondaryPattern } from '../../../shared/types';
+import type { EditorialAST } from '../../../shared/types';
 import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
@@ -16,7 +16,7 @@ import {
   mappingProviderAtom,
   modelResponsePanelModeFamily,
   singularityProviderAtom,
-} from '../../state/atoms';
+} from '../../state';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeStructuralAnalysis } from '../../../src/core/prompt-methods';

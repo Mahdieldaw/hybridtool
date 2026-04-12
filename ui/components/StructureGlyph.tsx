@@ -1,5 +1,5 @@
 import React from 'react';
-import { PrimaryShape } from '../../shared/contract';
+import { PrimaryShape } from '../../shared/types';
 
 interface StructureGlyphProps {
   pattern: PrimaryShape; // primary layer shape

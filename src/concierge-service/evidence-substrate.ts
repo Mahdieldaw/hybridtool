@@ -13,7 +13,7 @@ import type {
   EditorialThread,
   PipelineShadowParagraph,
   CognitiveArtifact,
-} from '../../shared/contract';
+} from '../../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Resolve a single editorial item ID → text
@@ -158,7 +158,7 @@ function formatEditorialThreads(
       const resolved = resolve(item.id);
       if (!resolved || !resolved.text) continue;
 
-      const role = item.role.toUpperCase();
+      const role = String(item.role || 'UNKNOWN').toUpperCase();
       lines.push(`[${role} | ${resolved.modelName} | ${resolved.claimLabel}]`);
       lines.push(resolved.text);
       lines.push('');

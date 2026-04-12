@@ -1,7 +1,7 @@
 import { useMemo, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { turnAtomFamily, pinnedSingularityProvidersAtom } from '../state/atoms';
-import type { AiTurn, SingularityOutput } from '../../shared/contract';
+import { turnAtomFamily, pinnedSingularityProvidersAtom } from '../state';
+import type { AiTurn, SingularityOutput } from '../../shared/types';
 
 export interface SingularityOutputState {
   output: SingularityOutput | null;

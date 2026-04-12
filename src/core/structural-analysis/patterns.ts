@@ -1,6 +1,6 @@
 //(Responsibility: Corpus-wide topological detection. Global structural phenomena derived via absolute topological signals without iterating over layers).
 
-import { EnrichedClaim, SecondaryPattern } from '../../../shared/contract';
+import { EnrichedClaim, SecondaryPattern } from '../../../shared/types';
 import { MeasuredCorpus } from './measure';
 import { MIN_CHAIN_LENGTH } from './classify';
 

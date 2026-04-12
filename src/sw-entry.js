@@ -33,7 +33,7 @@ import { authManager } from './core/auth-manager.js';
 // Persistence Layer Imports
 import { SessionManager } from './persistence/session-manager.js';
 import { initializePersistenceLayer } from './persistence/index';
-import { errorHandler, getErrorMessage } from './utils/error-handler.js';
+import { errorHandler, getErrorMessage } from './core/errors/handler.js';
 import { persistenceMonitor } from './core/persistence-monitor.js';
 
 // Global Services Registry

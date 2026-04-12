@@ -11,7 +11,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   normalizeError,
-} from '../utils/error-handler.js';
+} from '../core/errors/handler.js';
 
 const QWEN_ADAPTER_DEBUG = false;
 const pad = (...args) => {

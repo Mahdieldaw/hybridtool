@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useSetAtom } from 'jotai';
-import { toastAtom } from '../state/atoms';
+import { toastAtom } from '../state';
 import clsx from 'clsx';
 
 interface CopyButtonProps {

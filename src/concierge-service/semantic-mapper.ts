@@ -8,7 +8,7 @@
 //     Question generation is handled by the Survey Mapper (surveyMapper.ts).
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { UnifiedMapperOutput } from '../../shared/contract';
+import type { UnifiedMapperOutput } from '../../shared/types';
 import {
   parseSemanticMapperOutput as baseParseOutput,
   extractJsonFromContent,
@@ -140,7 +140,7 @@ export function parseSemanticMapperOutput(
     mapContent && mapContent.trim().length > 0 ? mapContent : normalizedText
   ) as any | null;
 
-  const result = baseParseOutput(rawResponse);
+  const result = baseParseOutput(normalizedText);
 
   function isUnifiedMapperOutput(parsed: unknown): parsed is UnifiedMapperOutput {
     if (parsed === null || typeof parsed !== 'object') return false;

@@ -5,7 +5,7 @@
  * to inform the next turn's batch responses.
  */
 
-import { MapperArtifact } from '../../shared/contract';
+import { MapperArtifact } from '../../shared/types';
 
 /**
  * Singularity context passed to the next turn.
