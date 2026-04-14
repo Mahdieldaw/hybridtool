@@ -1,3 +1,3 @@
-export { computeStructuralAnalysis } from './structural-analysis/engine';
-export { extractShadowStatements as executeShadowExtraction } from '../shadow';
-export type { TwoPassResult } from '../shadow';
+export { analyzeGlobalStructure as computeStructuralAnalysis } from './provenance/structure';
+export { extractShadowStatements } from '../shadow';
+export type { ShadowExtractionResult } from '../shadow';

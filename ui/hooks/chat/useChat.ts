@@ -30,7 +30,7 @@ import type {
 } from '../../../shared/types';
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
-import { computeThinkFlag } from '../../../src/think/computeThinkFlag.js';
+import { computeThinkFlag } from '../../../src/utils/think-utils';
 import { parseSessionTurns } from '../../utils/parse-session-turns';
 
 import type { HistorySessionSummary, FullSessionPayload, TurnMessage } from '../../types';

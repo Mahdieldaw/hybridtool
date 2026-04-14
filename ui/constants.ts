@@ -1,6 +1,6 @@
 import { LLMProvider } from './types';
 
-import { INITIAL_PROVIDERS } from './providers/provider-registry';
+import { INITIAL_PROVIDERS, PROVIDER_COLORS, PROVIDER_ACCENT_COLORS } from './providers/provider-registry';
 
 export const LLM_PROVIDERS_CONFIG: LLMProvider[] = [...INITIAL_PROVIDERS];
 
@@ -9,31 +9,8 @@ export const EXAMPLE_PROMPT = 'Explain the concept of quantum entanglement in si
 // Preferred streaming providers to prioritize in visible slots when 4+ are selected
 export const PRIMARY_STREAMING_PROVIDER_IDS: string[] = ['gemini-exp', 'claude', 'qwen'];
 
-// Provider color mapping for orb animations
-
-// ui/constants.ts
-
-export const PROVIDER_COLORS: Record<string, string> = {
-  claude: '#E07850',
-  gemini: '#3B82F6',
-  'gemini-pro': '#06B6D4',
-  'gemini-exp': '#8B5CF6',
-  chatgpt: '#10A37F',
-  qwen: '#F59E0B',
-  grok: '#293944ff',
-  default: '#64748B',
-};
-
-export const PROVIDER_ACCENT_COLORS: Record<string, string> = {
-  claude: '#C75B3A',
-  gemini: '#1D4ED8',
-  'gemini-pro': '#0891B2',
-  'gemini-exp': '#6D28D9',
-  chatgpt: '#047857',
-  qwen: '#D97706',
-  grok: '#293944ff',
-  default: '#475569',
-};
+// Re-export provider colors for backward compatibility
+export { PROVIDER_COLORS, PROVIDER_ACCENT_COLORS };
 
 // Keep workflow colors as-is
 export const WORKFLOW_STAGE_COLORS: Record<

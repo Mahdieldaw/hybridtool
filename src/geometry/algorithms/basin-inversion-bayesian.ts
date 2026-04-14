@@ -36,7 +36,7 @@ import type {
   BasinInversionBridgePair,
   BasinInversionBasin,
   BasinInversionResult,
-} from '../types';
+} from '../../../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

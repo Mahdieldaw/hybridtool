@@ -1,6 +1,7 @@
 // This file is located at ui/components/Icons.tsx
 
 import React from 'react';
+import { tokens } from '../styles/tokens';
 
 // SendIcon is removed (using text icon ✨)
 // SparklesIcon is removed (using text icon 🧠)
@@ -198,3 +199,26 @@ export const SettingsIcon = ({ className, style }: IconProps) => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
+
+// Provider Icons - consolidated from ui/providers/provider-icons.tsx
+// Icons pull from tokens to keep Rail free of hard-coded color values
+const baseIcon =
+  (fill: string) =>
+  ({ size = 16, style = {} as React.CSSProperties } = {}) => (
+    <div
+      aria-hidden="true"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 4,
+        background: fill,
+        ...style,
+      }}
+    />
+  );
+
+export const ChatGPTIcon = baseIcon(tokens.accents.chatgpt);
+export const ClaudeIcon = baseIcon(tokens.accents.claude);
+export const GeminiIcon = baseIcon(tokens.accents.gemini);
+export const QwenIcon = baseIcon(tokens.accents.qwen);
+export const GrokIcon = baseIcon(tokens.accents.grok);

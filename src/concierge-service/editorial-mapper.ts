@@ -16,7 +16,7 @@ import type {
   LandscapePosition,
   Claim,
 } from '../../shared/types';
-import type { SourceContinuityEntry } from '../core/passage-routing';
+import type { SourceContinuityEntry } from '../core/provenance/surface';
 import { extractJsonFromContent } from '../../shared/parsing-utils';
 
 // ─────────────────────────────────────────────────────────────────────────

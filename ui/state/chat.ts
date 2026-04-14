@@ -3,17 +3,6 @@ import { atomWithImmer } from 'jotai-immer';
 import { atomWithStorage, atomFamily } from 'jotai/utils';
 import type { TurnMessage, HistorySessionSummary } from '../types';
 
-// Cross-seam imports for cleanupTurnAtoms (lazy by function call — safe for circular refs)
-import {
-  turnStreamingStateFamily,
-  workflowProgressForTurnFamily,
-  providerErrorsForTurnFamily,
-  providerEffectiveStateFamily,
-  providerArtifactFamily,
-} from './workflow';
-import { turnExpandedStateFamily } from './ui';
-import { modelResponsePanelModeFamily, activeProbeDraftFamily } from './layout';
-
 // =============================================================================
 // ATOMIC STATE PRIMITIVES (Map + ID index)
 // =============================================================================
@@ -65,29 +54,3 @@ export const lastActivityAtAtom = atom<number>(0);
 export const historySessionsAtom = atomWithImmer<HistorySessionSummary[]>([]);
 export const isHistoryLoadingAtom = atom<boolean>(false);
 
-// =============================================================================
-// AtomFamily Cleanup Helper
-// =============================================================================
-/**
- * Removes all atomFamily entries for a set of deleted turns.
- * Call this before clearing turnsMap/turnIds on session delete to prevent
- * unbounded atom accumulation.
- */
-export function cleanupTurnAtoms(
-  turnIds: string[],
-  turnIdProviderPairs: Array<{ turnId: string; providerId: string }>
-): void {
-  for (const turnId of turnIds) {
-    turnAtomFamily.remove(turnId);
-    turnStreamingStateFamily.remove(turnId);
-    turnExpandedStateFamily.remove(turnId);
-    workflowProgressForTurnFamily.remove(turnId);
-    providerErrorsForTurnFamily.remove(turnId);
-    modelResponsePanelModeFamily.remove(turnId);
-    activeProbeDraftFamily.remove(turnId);
-  }
-  for (const pair of turnIdProviderPairs) {
-    providerEffectiveStateFamily.remove(pair);
-    providerArtifactFamily.remove(pair);
-  }
-}

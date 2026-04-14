@@ -1866,7 +1866,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       ) {
         const { buildPassageIndex, parseEditorialOutput } =
           await import('./concierge-service/editorial-mapper.js');
-        const { buildSourceContinuityMap } = await import('./core/passage-routing.js');
+        const { buildSourceContinuityMap } = await import('./core/provenance/surface.js');
 
         const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
         const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
@@ -1913,7 +1913,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       try {
         const orchestrator = services.get('orchestrator');
         if (orchestrator) {
-          const { buildSourceContinuityMap } = await import('./core/passage-routing.js');
+          const { buildSourceContinuityMap } = await import('./core/provenance/surface.js');
           const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
             await import('./concierge-service/editorial-mapper.js');
 

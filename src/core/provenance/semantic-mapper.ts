@@ -8,11 +8,11 @@
 //     Question generation is handled by the Survey Mapper (surveyMapper.ts).
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { UnifiedMapperOutput } from '../../shared/types';
+import type { UnifiedMapperOutput } from '../../../shared/types';
 import {
   parseSemanticMapperOutput as baseParseOutput,
   extractJsonFromContent,
-} from '../../shared/parsing-utils';
+} from '../../../shared/parsing-utils';
 
 type RawModelResponse = {
   modelIndex: number;

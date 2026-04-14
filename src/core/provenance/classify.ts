@@ -1,17 +1,20 @@
 /**
- * Statement classification — geometric grouping of the full corpus for the reading surface.
+ * Phase 5 — Classify
  *
- * Bridges paragraph embeddings (coarse spatial grouping) with statement IDs
- * (fine-grained coverage tracking). Unclaimed statements are grouped by
- * paragraph-level cosine proximity to the nearest claim — geometric
- * neighborhoods, not semantic assignments.
+ * Moves statement-classification.ts into the provenance pipeline as a strict
+ * phase. Key difference from the original:
  *
- * Runs AFTER: mixed provenance, claim density, passage routing, query relevance.
- * Consumes existing data only. No new embeddings, no LLM calls.
+ *   - ownershipMap is REQUIRED (not nullable). The defensive fallback
+ *     `statementOwnership ?? computeStatementOwnership(enrichedClaims)` is
+ *     removed — Phase 1 always produces the map.
+ *   - computeStatementOwnership is not imported here at all.
+ *
+ * All downstream code that called computeStatementClassification with
+ * statementOwnership: null must now pass ownershipMap from Phase 1.
  */
 
-import { cosineSimilarity } from '../clustering/distance';
-import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
+import { cosineSimilarity } from '../../clustering/distance';
+import type { ShadowParagraph } from '../../shadow/shadow-paragraph-projector';
 import type {
   ClaimDensityResult,
   PassageRoutingResult,
@@ -20,12 +23,19 @@ import type {
   ClaimedStatementEntry,
   UnclaimedGroup,
   UnclaimedParagraphEntry,
-} from '../../shared/types';
-import { computeStatementOwnership } from '../concierge-service/claim-provenance';
+} from '../../../shared/types';
 
-// ── Input ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
-export interface StatementClassificationInput {
+function nowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────
+
+export interface ClassifyPhaseInput {
   shadowStatements: Array<{ id: string; modelIndex?: number }>;
   shadowParagraphs: ShadowParagraph[];
   enrichedClaims: Array<{ id: string; sourceStatementIds?: string[] }>;
@@ -34,21 +44,14 @@ export interface StatementClassificationInput {
   paragraphEmbeddings: Map<string, Float32Array>;
   claimEmbeddings: Map<string, Float32Array>;
   queryRelevanceScores: Map<string, { querySimilarity: number }>;
-  statementOwnership: Map<string, Set<string>> | null;
+  /** Required — provided by Phase 1 (runMeasurePhase). No fallback. */
+  ownershipMap: Map<string, Set<string>>;
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function nowMs(): number {
-  return typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
-}
-
-// ── Engine ───────────────────────────────────────────────────────────────
+// ── Engine ────────────────────────────────────────────────────────────────
 
 export function computeStatementClassification(
-  input: StatementClassificationInput
+  input: ClassifyPhaseInput
 ): StatementClassificationResult {
   const start = nowMs();
   const {
@@ -60,14 +63,13 @@ export function computeStatementClassification(
     paragraphEmbeddings,
     claimEmbeddings,
     queryRelevanceScores,
-    statementOwnership,
+    ownershipMap,
   } = input;
 
-  // ── 1. Build claimed set: stmtId → Set<claimId> ────────────────────
-  const claimedStmts = statementOwnership ?? computeStatementOwnership(enrichedClaims as any);
+  // ── 1. Claimed set from Phase 1 ownershipMap (no reconstruction) ─────
+  const claimedStmts = ownershipMap;
 
-  // ── 2. Build passage membership lookup ─────────────────────────────
-  // Pre-build paragraph lookup: "modelIndex:paragraphIndex" → ShadowParagraph
+  // ── 2. Build passage membership lookup ────────────────────────────────
   const paraByKey = new Map<string, ShadowParagraph>();
   for (const para of shadowParagraphs) {
     paraByKey.set(`${para.modelIndex}:${para.paragraphIndex}`, para);
@@ -102,7 +104,7 @@ export function computeStatementClassification(
     }
   }
 
-  // ── 3. Populate claimed entries ────────────────────────────────────
+  // ── 3. Populate claimed entries ───────────────────────────────────────
   const claimed: Record<string, ClaimedStatementEntry> = {};
   for (const [stmtId, claimIdSet] of claimedStmts) {
     claimed[stmtId] = {
@@ -112,7 +114,7 @@ export function computeStatementClassification(
     };
   }
 
-  // ── 4. Identify paragraphs with unclaimed statements ───────────────
+  // ── 4. Identify paragraphs with unclaimed statements ──────────────────
   const allStmtIds = new Set(shadowStatements.map((s) => s.id));
   let mixedParagraphCount = 0;
   let fullyUnclaimedParagraphCount = 0;
@@ -129,7 +131,7 @@ export function computeStatementClassification(
     const unclaimed: string[] = [];
     const claimedInPara: string[] = [];
     for (const sid of para.statementIds) {
-      if (!allStmtIds.has(sid)) continue; // skip if not in corpus
+      if (!allStmtIds.has(sid)) continue;
       if (claimedStmts.has(sid)) {
         claimedInPara.push(sid);
       } else {
@@ -145,11 +147,9 @@ export function computeStatementClassification(
       mixedParagraphCount++;
       candidates.push({ para, unclaimedIds: unclaimed, claimedIds: claimedInPara });
     }
-    // else: empty paragraph (no statements in corpus), skip
   }
 
-  // ── 5. Compute per-paragraph claim similarities ────────────────────
-  // Collect claim IDs + embeddings once
+  // ── 5. Compute per-paragraph claim similarities ───────────────────────
   const claimIds = enrichedClaims.map((c) => c.id);
   const claimEmbList: Array<{ id: string; emb: Float32Array }> = [];
   for (const id of claimIds) {
@@ -166,11 +166,8 @@ export function computeStatementClassification(
 
   for (const { para, unclaimedIds, claimedIds } of candidates) {
     const paraEmb = paragraphEmbeddings.get(para.id);
-
-    // Skip if there are no claims or no paragraph embedding — cannot compute a nearest claim
     if (claimEmbList.length === 0 || !paraEmb) continue;
 
-    // Compute cosine to all claims
     const claimSimilarities: Record<string, number> = {};
     let bestClaimId = '';
     let bestSim = -Infinity;
@@ -186,7 +183,6 @@ export function computeStatementClassification(
 
     if (!bestClaimId) continue;
 
-    // Collect per-statement query relevance
     const statementQueryRelevance: Record<string, number> = {};
     for (const sid of unclaimedIds) {
       const qr = queryRelevanceScores.get(sid);
@@ -208,7 +204,7 @@ export function computeStatementClassification(
     });
   }
 
-  // ── 6. Group by nearestClaimId ─────────────────────────────────────
+  // ── 6. Group by nearestClaimId ────────────────────────────────────────
   const groupMap = new Map<string, ScoredParagraph[]>();
   for (const sp of scoredParagraphs) {
     if (!groupMap.has(sp.bestClaimId)) groupMap.set(sp.bestClaimId, []);
@@ -221,9 +217,9 @@ export function computeStatementClassification(
   for (const [nearestClaimId, members] of groupMap) {
     const paragraphs = members.map((m) => m.entry);
 
-    // Group-level aggregates
     const sims = members.map((m) => m.bestSim);
-    const meanClaimSimilarity = sims.length > 0 ? sims.reduce((a, b) => a + b, 0) / sims.length : 0;
+    const meanClaimSimilarity =
+      sims.length > 0 ? sims.reduce((a, b) => a + b, 0) / sims.length : 0;
 
     const allQr: number[] = [];
     for (const m of members) {
@@ -248,7 +244,7 @@ export function computeStatementClassification(
     });
   }
 
-  // ── 7. Summary ─────────────────────────────────────────────────────
+  // ── 7. Summary ────────────────────────────────────────────────────────
   const totalStatements = shadowStatements.length;
   const claimedCount = Object.keys(claimed).length;
   let unclaimedCount = 0;

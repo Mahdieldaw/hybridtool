@@ -1311,7 +1311,6 @@ export type ProviderConfigEntry = {
   maxInputChars: number;
 };
 
-export type HTOSErrorCode = string;
 
 export type RetryPolicy = {
   maxRetries: number;

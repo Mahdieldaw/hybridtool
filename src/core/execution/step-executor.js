@@ -5,7 +5,7 @@ import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 import { authManager } from '../auth-manager.js';
 import { classifyError } from '../errors/classifier.js';
 import { runWithProviderHealth } from '../provider-health-gate.js';
-import { logRetryEvent } from '../errors/telemetry.js';
+import { logRetryEvent } from '../errors/retry.js';
 import {
   errorHandler,
   isProviderAuthError,
@@ -517,7 +517,7 @@ export class StepExecutor {
     const shadowModule = await import('../../shadow');
     const { extractShadowStatements } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } =
-      await import('../../concierge-service/semantic-mapper.js');
+      await import('../provenance/semantic-mapper.js');
     // claimAssembly import removed — computePreSurveyPipeline handles it internally
     const { computeQueryRelevance } = await import('../../geometry/annotate');
 
@@ -758,7 +758,7 @@ export class StepExecutor {
         // ─────────────────────────────────────────────────────────────────────────
         try {
           const { computeBasinInversion } =
-            await import('../../../shared/geometry/basin-inversion-bayesian.js');
+            await import('../../../src/geometry/algorithms/basin-inversion-bayesian.js');
           const paraIds = Array.from(geometryParagraphEmbeddings.keys());
           const paraVectors = paraIds.map((id) => geometryParagraphEmbeddings.get(id));
           basinInversionResult = computeBasinInversion(paraIds, paraVectors);
@@ -1314,7 +1314,8 @@ export class StepExecutor {
                     // ── EDITORIAL MODEL CALL (StepExecutor-only) ──────────────
                     if (mapperArtifact && preSurvey?.derived) {
                       try {
-                        const { buildSourceContinuityMap } = await import('../passage-routing.js');
+                        const { buildSourceContinuityMap } =
+                          await import('../provenance/surface.js');
                         const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
                           await import('../../concierge-service/editorial-mapper.js');
 

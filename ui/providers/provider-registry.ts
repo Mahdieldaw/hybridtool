@@ -1,7 +1,7 @@
 import type { LLMProvider } from '../types';
 
 // Provider icons are light-weight and color-driven via tokens to remain dark-mode safe
-import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon, GrokIcon } from './provider-icons';
+import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon, GrokIcon } from '../components/Icons';
 
 // Import SVG Logos
 import ChatGPTLogo from '../assets/providers/chatgpt.svg';
@@ -91,3 +91,26 @@ let providers: ProviderConfig[] = [...INITIAL_PROVIDERS];
 export function getProviderById(id: string): ProviderConfig | undefined {
   return providers.find((p) => p.id === id);
 }
+
+// Provider color mapping for orb animations
+export const PROVIDER_COLORS: Record<string, string> = {
+  claude: '#E07850',
+  gemini: '#3B82F6',
+  'gemini-pro': '#06B6D4',
+  'gemini-exp': '#8B5CF6',
+  chatgpt: '#10A37F',
+  qwen: '#F59E0B',
+  grok: '#293944ff',
+  default: '#64748B',
+};
+
+export const PROVIDER_ACCENT_COLORS: Record<string, string> = {
+  claude: '#C75B3A',
+  gemini: '#1D4ED8',
+  'gemini-pro': '#0891B2',
+  'gemini-exp': '#6D28D9',
+  chatgpt: '#047857',
+  qwen: '#D97706',
+  grok: '#293944ff',
+  default: '#475569',
+};

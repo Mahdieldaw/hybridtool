@@ -40,11 +40,3 @@ export { isExcluded } from './exclusion-rules';
 export { extractShadowStatements } from './shadow-extractor';
 
 export { projectParagraphs } from './shadow-paragraph-projector';
-
-// ===========================================================================
-// LEGACY ALIASES (Migration Support)
-// ===========================================================================
-
-export { extractShadowStatements as executeShadowExtraction } from './shadow-extractor';
-
-export type { ShadowExtractionResult as TwoPassResult } from './shadow-extractor';
