@@ -30,7 +30,7 @@ export const messagesAtom = atom<TurnMessage[]>((get) => {
  * Uses selectAtom so each family member only re-renders when its own turn changes.*/
 export const turnAtomFamily = atomFamily(
   (turnId: string) =>
-    selectAtom(turnsMapAtom, (map) => (turnId ? map.get(turnId) : undefined)),
+    selectAtom(turnsMapAtom, (map) => map.get(turnId)),
   (a, b) => a === b
 );
 

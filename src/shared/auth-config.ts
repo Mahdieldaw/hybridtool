@@ -41,6 +41,11 @@ export const PROVIDER_URLS: Record<string, string> = {
   qwen: 'https://qianwen.com',
 };
 
-export type ProviderId =
+/**
+ * Providers with active authentication/session support.
+ * Note: grok is excluded currently because of issues with the provider.
+ */
+export type AuthProviderId =
   | (typeof AUTH_COOKIES)[number]['provider']
   | (typeof GEMINI_VARIANTS)[number];
+

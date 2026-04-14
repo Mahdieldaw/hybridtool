@@ -79,3 +79,5 @@ oi.js
 *.test.ts
 *.spec.js
 *.spec.ts
+
+scratch/

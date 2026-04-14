@@ -5,11 +5,13 @@
  * 1. { providerId: index } (Numeric values, e.g. { "gemini": 1, "claude": 2 })
  * 2. { index: providerId } (Numeric keys, e.g. { "1": "gemini", "2": "claude" })
  *
- * @param {object|null} rawCitationOrder - The raw citation order object from mapping meta.
+ * @param {Record<string, string | number> | null} rawCitationOrder - The raw citation order object from mapping meta.
  * @returns {string[]} Array of provider IDs in ascending order of their index.
  */
-export function normalizeCitationSourceOrder(rawCitationOrder) {
-  const normalizedCitationOrder = {}; // providerId -> numericIndex
+export function normalizeCitationSourceOrder(
+  rawCitationOrder: Record<string, string | number> | null
+): string[] {
+  const normalizedCitationOrder: Record<string, number> = {}; // providerId -> numericIndex
 
   if (rawCitationOrder && typeof rawCitationOrder === 'object') {
     const entries = Object.entries(rawCitationOrder);
@@ -44,6 +46,7 @@ export function normalizeCitationSourceOrder(rawCitationOrder) {
 
   // Return sorted array of provider IDs
   return Object.entries(normalizedCitationOrder)
-    .sort(([, a], [, b]) => (a || 0) - (b || 0))
+    .sort(([, a], [, b]) => a - b)
     .map(([providerId]) => providerId);
 }
+

@@ -13,4 +13,9 @@ export const PROVIDER_LIMITS = {
 } as const;
 
 export type ProviderLimits = typeof PROVIDER_LIMITS;
+/**
+ * Providers with defined input/output limits.
+ * All providers should have a limit as well so no discrepancy.
+ */
 export type ProviderId = keyof ProviderLimits;
+

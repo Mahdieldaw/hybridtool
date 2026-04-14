@@ -5,14 +5,14 @@ import type {
   PipelineRegion,
   PipelineSubstrateEdge,
   PipelineSubstrateGraph,
-} from '../../shared/types';
-import type { ClaimCentroid } from '../hooks/useClaimCentroids';
+} from '../../../shared/types';
+import type { ClaimCentroid } from '../../hooks/useClaimCentroids';
 import {
   getProviderAbbreviation,
   getProviderColor,
   getProviderName,
   resolveProviderIdFromCitationOrder,
-} from '../utils/provider-helpers';
+} from '../../utils/provider-helpers';
 
 type ParagraphData = {
   id: string;
@@ -461,7 +461,7 @@ export function ParagraphSpaceView({
     }
     if (hoveredClaimSourceIds) {
       for (const pid of hoveredClaimSourceIds) {
-        const rid = nodeToRegionMap.get(pid);
+        const rid = nodeToRegionMap.get(pid as string);
         if (rid) ids.add(rid);
       }
     }

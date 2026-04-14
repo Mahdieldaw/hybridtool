@@ -77,7 +77,7 @@ export const providerEffectiveStateFamily = atomFamily(
  * on page load, mapper switch, or regenerate via buildArtifactForProvider().
  *
  * Write: usePortMessageHandler (MAPPER_ARTIFACT_READY, REGENERATE response)
- * Read:  useProviderArtifact hook → DecisionMapSheet, CognitiveOutputRenderer
+ * Read:  useProviderArtifact hook → decisionmapsheet/DecisionMapSheet, CognitiveOutputRenderer
  */
 export const providerArtifactFamily = atomFamily(
   (_params: { turnId: string; providerId: string }) => atom<any | null>(null),

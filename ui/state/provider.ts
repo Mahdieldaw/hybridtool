@@ -1,10 +1,10 @@
 import { atom } from 'jotai';
 import { atomWithImmer } from 'jotai-immer';
 import { atomWithStorage } from 'jotai/utils';
-import type { ProviderLocks } from '@shared/provider-locks';
+import type { ProviderLocks } from 'src/shared/provider-locks';
 
 // Re-export for consumers who import from this file
-export type { ProviderLocks } from '@shared/provider-locks';
+export type { ProviderLocks } from 'src/shared/provider-locks';
 
 // -----------------------------
 // Model & feature configuration (persisted)

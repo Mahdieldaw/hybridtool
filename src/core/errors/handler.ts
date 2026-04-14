@@ -4,7 +4,9 @@
  */
 
 import { persistenceMonitor } from '../persistence-monitor';
-import { classifyError, isRateLimitError, isNetworkError, isProviderAuthError } from './classifier';
+import { classifyError, isRateLimitError, isNetworkError, isProviderAuthError, isDefinitiveAuthError } from './classifier';
+
+export { classifyError, isRateLimitError, isNetworkError, isProviderAuthError, isDefinitiveAuthError };
 import { getPolicy } from './retry';
 import { HTOSError, ProviderAuthError, type HTOSErrorCode } from '../../../shared/types/provider';
 

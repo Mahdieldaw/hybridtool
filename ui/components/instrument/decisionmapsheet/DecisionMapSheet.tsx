@@ -2,21 +2,15 @@ import React, { useMemo, useCallback, useEffect, useRef, useState } from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   isDecisionMapOpenAtom,
-  providerAuthStatusAtom,
   toastAtom,
   providerContextsAtom,
   currentSessionIdAtom,
-} from '../state';
-import { useClipActions } from '../hooks/useClipActions';
-import { useRoundActions } from '../hooks/chat/useRoundActions';
+} from '../../../state';
+import { useRoundActions } from '../../../hooks/chat/useRoundActions';
 import { m, AnimatePresence, LazyMotion, domAnimation } from 'framer-motion';
-import { LLM_PROVIDERS_CONFIG } from '../constants';
-import { getProviderColor, getProviderConfig } from '../utils/provider-helpers';
-import type { AiTurnWithUI } from '../types';
 import clsx from 'clsx';
-import { CopyButton } from './CopyButton';
-import { formatDecisionMapForMd } from '../utils/copy-format-utils';
-import { ParagraphSpaceView } from './ParagraphSpaceView';
+import { formatDecisionMapForMd } from '../../../utils/copy-format-utils';
+import { ParagraphSpaceView } from '../ParagraphSpaceView';
 import {
   GeometryCard,
   BayesianBasinCard,
@@ -27,15 +21,15 @@ import {
   RegionsCard,
   StatementClassificationCard,
   PeripheralNodeCard,
-} from './instrument/LayerCards';
-import { useInstrumentState } from '../hooks/useInstrumentState';
-import type { PipelineLayer } from '../hooks/useInstrumentState';
-import { useClaimCentroids } from '../hooks/useClaimCentroids';
-import { ToggleBar } from './instrument/ToggleBar';
-import { ClaimDetailDrawer } from './instrument/ClaimDetailDrawer';
-import { NarrativePanel } from './instrument/NarrativePanel';
-import { useEvidenceRows } from '../hooks/useEvidenceRows';
-import { useParagraphRows } from '../hooks/useParagraphRows';
+} from './cards';
+import { useInstrumentState } from '../../../hooks/useInstrumentState';
+import type { PipelineLayer } from '../../../hooks/useInstrumentState';
+import { useClaimCentroids } from '../../../hooks/useClaimCentroids';
+import { ToggleBar } from '../ToggleBar';
+import { ClaimDetailDrawer } from '../ClaimDetailDrawer';
+import { NarrativePanel } from '../NarrativePanel';
+import { useEvidenceRows } from '../../../hooks/useEvidenceRows';
+import { useParagraphRows } from '../../../hooks/useParagraphRows';
 import {
   BUILT_IN_COLUMNS,
   DEFAULT_VIEWS,
@@ -43,867 +37,34 @@ import {
   PARAGRAPH_COLUMNS,
   PARAGRAPH_VIEWS,
   PARAGRAPH_VIEW_MAP,
-} from './instrument/column-registry';
-import type { ColumnDef, ViewConfig } from './instrument/column-registry';
-import { EvidenceTable } from './instrument/EvidenceTable';
-import { ContextStrip } from './instrument/ContextStrip';
-import { ColumnPicker } from './instrument/ColumnPicker';
+} from '../column-registry';
+import type { ColumnDef, ViewConfig } from '../column-registry';
+import { EvidenceTable } from '../EvidenceTable';
+import { ContextStrip } from '../ContextStrip';
+import { ColumnPicker } from '../ColumnPicker';
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
 // ============================================================================
 
-import { parseSemanticMapperOutput } from '../../shared/parsing-utils';
+import { parseSemanticMapperOutput } from '../../../../shared/parsing-utils';
 
-import { normalizeProviderId } from '../utils/provider-id-mapper';
-import { useArtifactResolution } from '../hooks/useArtifactResolution';
+import { normalizeProviderId } from '../../../utils/provider-id-mapper';
+import { useArtifactResolution } from '../../../hooks/useArtifactResolution';
+
+// ============================================================================
+// DECOMPOSED COMPONENTS & UTILS
+// ============================================================================
+
+import { MapperSelector } from './MapperSelector';
+import { CrossSignalComparePanel } from './CrossSignalComparePanel';
+import { RefSection } from './ReferenceSection';
+import { getLayerCopyText } from './copy/formatLayerForExport';
 
 const DEBUG_DECISION_MAP_SHEET = false;
 const decisionMapSheetDbg = (...args: any[]) => {
   if (DEBUG_DECISION_MAP_SHEET) console.debug('[DecisionMapSheet]', ...args);
 };
-
-function safeArr<T = any>(v: any): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
-
-// ============================================================================
-// MAPPER SELECTOR COMPONENT
-// ============================================================================
-
-interface MapperSelectorProps {
-  aiTurn: AiTurnWithUI;
-  activeProviderId?: string;
-}
-
-const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderId }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const { handleClipClick } = useClipActions();
-  const authStatus = useAtomValue(providerAuthStatusAtom);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
-
-  const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
-  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter((p) => p.id !== 'system'), []);
-
-  const hasResponse = useCallback(
-    (providerId: string) => {
-      if (!aiTurn?.mappingResponses) return false;
-      const responses = (aiTurn.mappingResponses as any)[providerId];
-      return Array.isArray(responses) && responses.length > 0;
-    },
-    [aiTurn]
-  );
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-sm font-medium text-text-primary"
-      >
-        <span className="text-base">🧩</span>
-        <span className="opacity-70 text-xs uppercase tracking-wide">Mapper</span>
-        <span className="w-px h-3 bg-white/20 mx-1" />
-        <span className={clsx(!activeProvider && 'text-text-muted italic')}>
-          {activeProvider?.name || 'Select Model'}
-        </span>
-        <svg
-          className={clsx('w-3 h-3 text-text-muted transition-transform', isOpen && 'rotate-180')}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-64 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated overflow-hidden z-[3600] animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="p-2 grid gap-1">
-            {providers.map((p) => {
-              const pid = String(p.id);
-              const isUnauthorized = authStatus && authStatus[pid] === false;
-              const hasData = hasResponse(pid);
-
-              return (
-                <button
-                  key={pid}
-                  onClick={() => {
-                    if (!isUnauthorized) {
-                      handleClipClick(aiTurn.id, 'mapping', pid);
-                      setIsOpen(false);
-                    }
-                  }}
-                  disabled={isUnauthorized}
-                  className={clsx(
-                    'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors',
-                    pid === activeProviderId
-                      ? 'bg-brand-500/10 text-brand-500'
-                      : 'hover:bg-surface-highlight text-text-secondary',
-                    isUnauthorized && 'opacity-60 cursor-not-allowed'
-                  )}
-                >
-                  <div className="relative">
-                    <div
-                      className="w-2 h-2 rounded-full shadow-sm"
-                      style={{ backgroundColor: getProviderColor(pid) }}
-                    />
-                    {hasData && (
-                      <div className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-brand-500 rounded-full border border-surface-raised animate-pulse" />
-                    )}
-                  </div>
-                  <span
-                    className={clsx(
-                      'flex-1 text-xs',
-                      hasData ? 'font-semibold text-text-primary' : 'font-medium'
-                    )}
-                  >
-                    {p.name}
-                  </span>
-                  {hasData && pid !== activeProviderId && (
-                    <span className="text-[10px] uppercase tracking-wider text-text-muted px-1.5 py-0.5 rounded-sm bg-surface-highlight/30">
-                      Cached
-                    </span>
-                  )}
-                  {pid === activeProviderId && <span>✓</span>}
-                  {isUnauthorized && <span>🔒</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-function pearsonR(xs: number[], ys: number[]): number | null {
-  if (xs.length !== ys.length || xs.length < 3) return null;
-  const n = xs.length;
-  let sumX = 0;
-  let sumY = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += xs[i];
-    sumY += ys[i];
-  }
-  const meanX = sumX / n;
-  const meanY = sumY / n;
-  let num = 0;
-  let denX = 0;
-  let denY = 0;
-  for (let i = 0; i < n; i++) {
-    const dx = xs[i] - meanX;
-    const dy = ys[i] - meanY;
-    num += dx * dy;
-    denX += dx * dx;
-    denY += dy * dy;
-  }
-  const den = Math.sqrt(denX * denY);
-  if (!Number.isFinite(den) || den <= 0) return null;
-  return num / den;
-}
-
-function CrossSignalComparePanel({
-  artifact,
-  selectedLayer,
-}: {
-  artifact: any;
-  selectedLayer?: string;
-}) {
-  const claims = useMemo(() => safeArr<any>(artifact?.semantic?.claims), [artifact]);
-  const claimProvenance = artifact?.claimProvenance ?? null;
-  const exclusivityObj =
-    (claimProvenance && typeof claimProvenance === 'object'
-      ? (claimProvenance as any).claimExclusivity
-      : null) ?? {};
-  const blastScores = useMemo(() => safeArr<any>(artifact?.blastRadiusFilter?.scores), [artifact]);
-  const blastByClaimId = useMemo(
-    () => new Map(blastScores.map((s) => [String(s.claimId ?? s.id ?? ''), s])),
-    [blastScores]
-  );
-  const statementScores = (artifact as any)?.geometry?.query?.relevance?.statementScores ?? null;
-  const statementScoreById = useMemo(() => {
-    const m = new Map<string, number>();
-    const obj = statementScores && typeof statementScores === 'object' ? statementScores : {};
-    for (const [sid, score] of Object.entries(obj)) {
-      if (typeof score === 'number' && Number.isFinite(score)) m.set(String(sid), score);
-    }
-    return m;
-  }, [statementScores]);
-
-  type Measure = { key: string; label: string; get: (c: any) => number | null };
-  const measures: Measure[] = useMemo(() => {
-    return [
-      {
-        key: 'provenanceBulk',
-        label: 'Provenance Bulk',
-        get: (c) =>
-          typeof c?.provenanceBulk === 'number' && Number.isFinite(c.provenanceBulk)
-            ? c.provenanceBulk
-            : null,
-      },
-      {
-        key: 'supportCount',
-        label: 'Support Count (legacy)',
-        get: (c) =>
-          typeof c?.support_count === 'number' && Number.isFinite(c.support_count)
-            ? c.support_count
-            : Array.isArray(c?.supporters)
-              ? c.supporters.length
-              : null,
-      },
-      {
-        key: 'exclusivityRatio',
-        label: 'Exclusivity %',
-        get: (c) => {
-          const id = String(c?.id ?? '');
-          const ex = exclusivityObj?.[id];
-          return typeof ex?.exclusivityRatio === 'number' && Number.isFinite(ex.exclusivityRatio)
-            ? ex.exclusivityRatio * 100
-            : null;
-        },
-      },
-      {
-        key: 'blastRadius',
-        label: 'Blast Radius Score',
-        get: (c) => {
-          const id = String(c?.id ?? '');
-          const s = blastByClaimId.get(id);
-          const score = s?.composite ?? s?.score ?? null;
-          return typeof score === 'number' && Number.isFinite(score) ? score : null;
-        },
-      },
-      {
-        key: 'avgStatementRelevance',
-        label: 'Avg Statement Relevance',
-        get: (c) => {
-          const stmtIds = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
-          let sum = 0;
-          let n = 0;
-          for (const sid of stmtIds) {
-            const v = statementScoreById.get(String(sid));
-            if (typeof v === 'number' && Number.isFinite(v)) {
-              sum += v;
-              n += 1;
-            }
-          }
-          return n > 0 ? sum / n : null;
-        },
-      },
-    ];
-  }, [blastByClaimId, exclusivityObj, statementScoreById]);
-
-  // Default axes vary by selected layer
-  const layerDefaults: Record<string, [string, string]> = {
-    'competitive-provenance': ['provenanceBulk', 'exclusivityRatio'],
-    'blast-radius': ['provenanceBulk', 'blastRadius'],
-    'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
-  };
-  const defaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
-  const [xKey, setXKey] = useState<string>(defaults[0]);
-  const [yKey, setYKey] = useState<string>(defaults[1]);
-
-  useEffect(() => {
-    const newDefaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
-    setXKey(newDefaults[0]);
-    setYKey(newDefaults[1]);
-  }, [selectedLayer]);
-
-  const xMeasure = measures.find((m) => m.key === xKey) ?? measures[0];
-  const yMeasure =
-    measures.find((m) => m.key === yKey) ?? measures[Math.min(1, measures.length - 1)];
-
-  const points = useMemo(() => {
-    return claims
-      .map((c: any) => {
-        const id = String(c?.id ?? '');
-        const label = String(c?.label ?? id);
-        const x = xMeasure?.get(c);
-        const y = yMeasure?.get(c);
-        if (x == null || y == null) return null;
-        return { id, label, x, y };
-      })
-      .filter(Boolean) as Array<{ id: string; label: string; x: number; y: number }>;
-  }, [claims, xMeasure, yMeasure]);
-
-  const stats = useMemo(() => {
-    const xs = points.map((p) => p.x);
-    const ys = points.map((p) => p.y);
-    const r = pearsonR(xs, ys);
-    if (points.length < 3)
-      return {
-        r: null,
-        line: null as null | { a: number; b: number },
-        outlierIds: new Set<string>(),
-      };
-    const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
-    const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
-    let num = 0;
-    let den = 0;
-    for (let i = 0; i < xs.length; i++) {
-      num += (xs[i] - meanX) * (ys[i] - meanY);
-      den += (xs[i] - meanX) * (xs[i] - meanX);
-    }
-    const b = den > 0 ? num / den : 0;
-    const a = meanY - b * meanX;
-    const residuals = points.map((p) => {
-      const yHat = a + b * p.x;
-      const res = p.y - yHat;
-      return { id: p.id, abs: Math.abs(res) };
-    });
-    residuals.sort((u, v) => v.abs - u.abs);
-    const outlierIds = new Set(residuals.slice(0, Math.min(5, residuals.length)).map((u) => u.id));
-    return { r, line: { a, b }, outlierIds };
-  }, [points]);
-
-  const W = 560;
-  const H = 300;
-  const pad = 36;
-
-  const bounds = useMemo(() => {
-    if (points.length === 0) return null;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const p of points) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    }
-    const dx = Math.max(1e-6, maxX - minX);
-    const dy = Math.max(1e-6, maxY - minY);
-    return {
-      minX: minX - dx * 0.06,
-      maxX: maxX + dx * 0.06,
-      minY: minY - dy * 0.06,
-      maxY: maxY + dy * 0.06,
-    };
-  }, [points]);
-
-  const toX = useCallback(
-    (x: number) => {
-      if (!bounds) return 0;
-      const span = bounds.maxX - bounds.minX || 1;
-      return pad + ((x - bounds.minX) / span) * (W - pad * 2);
-    },
-    [bounds]
-  );
-
-  const toY = useCallback(
-    (y: number) => {
-      if (!bounds) return 0;
-      const span = bounds.maxY - bounds.minY || 1;
-      return pad + ((bounds.maxY - y) / span) * (H - pad * 2);
-    },
-    [bounds]
-  );
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          Cross-Signal Compare
-        </div>
-        <div className="text-[11px] text-text-muted font-mono">
-          r={stats.r == null ? '—' : stats.r.toFixed(3)} n={points.length}
-        </div>
-      </div>
-      {points.length >= 3 && (
-        <div className="text-[10px] text-text-muted">
-          Comparing <span className="text-text-secondary">{xMeasure?.label}</span> vs{' '}
-          <span className="text-text-secondary">{yMeasure?.label}</span> across {points.length}{' '}
-          claims.
-          {stats.r != null && Math.abs(stats.r) > 0.6 && (
-            <span className="text-amber-400 ml-1">
-              {stats.r > 0 ? 'Strong positive' : 'Strong negative'} correlation.
-            </span>
-          )}
-        </div>
-      )}
-      <div className="flex items-center gap-2 flex-wrap">
-        <select
-          className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-text-primary"
-          value={xKey}
-          onChange={(e) => setXKey(e.target.value)}
-        >
-          {measures.map((m) => (
-            <option key={m.key} value={m.key}>
-              X: {m.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-text-primary"
-          value={yKey}
-          onChange={(e) => setYKey(e.target.value)}
-        >
-          {measures.map((m) => (
-            <option key={m.key} value={m.key}>
-              Y: {m.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {points.length < 3 || !bounds ? (
-        <div className="text-xs text-text-muted italic py-2">
-          Not enough data to compare these signals.
-        </div>
-      ) : (
-        <svg
-          className="w-full max-w-[640px] bg-black/20 rounded-xl border border-white/10"
-          viewBox={`0 0 ${W} ${H}`}
-        >
-          <line
-            x1={pad}
-            y1={H - pad}
-            x2={W - pad}
-            y2={H - pad}
-            stroke="rgba(148,163,184,0.25)"
-            strokeWidth={1}
-          />
-          <line
-            x1={pad}
-            y1={pad}
-            x2={pad}
-            y2={H - pad}
-            stroke="rgba(148,163,184,0.25)"
-            strokeWidth={1}
-          />
-
-          {stats.line && (
-            <line
-              x1={toX(bounds.minX)}
-              y1={toY(stats.line.a + stats.line.b * bounds.minX)}
-              x2={toX(bounds.maxX)}
-              y2={toY(stats.line.a + stats.line.b * bounds.maxX)}
-              stroke="rgba(16,185,129,0.45)"
-              strokeWidth={2}
-            />
-          )}
-
-          {points.map((p) => {
-            const x = toX(p.x);
-            const y = toY(p.y);
-            const outlier = stats.outlierIds.has(p.id);
-            return (
-              <circle
-                key={p.id}
-                cx={x}
-                cy={y}
-                r={outlier ? 4.2 : 3.2}
-                fill={outlier ? 'rgba(251,113,133,0.95)' : 'rgba(96,165,250,0.85)'}
-              >
-                <title>{p.label}</title>
-              </circle>
-            );
-          })}
-        </svg>
-      )}
-
-      <div className="text-[10px] text-text-muted">
-        Outliers are based on absolute residual from the least-squares fit line.
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// REFERENCE SHELF SECTION
-// ============================================================================
-
-function RefSection({
-  id: _id,
-  label,
-  expanded,
-  onToggle,
-  copyText,
-  children,
-}: {
-  id: string;
-  label: string;
-  expanded: boolean;
-  onToggle: () => void;
-  copyText?: string;
-  children: React.ReactNode;
-}) {
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onToggle();
-    }
-  };
-
-  return (
-    <div className="border-b border-white/5 last:border-b-0">
-      <div
-        role="button"
-        tabIndex={0}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
-        onClick={onToggle}
-        onKeyDown={handleKeyDown}
-      >
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-          {label}
-        </span>
-        <div className="flex items-center gap-2">
-          {copyText && expanded && (
-            <div onClick={(e) => e.stopPropagation()}>
-              <CopyButton
-                text={copyText}
-                label={`Copy ${label}`}
-                variant="icon"
-                disabled={!copyText}
-              />
-            </div>
-          )}
-          <span className="text-text-muted text-[10px]">{expanded ? '▲' : '▼'}</span>
-        </div>
-      </div>
-      {expanded && <div className="px-3 pb-3">{children}</div>}
-    </div>
-  );
-}
-
-// ============================================================================
-// LAYER COPY TEXT HELPER (used for Reference Shelf copy buttons)
-// ============================================================================
-
-function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
-  if (!artifact) return '';
-  const ser = (obj: any) => JSON.stringify(obj ?? null, null, 2);
-  const safeArr = (v: any): any[] => (Array.isArray(v) ? v : []);
-
-  switch (layer) {
-    case 'geometry': {
-      const basin = artifact?.geometry?.basinInversion ?? null;
-      const sub = artifact?.geometry?.substrate ?? null;
-      const nodes = safeArr(sub?.nodes).map((n: any) => ({
-        id: n.id,
-        mutualRankDegree: n.mutualRankDegree,
-        isolationScore: n.isolationScore,
-      }));
-      return ser({
-        pairwiseField: {
-          nodeCount: nodes.length,
-          pairCount: basin?.pairCount ?? null,
-          mu: basin?.mu,
-          sigma: basin?.sigma,
-          p10: basin?.p10,
-          p90: basin?.p90,
-          discriminationRange: basin?.discriminationRange,
-        },
-        basinStructure: {
-          status: basin?.status,
-          T_v: basin?.T_v,
-          basinCount: basin?.basinCount,
-          basins: basin?.basins,
-          pctHigh: basin?.pctHigh,
-          pctValleyZone: basin?.pctValleyZone,
-          pctLow: basin?.pctLow,
-        },
-        mutualGraph: {
-          edgeCount: safeArr(sub?.mutualEdges).length,
-          nodes,
-        },
-      });
-    }
-    case 'query-relevance':
-      return ser(artifact?.geometry?.query);
-    case 'competitive-provenance':
-      return ser({
-        claimProvenance: artifact?.claimProvenance,
-        statementAllocation: artifact?.statementAllocation,
-      });
-    case 'provenance-comparison': {
-      const saPerClaim: Record<string, any> = artifact?.statementAllocation?.perClaim ?? {};
-      const stmtText = new Map<string, string>();
-      for (const s of safeArr(artifact?.shadow?.statements)) {
-        stmtText.set(String(s.id), String(s.text ?? ''));
-      }
-      const TOP_N = 10;
-      const claims = safeArr(artifact?.semantic?.claims);
-      return ser(
-        claims.map((claim: any) => {
-          const id = String(claim.id);
-          const compRows: any[] = safeArr(saPerClaim[id]?.directStatementProvenance);
-          return {
-            id,
-            label: String(claim.label ?? id),
-            competitive: [...compRows]
-              .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
-              .slice(0, TOP_N)
-              .map((r: any) => ({
-                statementId: r.statementId,
-                weight: r.weight,
-                text: stmtText.get(String(r.statementId)) ?? r.statementId,
-              })),
-          };
-        })
-      );
-    }
-    case 'mixed-provenance':
-      return ser(artifact?.mixedProvenance ?? null);
-    case 'claim-statements': {
-      const claims = safeArr(artifact?.semantic?.claims);
-      const stmtText = new Map<string, string>();
-      for (const s of safeArr(artifact?.shadow?.statements)) {
-        stmtText.set(String(s.id ?? s.statementId ?? s.sid ?? ''), String(s.text ?? ''));
-      }
-      const ownership = artifact?.claimProvenance?.statementOwnership ?? {};
-      const exclusivity = artifact?.claimProvenance?.claimExclusivity ?? {};
-      const scClaimed = artifact?.statementClassification?.claimed ?? {};
-      return ser(
-        claims.map((c: any) => {
-          const cid = String(c.id ?? '');
-          const exData = exclusivity[cid];
-          const exclusiveSet = new Set<string>(
-            Array.isArray(exData?.exclusiveIds) ? exData.exclusiveIds.map(String) : []
-          );
-          const stmtIds: string[] = Array.isArray(c.sourceStatementIds)
-            ? c.sourceStatementIds.map(String)
-            : [];
-          return {
-            claimId: cid,
-            label: String(c.label ?? cid),
-            statements: stmtIds.map((sid) => {
-              const owners: string[] = Array.isArray(ownership[sid])
-                ? ownership[sid].map(String)
-                : [];
-              const entry = scClaimed[sid];
-              const claimCount = Array.isArray(entry?.claimIds) ? entry.claimIds.length : 0;
-              return {
-                statementId: sid,
-                text: stmtText.get(sid) ?? '',
-                exclusive: exclusiveSet.has(sid),
-                sharedWith: owners.filter((o: string) => o !== cid),
-                fate: claimCount >= 2 ? 'supporting' : claimCount === 1 ? 'primary' : 'unclaimed',
-              };
-            }),
-          };
-        })
-      );
-    }
-    case 'blast-radius': {
-      const stmtText = new Map<string, string>();
-      for (const s of safeArr(artifact?.shadow?.statements)) {
-        stmtText.set(String(s.id), String(s.text ?? ''));
-      }
-      const expandStmtRefs = (value: any): any => {
-        if (Array.isArray(value)) return value.map(expandStmtRefs);
-        if (!value || typeof value !== 'object') return value;
-        const out: any = {};
-        for (const [k, v] of Object.entries(value)) {
-          const key = String(k);
-          const isIdsKey = /statementids/i.test(key);
-          const isIdKey = /statementid/i.test(key);
-          if (Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number')) {
-            const ids = (v as any[]).map((x) => String(x));
-            const allKnown = ids.length > 0 && ids.every((id) => stmtText.has(id));
-            if (isIdsKey || allKnown) {
-              out[k] = ids;
-              out[`${key}Resolved`] = ids.map((id) => ({ id, text: stmtText.get(id) ?? '' }));
-              continue;
-            }
-          }
-          if (typeof v === 'string' || typeof v === 'number') {
-            const sid = String(v);
-            const known = stmtText.has(sid);
-            if (isIdKey || (known && /id$/i.test(key))) {
-              out[k] = sid;
-              out[`${key}Text`] = stmtText.get(sid) ?? '';
-              continue;
-            }
-          }
-          if (isIdsKey && Array.isArray(v)) {
-            const ids = (v as any[]).map((id) => String(id));
-            out[k] = ids;
-            out[`${key}Resolved`] = ids.map((id) => ({ id, text: stmtText.get(id) ?? '' }));
-            continue;
-          }
-          out[k] = expandStmtRefs(v);
-        }
-        return out;
-      };
-      return ser({
-        blastRadiusFilter: expandStmtRefs(artifact?.blastRadiusFilter),
-        blastSurface: expandStmtRefs(artifact?.blastSurface),
-        substrateSummary: artifact?.substrateSummary ?? null,
-      });
-    }
-    case 'claim-density':
-      return ser({
-        claimDensity: artifact?.claimDensity ?? null,
-        passageRouting: artifact?.passageRouting ?? null,
-        surveyGates: artifact?.surveyGates ?? null,
-      });
-    case 'stmt-classification': {
-      const sc = artifact?.statementClassification ?? null;
-      if (!sc) return ser(null);
-      const groups = safeArr(sc.unclaimedGroups);
-      const claimedEntries = Object.values(sc.claimed ?? {}) as any[];
-      return ser({
-        summary: sc.summary ?? null,
-        claimed: {
-          total: claimedEntries.length,
-          inPassage: claimedEntries.filter((e: any) => e.inPassage).length,
-          outsidePassage: claimedEntries.filter((e: any) => !e.inPassage).length,
-          multiClaim: claimedEntries.filter(
-            (e: any) => Array.isArray(e.claimIds) && e.claimIds.length > 1
-          ).length,
-        },
-        unclaimedGroups: groups.map((g: any, i: number) => {
-          let uc = 0;
-          for (const p of safeArr(g.paragraphs)) uc += safeArr(p.unclaimedStatementIds).length;
-          return {
-            index: i + 1,
-            nearestClaimId: g.nearestClaimId ?? null,
-            landscape: g.nearestClaimLandscapePosition ?? 'floor',
-            paragraphCount: safeArr(g.paragraphs).length,
-            unclaimedCount: uc,
-            meanClaimSimilarity: g.meanClaimSimilarity ?? 0,
-            meanQueryRelevance: g.meanQueryRelevance ?? 0,
-            maxQueryRelevance: g.maxQueryRelevance ?? 0,
-          };
-        }),
-      });
-    }
-    case 'bayesian-basins': {
-      const bayesian = artifact?.geometry?.bayesianBasinInversion ?? null;
-      const bMeta = bayesian?.meta?.bayesian ?? null;
-      return ser({
-        summary: {
-          status: bayesian?.status,
-          nodeCount: bayesian?.nodeCount,
-          basinCount: bayesian?.basinCount,
-          nodesWithBoundary: bMeta?.nodesWithBoundary,
-          boundaryRatio: bMeta?.boundaryRatio,
-          mutualInclusionPairs: bMeta?.mutualInclusionPairs,
-          medianBoundarySim: bMeta?.medianBoundarySim,
-          concentration: bMeta?.concentration,
-          processingTimeMs: bayesian?.meta?.processingTimeMs,
-        },
-        basins: safeArr(bayesian?.basins).map((b: any) => ({
-          basinId: b.basinId,
-          size: Array.isArray(b.nodeIds) ? b.nodeIds.length : 0,
-          trenchDepth: b.trenchDepth,
-        })),
-        profiles: safeArr(bMeta?.profiles).map((p: any) => ({
-          nodeId: p.nodeId,
-          changePoint: p.changePoint,
-          boundarySim: p.boundarySim,
-          logBayesFactor: p.logBayesFactor,
-          posteriorConcentration: p.posteriorConcentration,
-          inGroupSize: p.inGroupSize,
-          totalPeers: p.totalPeers,
-        })),
-        globalField: {
-          mu: bayesian?.mu,
-          sigma: bayesian?.sigma,
-          p10: bayesian?.p10,
-          p90: bayesian?.p90,
-          discriminationRange: bayesian?.discriminationRange,
-          T_v: bayesian?.T_v,
-        },
-      });
-    }
-    case 'regions': {
-      const ps = artifact?.geometry?.preSemantic;
-      const regions = safeArr(ps?.regions || ps?.regionization?.regions);
-      return ser({
-        count: regions.length,
-        regions: regions.map((r: any) => ({
-          id: r.id,
-          kind: r.kind,
-          nodeCount: safeArr(r.nodeIds).length,
-        })),
-      });
-    }
-    case 'periphery' as any: {
-      const diag = artifact?.passageRouting?.routing?.diagnostics;
-      const actualExcludedIds = new Set(safeArr(diag?.peripheralNodeIds));
-      const paragraphs = safeArr(artifact?.shadow?.paragraphs);
-
-      const basins = safeArr(artifact?.geometry?.basinInversion?.basins);
-      let largestBasinId = null;
-      if (basins.length > 0) {
-        let best = basins[0];
-        for (const b of basins) {
-          if ((b.nodeIds?.length ?? 0) > (best.nodeIds?.length ?? 0)) best = b;
-        }
-        largestBasinId = best.basinId;
-      }
-
-      const regions =
-        artifact?.geometry?.preSemantic?.regions ||
-        artifact?.geometry?.preSemantic?.regionization?.regions ||
-        [];
-      const gapSingletons = new Set(
-        safeArr(regions)
-          .filter((r: any) => r.kind === 'gap' && safeArr(r.nodeIds).length === 1)
-          .map((r: any) => String(r.nodeIds[0]))
-      );
-
-      // Exhaustive list for diagnostic mapping
-      const allOutlierIds = new Set<string>();
-      basins
-        .filter((b) => b.basinId !== largestBasinId)
-        .forEach((b) => safeArr(b.nodeIds).forEach((id) => allOutlierIds.add(String(id))));
-      gapSingletons.forEach((id) => allOutlierIds.add(id));
-
-      const basinByNodeId = diag?.basinByNodeId ?? {};
-
-      const mapped = Array.from(allOutlierIds).map((id) => {
-        const p = paragraphs.find((x) => String(x.id) === id);
-        const bid = basinByNodeId[id];
-        const isBasin = bid != null && bid !== largestBasinId;
-        const isGap = gapSingletons.has(id);
-        const excluded = actualExcludedIds.has(id);
-
-        const types = [];
-        if (isBasin) types.push('Basin Outlier');
-        if (isGap) types.push('Region Outlier (Gap)');
-
-        return {
-          id,
-          index: p?.paragraphIndex,
-          status: excluded ? 'Excluded' : 'Core Protected',
-          type: types.join(' & '),
-          origin: bid != null ? `basin b_${bid}` : 'gap singleton',
-          text: p?._fullParagraph || p?.text || '',
-        };
-      });
-
-      return ser({
-        corpusMode: diag?.corpusMode,
-        peripheralRatio: diag?.peripheralRatio,
-        actualExcludedCount: actualExcludedIds.size,
-        totalPotentialOutliers: allOutlierIds.size,
-        nodes: mapped,
-      });
-    }
-    case 'raw-artifacts':
-      return ser(artifact);
-    default:
-      return ser(artifact);
-  }
-}
 
 export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
@@ -1410,9 +571,6 @@ export const DecisionMapSheet = React.memo(() => {
   }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
 
   // v3: Claim centroids for ParagraphSpaceView diamonds
-  // IMPORTANT: use artifact claims (enriched by reconstructCanonicalProvenance, which adds sourceStatementIds).
-  // semanticClaims may resolve to raw LLM output (parsedSemanticFromText) which lacks sourceStatementIds,
-  // making centroid computation fail with hasPosition=false on every claim.
   const claimCentroids = useClaimCentroids(
     (mappingArtifact as any)?.semantic?.claims || null,
     (mappingArtifact as any)?.geometry?.substrate || null,
@@ -1420,7 +578,9 @@ export const DecisionMapSheet = React.memo(() => {
   );
 
   const semanticEdges = useMemo(
-    () => safeArr((mappingArtifact as any)?.semantic?.edges),
+    () => (mappingArtifact as any)?.semantic?.edges
+      ? Array.isArray((mappingArtifact as any).semantic.edges) ? (mappingArtifact as any).semantic.edges : []
+      : [],
     [mappingArtifact]
   );
 
@@ -1465,8 +625,6 @@ export const DecisionMapSheet = React.memo(() => {
     regenTimersRef.current = [];
     setRegenState('running');
     rebuildArtifact();
-    // Rebuild is callback-based; the atom updates when the response arrives.
-    // For UX feedback, transition state after a brief delay.
     regenTimersRef.current.push(setTimeout(() => setRegenState('done'), 800));
     regenTimersRef.current.push(setTimeout(() => setRegenState('idle'), 2800));
   }, [regenState, rebuildArtifact]);
@@ -1502,9 +660,8 @@ export const DecisionMapSheet = React.memo(() => {
               />
             </div>
 
-            {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}
+            {/* Header Row: Mapper Selector (Left) + Info */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 relative z-20 gap-4">
-              {/* Left: Provider Selector and Info Dropdown */}
               <div className="flex-none flex items-center gap-3">
                 {aiTurnSafe && (
                   <MapperSelector aiTurn={aiTurnSafe} activeProviderId={activeMappingPid} />
@@ -1554,7 +711,6 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Right: Actions */}
               <div className="flex-none flex items-center gap-3">
-                {/* Actions Menu */}
                 <div className="relative">
                   <button
                     type="button"
@@ -1615,7 +771,6 @@ export const DecisionMapSheet = React.memo(() => {
                   )}
                 </div>
 
-                {/* Copy Menu */}
                 <div className="relative">
                   <button
                     type="button"
@@ -1691,7 +846,7 @@ export const DecisionMapSheet = React.memo(() => {
               </div>
             </div>
 
-            {/* ── Instrument: Two-zone resizable layout ───────────────── */}
+            {/* Content Area */}
             <div
               ref={splitContainerRef}
               className="flex-1 overflow-hidden relative z-10"
@@ -1706,7 +861,7 @@ export const DecisionMapSheet = React.memo(() => {
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Zone 1: ParagraphSpaceView (resizable left pane) */}
+              {/* Left Pane: ParagraphSpaceView */}
               {isGraphCollapsed ? (
                 <div
                   className="h-full border-r border-white/10 flex flex-col items-center justify-center bg-black/10"
@@ -1786,7 +941,7 @@ export const DecisionMapSheet = React.memo(() => {
                 </div>
               )}
 
-              {/* Resizable divider (grid column 2) */}
+              {/* Divider */}
               <div
                 className={clsx(
                   'h-full transition-colors cursor-col-resize relative select-none touch-none',
@@ -1798,7 +953,7 @@ export const DecisionMapSheet = React.memo(() => {
                 onPointerUp={handleSplitPointerUp}
               />
 
-              {/* Zone 2: Right panel with Instrument/Narrative toggle */}
+              {/* Right panel */}
               {isRightCollapsed && !isGraphCollapsed ? (
                 <div
                   className="h-full border-l border-white/10 flex flex-col items-center justify-center bg-black/10"
@@ -1851,9 +1006,7 @@ export const DecisionMapSheet = React.memo(() => {
                   <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
                     {instrumentState.rightPanelMode === 'instrument' ? (
                       <>
-                        {/* ── Toolbar: Claim selector + Table/Text toggle + context-sensitive controls ── */}
                         <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-none flex-wrap">
-                          {/* Claim selector (both modes) */}
                           <select
                             className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary max-w-[160px] focus:outline-none focus:border-brand-500/50 cursor-pointer"
                             value={instrumentSelectedClaimId ?? ''}
@@ -1873,7 +1026,6 @@ export const DecisionMapSheet = React.memo(() => {
                             ))}
                           </select>
 
-                          {/* Statement / Paragraph toggle */}
                           <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
                             {(['statement', 'paragraph'] as const).map((m) => (
                               <button
@@ -1892,7 +1044,6 @@ export const DecisionMapSheet = React.memo(() => {
                             ))}
                           </div>
 
-                          {/* View switcher */}
                           <select
                             className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:border-brand-500/50 cursor-pointer"
                             value={selectedView}
@@ -1907,7 +1058,6 @@ export const DecisionMapSheet = React.memo(() => {
                             )}
                           </select>
 
-                          {/* Scope toggle */}
                           <div className="flex items-center rounded-lg border border-white/10 overflow-hidden">
                             {(['claim', 'cross-claim'] as const).map((s) => (
                               <button
@@ -1926,7 +1076,6 @@ export const DecisionMapSheet = React.memo(() => {
                             ))}
                           </div>
 
-                          {/* Column picker */}
                           <div className="ml-auto flex items-center gap-2">
                             <ColumnPicker
                               allColumns={allColumns}
@@ -1965,7 +1114,7 @@ export const DecisionMapSheet = React.memo(() => {
                           </div>
                         </div>
 
-                        {/* ── Vertical-split: Table + Cards ── */}
+                        {/* Split: Table + Cards */}
                         {isTableCollapsed ? (
                           <>
                             <div className="flex-none px-3 py-2 text-[11px] text-text-muted border-b border-white/10 flex items-center justify-between">
@@ -2086,10 +1235,7 @@ export const DecisionMapSheet = React.memo(() => {
                                   expanded={expandedRefSections.includes(id)}
                                   onToggle={() => instrumentActions.toggleRefSection(id)}
                                   copyText={
-                                    id !== 'cross-signal' &&
-                                      id !== 'traversal-pruning' &&
-                                      id !== 'passage-ownership' &&
-                                      id !== 'passage-pruning'
+                                    id !== 'cross-signal'
                                       ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                       : undefined
                                   }
@@ -2113,7 +1259,6 @@ export const DecisionMapSheet = React.memo(() => {
                                 : 'grid-template-rows 150ms ease-out',
                             }}
                           >
-                            {/* Row 1: EvidenceTable */}
                             <div className="min-h-0 overflow-hidden relative">
                               <EvidenceTable
                                 rows={activeRows}
@@ -2169,7 +1314,6 @@ export const DecisionMapSheet = React.memo(() => {
                               </AnimatePresence>
                             </div>
 
-                            {/* Row 2: Vertical resize handle */}
                             <div
                               className={clsx(
                                 'w-full transition-colors cursor-row-resize relative select-none touch-none flex items-center justify-center',
@@ -2200,7 +1344,6 @@ export const DecisionMapSheet = React.memo(() => {
                               </button>
                             </div>
 
-                            {/* Row 3: LayerCards or collapsed bar */}
                             {isCardsCollapsed ? (
                               <div className="flex items-center justify-between px-3 text-[11px] text-text-muted bg-black/10 border-t border-white/5">
                                 <span>Reference shelf collapsed</span>
@@ -2325,10 +1468,7 @@ export const DecisionMapSheet = React.memo(() => {
                                     expanded={expandedRefSections.includes(id)}
                                     onToggle={() => instrumentActions.toggleRefSection(id)}
                                     copyText={
-                                      id !== 'cross-signal' &&
-                                        id !== 'traversal-pruning' &&
-                                        id !== 'passage-ownership' &&
-                                        id !== 'passage-pruning'
+                                      id !== 'cross-signal'
                                         ? getLayerCopyText(id as PipelineLayer, mappingArtifact)
                                         : undefined
                                     }

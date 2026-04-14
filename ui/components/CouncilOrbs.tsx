@@ -12,7 +12,7 @@ import {
 import { LLMProvider } from '../types';
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from '../constants';
 import { getProviderColor, getProviderLogo } from '../utils/provider-helpers';
-import { setProviderLock } from '@shared/provider-locks';
+import { setProviderLock } from 'src/shared/provider-locks';
 import clsx from 'clsx';
 
 interface CouncilOrbsProps {

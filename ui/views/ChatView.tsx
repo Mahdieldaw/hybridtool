@@ -30,7 +30,7 @@ const CouncilOrbsVertical = safeLazy(() =>
 // Lazy load DecisionMapSheet (named export adapter)
 // Uses safeLazy for robust loading
 const DecisionMapSheet = safeLazy(() =>
-  import('../components/DecisionMapSheet').then((module) => ({ default: module.DecisionMapSheet }))
+  import('../components/instrument/decisionmapsheet/DecisionMapSheet').then((module) => ({ default: module.DecisionMapSheet }))
 );
 
 export default function ChatView() {

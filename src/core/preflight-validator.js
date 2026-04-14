@@ -4,7 +4,7 @@ import {
   isProviderAuthorized,
   PROVIDER_PRIORITIES,
 } from '../../shared/provider-config.js';
-import { getProviderLocks } from '../../shared/provider-locks.js';
+import { getProviderLocks } from '../shared/provider-locks.js';
 
 // Provider login URLs (duplicated from auth-config.ts for JS compatibility)
 const PROVIDER_URLS = {

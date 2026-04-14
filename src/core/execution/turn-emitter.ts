@@ -236,7 +236,7 @@ function toNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-export class Turnemitter {
+export class TurnEmitter {
   private port: Port;
   lastFinalizedTurn: FinalizedTurn | null;
 

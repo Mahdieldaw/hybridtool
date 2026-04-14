@@ -1,11 +1,11 @@
 /**
  * Shared artifact resolution hook.
  *
- * Extracts the artifact resolution chain that both DecisionMapSheet and
+ * Extracts the artifact resolution chain that both decisionmapsheet/DecisionMapSheet and
  * WorkspaceShell need. Single source of truth.
  *
  * The 6-step activeMappingPid cascade and citationSourceOrder merge
- * are preserved verbatim from DecisionMapSheet.
+ * are preserved verbatim from the original DecisionMapSheet.
  */
 
 import { useMemo, useEffect } from 'react';
