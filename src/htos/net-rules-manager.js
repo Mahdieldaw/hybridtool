@@ -199,8 +199,17 @@ const NetRulesManager = {
         addRules: addRules,
       });
     } catch (err) {
-      // Roll back internal state; Chrome state may be partially changed
-      this._rules = prevRules;
+      // Reconcile internal state against Chrome's actual live rules to avoid
+      // tracking IDs that Chrome already removed (which happens when unregister
+      // succeeds but addRules fails).
+      try {
+        const liveRules = await chrome.declarativeNetRequest.getSessionRules();
+        const liveIds = new Set(liveRules.map((r) => r.id));
+        this._rules = prevRules.filter((r) => liveIds.has(r.id));
+      } catch {
+        // If we can't read Chrome state, fall back to empty to avoid phantom entries
+        this._rules = [];
+      }
       throw err;
     }
 

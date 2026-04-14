@@ -870,7 +870,7 @@ export interface PreSemanticInterpretation {
   };
   regionSource?: 'gap' | 'basin' | 'none';
   corpusMode?: 'dominant-core' | 'parallel-cores' | 'no-geometry';
-  peripheralNodeIds?: Set<string>;
+  peripheralNodeIds?: string[];
   peripheralRatio?: number;
   largestBasinRatio?: number | null;
   basinByNodeId?: Record<string, number>;

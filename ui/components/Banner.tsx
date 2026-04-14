@@ -3,7 +3,7 @@ import { useAtom } from 'jotai';
 import { alertTextAtom } from '../state';
 
 const Banner: React.FC = () => {
-  const [alertText, setAlertText] = useAtom(alertTextAtom as any);
+  const [alertText, setAlertText] = useAtom(alertTextAtom);
   if (!alertText) return null;
 
   const handleClose = () => setAlertText(null);

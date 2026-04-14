@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { atomWithImmer } from 'jotai-immer';
-import { atomWithStorage, atomFamily } from 'jotai/utils';
+import { atomWithStorage, atomFamily, selectAtom } from 'jotai/utils';
 import type { TurnMessage, HistorySessionSummary } from '../types';
 
 // =============================================================================
@@ -27,13 +27,10 @@ export const messagesAtom = atom<TurnMessage[]>((get) => {
 });
 
 /**Atom family: Get a single turn by ID with isolated subscriptions.
- * Prefer this over turnByIdAtom when you need per-turn render isolation.*/
+ * Uses selectAtom so each family member only re-renders when its own turn changes.*/
 export const turnAtomFamily = atomFamily(
   (turnId: string) =>
-    atom((get) => {
-      if (!turnId) return undefined;
-      return get(turnsMapAtom).get(turnId);
-    }),
+    selectAtom(turnsMapAtom, (map) => (turnId ? map.get(turnId) : undefined)),
   (a, b) => a === b
 );
 

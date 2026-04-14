@@ -1,4 +1,4 @@
-// src/core/error-classifier.ts
+// src/core/errors/classifier.ts
 
 import type { ProviderError, ProviderErrorType } from '../../../shared/types';
 import { ProviderAuthError } from '../../../shared/types/provider';
