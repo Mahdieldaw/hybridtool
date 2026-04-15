@@ -27,8 +27,7 @@ import type {
   StatementClassificationResult,
 } from '../../../shared/types';
 import type { ShadowParagraph, ShadowStatement } from '../../shadow';
-import type { MeasuredRegion } from '../../geometry/types';
-import type { PeripheryResult } from '../../geometry/types';
+import type { MeasuredRegion, PeripheryResult } from '../../geometry';
 import type { ClaimExclusivity } from './measure';
 import type { StructurePhaseOutput } from './structure';
 

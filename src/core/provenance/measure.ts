@@ -21,7 +21,7 @@ import type {
   ParagraphCoverageEntry,
   PassageEntry,
 } from '../../../shared/types';
-import type { MeasuredRegion, PeripheryResult } from '../../geometry/types';
+import type { MeasuredRegion, PeripheryResult } from '../../geometry';
 import { cosineSimilarity } from '../../clustering/distance';
 import { generateTextEmbeddings } from '../../clustering/embeddings';
 

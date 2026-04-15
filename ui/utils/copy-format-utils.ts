@@ -48,6 +48,36 @@ export function formatDecisionMapForMd(narrative: string, claims: Claim[], edges
   return md;
 }
 
+/**
+ * Walk a batch responses object (flat or array-per-provider), sort by
+ * LLM_PROVIDERS_CONFIG order, and return formatted markdown parts.
+ * Callers apply their own header and join strategy.
+ */
+export function formatBatchResponseParts(
+  batchResponses: Record<string, any> | null | undefined
+): string[] {
+  if (!batchResponses || typeof batchResponses !== 'object') return [];
+
+  const normalized: Record<string, any> = {};
+  Object.entries(batchResponses).forEach(([pid, val]) => {
+    const candidate = Array.isArray(val) ? val[val.length - 1] : val;
+    if (!candidate || typeof candidate !== 'object') return;
+    const text = String((candidate as any).text || '').trim();
+    if (!text) return;
+    normalized[String(pid)] = candidate;
+  });
+
+  const ordered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id));
+  const extras = Object.keys(normalized).filter((pid) => !ordered.includes(pid)).sort();
+
+  return [...ordered, ...extras]
+    .filter((pid) => !!normalized[pid])
+    .map((pid) => {
+      const providerName = LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === pid)?.name || pid;
+      return formatProviderResponseForMd(normalized[pid], providerName);
+    });
+}
+
 export function formatProviderResponseForMd(
   response: ProviderResponse | Partial<ProviderResponse> | null | undefined,
   providerName: string
@@ -270,6 +300,100 @@ export function formatSessionForMarkdown(fullSession: {
   }
 
   return md;
+}
+
+// ============================================================================
+// TURN COPY FORMATTERS
+// Section ordering authority lives here. formatFullTurn is the editorial source
+// of truth: Singularity → Mapper → Batch.
+// ============================================================================
+
+/**
+ * Format the singularity synthesis section for clipboard output.
+ * Includes provider attribution so the text is self-describing when pasted.
+ */
+export function formatSingularityResponse(
+  output: { text?: string; providerId?: string | number } | null | undefined
+): string {
+  const text = String(output?.text || '').trim();
+  if (!text) return '';
+  const providerName = output?.providerId
+    ? LLM_PROVIDERS_CONFIG.find((p) => p.id === output.providerId)?.name ||
+      String(output.providerId)
+    : 'Singularity';
+  return `**${providerName} (Singularity)**:\n\n${text}\n`;
+}
+
+/**
+ * Format the mapper narrative section for clipboard output.
+ * Reads the latest mapping response for effectivePid from the aiTurn.
+ * Returns '' when the pid is absent or the response text is empty.
+ */
+export function formatMapperResponse(
+  aiTurn: AiTurn,
+  effectivePid: string | null | undefined
+): string {
+  const mapPid = effectivePid ? String(effectivePid) : null;
+  if (!mapPid) return '';
+  const mapResponses = (aiTurn as any)?.mappingResponses;
+  if (!mapResponses || typeof mapResponses !== 'object') return '';
+  const entry = mapResponses[mapPid];
+  const arr = Array.isArray(entry) ? entry : entry ? [entry] : [];
+  const last = arr.length > 0 ? arr[arr.length - 1] : null;
+  const mapText = typeof last?.text === 'string' ? last.text.trim() : '';
+  if (!mapText) return '';
+  const mapperName = LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === mapPid)?.name || mapPid;
+  return `**${mapperName} (Mapper)**:\n\n${mapText}\n`;
+}
+
+/**
+ * Wrap formatBatchResponseParts with an optional ## header.
+ * Default includeHeader=true — suitable for ModelResponsePanel's "Copy All" button.
+ * Pass includeHeader=false when composing batch as one section inside formatFullTurn
+ * (the master turn copy does not want a nested sub-header).
+ */
+export function formatBatchResponses(
+  batchResponses: Record<string, any> | null | undefined,
+  opts?: { includeHeader?: boolean }
+): string {
+  const parts = formatBatchResponseParts(batchResponses);
+  if (parts.length === 0) return '';
+  const includeHeader = opts?.includeHeader !== false;
+  if (!includeHeader) return parts.join('\n');
+  return `## Raw Council Outputs (${parts.length} Models)\n\n${parts.join('\n')}`;
+}
+
+/**
+ * Compose the full turn copy text: Singularity → Mapper → Batch.
+ *
+ * Section ordering rationale:
+ *   Singularity first  — it's the synthesis crown; most users want this at the top.
+ *   Mapper in the middle — structural bridge between synthesis and raw inputs.
+ *   Batch last          — raw council material; useful context but secondary.
+ *
+ * Empty sections are skipped entirely (no orphan headers).
+ * Output is byte-identical to the previous inline copyAllText on a turn with all
+ * three sections present.
+ */
+export function formatFullTurn(
+  aiTurn: AiTurn,
+  effectivePid: string | null | undefined,
+  singularityOutput: { text?: string; providerId?: string | number } | null | undefined
+): string {
+  const parts: string[] = [];
+
+  const singPart = formatSingularityResponse(singularityOutput);
+  if (singPart) parts.push(singPart);
+
+  const mapPart = formatMapperResponse(aiTurn, effectivePid);
+  if (mapPart) parts.push(mapPart);
+
+  // Use formatBatchResponseParts directly (no sub-header) — batch is one section
+  // among three here; a ## header would be redundant inside the master copy.
+  const batchParts = formatBatchResponseParts(aiTurn.batch?.responses);
+  if (batchParts.length > 0) parts.push(...batchParts);
+
+  return parts.length > 0 ? parts.join('\n') : '';
 }
 
 // ============================================================================

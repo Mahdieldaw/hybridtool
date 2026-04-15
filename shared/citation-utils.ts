@@ -16,10 +16,10 @@ export function normalizeCitationSourceOrder(
   if (rawCitationOrder && typeof rawCitationOrder === 'object') {
     const entries = Object.entries(rawCitationOrder);
     if (entries.length > 0) {
-      const [firstKey, firstVal] = entries[0];
-      // If values are numbers AND key is not numeric, treat as provider -> index
-      const isProviderToIndex =
-        typeof firstVal === 'number' && Number.isFinite(firstVal) && isNaN(Number(firstKey));
+      // If all values are finite numbers, treat as provider -> index
+      const isProviderToIndex = entries.every(
+        ([, v]) => typeof v === 'number' && Number.isFinite(v)
+      );
 
       if (isProviderToIndex) {
         // Start with what we have, but filter for valid numbers

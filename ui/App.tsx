@@ -1,23 +1,23 @@
 import { useRef, Suspense, useCallback } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { usePortMessageHandler } from './hooks/chat/usePortMessageHandler';
-import { useConnectionMonitoring } from './hooks/useConnectionMonitoring';
-import { useHistoryLoader } from './hooks/useHistoryLoader';
+import { useConnectionMonitoring } from './hooks/ui/useConnectionMonitoring';
+import { useHistoryLoader } from './hooks/ui/useHistoryLoader';
 import { useResponsiveLoadingGuard } from './hooks/ui/useLoadingWatchdog';
 import { safeLazy } from './utils/safe-lazy';
 const ChatView = safeLazy(() => import('./views/ChatView'));
-import Header from './components/Header';
-const HistoryPanel = safeLazy(() => import('./components/HistoryPanel'));
-import Banner from './components/Banner';
-import { ReconnectOverlay } from './components/ReconnectOverlay'; // Import Overlay
+import Header from './shell/chrome/Header';
+const HistoryPanel = safeLazy(() => import('./shell/chrome/HistoryPanel'));
+import Banner from './shell/chrome/Banner';
+import { ReconnectOverlay } from './shell/chrome/ReconnectOverlay'; // Import Overlay
 import api from './services/extension-api'; // Import API
 
-const SettingsPanel = safeLazy(() => import('./components/SettingsPanel'));
-import { Toast } from './components/Toast';
+const SettingsPanel = safeLazy(() => import('./shell/chrome/SettingsPanel'));
+import { Toast } from './shell/chrome/Toast';
 import { isHistoryPanelOpenAtom, connectionStatusAtom } from './state'; // Import connection atom
 
-import { useInitialization } from './hooks/useInitialization';
-import { useSessionSync } from './hooks/useSessionSync';
+import { useInitialization } from './hooks/ui/useInitialization';
+import { useSessionSync } from './hooks/ui/useSessionSync';
 import { useSmartProviderDefaults } from './hooks/providers/useSmartProviderDefaults';
 import { useProviderStatus } from './hooks/providers/useProviderStatus';
 import { useOnClickOutside } from 'usehooks-ts';

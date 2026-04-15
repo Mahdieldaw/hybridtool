@@ -25,7 +25,7 @@ import type {
   MixedStatementResolution,
   MixedDirectionProbe,
 } from '../../../shared/types';
-import type { PeripheryResult } from '../../geometry/types';
+import type { PeripheryResult } from '../../geometry';
 import { cosineSimilarity } from '../../clustering/distance';
 import nlp from 'compromise';
 

@@ -12,25 +12,25 @@ import {
   splitPaneRatioAtom,
   splitPaneFullWidthAtom,
 } from '../state';
-import { ResizableSplitLayout } from '../components/ResizableSplitLayout';
+import { ResizableSplitLayout } from '../shell/layout/ResizableSplitLayout';
 import clsx from 'clsx';
 
-import MessageRow from '../components/MessageRow';
-import ChatInput from '../components/ChatInput';
-import WelcomeScreen from '../components/WelcomeScreen';
+import MessageRow from '../shell/stream/MessageRow';
+import ChatInput from '../shell/stream/ChatInput';
+import WelcomeScreen from '../shell/stream/WelcomeScreen';
 import { useChat } from '../hooks/chat/useChat';
-import { SplitPaneRightPanel } from '../components/SplitPaneRightPanel';
+import { SplitPaneRightPanel } from '../shell/layout/SplitPaneRightPanel';
 import { safeLazy } from '../utils/safe-lazy';
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
 const CouncilOrbsVertical = safeLazy(() =>
-  import('../components/CouncilOrbsVertical').then((m) => ({ default: m.CouncilOrbsVertical }))
+  import('../shell/status/CouncilOrbsVertical').then((m) => ({ default: m.CouncilOrbsVertical }))
 );
 
 // Lazy load DecisionMapSheet (named export adapter)
 // Uses safeLazy for robust loading
 const DecisionMapSheet = safeLazy(() =>
-  import('../components/instrument/decisionmapsheet/DecisionMapSheet').then((module) => ({ default: module.DecisionMapSheet }))
+  import('../instrument/decisionmapsheet/DecisionMapSheet').then((module) => ({ default: module.DecisionMapSheet }))
 );
 
 export default function ChatView() {

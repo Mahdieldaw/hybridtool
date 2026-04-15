@@ -1,6 +1,6 @@
 
 import { ContextResolver } from "./context-resolver.js";
-import type { ProviderResponseRecord } from "../persistence/types";
+import type { ProviderResponseRecord } from "../persistence";
 
 type RecomputeTestContext = {
   type: "recompute";
