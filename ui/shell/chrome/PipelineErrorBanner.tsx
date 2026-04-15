@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import { LLM_PROVIDERS_CONFIG } from '../../config/constants';
 import clsx from 'clsx';
 
 interface PipelineErrorBannerProps {

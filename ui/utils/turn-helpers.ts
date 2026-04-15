@@ -1,7 +1,7 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
 import type { UserTurn, ProviderKey } from '../../shared/types';
 import type { AiTurnWithUI } from '../types';
-import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
+import { PRIMARY_STREAMING_PROVIDER_IDS } from '../config/constants';
 import { DEFAULT_THREAD } from '../../shared/messaging';
 
 export function createOptimisticAiTurn(

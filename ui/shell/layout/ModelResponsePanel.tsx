@@ -14,7 +14,7 @@ import {
   modelResponsePanelModeFamily,
   splitPaneFullWidthAtom,
 } from '../../state';
-import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import { LLM_PROVIDERS_CONFIG } from '../../config/constants';
 import { useProviderActions } from '../../hooks/providers/useProviderActions';
 import { useArtifactResolution } from '../../hooks/reading/useArtifactResolution';
 import { usePassageHighlight } from '../../hooks/reading/usePassageHighlight';

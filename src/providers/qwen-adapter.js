@@ -3,7 +3,7 @@
  * - Implements ProviderAdapter interface for Qwen
  * - Wraps QwenSessionApi with auth observation (Qwen has internal retries)
  */
-import { authManager } from '../core/auth-manager.js';
+import { authManager } from './auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
@@ -11,7 +11,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   normalizeError,
-} from '../core/errors/handler.js';
+} from '../errors/handler.js';
 
 const QWEN_ADAPTER_DEBUG = false;
 const pad = (...args) => {

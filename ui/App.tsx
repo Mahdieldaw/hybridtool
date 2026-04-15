@@ -5,7 +5,7 @@ import { useConnectionMonitoring } from './hooks/ui/useConnectionMonitoring';
 import { useHistoryLoader } from './hooks/ui/useHistoryLoader';
 import { useResponsiveLoadingGuard } from './hooks/ui/useLoadingWatchdog';
 import { safeLazy } from './utils/safe-lazy';
-const ChatView = safeLazy(() => import('./views/ChatView'));
+const ChatView = safeLazy(() => import('./chat/ChatView'));
 import Header from './shell/chrome/Header';
 const HistoryPanel = safeLazy(() => import('./shell/chrome/HistoryPanel'));
 import Banner from './shell/chrome/Banner';

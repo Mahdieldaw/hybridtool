@@ -4,7 +4,7 @@
  * - Handles both Flash and Pro models via dynamic configuration
  * - Wraps GeminiSessionApi with auth observation (Gemini has internal retries)
  */
-import { authManager } from '../core/auth-manager.js';
+import { authManager } from './auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
@@ -12,7 +12,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   normalizeError,
-} from '../core/errors/handler.js';
+} from '../errors/handler.js';
 
 const GEMINI_ADAPTER_DEBUG = false;
 const pad = (...args) => {

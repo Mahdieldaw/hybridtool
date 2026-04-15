@@ -6,7 +6,7 @@
  *
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { ProviderDNRGate } from '../core/dnr-utils.js';
+import { ProviderDNRGate } from '../system/dnr-utils.js';
 
 // Provider-specific debug flag (off by default)
 const CLAUDE_DEBUG = false;

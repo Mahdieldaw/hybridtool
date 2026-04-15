@@ -9,7 +9,7 @@ import {
   mappingProviderAtom,
   singularityProviderAtom,
 } from '../../state';
-import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import { LLM_PROVIDERS_CONFIG } from '../../config/constants';
 import { useProviderStatus } from '../../hooks/providers/useProviderStatus';
 
 export default function SettingsPanel() {

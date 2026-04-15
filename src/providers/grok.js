@@ -3,7 +3,7 @@
  * HTOS Grok Provider Controller
  * - Implements Grok authentication handshake and conversation API
  * - Runs entirely in Service Worker (no offscreen needed)
- * 
+ *
  * Build-phase safe: emitted to dist/providers/*
  */
 
@@ -15,7 +15,7 @@ import {
   parseSvgData,
   parseXValues,
 } from './grok-signature.js';
-import { ProviderDNRGate } from '../core/dnr-utils.js';
+import { ProviderDNRGate } from '../system/dnr-utils.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MODELS CONFIGURATION

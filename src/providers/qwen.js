@@ -5,8 +5,8 @@
  * Updated for api.qianwen.com endpoints (2024+)
  */
 
-import { retryWithPolicy } from '../core/errors/retry';
-import { ProviderDNRGate } from '../core/dnr-utils.js';
+import { retryWithPolicy } from '../errors/retry';
+import { ProviderDNRGate } from '../system/dnr-utils.js';
 
 // =============================================================================
 // CONSTANTS

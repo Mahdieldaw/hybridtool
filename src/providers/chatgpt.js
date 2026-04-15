@@ -7,7 +7,7 @@
  *
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { BusController, utils } from '../core/vendor-exports.js';
+import { BusController, utils } from '../system/bus-controller.js';
 
 // Removed stub ChatGPTProviderController (duplicate)
 // =============================================================================

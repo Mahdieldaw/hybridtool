@@ -1,9 +1,6 @@
-import {
-  INITIAL_PROVIDERS,
-  getProviderById as registryGetById,
-} from '../providers/provider-registry';
-import { PROVIDER_COLORS } from '../constants';
-import type { ProviderConfig } from '../providers/provider-registry';
+import { INITIAL_PROVIDERS, getProviderById as registryGetById } from '../config/provider-registry';
+import { PROVIDER_COLORS } from '../config/constants';
+import type { ProviderConfig } from '../config/provider-registry';
 import { normalizeProviderId } from './provider-id-mapper';
 
 /**

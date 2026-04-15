@@ -7,7 +7,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { ArtifactProcessor } from '../../shared/artifact-processor';
-import { retryWithPolicy, getPolicy } from '../core/errors/retry';
+import { retryWithPolicy, getPolicy } from '../errors/retry';
 
 // Provider-specific debug flag (off by default)
 const GEMINI_DEBUG = false;
@@ -665,9 +665,62 @@ export class GeminiSessionApi {
     // Append extracted content as Claude-style artifacts
     if (immersiveContent.length > 0 && u) {
       immersiveContent.forEach((item) => {
-        // Avoid duplicates if multiple chunks contain the same item
-        if (u.text && !u.text.includes(`identifier="${item.identifier}"`)) {
-          u.text += processor.formatArtifact(item);
+        const contentTrimmed = item.content.trim();
+        const isDirectImage =
+          (contentTrimmed.startsWith('http') || contentTrimmed.startsWith('data:image')) &&
+          !contentTrimmed.includes('\n') &&
+          !contentTrimmed.includes(' ');
+
+        if (isDirectImage) {
+          const markdownImage = `\n\n![${item.title || 'Image'}](${contentTrimmed})\n\n`;
+          if (u.text && !u.text.includes(contentTrimmed)) {
+            u.text += markdownImage;
+          }
+        } else {
+          // Extract images from HTML tags within immersive content
+          const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+          let match;
+          while ((match = imgRegex.exec(item.content)) !== null) {
+            const src = match[1];
+            if (src.startsWith('data:image') || src.startsWith('http')) {
+              const altMatch = match[0].match(/alt=["']([^"']*)["']/i);
+              const alt = altMatch ? altMatch[1] : item.title || 'Image';
+              const markdownImage = `\n\n![${alt}](${src})\n\n`;
+              if (u.text && !u.text.includes(src)) {
+                u.text += markdownImage;
+              }
+            }
+          }
+
+          // Extract images from Markdown within immersive content
+          const mdImgRegex = /!\[([^\]]*)\]\((https?:\/\/[^)]+|data:image[^)]+)\)/g;
+          while ((match = mdImgRegex.exec(item.content)) !== null) {
+            const alt = match[1] || item.title || 'Image';
+            const src = match[2];
+            const markdownImage = `\n\n![${alt}](${src})\n\n`;
+            if (u.text && !u.text.includes(src)) {
+              u.text += markdownImage;
+            }
+          }
+
+          // Avoid duplicates if multiple chunks contain the same item
+          if (u.text && !u.text.includes(`identifier="${item.identifier}"`)) {
+            // Also update the item content to use markdown images instead of HTML img tags
+            // to ensure it renders correctly if the user still opens the artifact
+            item.content = item.content.replace(
+              /<img[^>]+src=["']([^"']+)["'][^>]*>/gi,
+              (m, src) => {
+                const altMatch = m.match(/alt=["']([^"']*)["']/i);
+                const alt = altMatch ? altMatch[1] : 'Image';
+                return `![${alt}](${src})`;
+              }
+            );
+
+            // Only format as artifact if it wasn't purely an internal image reference
+            if (!item.isImage) {
+              u.text += processor.formatArtifact(item);
+            }
+          }
         }
       });
     }
@@ -700,21 +753,27 @@ export class GeminiSessionApi {
     if (Array.isArray(obj)) {
       // Check signature for Image Data
       if (
-        obj.length >= 5 &&
+        obj.length >= 3 &&
         typeof obj[0] === 'string' &&
         (obj[0].startsWith('http') || obj[0].startsWith('data:image')) &&
-        typeof obj[2] === 'number' && // Width
-        typeof obj[3] === 'number' && // Height
-        typeof obj[4] === 'string' // Title
+        ((typeof obj[2] === 'number' && typeof obj[3] === 'number') ||
+          (typeof obj[1] === 'number' && typeof obj[2] === 'number') ||
+          obj[0].includes('googleusercontent.com'))
       ) {
         // Check if already added
         if (!results.find((r) => r.url === obj[0])) {
+          const width =
+            typeof obj[2] === 'number' ? obj[2] : typeof obj[1] === 'number' ? obj[1] : 0;
+          const height =
+            typeof obj[3] === 'number' ? obj[3] : typeof obj[2] === 'number' ? obj[2] : 0;
+          const title =
+            typeof obj[4] === 'string' ? obj[4] : typeof obj[3] === 'string' ? obj[3] : 'Image';
           results.push({
             url: obj[0],
-            width: obj[2],
-            height: obj[3],
-            title: obj[4],
-            id: obj[6], // Optional ID
+            width: width,
+            height: height,
+            title: title,
+            id: obj[6] || obj[0], // Optional ID
           });
         }
       }
@@ -736,16 +795,17 @@ export class GeminiSessionApi {
         obj.length >= 5 &&
         typeof obj[0] === 'string' &&
         (obj[0].includes('.') || obj[0].length > 0) && // Basic filename check
-        !obj[0].includes('_image_') && // EXCLUDE internal image references
         typeof obj[2] === 'string' && // Title
         typeof obj[4] === 'string' // Content
       ) {
+        const isImage = obj[0].includes('_image_');
         // Check if already added
         if (!results.find((r) => r.identifier === obj[0])) {
           results.push({
             identifier: obj[0],
             title: obj[2],
             content: obj[4],
+            isImage: isImage,
           });
         }
       }

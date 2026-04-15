@@ -28,7 +28,7 @@ import { normalizeProviderId } from '../../utils/provider-id-mapper';
 import api from '../../services/extension-api';
 import type { TurnMessage, UserTurn, AiTurnWithUI } from '../../types';
 import type { ProviderKey } from '../../../shared/types';
-import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import { LLM_PROVIDERS_CONFIG } from '../../config/constants';
 import {
   DEFAULT_THREAD,
   PROBE_CHUNK,

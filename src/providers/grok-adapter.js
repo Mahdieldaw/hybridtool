@@ -7,7 +7,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 
-import { authManager } from '../core/auth-manager.js';
+import { authManager } from './auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
@@ -16,7 +16,7 @@ import {
   isNetworkError,
   createProviderAuthError,
   normalizeError,
-} from '../core/errors/handler.js';
+} from '../errors/handler.js';
 
 // Provider-specific adapter debug flag (off by default)
 const GROK_ADAPTER_DEBUG = false;

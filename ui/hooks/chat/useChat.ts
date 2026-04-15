@@ -29,8 +29,8 @@ import type {
   UserTurn,
 } from '../../../shared/types';
 import { DEFAULT_THREAD } from '../../../shared/messaging';
-import { LLM_PROVIDERS_CONFIG } from '../../constants';
-import { computeThinkFlag } from '../../../src/utils/think-utils';
+import { LLM_PROVIDERS_CONFIG } from '../../config/constants';
+import { computeThinkFlag } from '../../../shared/think-utils';
 import { parseSessionTurns } from '../../utils/parse-session-turns';
 
 import type { HistorySessionSummary, FullSessionPayload, TurnMessage } from '../../types';

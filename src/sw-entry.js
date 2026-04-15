@@ -10,11 +10,11 @@ import {
   CSPController,
   UserAgentController,
   ArkoseController,
-  BusController,
-  LifecycleManager,
-} from './core/vendor-exports.js';
-import { WorkflowCompiler } from './core/workflow-compiler.js';
-import { ContextResolver } from './core/context-resolver.js';
+} from './system/net-rules-manager.js';
+import { BusController } from './system/bus-controller.js';
+import { LifecycleManager } from './system/lifecycle-manager.js';
+import { WorkflowCompiler } from './core/execution/workflow-compiler.js';
+import { ContextResolver } from './core/execution/io/context-resolver.js';
 
 import { ClaudeAdapter } from './providers/claude-adapter.js';
 import { GeminiAdapter } from './providers/gemini-adapter.js';
@@ -26,20 +26,20 @@ import { GeminiProviderController } from './providers/gemini.js';
 import { ChatGPTProviderController } from './providers/chatgpt.js';
 import { QwenProviderController } from './providers/qwen.js';
 import { GrokProviderController } from './providers/grok.js';
-import { DNRUtils } from './core/dnr-utils.js';
-import { ConnectionHandler } from './core/connection-handler.js';
-import { authManager } from './core/auth-manager.js';
+import { DNRUtils } from './system/dnr-utils.js';
+import { ConnectionHandler } from './system/connection-handler.js';
+import { authManager } from './providers/auth-manager.js';
 
 // Persistence Layer Imports
 import { SessionManager } from './persistence/session-manager.js';
 import { initializePersistenceLayer } from './persistence/index';
-import { errorHandler, getErrorMessage } from './core/errors/handler.js';
-import { persistenceMonitor } from './core/persistence-monitor.js';
+import { errorHandler, getErrorMessage } from './errors/handler.js';
+import { persistenceMonitor } from './persistence/persistence-monitor.js';
 
 // Global Services Registry
-import { ServiceRegistry } from './core/service-registry.js';
+import { ServiceRegistry } from './system/service-registry.js';
 
-const services = /** @type {import("./core/service-registry.js").ServiceRegistry} */ (
+const services = /** @type {import("./system/service-registry.js").ServiceRegistry} */ (
   /** @type {unknown} */ (ServiceRegistry.getInstance())
 );
 
@@ -916,7 +916,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const { unpackEmbeddingMap } = await import('./persistence/embedding-codec.js');
           const { generateTextEmbeddings, structuredTruncate } = await import('./clustering');
           const { DEFAULT_CONFIG } = await import('./clustering');
-          const { searchCorpus } = await import('./core/corpus-search.js');
+          const { searchCorpus } = await import('./clustering/corpus-search.js');
 
           const turnRaw = await sm.adapter.get('turns', aiTurnId);
           let shadowParagraphs = turnRaw?.mapping?.artifact?.shadow?.paragraphs || [];
@@ -1866,7 +1866,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       ) {
         const { buildPassageIndex, parseEditorialOutput } =
           await import('./concierge-service/editorial-mapper.js');
-        const { buildSourceContinuityMap } = await import('./core/provenance/surface.js');
+        const { buildSourceContinuityMap } = await import('./provenance/surface.js');
 
         const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
         const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
@@ -1913,7 +1913,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       try {
         const orchestrator = services.get('orchestrator');
         if (orchestrator) {
-          const { buildSourceContinuityMap } = await import('./core/provenance/surface.js');
+          const { buildSourceContinuityMap } = await import('./provenance/surface.js');
           const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
             await import('./concierge-service/editorial-mapper.js');
 
