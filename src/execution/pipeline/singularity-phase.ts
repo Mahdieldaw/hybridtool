@@ -71,7 +71,9 @@ export async function runSingularityLLM(step, context, options) {
           signal = parsed.signal || null;
         }
       }
-    } catch (_) {}
+    } catch (err) {
+      console.warn('[SingularityPhase] Failed to parse concierge output:', err);
+    }
 
     // Strip <document> artifact tags from prose and collect them for separate rendering
     const processed = artifactProcessor.process(cleanedText);
@@ -512,7 +514,7 @@ export async function executeSingularityPhase(
             }
 
             try {
-              port.postMessage({
+              port?.postMessage({
                 type: 'WORKFLOW_STEP_UPDATE',
                 sessionId: context.sessionId,
                 stepId: singularityStep.stepId,
@@ -537,7 +539,7 @@ export async function executeSingularityPhase(
         try {
           if (singularityStep?.stepId) {
             const msg = getErrorMessage(singularityErr);
-            port.postMessage({
+            port?.postMessage({
               type: 'WORKFLOW_STEP_UPDATE',
               sessionId: context.sessionId,
               stepId: singularityStep.stepId,
@@ -554,7 +556,7 @@ export async function executeSingularityPhase(
       }
     }
 
-    port.postMessage({
+    port?.postMessage({
       type: 'MAPPER_ARTIFACT_READY',
       sessionId: context.sessionId,
       aiTurnId: context.canonicalAiTurnId,

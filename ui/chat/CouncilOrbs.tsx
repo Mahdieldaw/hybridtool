@@ -620,6 +620,8 @@ const Orb: React.FC<OrbProps> = ({
   useEffect(() => {
     const prevStage = prevStageRef.current;
 
+    prevStageRef.current = workflowStage;
+
     // Detect "start streaming" transition
     if (prevStage !== 'streaming' && workflowStage === 'streaming') {
       setAnimationClass('council-orb--start-pulse');
@@ -633,8 +635,6 @@ const Orb: React.FC<OrbProps> = ({
       const timer = setTimeout(() => setAnimationClass(''), 500);
       return () => clearTimeout(timer);
     }
-
-    prevStageRef.current = workflowStage;
   }, [workflowStage]);
 
   return (

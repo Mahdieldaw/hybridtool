@@ -7,8 +7,15 @@ import { runSingularityLLM } from './singularity-phase.js';
  * Handles recompute requests (formerly handleContinueRequest from CognitivePipelineHandler)
  */
 export async function handleRecompute(payload, options) {
-  const { port, persistenceCoordinator, sessionManager, streamingManager, contextManager, orchestrator, healthTracker } =
-    options;
+  const {
+    port,
+    persistenceCoordinator,
+    sessionManager,
+    streamingManager,
+    contextManager,
+    orchestrator,
+    healthTracker,
+  } = options;
   const { sessionId, aiTurnId, providerId, isRecompute, sourceTurnId } = payload || {};
 
   try {
@@ -21,7 +28,7 @@ export async function handleRecompute(payload, options) {
     const effectiveSessionId = sessionId || aiTurn.sessionId;
     if (sessionId && aiTurn.sessionId && sessionId !== aiTurn.sessionId) {
       try {
-        port.postMessage({
+        port?.postMessage({
           type: 'CONTINUATION_ERROR',
           sessionId,
           aiTurnId,
@@ -324,7 +331,7 @@ export async function handleRecompute(payload, options) {
         : undefined;
 
       try {
-        port.postMessage({
+        port?.postMessage({
           type: 'WORKFLOW_STEP_UPDATE',
           sessionId: effectiveSessionId,
           stepId,
@@ -393,7 +400,9 @@ export async function handleRecompute(payload, options) {
       try {
         const t = await adapter.get('turns', aiTurnId);
         if (t) finalAiTurn = t;
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[RecomputeHandler] Failed to refetch aiTurn for finalization:', err);
+      }
 
       const batchPhase =
         Object.keys(buckets.batchResponses || {}).length > 0
@@ -480,7 +489,7 @@ export async function handleRecompute(payload, options) {
     console.error(`[RecomputeHandler] Orchestration failed:`, error);
     try {
       const msg = error instanceof Error ? error.message : String(error);
-      port.postMessage({
+      port?.postMessage({
         type: 'WORKFLOW_STEP_UPDATE',
         sessionId: sessionId || 'unknown',
         stepId: `continue-singularity-error`,

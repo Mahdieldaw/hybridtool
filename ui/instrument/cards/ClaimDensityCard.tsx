@@ -79,15 +79,17 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
     >();
     for (const pc of paraCoverage) {
       const mi = pc.modelIndex as number;
-      if (!byModel.has(mi)) byModel.set(mi, { paraCount: 0, passageCount: 0, hasPassage: false });
-      byModel.get(mi)!.paraCount++;
+      if (Number.isFinite(mi) && !byModel.has(mi)) byModel.set(mi, { paraCount: 0, passageCount: 0, hasPassage: false });
+      if (Number.isFinite(mi)) byModel.get(mi)!.paraCount++;
     }
     for (const p of passages) {
       const mi = p.modelIndex as number;
-      if (!byModel.has(mi)) byModel.set(mi, { paraCount: 0, passageCount: 0, hasPassage: false });
-      const entry = byModel.get(mi)!;
-      entry.passageCount++;
-      if ((p.length ?? 0) >= 2) entry.hasPassage = true;
+      if (Number.isFinite(mi) && !byModel.has(mi)) byModel.set(mi, { paraCount: 0, passageCount: 0, hasPassage: false });
+      if (Number.isFinite(mi)) {
+        const entry = byModel.get(mi)!;
+        entry.passageCount++;
+        if ((p.length ?? 0) >= 2) entry.hasPassage = true;
+      }
     }
 
     return Array.from(byModel.entries())

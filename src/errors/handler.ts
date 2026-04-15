@@ -141,7 +141,7 @@ export function createMultiProviderAuthError(
     'MULTI_AUTH_REQUIRED',
     {
       providerIds,
-      loginUrls: providerIds.map((pid) => PROVIDER_CONFIG[pid]?.loginUrl),
+      loginUrls: providerIds.map((pid) => PROVIDER_CONFIG[pid]?.loginUrl).filter(Boolean),
     },
     false
   );
@@ -307,7 +307,11 @@ export class ErrorHandler {
     this.fallbackStrategies.set('NETWORK_UNAVAILABLE', async (operation, context) => {
       console.warn('🔄 Falling back to cache for network operation:', operation);
 
-      const cacheKey = `htos_cache_${context.url || context.key}`;
+      const urlOrKey = context.url || context.key;
+      if (!urlOrKey) {
+        throw new HTOSError('Cannot cache: no url or key in context', 'NO_CACHE_AVAILABLE');
+      }
+      const cacheKey = `htos_cache_${urlOrKey}`;
       const cached = localStorage.getItem(cacheKey);
 
       if (cached) {
@@ -411,8 +415,9 @@ export class ErrorHandler {
 
       RATE_LIMITED: {
         name: 'Rate Limit Recovery',
-        execute: async (_error, context) => {
+        execute: async (error, context) => {
           console.log(`⏳ Rate limited by ${context.providerId}, waiting...`);
+          if (!context.operation) throw error;
           return await this.retryWithBackoff(
             context.operation as OperationFn,
             context,
@@ -424,7 +429,7 @@ export class ErrorHandler {
       INDEXEDDB_ERROR: {
         name: 'IndexedDB Recovery',
         execute: async (error, context) => {
-          if (context.reinitialize) {
+          if (context.reinitialize && context.retry) {
             await (context.reinitialize as () => Promise<unknown>)();
             return await (context.retry as () => Promise<unknown>)();
           }

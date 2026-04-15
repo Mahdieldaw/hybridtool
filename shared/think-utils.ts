@@ -14,8 +14,10 @@ export function computeThinkFlag({ modeThinkButtonOn = false, input = '', inputF
   const flags: string[] =
     Array.isArray(inputFlags) && inputFlags.length
       ? inputFlags
-      : typeof input === 'string'
-        ? input.match(/\b\w\b/g) || []
-        : [];
+      : typeof inputFlags === 'string'
+        ? inputFlags.match(/\b\w\b/g) || []
+        : typeof input === 'string'
+          ? input.match(/\b\w\b/g) || []
+          : [];
   return Boolean(modeThinkButtonOn) || flags.includes(AI_THINK_FLAG);
 }

@@ -169,7 +169,7 @@ export function GeometryCard({
             participationRate != null
               ? `${(participationRate * 100).toFixed(0)}% mutual participation`
               : '';
-          return `${fmtInt(nodes.length)} paragraphs, D=${fmt(D, 3)} (${dDesc}). ${basinDesc}. ${partDesc}.`;
+          return `${fmtInt(nodes.length)} paragraphs, D=${fmt(D, 3)} (${dDesc}). ${basinDesc}.${partDesc ? ` ${partDesc}.` : ''}`;
         })()}
         variant={
           D == null
@@ -228,7 +228,7 @@ export function GeometryCard({
             <StatRow {...statRowProps("D = P90−P10", fmt(D, 4), dColor)} />
             <StatRow
               {...statRowProps(
-                "T_v", 
+                "T_v",
                 basin?.status === 'ok' ? fmt(basin.T_v, 4) : '—',
                 basin?.status === 'ok' ? 'text-emerald-400' : undefined
               )}

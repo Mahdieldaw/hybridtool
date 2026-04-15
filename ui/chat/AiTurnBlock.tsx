@@ -1,4 +1,4 @@
-// ui/components/AiTurnBlock.tsx - FIXED ALIGNMENT
+// ui/chat/AiTurnBlock.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import type { AiTurn, ProbeSession, ProbeSessionResponse } from '../../shared/types';

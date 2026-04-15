@@ -536,19 +536,19 @@ export function analyzeGlobalStructure(input: {
   }
 
   const rawMetrics: RawClaimMetrics[] = rawClaims.map((claim) => {
-    if (!claim.supporters) claim.supporters = [];
-    const k = claim.supporters.length;
+    const supporters = claim.supporters ?? [];
+    const k = supporters.length;
     totalMass += k;
-    claim.supporters.forEach((s) => {
+    supporters.forEach((s) => {
       if (typeof s === 'number') supporterSet.add(s);
     });
 
-    const distinctModelCount = new Set(claim.supporters.map(String)).size;
+    const distinctModelCount = new Set(supporters.map(String)).size;
     const incoming = safeEdges.filter((e) => e.to === claim.id);
     const outgoing = safeEdges.filter((e) => e.from === claim.id);
 
     return {
-      claim,
+      claim: supporters === claim.supporters ? claim : { ...claim, supporters },
       k,
       distinctModelCount,
       inDegree: incoming.length,
@@ -657,7 +657,7 @@ export function analyzeGlobalStructure(input: {
   const claimMap = new Map<string, EnrichedClaim>(enrichedClaims.map((c) => [c.id, c]));
 
   const conflicts = safeEdges
-    .filter((e) => e.type === 'conflicts' && e.from !== e.to)
+    .filter((e) => e.type === 'conflicts' && e.from !== e.to && claimMap.has(e.from) && claimMap.has(e.to))
     .map((e) => {
       const a = claimMap.get(e.from)!;
       const b = claimMap.get(e.to)!;
@@ -671,7 +671,7 @@ export function analyzeGlobalStructure(input: {
     .filter(Boolean) as ConflictPair[];
 
   const conflictInfos = safeEdges
-    .filter((e) => e.type === 'conflicts' && e.from !== e.to)
+    .filter((e) => e.type === 'conflicts' && e.from !== e.to && claimMap.has(e.from) && claimMap.has(e.to))
     .map((e) => {
       const a = claimMap.get(e.from)!;
       const b = claimMap.get(e.to)!;

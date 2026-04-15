@@ -6,6 +6,13 @@ interface CrossSignalComparePanelProps {
   selectedLayer?: string;
 }
 
+// Default axes vary by selected layer
+const layerDefaults: Record<string, [string, string]> = {
+  'competitive-provenance': ['provenanceBulk', 'exclusivityRatio'],
+  'blast-radius': ['provenanceBulk', 'blastRadius'],
+  'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
+};
+
 export function CrossSignalComparePanel({
   artifact,
   selectedLayer,
@@ -96,12 +103,6 @@ export function CrossSignalComparePanel({
     ];
   }, [blastByClaimId, exclusivityObj, statementScoreById]);
 
-  // Default axes vary by selected layer
-  const layerDefaults: Record<string, [string, string]> = {
-    'competitive-provenance': ['provenanceBulk', 'exclusivityRatio'],
-    'blast-radius': ['provenanceBulk', 'blastRadius'],
-    'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
-  };
   const defaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
   const [xKey, setXKey] = useState<string>(defaults[0]);
   const [yKey, setYKey] = useState<string>(defaults[1]);
@@ -230,6 +231,7 @@ export function CrossSignalComparePanel({
           className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-text-primary"
           value={xKey}
           onChange={(e) => setXKey(e.target.value)}
+          aria-label="X-axis measure selection"
         >
           {measures.map((m) => (
             <option key={m.key} value={m.key}>
@@ -241,6 +243,7 @@ export function CrossSignalComparePanel({
           className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-text-primary"
           value={yKey}
           onChange={(e) => setYKey(e.target.value)}
+          aria-label="Y-axis measure selection"
         >
           {measures.map((m) => (
             <option key={m.key} value={m.key}>

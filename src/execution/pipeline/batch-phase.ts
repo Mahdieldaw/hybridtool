@@ -254,11 +254,15 @@ export async function executeBatchPhase(step, context, options) {
         });
 
         // Persist contexts before proceeding — guarantees mapping step reads fresh data
-        await options.persistenceCoordinator.persistProviderContexts(
-          context.sessionId,
-          batchUpdates,
-          'batch'
-        );
+        try {
+          await options.persistenceCoordinator.persistProviderContexts(
+            context.sessionId,
+            batchUpdates,
+            'batch'
+          );
+        } catch (err) {
+          console.error('[BatchPhase] Failed to persist provider contexts:', err);
+        }
 
         const formattedResults = {};
         const authErrors = [];

@@ -110,7 +110,7 @@ export function PeripheralNodeCard({ artifact }: { artifact: any }) {
         </div>
       </CardSection>
 
-      {(hasExcluded || allPotentialOutliers.size > 0) && (
+      {(hasExcluded || allPotentialOutliers.size > 0) && paragraphs.length > 0 && (
         <CardSection title="Outlier Diagnostic Map">
           <SortableTable
             columns={[

@@ -197,6 +197,10 @@ export function BinHistogram({
   /** Optional basin zone coloring: bins between T_low and T_high are "valley" (amber), above T_high are "high" (emerald), below T_low are "low" (blue) */
   zoneBounds?: { T_low: number; T_high: number };
 }) {
+  if (bins.length === 0 || bins.every(count => count === 0)) {
+    return <div className="text-xs text-text-muted italic py-2">No data</div>;
+  }
+
   const maxCount = Math.max(1, ...bins);
   const span = binMax - binMin;
 
@@ -230,13 +234,13 @@ export function BinHistogram({
             );
           })}
         </div>
-        {markers?.map((m) => {
+        {markers?.map((m, index) => {
           if (!(span > 0)) return null;
           const pct = ((m.value - binMin) / span) * 100;
           if (pct < 0 || pct > 100) return null;
           return (
             <div
-              key={m.label}
+              key={`${m.label}-${index}`}
               className="absolute top-0 bottom-0 w-px opacity-80"
               style={{ left: `${pct}%`, backgroundColor: m.color }}
               title={`${m.label}: ${m.value.toFixed(6)}`}

@@ -251,15 +251,6 @@ const ChatInput = ({
   const handleSubmit = (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     if (isLoading || !prompt.trim()) return;
-    if (isOverLimit) {
-      setToast({
-        id: Date.now(),
-        message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`,
-        type: 'error',
-      });
-      return;
-    }
-
     executeSend(prompt);
   };
 

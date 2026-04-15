@@ -1,4 +1,4 @@
-import { DEFAULT_THREAD } from '../../../../shared/messaging.js';
+import { DEFAULT_THREAD } from './../../../shared/messaging.js';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -176,6 +176,9 @@ export class ContextManager {
                 if (t && t.type === 'user' && String(t.text || '') === String(fallbackText)) {
                   const next = sessionTurns[i + 1];
                   if (next && next.type === 'ai') {
+                    console.warn(
+                      `[ContextManager] Text-based fallback matched AI turn ${next.id} for source ${turnId} — duplicate messages could yield wrong turn`
+                    );
                     aiTurn = next;
                     break;
                   }

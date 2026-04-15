@@ -657,7 +657,7 @@ export function MixedResolutionInline({ artifact }: { artifact: any }) {
             key={s.claimId}
             title={`${cLabel}`}
             badge={{
-              text: `${fmtInt(mr.mixedCount)} mixed · ${fmtInt(mr.mixedProtectedCount)}P · ${fmtInt(mr.mixedRemovedCount ?? 0)}R · ${fmtInt(mr.mixedSkeletonizedCount)}S`,
+              text: `${fmtInt(mr.mixedCount)} mixed · ${fmtInt(mr.mixedProtectedCount)}P · ${fmtInt(mr.mixedRemovedCount ?? 0)}R · ${fmtInt(mr.mixedSkeletonizedCount ?? 0)}S`,
             }}
           >
             <div className="grid grid-cols-4 gap-x-4 mb-2">

@@ -1,4 +1,4 @@
-// src/core/connection-handler.js
+// src/system/connection-handler.js
 
 import { WorkflowEngine } from '../core/execution/workflow-engine.js';
 import { runPreflight, createAuthErrorMessage } from '../core/execution/preflight-validator.js';
@@ -1226,13 +1226,17 @@ export class ConnectionHandler {
    * Send error back to UI
    */
   _sendError(originalMessage, error) {
-    this.port.postMessage({
-      type: 'WORKFLOW_STEP_UPDATE',
-      sessionId: originalMessage.payload?.sessionId || 'unknown',
-      stepId: 'handler-error',
-      status: 'failed',
-      error: error.message || String(error),
-    });
+    // Port may be null (post-cleanup) or closed (disconnect raced the async path)
+    if (!this.port || typeof this.port.postMessage !== 'function') return;
+    try {
+      this.port.postMessage({
+        type: 'WORKFLOW_STEP_UPDATE',
+        sessionId: originalMessage.payload?.sessionId || 'unknown',
+        stepId: 'handler-error',
+        status: 'failed',
+        error: error?.message || String(error),
+      });
+    } catch (_) {}
   }
 
   /**

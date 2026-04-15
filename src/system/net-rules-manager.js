@@ -240,13 +240,21 @@ const NetRulesManager = {
   async _unregisterByIds(ruleIds) {
     if (ruleIds.length === 0) return;
 
+    // snapshot before mutation so we can roll back on Chrome API failue
+    const prevRules = [...this._rules];
+
     // Remove from internal tracking
     this._rules = this._rules.filter((rule) => !ruleIds.includes(rule.id));
 
-    // Remove from Chrome
+  try {
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: ruleIds,
     });
+  } catch (err) {
+    //Chrome rejected the removal - restore tracking to stay consistent
+    this._rules = prevRules;
+    throw err;
+  }
   },
 
   /**
@@ -539,16 +547,25 @@ const ArkoseController = {
   /**
    * Remove all AE header rules for arkose provider
    */
-  async removeAllAEHeaderRules() {
-    try {
-      await DNRUtils.removeProviderRules('arkose');
+  removeAllAEHeaderRules() {
+    // Capture the IDs DNRUtils is tracking for 'arkose' BEFORE removal,
+    // so we can sync NetRulesManager._rules after DNRUtils clears its own state.
+    const arkoseIds = new Set([
+      ...(DNRUtils.scopedRules?.get('arkose') ?? []),
+      ...(DNRUtils.sessionRules?.get('arkose') ?? []),
+    ]);
+
+    DNRUtils.removeProviderRules('arkose').then(() => {
+      // Sync removal from NetRulesManager tracking (matches what removeAEHeaderRule does per-ID)
+      if (arkoseIds.size > 0) {
+        NetRulesManager._rules = NetRulesManager._rules.filter((r) => !arkoseIds.has(r.id));
+      }
+
       console.debug('ArkoseController: Removed all AE header rules');
-    } catch (error) {
+    }).catch(error => {
       console.error('ArkoseController: Failed to remove all AE header rules:', error);
-      throw error;
-    }
+    });
   },
-};
 
 // =============================================================================
 // EXPORT

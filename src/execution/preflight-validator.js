@@ -1,4 +1,4 @@
-// src/core/preflight-validator.js
+// src/execution/preflight-validator.js
 import {
   selectBestProvider,
   isProviderAuthorized,
@@ -83,7 +83,7 @@ export async function runPreflight(request, authStatus, availableProviders) {
       .filter((pid) => {
         const status = authStatus[pid.toLowerCase()];
         const notExplicitlyFalse = status !== false;
-        return notExplicitlyFalse && availableProviders.includes(pid);
+        return notExplicitlyFalse && availableProviders.includes(pid.toLowerCase());
       })
       .slice(0, 3);
   }
@@ -93,7 +93,7 @@ export async function runPreflight(request, authStatus, availableProviders) {
   // Only block if explicitly false, not if undefined
   if (mapper && authStatus[mapper.toLowerCase()] === false) {
     const candidate = selectBestProvider('mapping', authStatus, availableProviders);
-    if (locks.mapping === mapper) {
+    if (locks.mapping) {
       if (candidate) {
         warnings.push(
           `Mapper "${mapper}" is locked but unauthorized; using "${candidate}" for this request`

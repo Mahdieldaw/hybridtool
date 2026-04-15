@@ -104,7 +104,7 @@ class AuthManager {
    * Fast (~10ms) but not 100% reliable (cookie exists ≠ valid session)
    */
   async checkAllCookies() {
-    const status = {};
+    const status = { ...(this._cookieStatus || {}) };
 
     await Promise.all(
       AUTH_COOKIES.map(async (config) => {

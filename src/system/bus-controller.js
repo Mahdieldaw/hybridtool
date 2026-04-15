@@ -398,7 +398,7 @@ const BusController = {
             reqId: requestId,
           });
           const iframeOrigin = iframe?.src ? new URL(iframe.src).origin : location.origin;
-          iframe.contentWindow.postMessage(busMsg, iframeOrigin);
+          iframe.contentWindow?.postMessage(busMsg, iframeOrigin);
         } catch (error) {
           console.error('[BusController-os] Failed to forward message to iframe:', error);
           try {
@@ -437,7 +437,7 @@ const BusController = {
             resId: message.reqId,
             result: result,
           },
-          '*'
+          location.origin
         );
       }
     });
@@ -574,6 +574,12 @@ const BusController = {
     const executeHandlers = async () => {
       if (a) {
         n = await this._deserialize(a);
+      }
+
+      if (n == null) {
+        n = [];
+      } else if (!Array.isArray(n)) {
+        n = [n];
       }
 
       return await this._pick(

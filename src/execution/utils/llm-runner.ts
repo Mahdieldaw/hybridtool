@@ -88,7 +88,7 @@ export async function executeGenericSingleStep(
     return new Promise((resolve, reject) => {
       orchestrator.executeParallelFanout(prompt, [pid], {
         sessionId: context.sessionId,
-        useThinking: options.useThinking || payload.useThinking || false,
+        useThinking: options.useThinking || payload?.useThinking || false,
         providerContexts,
         onError: (err) => {
           console.warn(`[LLMRunner] ${stepType} fanout error for ${pid}:`, err);

@@ -284,7 +284,7 @@ export class WorkflowCompiler {
   }
 
   _generateWorkflowId(contextType) {
-    return `wf-${contextType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `wf-${contextType}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
   }
 
   // ============================================================================

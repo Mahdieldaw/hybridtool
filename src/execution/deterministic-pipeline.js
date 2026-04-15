@@ -345,7 +345,7 @@ function generateMapperArtifactId() {
   const c = globalThis?.crypto;
   if (c && typeof c.randomUUID === 'function') return `artifact-${c.randomUUID()}`;
   artifactIdCounter += 1;
-  return `artifact-${Date.now()}-${artifactIdCounter}`;
+  return `artifact-${Date.now()}-${artifactIdCounter}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export function assembleMapperArtifact({

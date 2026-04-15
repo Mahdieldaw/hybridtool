@@ -74,7 +74,11 @@ export async function runWithProviderHealth<T>(
     return result;
   } catch (error) {
     const classified = classifyError(error);
-    tracker?.recordFailure?.(providerId, error);
+    try {
+      tracker?.recordFailure?.(providerId, error);
+    } catch (healthErr) {
+      console.error('[ProviderHealthGate] recordFailure threw:', healthErr);
+    }
     logRetryEvent({
       providerId,
       stage,

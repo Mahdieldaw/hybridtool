@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from '../state';
 import { LLM_PROVIDERS_CONFIG } from '../config/constants';
 import type { AiTurn } from '../../shared/types';
+import type { LLMProvider } from '../types';
 import clsx from 'clsx';
 
 interface CouncilOrbsVerticalProps {
@@ -80,7 +81,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
 
 interface VerticalOrbProps {
   turnId: string;
-  provider: any;
+  provider: LLMProvider;
   isActive: boolean;
   onClick: () => void;
   onHover: (id: string | null) => void;
@@ -121,6 +122,12 @@ const VerticalOrb: React.FC<VerticalOrbProps> = ({
         onMouseEnter={() => onHover(pid)}
         onMouseLeave={() => onHover(null)}
         onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick();
+          }
+        }}
       />
 
       {/* Tooltip (Left side for vertical bar) */}

@@ -253,6 +253,13 @@ function parseRetryAfter(error: ErrorCandidate | null): number | null {
   const seconds = parseInt(String(retryAfter), 10);
   if (!Number.isNaN(seconds)) return seconds * 1000;
 
+  // HTTP-date format (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
+  const date = new Date(String(retryAfter));
+  if (!Number.isNaN(date.getTime())) {
+    const ms = date.getTime() - Date.now();
+    return ms > 0 ? ms : null;
+  }
+
   return null;
 }
 
