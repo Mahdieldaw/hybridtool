@@ -20,13 +20,13 @@ export function useSessionSync(isInitialized: boolean) {
 
   useEffect(() => {
     if (!isInitialized || !currentSessionId || turnIds.length > 0 || hasSyncedRef.current) return;
+    hasSyncedRef.current = true; // set synchronously to prevent StrictMode double-fire
 
     (async () => {
       try {
         const response = await api.getHistorySession(currentSessionId);
         const fullSession = response as any;
         if (!fullSession?.turns?.length) {
-          hasSyncedRef.current = true;
           return;
         }
 
@@ -42,7 +42,6 @@ export function useSessionSync(isInitialized: boolean) {
             currentSessionId
           );
         }
-        hasSyncedRef.current = true;
       } catch (e) {
         console.warn('[SessionSync] Failed to rehydrate session:', e);
       }

@@ -108,6 +108,7 @@ const VerticalOrb: React.FC<VerticalOrbProps> = ({
     <div className="relative flex items-center justify-center w-full">
       <button
         type="button"
+        aria-label={`${provider.name}${isStreaming ? ' (streaming)' : hasError ? ' (error)' : isSkipped ? ' (skipped)' : ''}${isActive ? ', active' : ''}`}
         className={clsx(
           'rounded-full transition-all duration-200 relative',
           isActive

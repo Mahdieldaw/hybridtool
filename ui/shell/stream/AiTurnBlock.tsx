@@ -134,6 +134,8 @@ const ProbeSessionCard: React.FC<ProbeSessionCardProps> = ({ session, isExpanded
       <button
         type="button"
         onClick={onToggle}
+        aria-expanded={isExpanded}
+        aria-controls={`probe-panel-${session.id}`}
         className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-highlight/20 transition-colors cursor-pointer"
       >
         <span className="text-sm font-medium text-text-secondary flex-1 truncate">
@@ -146,7 +148,7 @@ const ProbeSessionCard: React.FC<ProbeSessionCardProps> = ({ session, isExpanded
       </button>
 
       {isExpanded && (
-        <div className="border-t border-border-subtle/20 divide-y divide-border-subtle/10">
+        <div id={`probe-panel-${session.id}`} className="border-t border-border-subtle/20 divide-y divide-border-subtle/10">
           {responses.length === 0 ? (
             <div className="px-4 py-3 text-xs text-text-muted">
               {session.status === 'searching' ? 'Searching corpus…' : 'Awaiting probe responses…'}

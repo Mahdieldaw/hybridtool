@@ -68,7 +68,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
         setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
       }
     },
-    [text, onCopy, setToast, disabled]
+    [text, html, onCopy, setToast, disabled]
   );
 
   const baseClasses =

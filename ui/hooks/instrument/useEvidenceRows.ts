@@ -352,7 +352,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
     return statements.map((stmt): EvidenceRow => {
       const stmtId = normalizeStatementId(stmt);
-      const modelIndex = typeof stmt.modelIndex === 'number' ? stmt.modelIndex : 0;
+      const modelIndex = Number.isFinite(stmt.modelIndex) ? stmt.modelIndex : 0;
       const providerId = resolveProviderIdFromCitationOrder(
         modelIndex,
         globalMaps?.citationSourceOrder ?? undefined

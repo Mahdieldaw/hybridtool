@@ -6,7 +6,7 @@ import api from '../../services/extension-api';
 import { probeProvidersEnabledAtom } from '../../state';
 import { useCorpusSearch } from './useCorpusSearch';
 
-jest.mock('../services/extension-api', () => ({
+jest.mock('../../services/extension-api', () => ({
   __esModule: true,
   default: {
     corpusSearch: jest.fn(),

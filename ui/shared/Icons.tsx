@@ -1,4 +1,4 @@
-// This file is located at ui/components/Icons.tsx
+// This file is located at ui/shared/Icons.tsx
 
 import React from 'react';
 import { tokens } from '../styles/tokens';
@@ -101,11 +101,6 @@ export const UserIcon = ({ className, style }: IconProps) => (
     />
   </svg>
 );
-
-// This is the corrected PuzzleIcon component
-// In ui/components/Icons.tsx
-
-// ... (your existing icons like UserIcon, BotIcon, etc.)
 
 export const ListIcon = ({ className, style, size = 16 }: IconProps & { size?: number }) => (
   <svg

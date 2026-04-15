@@ -62,8 +62,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({
         <h3 className="m-0 mb-4 text-lg font-semibold text-text-primary">Rename Chat</h3>
 
         <div className="mb-5">
-          <label className="block text-sm font-medium text-text-secondary mb-2">Chat Title</label>
+          <label htmlFor="chat-title-input" className="block text-sm font-medium text-text-secondary mb-2">Chat Title</label>
           <input
+            id="chat-title-input"
             ref={inputRef}
             type="text"
             value={title}

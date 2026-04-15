@@ -18,9 +18,9 @@ export {
   getProviderConfig,
   resolveProviderIdFromCitationOrder,
   CopyButton,
-  SelectedEntity,
   safeArr,
 };
+export type { SelectedEntity };
 
 // ============================================================================
 // HELPERS

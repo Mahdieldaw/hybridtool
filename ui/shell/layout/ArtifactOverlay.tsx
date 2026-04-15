@@ -1,7 +1,7 @@
 // ui/components/ArtifactOverlay.tsx
 // Extracted from ProviderResponseBlock.tsx for artifact modal display
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { toastAtom } from '../../state';
 import MarkdownDisplay from '../../shared/MarkdownDisplay';
@@ -23,6 +23,14 @@ interface ArtifactOverlayProps {
  */
 export const ArtifactOverlay: React.FC<ArtifactOverlayProps> = ({ artifact, onClose }) => {
   const setToast = useSetAtom(toastAtom);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const handleCopy = useCallback(async () => {
     try {

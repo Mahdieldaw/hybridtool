@@ -362,8 +362,9 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
     const boxY = height - boxSize - 4;
     const miniW = boxSize;
     const miniH = boxSize;
-    const miniCx = boxX + miniW / 2;
-    const miniCy = boxY + miniH / 2;
+    // miniCx/miniCy are relative to the group origin (the <g> already translates by boxX, boxY)
+    const miniCx = miniW / 2;
+    const miniCy = miniH / 2;
 
     const baseShape = (() => {
       switch (shape) {

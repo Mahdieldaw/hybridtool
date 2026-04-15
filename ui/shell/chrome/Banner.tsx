@@ -19,7 +19,6 @@ const Banner: React.FC = () => {
       <div className="ml-auto flex gap-2">
         <button
           onClick={handleClose}
-          aria-label="Close notice"
           className="bg-transparent text-text-muted border border-border-subtle rounded-md px-2 py-1 text-xs cursor-pointer hover:bg-surface-highlight hover:text-text-secondary transition-colors"
         >
           Dismiss

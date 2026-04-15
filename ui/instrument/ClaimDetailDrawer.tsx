@@ -101,15 +101,16 @@ export function ClaimDetailDrawer({
     const claimMap = new Map<string, string>();
     for (const c of claims) claimMap.set(String(c.id), String(c.label || c.id));
 
+    const claimIdStr = String(claim.id);
     return edges
-      .filter((e: any) => e.from === claim.id || e.to === claim.id)
+      .filter((e: any) => String(e.from) === claimIdStr || String(e.to) === claimIdStr)
       .map((e: any) => {
-        const otherId = e.from === claim.id ? e.to : e.from;
+        const otherId = String(e.from) === claimIdStr ? String(e.to) : String(e.from);
         return {
           type: e.type,
           otherId,
-          otherLabel: claimMap.get(String(otherId)) || otherId,
-          direction: e.from === claim.id ? 'outgoing' : 'incoming',
+          otherLabel: claimMap.get(otherId) || otherId,
+          direction: String(e.from) === claimIdStr ? 'outgoing' : 'incoming',
         };
       });
   }, [claim.id, artifact]);
@@ -166,9 +167,9 @@ export function ClaimDetailDrawer({
 
   return (
     <m.div
-      initial={variant === 'bottom' ? { y: 96, opacity: 0 } : { x: 320, opacity: 0 }}
+      initial={variant === 'bottom' ? { y: 96, opacity: 0 } : { x: 400, opacity: 0 }}
       animate={variant === 'bottom' ? { y: 0, opacity: 1 } : { x: 0, opacity: 1 }}
-      exit={variant === 'bottom' ? { y: 96, opacity: 0 } : { x: 320, opacity: 0 }}
+      exit={variant === 'bottom' ? { y: 96, opacity: 0 } : { x: 400, opacity: 0 }}
       transition={{ type: 'spring', damping: 26, stiffness: 300 }}
       className={containerClassName}
     >
@@ -251,10 +252,12 @@ export function ClaimDetailDrawer({
                     label: edge.type,
                   };
                   return (
-                    <div
+                    <button
                       key={i}
-                      className="flex items-center gap-2 text-[11px] group cursor-pointer hover:bg-white/5 rounded px-1.5 py-1 -mx-1.5"
+                      type="button"
+                      className="flex items-center gap-2 text-[11px] group cursor-pointer hover:bg-white/5 rounded px-1.5 py-1 -mx-1.5 w-full text-left"
                       onClick={() => onClaimNavigate?.(edge.otherId)}
+                      aria-label={`${edge.type} ${edge.direction === 'outgoing' ? 'to' : 'from'} ${edge.otherLabel}`}
                     >
                       <span className={`${style.color} font-medium w-[72px] flex-none`}>
                         {style.label}
@@ -263,7 +266,7 @@ export function ClaimDetailDrawer({
                         {edge.direction === 'outgoing' ? '\u2192' : '\u2190'}
                       </span>
                       <span className="text-text-primary truncate">{edge.otherLabel}</span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

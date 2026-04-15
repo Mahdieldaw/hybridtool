@@ -5,7 +5,7 @@
 // If you modify this logic, the extension WILL break silently.
 // DO NOT ATTEMPT TO "IMPROVE" THIS FILE.
 // ************************************************************
-// ui/hooks/useInitialization.ts
+// ui/hooks/ui/useInitialization.ts
 import { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import {
@@ -60,7 +60,7 @@ export function useInitialization(): boolean {
       console.log('[Init] UI state reset to defaults.');
     };
 
-    // --- Stage 4: Run init and handle success/failure ---
+    // --- Stage 3: Run init and handle success/failure ---
     (async () => {
       try {
         await initialize(); // real work

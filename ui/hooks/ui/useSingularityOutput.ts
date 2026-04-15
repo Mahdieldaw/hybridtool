@@ -176,7 +176,8 @@ export function useSingularityOutput(
       output,
       isLoading: requestedCandidate.isLoading,
       isError: requestedCandidate.isError,
-      providerId: active.providerId,
+      // output is built from requestedCandidate, so providerId must match
+      providerId: requestedCandidate.providerId,
       requestedProviderId: pinnedId || active.providerId,
       rawText: latestResponse.text,
       error: (latestResponse.meta as any)?.error,

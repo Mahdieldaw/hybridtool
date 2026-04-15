@@ -340,7 +340,10 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
       </div>
     );
   },
-  (prev, next) => prev.content === next.content && prev.components === next.components
+  (prev, next) =>
+    prev.content === next.content &&
+    prev.components === next.components &&
+    prev.className === next.className
 );
 
 export default MarkdownDisplay;

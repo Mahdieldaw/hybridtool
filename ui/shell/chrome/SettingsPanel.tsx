@@ -42,13 +42,17 @@ export default function SettingsPanel() {
   const handleRefresh = async () => {
     if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
     setIsRefreshing(true);
-    await manualRefresh();
-    refreshTimeoutRef.current = setTimeout(() => setIsRefreshing(false), 500);
+    try {
+      await manualRefresh();
+    } finally {
+      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+      refreshTimeoutRef.current = setTimeout(() => setIsRefreshing(false), 500);
+    }
   };
 
   return (
     <div
-      className={`fixed top-0 w-[350px] h-screen bg-surface-highest/95 backdrop-blur-xl border-l border-border-subtle z-[1100] p-5 overflow-y-auto transition-[right] duration-300 ease-out ${isSettingsOpen ? 'right-0' : '-right-[350px]'
+      className={`fixed top-0 w-[350px] h-screen bg-surface-highest/95 backdrop-blur-xl border-l border-border-subtle z-[1100] p-5 overflow-y-auto ${!isReducedMotion ? 'transition-[right] duration-300 ease-out' : ''} ${isSettingsOpen ? 'right-0' : '-right-[350px]'
         }`}
     >
       <div className="settings-header flex items-center justify-between mb-6">
@@ -59,12 +63,13 @@ export default function SettingsPanel() {
           <button
             onClick={handleRefresh}
             title="Check Login Status"
-            className={`p-2 bg-none border-none cursor-pointer rounded transition-all duration-300 text-lg ${isRefreshing ? 'text-brand-500 rotate-180' : 'text-text-muted'
+            className={`p-2 bg-none border-none cursor-pointer rounded transition-all duration-300 text-lg ${isRefreshing ? 'text-brand-500 animate-spin' : 'text-text-muted'
               }`}
           >
             ↻
           </button>
           <button
+            aria-label="Close settings"
             className="close-settings p-2 bg-none border-none text-text-muted cursor-pointer rounded transition-colors duration-200 text-lg hover:bg-surface-highlight hover:text-text-secondary"
             onClick={() => setIsSettingsOpen(false)}
           >
@@ -158,7 +163,7 @@ export default function SettingsPanel() {
                 }}
               >
                 <div
-                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${selectedModels[provider.id] ? 'left-[22px]' : 'left-0.5'
+                  className={`absolute top-0.5 w-4 h-4 bg-white rounded-full ${!isReducedMotion ? 'transition-all duration-200' : ''} ${selectedModels[provider.id] ? 'left-[22px]' : 'left-0.5'
                     }`}
                 />
               </div>
@@ -184,7 +189,7 @@ export default function SettingsPanel() {
               }`}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isVisibleMode ? 'left-[22px]' : 'left-0.5'
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full ${!isReducedMotion ? 'transition-all duration-200' : ''} ${isVisibleMode ? 'left-[22px]' : 'left-0.5'
                 }`}
             />
           </div>
@@ -211,7 +216,7 @@ export default function SettingsPanel() {
             }}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${powerUserMode ? 'left-[22px]' : 'left-0.5'
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full ${!isReducedMotion ? 'transition-all duration-200' : ''} ${powerUserMode ? 'left-[22px]' : 'left-0.5'
                 }`}
             />
           </div>
@@ -235,7 +240,7 @@ export default function SettingsPanel() {
             }}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isReducedMotion ? 'left-[22px]' : 'left-0.5'
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full ${!isReducedMotion ? 'transition-all duration-200' : ''} ${isReducedMotion ? 'left-[22px]' : 'left-0.5'
                 }`}
             />
           </div>

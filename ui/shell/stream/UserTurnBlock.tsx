@@ -16,11 +16,11 @@ const UserTurnBlock = ({ userTurn }: UserTurnBlockProps) => {
   const onToggle = useCallback(() => setIsExpanded((prev) => !prev), [setIsExpanded]);
 
   const date = new Date(userTurn.createdAt);
-  const readableTimestamp = date.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-  const isoTimestamp = date.toISOString();
+  const isValidDate = !isNaN(date.getTime());
+  const readableTimestamp = isValidDate
+    ? date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    : '';
+  const isoTimestamp = isValidDate ? date.toISOString() : '';
 
   return (
     <div className="user-turn-block flex gap-3 p-3 bg-surface-raised border border-border-subtle rounded-2xl mx-auto max-w-3xl">
@@ -29,11 +29,20 @@ const UserTurnBlock = ({ userTurn }: UserTurnBlockProps) => {
       </div>
       <div className="user-content flex-1 min-w-0 flex flex-col overflow-x-hidden min-h-[80px]">
         <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
           className={clsx(
             'flex justify-between items-center cursor-pointer',
             isExpanded ? 'mb-2' : 'mb-0'
           )}
           onClick={onToggle}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onToggle();
+            }
+          }}
         >
           <span className="text-xs font-semibold text-text-secondary">Your Prompt</span>
           {isExpanded ? (

@@ -318,7 +318,7 @@ export function formatSingularityResponse(
   const text = String(output?.text || '').trim();
   if (!text) return '';
   const providerName = output?.providerId
-    ? LLM_PROVIDERS_CONFIG.find((p) => p.id === output.providerId)?.name ||
+    ? LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === String(output.providerId))?.name ||
       String(output.providerId)
     : 'Singularity';
   return `**${providerName} (Singularity)**:\n\n${text}\n`;

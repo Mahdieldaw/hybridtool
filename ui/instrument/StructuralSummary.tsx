@@ -122,8 +122,8 @@ function describeLayer(
       const [idA, idB] = layer.causalClaimIds;
       const claimA = idA ? claimMap.get(idA) : null;
       const claimB = idB ? claimMap.get(idB) : null;
-      const labelA = claimA?.label ?? idA;
-      const labelB = claimB?.label ?? idB;
+      const labelA = claimA?.label ?? idA ?? '<unknown>';
+      const labelB = claimB?.label ?? idB ?? '<unknown>';
 
       if (isResidual) {
         return {
@@ -146,8 +146,8 @@ function describeLayer(
       const [idA, idB] = layer.causalClaimIds;
       const claimA = idA ? claimMap.get(idA) : null;
       const claimB = idB ? claimMap.get(idB) : null;
-      const labelA = claimA?.label ?? idA;
-      const labelB = claimB?.label ?? idB;
+      const labelA = claimA?.label ?? idA ?? '<unknown>';
+      const labelB = claimB?.label ?? idB ?? '<unknown>';
 
       if (isResidual) {
         return {

@@ -150,19 +150,15 @@ export function NarrativePanel({
                   className="px-2 py-1 rounded-md text-[11px] border border-border-subtle text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors disabled:opacity-50"
                   disabled={!rawJson}
                   onClick={() => {
-                    let url: string | undefined;
-                    try {
-                      const text = rawJson || '';
-                      if (!text) return;
-                      const blob = new Blob([text], { type: 'application/json' });
-                      url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `mapping_artifact_${aiTurnId || 'turn'}.json`;
-                      a.click();
-                    } finally {
-                      if (url) URL.revokeObjectURL(url);
-                    }
+                    const text = rawJson || '';
+                    if (!text) return;
+                    const blob = new Blob([text], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `mapping_artifact_${aiTurnId || 'turn'}.json`;
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 10_000);
                   }}
                 >
                   Export

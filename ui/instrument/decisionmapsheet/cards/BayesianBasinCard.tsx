@@ -5,7 +5,6 @@ import {
   fmtPct,
   fmtInt,
   safeArr,
-  BinHistogram,
   CardSection,
   InterpretiveCallout,
   SortableTable,
@@ -25,8 +24,6 @@ export function BayesianBasinCard({
 }) {
   const basinInversion = artifact?.geometry?.basinInversion ?? null;
   const status = basinInversion?.status ?? 'unknown';
-  const mu = basinInversion?.mu ?? null;
-  const sigma = basinInversion?.sigma ?? null;
 
   const { basins, summary } = useMemo(() => {
     const b = safeArr<any>(basinInversion?.basins);
@@ -42,9 +39,6 @@ export function BayesianBasinCard({
     const coverage = nodeCount > 0 ? nodesInBasins / nodeCount : 0;
     return { basins: b, summary: { nUnchecked, nFound, total: b.length, coverage } };
   }, [basinInversion]);
-
-  const hasHistogram =
-    basinInversion && Array.isArray(basinInversion.histogram) && basinInversion.histogram.length > 0;
 
   if (!basinInversion) {
     return (
@@ -83,34 +77,6 @@ export function BayesianBasinCard({
         }
         variant={status === 'ok' ? 'ok' : 'warn'}
       />
-
-      {/* Field Histogram */}
-      <CardSection title="Inversion Field">
-        {hasHistogram && (
-          <BinHistogram
-            bins={basinInversion.histogram}
-            binMin={basinInversion.binMin}
-            binMax={basinInversion.binMax}
-            binWidth={basinInversion.binWidth}
-            height={90}
-            markers={
-              [
-                mu != null ? { label: 'μ', value: mu, color: '#93c5fd' } : null,
-                basinInversion.status === 'ok' && basinInversion.T_v != null
-                  ? { label: 'T_v', value: basinInversion.T_v, color: '#34d399' }
-                  : null,
-              ].filter(Boolean) as { label: string; value: number; color: string }[]
-            }
-            zoneBounds={
-              basinInversion.T_low != null && basinInversion.T_high != null
-                ? { T_low: basinInversion.T_low, T_high: basinInversion.T_high }
-                : mu != null && sigma != null
-                  ? { T_low: mu - sigma, T_high: mu + sigma }
-                  : undefined
-            }
-          />
-        )}
-      </CardSection>
 
       {/* Basins List */}
       {basins.length > 0 && (

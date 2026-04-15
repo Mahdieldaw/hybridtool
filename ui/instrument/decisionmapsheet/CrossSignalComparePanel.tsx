@@ -12,10 +12,13 @@ export function CrossSignalComparePanel({
 }: CrossSignalComparePanelProps) {
   const claims = useMemo(() => safeArr<any>(artifact?.semantic?.claims), [artifact]);
   const claimProvenance = artifact?.claimProvenance ?? null;
-  const exclusivityObj =
-    (claimProvenance && typeof claimProvenance === 'object'
-      ? (claimProvenance as any).claimExclusivity
-      : null) ?? {};
+  const exclusivityObj = useMemo(
+    () =>
+      (claimProvenance && typeof claimProvenance === 'object'
+        ? (claimProvenance as any).claimExclusivity
+        : null) ?? {},
+    [claimProvenance]
+  );
   const blastScores = useMemo(() => safeArr<any>(artifact?.blastRadiusFilter?.scores), [artifact]);
   const blastByClaimId = useMemo(
     () => new Map(blastScores.map((s) => [String(s.claimId ?? s.id ?? ''), s])),

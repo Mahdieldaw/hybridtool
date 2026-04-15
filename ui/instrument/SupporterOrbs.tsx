@@ -21,7 +21,7 @@ function getProviderFromSupporter(
   }
   if (
     citationSourceOrder &&
-    (typeof s === 'number' || (typeof s === 'string' && !isNaN(Number(s))))
+    (typeof s === 'number' || (typeof s === 'string' && s.trim().length > 0 && !isNaN(Number(s))))
   ) {
     const providerId = citationSourceOrder[Number(s)];
     if (providerId) return getProviderConfig(providerId) || null;

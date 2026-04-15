@@ -1,4 +1,4 @@
-// ui/hooks/useConnectionMonitoring.ts
+// ui/hooks/ui/useConnectionMonitoring.ts
 import { useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { connectionStatusAtom } from '../../state';

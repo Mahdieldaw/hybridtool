@@ -2,7 +2,7 @@
 // Replaces flexbox with CSS Grid for deterministic layout control
 // GRID GUARANTEES: Content cannot expand beyond defined tracks
 
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import clsx from 'clsx';
 
 interface ResizableSplitLayoutProps {
@@ -36,6 +36,14 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
   const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 55);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Clean up body styles if the component unmounts mid-drag
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, []);
+
   // Use controlled ratio if provided, otherwise internal
   const ratio = controlledRatio ?? internalRatio;
 
@@ -43,7 +51,7 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
   const dividerWidth = rightPaneFullWidth ? 0 : 6;
   const gridTemplateColumns = isSplitOpen
     ? rightPaneFullWidth
-      ? `0fr 0px 1fr`
+      ? `0px 0px 1fr`
       : `${ratio}fr ${dividerWidth}px ${100 - ratio}fr`
     : '1fr';
 
@@ -140,6 +148,7 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
           >
             {/* Divider Content (Orbs) */}
             <div className="absolute top-0 bottom-0 left-0 w-0 flex flex-col items-center justify-center overflow-visible pointer-events-none">

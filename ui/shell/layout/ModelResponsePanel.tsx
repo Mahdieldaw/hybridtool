@@ -514,9 +514,9 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                     >
                       <span>{historyCount - 1} previous version(s)</span>
                       {showHistory ? (
-                        <ChevronDownIcon className="w-3 h-3" />
-                      ) : (
                         <ChevronUpIcon className="w-3 h-3" />
+                      ) : (
+                        <ChevronDownIcon className="w-3 h-3" />
                       )}
                     </button>
 

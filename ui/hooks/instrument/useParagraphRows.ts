@@ -98,7 +98,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
 
     const coverageByPara = new Map<string, number>();
     for (const pc of cdProfile.paragraphCoverage ?? []) {
-      coverageByPara.set(String(pc.paragraphId), pc.coverage);
+      coverageByPara.set(String(pc.paragraphId).trim(), pc.coverage);
     }
 
     const passageLenByPara = new Map<string, number>();
@@ -109,7 +109,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
           pc.paragraphIndex >= passage.startParagraphIndex &&
           pc.paragraphIndex <= passage.endParagraphIndex
         ) {
-          passageLenByPara.set(String(pc.paragraphId), passage.length);
+          passageLenByPara.set(String(pc.paragraphId).trim(), passage.length);
         }
       }
     }

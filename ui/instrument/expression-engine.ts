@@ -263,8 +263,8 @@ class Parser {
     let left = this.parseAnd(env);
     while (this.peek().type === 'OR') {
       this.consume();
-      if (left) return left; // short-circuit: return actual truthy value
-      left = this.parseAnd(env);
+      const right = this.parseAnd(env); // always consume RHS tokens
+      if (!left) left = right;
     }
     return left;
   }
@@ -273,8 +273,8 @@ class Parser {
     let left = this.parseEquality(env);
     while (this.peek().type === 'AND') {
       this.consume();
-      if (!left) return left; // short-circuit: return actual falsy value
-      left = this.parseEquality(env);
+      const right = this.parseEquality(env); // always consume RHS tokens
+      if (left) left = right;
     }
     return left;
   }

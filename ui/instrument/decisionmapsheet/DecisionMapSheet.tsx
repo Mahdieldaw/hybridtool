@@ -317,6 +317,9 @@ export const DecisionMapSheet = React.memo(() => {
     }
   }, [sessionId, openState, setOpenState]);
 
+  const resizeListenersCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => resizeListenersCleanupRef.current?.(), []);
+
   const handleResizePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -344,11 +347,16 @@ export const DecisionMapSheet = React.memo(() => {
         resizeRef.current.active = false;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        resizeListenersCleanupRef.current = null;
         if (!moved) setOpenState(null);
       };
 
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      resizeListenersCleanupRef.current = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
     },
     [setOpenState, sheetHeightRatio]
   );

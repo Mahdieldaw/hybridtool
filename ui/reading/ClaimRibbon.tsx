@@ -27,7 +27,10 @@ export const ClaimRibbon: React.FC<ClaimRibbonProps> = ({
     const routingProfiles: Record<string, any> = artifact?.passageRouting?.claimProfiles ?? {};
     const densityProfiles: Record<string, any> = artifact?.claimDensity?.profiles ?? {};
 
-    const tierIndex = (pos: LandscapePosition): number => LANDSCAPE_ORDER.indexOf(pos);
+    const tierIndex = (pos: LandscapePosition): number => {
+      const idx = LANDSCAPE_ORDER.indexOf(pos);
+      return idx === -1 ? LANDSCAPE_ORDER.length : idx;
+    };
 
     return claims
       .map((claim: any): ClaimChip => {

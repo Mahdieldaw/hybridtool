@@ -541,7 +541,7 @@ export function MixedResolutionInline({ artifact }: { artifact: any }) {
       totalMixed += mr.mixedCount;
       totalProt += mr.mixedProtectedCount;
       totalRem += mr.mixedRemovedCount ?? 0;
-      totalSkel += mr.mixedSkeletonizedCount;
+      totalSkel += mr.mixedSkeletonizedCount ?? 0;
     }
     return { totalMixed, totalProt, totalRem, totalSkel };
   }, [claimsWithMixed]);
