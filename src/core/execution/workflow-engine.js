@@ -1,11 +1,13 @@
-import { getHealthTracker } from './provider-health-tracker.js';
-import { StepExecutor } from './execution/step-executor.js';
-import { StreamingManager } from './execution/streaming-manager.js';
-import { ContextManager } from './execution/context-manager.js';
-import { PersistenceCoordinator } from './execution/persistence-coordinator.js';
-import { TurnEmitter } from './execution/turn-emitter.js';
-import { CognitivePipelineHandler } from './execution/cognitive-pipeline-handler.js';
-import { classifyError } from './errors/classifier.js';
+import { getHealthTracker } from '../provider-health-tracker.js';
+import { executeBatchPhase } from './pipeline/batch-phase.ts';
+import { executeMappingPhase } from './pipeline/mapping-phase.ts';
+import { executeSingularityPhase } from './pipeline/singularity-phase.ts';
+import { handleRecompute } from './pipeline/recompute-handler.ts';
+import { StreamingManager } from './io/streaming-manager.ts';
+import { ContextManager } from './io/context-manager.ts';
+import { PersistenceCoordinator } from './io/persistence-coordinator.ts';
+import { TurnEmitter } from './io/turn-emitter.ts';
+import { classifyError } from '../errors/classifier.js';
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
@@ -20,33 +22,26 @@ export class WorkflowEngine {
     this.healthTracker = getHealthTracker();
 
     // Components
-    this.stepExecutor = new StepExecutor(orchestrator, this.healthTracker);
     this.streamingManager = new StreamingManager(port);
     this.contextManager = new ContextManager(sessionManager);
     this.persistenceCoordinator = new PersistenceCoordinator(sessionManager);
     this.turnEmitter = new TurnEmitter(port);
-    this.cognitiveHandler = new CognitivePipelineHandler(
-      port,
-      this.persistenceCoordinator,
-      sessionManager
-    );
+    this._inflightContinuations = new Map();
 
     // Executor mapping - FOUNDATION ONLY
     // Singularity/Concierge steps are handled via handleContinueCognitiveRequest
     this._executors = {
-      prompt: (step, ctx, _results, _wfCtx, _resolved, opts) =>
-        this.stepExecutor.executePromptStep(step, ctx, opts),
+      prompt: (step, ctx, _results, _wfCtx, _resolved, opts) => executeBatchPhase(step, ctx, opts),
       mapping: (step, ctx, results, wfCtx, _resolved, opts) =>
-        this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, opts),
-      singularity: (step, ctx, results, _wfCtx, resolved, _opts) =>
-        this.cognitiveHandler.orchestrateSingularityPhase(
+        executeMappingPhase(step, ctx, results, wfCtx, opts),
+      singularity: (step, ctx, results, _wfCtx, resolved, options) =>
+        executeSingularityPhase(
           this.currentRequest || {},
           ctx,
           results,
           resolved,
           this.currentUserMessage || ctx?.userMessage || '',
-          this.stepExecutor,
-          this.streamingManager
+          options
         ),
     };
 
@@ -305,9 +300,12 @@ export class WorkflowEngine {
 
   _buildOptionsForStep(stepType) {
     const baseOptions = {
+      port: this.port,
       streamingManager: this.streamingManager,
       persistenceCoordinator: this.persistenceCoordinator,
       sessionManager: this.sessionManager,
+      orchestrator: this.orchestrator,
+      healthTracker: this.healthTracker,
     };
 
     if (stepType === 'mapping') {
@@ -611,11 +609,15 @@ export class WorkflowEngine {
   }
 
   async handleContinueCognitiveRequest(payload) {
-    return this.cognitiveHandler.handleContinueRequest(
-      payload,
-      this.stepExecutor,
-      this.streamingManager,
-      this.contextManager
-    );
+    return handleRecompute(payload, {
+      port: this.port,
+      streamingManager: this.streamingManager,
+      persistenceCoordinator: this.persistenceCoordinator,
+      sessionManager: this.sessionManager,
+      contextManager: this.contextManager,
+      orchestrator: this.orchestrator,
+      healthTracker: this.healthTracker,
+      inflightContinuations: this._inflightContinuations,
+    });
   }
 }

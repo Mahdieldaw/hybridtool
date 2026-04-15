@@ -1,5 +1,5 @@
-import { DEFAULT_THREAD } from '../../../shared/messaging.js';
-import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings';
+import { DEFAULT_THREAD } from '../../../../shared/messaging.js';
+import { cleanupPendingEmbeddingsBuffers } from '../../../clustering/embeddings.js';
 
 interface Statement {
   id: string;

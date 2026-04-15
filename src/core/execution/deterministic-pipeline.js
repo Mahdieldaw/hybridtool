@@ -104,7 +104,7 @@ export async function computeDerivedFields({
           result.basinInversion = geoRecord.meta.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
           const { computeBasinInversion } =
-            await import('../../../src/geometry/algorithms/basin-inversion-bayesian');
+            await import('../../geometry/algorithms/basin-inversion-bayesian');
           const dims = geoRecord.meta.dimensions || 384;
           const paraIds = geoRecord.meta.paragraphIndex;
           const view = new Float32Array(geoRecord.paragraphEmbeddings);
@@ -527,7 +527,7 @@ export async function computePreSurveyPipeline({
     const { buildGeometricSubstrate } = await import('../../geometry/measure');
     const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
     const { computeBasinInversion } =
-      await import('../../../src/geometry/algorithms/basin-inversion-bayesian');
+      await import('../../geometry/algorithms/basin-inversion-bayesian');
 
     const paraVectors = Array.from(paragraphEmbeddings.values());
     const paraIds = Array.from(paragraphEmbeddings.keys());
@@ -685,7 +685,7 @@ export async function computePreSurveyPipeline({
     } else if (paragraphEmbeddings?.size > 0) {
       try {
         const { computeBasinInversionBayesian: _bayesian } =
-          await import('../../../src/geometry/algorithms/basin-inversion-bayesian');
+          await import('../../geometry/algorithms/basin-inversion-bayesian');
         const _paraIds = Array.from(paragraphEmbeddings.keys());
         const _paraVecs = _paraIds.map((id) => paragraphEmbeddings.get(id));
         derived.bayesianBasinInversion = _bayesian(_paraIds, _paraVecs);

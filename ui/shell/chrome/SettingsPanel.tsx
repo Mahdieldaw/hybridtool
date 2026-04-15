@@ -63,7 +63,7 @@ export default function SettingsPanel() {
           <button
             onClick={handleRefresh}
             title="Check Login Status"
-            className={`p-2 bg-none border-none cursor-pointer rounded transition-all duration-300 text-lg ${isRefreshing ? 'text-brand-500 animate-spin' : 'text-text-muted'
+            className={`p-2 bg-none border-none cursor-pointer rounded transition-all duration-300 text-lg ${isRefreshing ? `text-brand-500 ${!isReducedMotion ? 'animate-spin' : ''}` : 'text-text-muted'
               }`}
           >
             ↻

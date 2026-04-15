@@ -13,7 +13,7 @@ import { useChat } from '../../hooks/chat/useChat';
 import api from '../../services/extension-api';
 import { normalizeBackendRoundsToTurns } from '../../utils/turn-helpers';
 import { formatSessionForMarkdown, sanitizeSessionForExport } from '../../utils/copy-format-utils';
-import logoIcon from '../assets/brand/logo-icon.png';
+import logoIcon from '../../assets/brand/logo-icon.png';
 import { PlusIcon, TrashIcon, EllipsisHorizontalIcon, ChevronRightIcon } from '../../shared/Icons';
 import { HistorySessionSummary } from '../../types';
 

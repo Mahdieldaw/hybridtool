@@ -1,5 +1,5 @@
 import { EXAMPLE_PROMPT } from '../../constants';
-import logoIcon from '../assets/brand/logo-icon.png';
+import logoIcon from '../../assets/brand/logo-icon.png';
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
   isLoading?: boolean;

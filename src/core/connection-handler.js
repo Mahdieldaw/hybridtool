@@ -1,6 +1,6 @@
 // src/core/connection-handler.js
 
-import { WorkflowEngine } from './workflow-engine.js';
+import { WorkflowEngine } from './execution/workflow-engine.js';
 import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
 import { authManager } from './auth-manager.js';
 import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging.js';

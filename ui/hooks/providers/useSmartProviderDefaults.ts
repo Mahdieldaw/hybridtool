@@ -7,7 +7,7 @@ import {
   providerLocksAtom,
 } from '../../state';
 import { selectBestProvider, isProviderAuthorized } from '@shared/provider-config';
-import { getProviderLocks, subscribeToLockChanges } from 'src/shared/provider-locks';
+import { getProviderLocks, subscribeToLockChanges } from "../../../src/shared/provider-locks";
 
 // Reusable hook for auto-selecting providers
 const useAutoSelectProvider = (
