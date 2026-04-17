@@ -194,6 +194,7 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
       });
 
       const isBgeBase = modelId === 'bge-base-en-v1.5';
+      const isMiniLM = modelId === 'all-MiniLM-L6-v2';
       const bgeConfig = {
         architectures: ['BertModel'],
         attention_probs_dropout_prob: 0.1,
@@ -213,6 +214,25 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
         use_cache: true,
         vocab_size: 30522,
       };
+      const miniLMConfig = {
+        architectures: ['BertModel'],
+        attention_probs_dropout_prob: 0.1,
+        hidden_act: 'gelu',
+        hidden_dropout_prob: 0.1,
+        hidden_size: 384,
+        initializer_range: 0.02,
+        intermediate_size: 1536,
+        layer_norm_eps: 1e-12,
+        max_position_embeddings: 512,
+        model_type: 'bert',
+        num_attention_heads: 12,
+        num_hidden_layers: 6,
+        pad_token_id: 0,
+        position_embedding_type: 'absolute',
+        type_vocab_size: 2,
+        use_cache: true,
+        vocab_size: 30522,
+      };
 
       let model;
       const hasWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
@@ -224,11 +244,18 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
             local_files_only: true,
             subfolder: 'onnx',
           }
-        : {
-            dtype: 'q4f16',
-            local_files_only: true,
-            subfolder: 'onnx',
-          };
+        : isMiniLM
+          ? {
+              dtype: 'q4f16',
+              config: miniLMConfig,
+              local_files_only: true,
+              subfolder: 'onnx',
+            }
+          : {
+              dtype: 'q4f16',
+              local_files_only: true,
+              subfolder: 'onnx',
+            };
 
       const optsForDevice = (device) => {
         const base = { ...pipelineOptions, device };

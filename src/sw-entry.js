@@ -790,12 +790,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
       // Delegates to doRegenerateEmbeddings() which handles dedup + full pipeline.
       case 'REGENERATE_EMBEDDINGS':
         (async () => {
-          const { aiTurnId, providerId } = message.payload || {};
+          const { aiTurnId, providerId, embeddingModelId } = message.payload || {};
           if (!aiTurnId || !providerId) {
             sendResponse({ success: false, error: 'Missing aiTurnId or providerId' });
             return;
           }
-          const result = await doRegenerateEmbeddings(aiTurnId, providerId, sm);
+          const result = await doRegenerateEmbeddings(aiTurnId, providerId, sm, embeddingModelId);
           sendResponse(result);
         })().catch((e) => {
           console.error('[Regenerate] Failed:', e);
@@ -915,7 +915,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const geoRecord = await sm.loadEmbeddings(aiTurnId);
           const { unpackEmbeddingMap } = await import('./persistence/embedding-codec.js');
           const { generateTextEmbeddings, structuredTruncate } = await import('./clustering');
-          const { DEFAULT_CONFIG } = await import('./clustering');
+          const { getConfigForModel } = await import('./clustering/config.js');
           const { searchCorpus } = await import('./clustering/corpus-search.js');
 
           const turnRaw = await sm.adapter.get('turns', aiTurnId);
@@ -1077,12 +1077,14 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             return;
           }
 
-          // Embed the query
+          // Embed the query using the same model that was used for the corpus
+          const corpusModelId = geoRecord?.meta?.embeddingModelId || 'bge-base-en-v1.5';
+          const corpusEmbeddingConfig = getConfigForModel(corpusModelId);
           const truncated = structuredTruncate(queryText.trim(), 1200);
           const prefixed = truncated.toLowerCase().startsWith('represent this sentence')
             ? truncated
             : `Represent this sentence for searching relevant passages: ${truncated}`;
-          const queryBatch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG);
+          const queryBatch = await generateTextEmbeddings([prefixed], corpusEmbeddingConfig);
           const queryEmbedding = queryBatch.embeddings.get('0');
           if (!queryEmbedding) {
             sendResponse({ success: false, error: 'Query embedding failed' });
@@ -1506,10 +1508,11 @@ const regenInflight = new Map(); // "turnId::providerId" → Promise<result>
  * Returns { success: true, data: { artifact, claimCount, edgeCount } }
  * or { success: false, error: string }.
  */
-function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
+function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
+  const resolvedModelId = requestedModelId || 'bge-base-en-v1.5';
   const cacheKey = `${aiTurnId}::${String(providerId || '')
     .trim()
-    .toLowerCase()}`;
+    .toLowerCase()}::${resolvedModelId}`;
 
   if (regenInflight.has(cacheKey)) return regenInflight.get(cacheKey);
 
@@ -1529,11 +1532,12 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       generateTextEmbeddings,
       stripInlineMarkdown,
       structuredTruncate,
-      DEFAULT_CONFIG,
     } = await import('./clustering');
+    const { getConfigForModel } = await import('./clustering/config.js');
     const { packEmbeddingMap, unpackEmbeddingMap } =
       await import('./persistence/embedding-codec.js');
-    const dims = DEFAULT_CONFIG.embeddingDimensions;
+    const embeddingConfig = getConfigForModel(resolvedModelId);
+    const dims = embeddingConfig.embeddingDimensions;
 
     // ── Load query text (shared) ──
     const userTurnId = turnRaw.userTurnId;
@@ -1670,11 +1674,15 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       cachedParaIds.size !== currentParaIds.size ||
       [...currentParaIds].some((id) => !cachedParaIds.has(id));
 
-    if (stmtIdMismatch || paraIdMismatch) {
+    const cachedModelId = geoRecord?.meta?.embeddingModelId || 'bge-base-en-v1.5';
+    const modelMismatch = cachedModelId !== resolvedModelId;
+
+    if (stmtIdMismatch || paraIdMismatch || modelMismatch) {
       console.log(
         `[Regenerate] Embedding cache stale:`,
         stmtIdMismatch ? `stmts ${cachedStmtIds.size}→${currentStmtIds.size}` : '',
-        paraIdMismatch ? `paras ${cachedParaIds.size}→${currentParaIds.size}` : ''
+        paraIdMismatch ? `paras ${cachedParaIds.size}→${currentParaIds.size}` : '',
+        modelMismatch ? `model ${cachedModelId}→${resolvedModelId}` : ''
       );
     }
 
@@ -1684,14 +1692,15 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
       (geoRecord.meta?.paragraphCount === 0 && shadowParagraphs.length > 0) ||
       geoRecord.meta?.embeddingVersion !== 2 ||
       stmtIdMismatch ||
-      paraIdMismatch;
+      paraIdMismatch ||
+      modelMismatch;
 
     if (needsRegeneration) {
-      const stmtResult = await generateStatementEmbeddings(shadowStatements, DEFAULT_CONFIG);
+      const stmtResult = await generateStatementEmbeddings(shadowStatements, embeddingConfig);
       const paraResult = await generateEmbeddings(
         shadowParagraphs,
         shadowStatements,
-        DEFAULT_CONFIG
+        embeddingConfig
       );
 
       let queryEmbedding = null;
@@ -1703,7 +1712,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
             ? `Represent this sentence for searching relevant passages: ${truncated}`
             : truncated;
         if (prefixed) {
-          const batch = await generateTextEmbeddings([prefixed], DEFAULT_CONFIG);
+          const batch = await generateTextEmbeddings([prefixed], embeddingConfig);
           queryEmbedding = batch.embeddings.get('0') || null;
         }
       }
@@ -1722,7 +1731,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm) {
         paragraphEmbeddings: packedParagraphs.buffer,
         queryEmbedding: queryBuffer,
         meta: {
-          embeddingModelId: DEFAULT_CONFIG.modelId,
+          embeddingModelId: resolvedModelId,
           dimensions: dims,
           hasQuery: Boolean(queryEmbedding),
           statementCount: packedStatements.index.length,

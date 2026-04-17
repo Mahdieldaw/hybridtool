@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Configuration
-export { type EmbeddingConfig, DEFAULT_CONFIG } from './config';
+export { type EmbeddingConfig, type EmbeddingModelEntry, DEFAULT_CONFIG, EMBEDDING_MODELS, getConfigForModel } from './config';
 
 // Similarity utilities
 export { cosineSimilarity } from './distance';

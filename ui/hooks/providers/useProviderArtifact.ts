@@ -8,8 +8,8 @@
  */
 
 import { useCallback, useRef } from 'react';
-import { useAtom } from 'jotai';
-import { providerArtifactFamily } from '../../state';
+import { useAtom, useAtomValue } from 'jotai';
+import { providerArtifactFamily, embeddingModelIdAtom } from '../../state';
 
 export function useProviderArtifact(
   turnId: string | undefined | null,
@@ -21,6 +21,7 @@ export function useProviderArtifact(
   };
   const [artifact, setArtifact] = useAtom(providerArtifactFamily(key));
   const inflightRef = useRef<string | null>(null);
+  const embeddingModelId = useAtomValue(embeddingModelIdAtom);
 
   const rebuild = useCallback(() => {
     if (!turnId || !providerId) return;
@@ -32,7 +33,7 @@ export function useProviderArtifact(
     chrome.runtime.sendMessage(
       {
         type: 'REGENERATE_EMBEDDINGS',
-        payload: { aiTurnId: turnId, providerId },
+        payload: { aiTurnId: turnId, providerId, embeddingModelId },
       },
       (response: any) => {
         if (inflightRef.current !== cacheKey) return; // stale
@@ -46,7 +47,7 @@ export function useProviderArtifact(
         }
       }
     );
-  }, [turnId, providerId, setArtifact]);
+  }, [turnId, providerId, embeddingModelId, setArtifact]);
 
   return { artifact, setArtifact, rebuild, isReady: !!artifact };
 }

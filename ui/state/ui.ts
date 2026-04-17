@@ -61,6 +61,7 @@ export const powerUserModeAtom = atomWithStorage<boolean>('htos_power_user_mode'
 export const thinkOnChatGPTAtom = atomWithStorage<boolean>('htos_think_chatgpt', false);
 export const isVisibleModeAtom = atomWithStorage<boolean>('htos_visible_mode', true);
 export const isReducedMotionAtom = atomWithStorage<boolean>('htos_reduced_motion', false);
+export const embeddingModelIdAtom = atomWithStorage<string>('htos_embedding_model', 'bge-base-en-v1.5');
 
 export const chatInputValueAtom = atomWithStorage<string>('htos_chat_input_value', '', undefined, {
   getOnInit: true,
