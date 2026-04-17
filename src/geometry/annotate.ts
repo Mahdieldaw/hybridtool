@@ -10,7 +10,7 @@
 
 import type { ShadowStatement } from '../shadow/shadow-extractor';
 import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
-import type { GeometricSubstrate, NodeLocalStats, MeasuredRegion } from './types';
+import type { GeometricSubstrate, NodeLocalStats, SubstrateInterpretation } from './types';
 import { cosineSimilarity } from '../clustering/distance';
 
 // ─── Enrichment types ─────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ export function enrichStatementsWithGeometry(
   statements: ShadowStatement[],
   paragraphs: ShadowParagraph[],
   substrate: GeometricSubstrate,
-  regions: MeasuredRegion[]
+  interpretation?: SubstrateInterpretation | null
 ): EnrichmentResult {
   const statementToParagraph = new Map<string, string>();
   for (const para of paragraphs) {
@@ -69,13 +69,6 @@ export function enrichStatementsWithGeometry(
   const paragraphToNode = new Map<string, NodeLocalStats>();
   for (const node of substrate.nodes) {
     paragraphToNode.set(node.paragraphId, node);
-  }
-
-  const paragraphToRegion = new Map<string, string>();
-  for (const region of regions) {
-    for (const nodeId of region.nodeIds) {
-      paragraphToRegion.set(nodeId, region.id);
-    }
   }
 
   const failures: EnrichmentResult['failures'] = [];
@@ -94,11 +87,12 @@ export function enrichStatementsWithGeometry(
       continue;
     }
 
-    const regionId = paragraphToRegion.get(paragraphId) ?? null;
+    const annotation = interpretation?.nodeAnnotations?.get(paragraphId);
 
     stmt.geometricCoordinates = {
       paragraphId,
-      regionId,
+      regionId: annotation?.regionId ?? null,
+      basinId: annotation?.basinId ?? null,
       isolationScore: node.isolationScore,
     };
 
@@ -173,12 +167,12 @@ export function annotateStatements(input: {
   statements: ShadowStatement[];
   paragraphs: ShadowParagraph[];
   substrate: GeometricSubstrate;
-  regions: MeasuredRegion[];
+  interpretation?: SubstrateInterpretation | null;
   queryEmbedding?: Float32Array | null;
   statementEmbeddings?: Map<string, Float32Array> | null;
   paragraphEmbeddings?: Map<string, Float32Array> | null;
 }): { queryRelevance: QueryRelevanceResult | null } {
-  enrichStatementsWithGeometry(input.statements, input.paragraphs, input.substrate, input.regions);
+  enrichStatementsWithGeometry(input.statements, input.paragraphs, input.substrate, input.interpretation);
 
   let queryRelevance: QueryRelevanceResult | null = null;
   if (input.queryEmbedding) {

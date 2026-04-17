@@ -224,31 +224,12 @@ export async function buildGeometryAsync(
       return results;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Basin Inversion (Topographic Analysis)
-    // ─────────────────────────────────────────────────────────────────────────
-    try {
-      const { computeBasinInversion } =
-        await import('../../../geometry/algorithms/basin-inversion-bayesian.js');
-      const paraIds = Array.from(results.geometryParagraphEmbeddings.keys());
-      const paraVectors = paraIds.map((id) => results.geometryParagraphEmbeddings.get(id));
-      results.basinInversionResult = computeBasinInversion(paraIds, paraVectors);
-      console.log(
-        `[buildGeometryAsync] Basin inversion complete: ${results.basinInversionResult.basinCount} basins found`
-      );
-    } catch (err) {
-      console.warn(`[buildGeometryAsync] Basin inversion failed:`, getErrorMessage(err));
-    }
-
-    results.bayesianBasinInversionResult = results.basinInversionResult;
-
     results.substrate = buildGeometricSubstrate(
       paragraphResult.paragraphs,
       results.geometryParagraphEmbeddings,
-      embeddingBackend,
-      undefined, // config
-      results.basinInversionResult // Pass topography to substrate
+      embeddingBackend
     );
+
     geometryDiagnostics.stages.substrate = {
       status: 'ok',
       embeddingBackend,
@@ -324,11 +305,11 @@ export async function buildGeometryAsync(
       if (!results.substrateDegenerate && typeof buildPreSemanticInterpretation === 'function') {
         results.preSemanticInterpretation = buildPreSemanticInterpretation(
           results.substrate,
-          paragraphResult.paragraphs,
-          results.geometryParagraphEmbeddings,
-          undefined,
-          results.basinInversionResult
+          results.geometryParagraphEmbeddings
         );
+        // Basin inversion is now computed inside interpret — read from result
+        results.basinInversionResult = results.preSemanticInterpretation?.basinInversion ?? null;
+        results.bayesianBasinInversionResult = results.basinInversionResult;
       } else {
         results.preSemanticInterpretation = null;
       }

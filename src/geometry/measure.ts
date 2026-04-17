@@ -266,8 +266,7 @@ export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGr
 
 export function computeNodeStats(
   paragraphs: ShadowParagraph[],
-  mutualRankGraph: MutualRankGraph,
-  basinInversionResult?: any
+  mutualRankGraph: MutualRankGraph
 ): NodeLocalStats[] {
   const nodes: NodeLocalStats[] = [];
 
@@ -287,7 +286,6 @@ export function computeNodeStats(
       isolationScore: isolated ? 1 : 0,
       mutualNeighborhoodPatch: patch,
       mutualRankDegree,
-      basinId: basinInversionResult?.basinByNodeId?.[id] ?? undefined,
     });
   }
 
@@ -406,8 +404,7 @@ export function measureSubstrate(
   paragraphs: ShadowParagraph[],
   embeddings: Map<string, Float32Array> | null,
   embeddingBackend: 'webgpu' | 'wasm' | 'none' = 'wasm',
-  config: SubstrateConfig = DEFAULT_SUBSTRATE_CONFIG,
-  basinInversionResult?: any
+  config: SubstrateConfig = DEFAULT_SUBSTRATE_CONFIG
 ): GeometricSubstrate | DegenerateSubstrate {
   const startTime = performance.now();
   const n = paragraphs.length;
@@ -448,8 +445,8 @@ export function measureSubstrate(
   // Phase 2 — Mutual recognition graph
   const graph = buildMutualRankGraph(field);
 
-  // Phase 3 — Node stats
-  const nodes = computeNodeStats(paragraphs, graph, basinInversionResult);
+  // Phase 3 — Node stats (basin IDs are annotated post-construction via annotateSubstrateBasins)
+  const nodes = computeNodeStats(paragraphs, graph);
 
   // Phase 4 — Health (reads already-computed values only, no re-traversal)
   const health = deriveHealth(field, graph, n);

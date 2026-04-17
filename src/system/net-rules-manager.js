@@ -547,7 +547,7 @@ const ArkoseController = {
   /**
    * Remove all AE header rules for arkose provider
    */
-  removeAllAEHeaderRules() {
+  async removeAllAEHeaderRules() {
     // Capture the IDs DNRUtils is tracking for 'arkose' BEFORE removal,
     // so we can sync NetRulesManager._rules after DNRUtils clears its own state.
     const arkoseIds = new Set([
@@ -555,17 +555,19 @@ const ArkoseController = {
       ...(DNRUtils.sessionRules?.get('arkose') ?? []),
     ]);
 
-    DNRUtils.removeProviderRules('arkose').then(() => {
+    try {
+      await DNRUtils.removeProviderRules('arkose');
       // Sync removal from NetRulesManager tracking (matches what removeAEHeaderRule does per-ID)
       if (arkoseIds.size > 0) {
         NetRulesManager._rules = NetRulesManager._rules.filter((r) => !arkoseIds.has(r.id));
       }
-
       console.debug('ArkoseController: Removed all AE header rules');
-    }).catch(error => {
+    } catch (error) {
       console.error('ArkoseController: Failed to remove all AE header rules:', error);
-    });
+      throw error;
+    }
   },
+};
 
 // =============================================================================
 // EXPORT

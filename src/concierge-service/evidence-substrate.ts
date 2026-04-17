@@ -14,6 +14,32 @@ import type {
   PipelineShadowParagraph,
   CognitiveArtifact,
 } from '../../shared/types';
+import type { IndexedPassage, IndexedUnclaimedGroup } from './editorial-mapper';
+
+// ─────────────────────────────────────────────────────────────────────────
+// Lookup cache (built once from passage index, reused by substrate builder)
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface EvidenceSubstrateLookupCache {
+  passages: Map<string, { text: string; modelName: string; claimLabel: string }>;
+  unclaimed: Map<string, { text: string; claimLabel: string }>;
+}
+
+export function buildLookupCacheFromIndex(
+  passages: IndexedPassage[],
+  unclaimed: IndexedUnclaimedGroup[]
+): EvidenceSubstrateLookupCache {
+  const passageMap = new Map<string, { text: string; modelName: string; claimLabel: string }>();
+  for (const p of passages) {
+    passageMap.set(p.passageKey, { text: p.text, modelName: p.modelName, claimLabel: p.claimLabel });
+  }
+  const unclaimedMap = new Map<string, { text: string; claimLabel: string }>();
+  for (const u of unclaimed) {
+    const text = u.paragraphs.flatMap((p) => p.unclaimedStatementTexts).join('\n\n');
+    unclaimedMap.set(u.groupKey, { text, claimLabel: u.nearestClaimId });
+  }
+  return { passages: passageMap, unclaimed: unclaimedMap };
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Resolve a single editorial item ID → text
@@ -120,6 +146,24 @@ function buildResolver(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Fast-path resolver: uses pre-built lookup cache
+// ─────────────────────────────────────────────────────────────────────────
+
+function resolveFromCache(
+  itemId: string,
+  cache: EvidenceSubstrateLookupCache
+): PassageResolution | null {
+  if (itemId.startsWith('unclaimed:')) {
+    const entry = cache.unclaimed.get(itemId);
+    if (!entry) return null;
+    return { text: entry.text, modelName: 'unclaimed', claimLabel: entry.claimLabel };
+  }
+  const entry = cache.passages.get(itemId);
+  if (!entry) return null;
+  return { text: entry.text, modelName: entry.modelName, claimLabel: entry.claimLabel };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Format editorial threads as readable text
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -183,14 +227,18 @@ function formatEditorialThreads(
 export function buildEvidenceSubstrate(
   artifact: CognitiveArtifact | null,
   mappingText: string,
-  citationSourceOrder: Record<string | number, string>
+  citationSourceOrder: Record<string | number, string>,
+  options?: { lookupCache?: EvidenceSubstrateLookupCache }
 ): string {
   const sections: string[] = [];
 
   // 1. Editorial threads (arranged batch text)
   const editorialAST = (artifact as any)?.editorialAST as EditorialAST | undefined;
   if (editorialAST?.threads?.length && artifact) {
-    const resolve = buildResolver(artifact, citationSourceOrder);
+    const cache = options?.lookupCache ?? (artifact as any)?._editorialLookupCache as EvidenceSubstrateLookupCache | undefined;
+    const resolve = cache
+      ? (id: string) => resolveFromCache(id, cache)
+      : buildResolver(artifact, citationSourceOrder);
     const editorialText = formatEditorialThreads(editorialAST, resolve);
     if (editorialText) {
       sections.push('=== EDITORIAL THREADS ===\n' + editorialText);

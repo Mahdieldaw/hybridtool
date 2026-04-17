@@ -18,30 +18,33 @@
 // INVERSION TEST: L1. No semantic context crosses this boundary.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
+
 import type {
   GeometricSubstrate,
   NodeLocalStats,
   MeasuredRegion,
   SubstrateInterpretation,
   RegionizationMeta,
-  RegionSource,
   PipelineGateResult,
   PeripheryResult,
+  BasinNodeProfile,
+  NodeStructuralProfile,
 } from './types';
 import { isDegenerate } from './types';
 import { cosineSimilarity } from '../clustering/distance';
 import { computeGapRegionalization } from './algorithms/gap-regionalization';
+import { computeBasinInversion } from './algorithms/basin-inversion-bayesian';
 
 export type {
   SubstrateInterpretation,
   MeasuredRegion,
-  RegionSource,
   RegionizationMeta,
   CorpusMode,
   PeripheryResult,
   PipelineGateResult,
   GateVerdict,
+  BasinNodeProfile,
+  NodeStructuralProfile,
 } from './types';
 
 // ─── Gate constants ───────────────────────────────────────────────────────────
@@ -130,21 +133,7 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
   return { verdict: 'proceed', confidence: proceedConfidence, evidence, measurements };
 }
 
-// ─── Step 2: Source selection ─────────────────────────────────────────────────
 
-function selectRegionSource(basinInversionResult?: any, gapResult?: any): RegionSource {
-  if (gapResult && Array.isArray(gapResult.regions) && gapResult.regions.length > 0) {
-    return 'gap';
-  }
-  if (
-    basinInversionResult?.status === 'ok' &&
-    Array.isArray(basinInversionResult.basins) &&
-    basinInversionResult.basins.length > 1
-  ) {
-    return 'basin';
-  }
-  return 'none';
-}
 
 // ─── Step 3A: Raw topology index ─────────────────────────────────────────────
 
@@ -158,7 +147,7 @@ interface TopologyIndex {
 
 function buildTopologyIndex(
   substrate: GeometricSubstrate,
-  basinInversionResult?: any,
+  basinInversion?: any,
   gapResult?: any
 ): TopologyIndex {
   const nodeToBasin = new Map<string, number>();
@@ -168,8 +157,8 @@ function buildTopologyIndex(
   const nodeNeighborhood = new Map<string, string[]>();
 
   // Basin index
-  if (basinInversionResult?.status === 'ok' && Array.isArray(basinInversionResult.basins)) {
-    for (const basin of basinInversionResult.basins) {
+  if (basinInversion?.status === 'ok' && Array.isArray(basinInversion.basins)) {
+    for (const basin of basinInversion.basins) {
       for (const nodeId of basin.nodeIds) {
         nodeToBasin.set(nodeId, basin.basinId);
       }
@@ -233,16 +222,14 @@ function unionStatementIdsStable(
 }
 
 function collectRegionIdentities(
-  source: RegionSource,
   substrate: GeometricSubstrate,
-  basinInversionResult?: any,
   gapResult?: any
 ): RawRegionIdentity[] {
   const nodesById = new Map(substrate.nodes.map((n) => [n.paragraphId, n]));
   const identities: RawRegionIdentity[] = [];
   let idx = 0;
 
-  if (source === 'gap' && gapResult && Array.isArray(gapResult.regions)) {
+  if (gapResult && Array.isArray(gapResult.regions)) {
     for (const gr of gapResult.regions) {
       const nodeIds: string[] = [...gr.allNodeIds];
       const modelIndices: number[] = [];
@@ -259,24 +246,8 @@ function collectRegionIdentities(
         sourceId: `gap_${gr.id}`,
       });
     }
-  } else if (source === 'basin' && basinInversionResult?.status === 'ok') {
-    for (const basin of basinInversionResult.basins) {
-      const nodeIds: string[] = [...basin.nodeIds];
-      const modelIndices: number[] = [];
-      for (const nodeId of nodeIds) {
-        const node = nodesById.get(nodeId);
-        if (node) modelIndices.push(node.modelIndex);
-      }
-      identities.push({
-        id: `r_${idx++}`,
-        kind: 'basin',
-        nodeIds,
-        statementIds: unionStatementIdsStable(nodeIds, nodesById),
-        modelIndices: uniqueSorted(modelIndices),
-        sourceId: `basin_${basin.basinId}`,
-      });
-    }
   }
+  // Basin-sourced region construction removed — regions are always from gap.
 
   // Sort: gaps first, then by nodeCount descending, tiebreak lexicographic on id
   identities.sort((a, b) => {
@@ -573,14 +544,14 @@ export function identifyPeriphery(
 }
 
 function deriveCorpusMode(
-  basinInversionResult: any,
+  basinInversion: any,
   topologyIndex: TopologyIndex,
   _totalNodes: number
 ): Pick<
   SubstrateInterpretation,
   'corpusMode' | 'peripheralNodeIds' | 'peripheralRatio' | 'largestBasinRatio' | 'basinByNodeId'
 > {
-  const periphery = identifyPeriphery(basinInversionResult, {
+  const periphery = identifyPeriphery(basinInversion, {
     nodeToGap: topologyIndex.nodeToGap,
     gapSizes: topologyIndex.gapSizes,
   });
@@ -594,19 +565,140 @@ function deriveCorpusMode(
   };
 }
 
+// ─── Basin node profiles ──────────────────────────────────────────────────────
+
+function buildBasinNodeProfiles(
+  substrate: GeometricSubstrate,
+  basinInversion: any
+): Map<string, BasinNodeProfile> {
+  const profiles = new Map<string, BasinNodeProfile>();
+
+  if (!basinInversion || basinInversion.status !== 'ok' || !basinInversion.basins?.length) {
+    for (const node of substrate.nodes) {
+      profiles.set(node.paragraphId, {
+        basinId: null,
+        intraBasinSimilarity: 0,
+        interBasinSimilarity: 0,
+        separationDelta: 0,
+      });
+    }
+    return profiles;
+  }
+
+  const nodeBasin = new Map<string, number>();
+  for (const basin of basinInversion.basins) {
+    for (const nodeId of basin.nodeIds) {
+      nodeBasin.set(nodeId, basin.basinId);
+    }
+  }
+
+  for (const node of substrate.nodes) {
+    const pid = node.paragraphId;
+    const bid = nodeBasin.get(pid) ?? null;
+
+    if (bid == null) {
+      profiles.set(pid, {
+        basinId: null,
+        intraBasinSimilarity: 0,
+        interBasinSimilarity: 0,
+        separationDelta: 0,
+      });
+      continue;
+    }
+
+    const row = substrate.pairwiseField.matrix.get(pid);
+    if (!row) {
+      profiles.set(pid, {
+        basinId: bid,
+        intraBasinSimilarity: 0,
+        interBasinSimilarity: 0,
+        separationDelta: 0,
+      });
+      continue;
+    }
+
+    let intraSum = 0, intraCount = 0;
+    let interSum = 0, interCount = 0;
+
+    for (const [otherId, sim] of row) {
+      if (otherId === pid) continue;
+      const otherBasin = nodeBasin.get(otherId);
+      if (otherBasin === bid) {
+        intraSum += sim;
+        intraCount++;
+      } else {
+        interSum += sim;
+        interCount++;
+      }
+    }
+
+    const intra = intraCount > 0 ? intraSum / intraCount : 0;
+    const inter = interCount > 0 ? interSum / interCount : 0;
+
+    profiles.set(pid, {
+      basinId: bid,
+      intraBasinSimilarity: intra,
+      interBasinSimilarity: inter,
+      separationDelta: intra - inter,
+    });
+  }
+
+  return profiles;
+}
+
+// ─── Structural profiles ──────────────────────────────────────────────────────
+
+function buildStructuralProfiles(
+  substrate: GeometricSubstrate,
+  gapResult: any,
+  basinNodeProfiles: Map<string, BasinNodeProfile>
+): Map<string, NodeStructuralProfile> {
+  const profiles = new Map<string, NodeStructuralProfile>();
+  const N = substrate.nodes.length;
+  const maxDegree = Math.max(1, N - 1);
+
+  for (const node of substrate.nodes) {
+    const pid = node.paragraphId;
+
+    // Connectivity: mutual rank degree normalized by (N-1)
+    const edges = substrate.mutualRankGraph.adjacency.get(pid);
+    const connectivity = N <= 1 ? 0 : clamp01((edges?.length ?? 0) / maxDegree);
+
+    // Gap strength: upper boundary from NodeGapProfile (local discontinuity)
+    const gapProfile = gapResult?.nodeProfiles?.[pid];
+    const gapStrength = gapProfile?.upperBoundary != null
+      ? clamp01(gapProfile.upperBoundary)
+      : 0;
+
+    // Basin fields from BasinNodeProfile
+    const basinProfile = basinNodeProfiles.get(pid);
+
+    profiles.set(pid, {
+      paragraphId: pid,
+      connectivity,
+      gapStrength,
+      basinId: basinProfile?.basinId ?? null,
+      basinSeparationDelta: basinProfile?.separationDelta ?? 0,
+    });
+  }
+
+  return profiles;
+}
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
 /**
- * Interpret a measured substrate: gate → source selection → collect → populate
+ * Interpret a measured substrate: gate → basin → gap → collect → populate
  * → construct → periphery.
+ *
+ * Basin is computed internally as a parallel structural signal.
+ * Regions are ALWAYS from gap — no selection step.
  *
  * Phase discipline: reads only from substrate + paragraphs. No semantic context
  * crosses this boundary (L1-only).
  */
 export function interpretSubstrate(
   substrate: GeometricSubstrate,
-  paragraphs: ShadowParagraph[],
-  basinInversionResult?: any,
   paragraphEmbeddings?: Map<string, Float32Array> | null
 ): SubstrateInterpretation {
   // Step 1 — Gate (reads substrate.health only)
@@ -619,22 +711,36 @@ export function interpretSubstrate(
     totalNodes: substrate.nodes.length,
   };
 
+  // Compute basin internally — parallel structural signal
+  const basinInversion = gate.verdict !== 'skip_geometry'
+    ? computeBasinInversion(substrate)
+    : null;
+
   if (gate.verdict === 'skip_geometry') {
-    const periphery = identifyPeriphery(basinInversionResult);
+    const periphery = identifyPeriphery(basinInversion);
+    const nodeAnnotations = new Map<string, { basinId: number | null; regionId: string | null }>();
+    for (const node of substrate.nodes) {
+      nodeAnnotations.set(node.paragraphId, { basinId: null, regionId: null });
+    }
+    const basinNodeProfiles = buildBasinNodeProfiles(substrate, basinInversion);
+    const structuralProfiles = buildStructuralProfiles(substrate, null, basinNodeProfiles);
     return {
       gate,
       regions: [],
       regionMeta: emptyMeta,
-      regionSource: 'none',
       corpusMode: periphery.corpusMode,
       peripheralNodeIds: periphery.peripheralNodeIds,
       peripheralRatio: periphery.peripheralRatio,
       largestBasinRatio: periphery.largestBasinRatio,
       basinByNodeId: periphery.basinByNodeId,
+      basinInversion,
+      nodeAnnotations,
+      structuralProfiles,
+      basinNodeProfiles,
     };
   }
 
-  // Compute gap result (side input for source selection)
+  // Compute gap result — regions are ALWAYS from gap
   let gapResult: any = null;
   if (paragraphEmbeddings && paragraphEmbeddings.size > 0) {
     const nodes = substrate.nodes
@@ -645,17 +751,12 @@ export function interpretSubstrate(
     }
   }
 
-  // Step 2 — Source selection (explicit named decision)
-  const regionSource = selectRegionSource(basinInversionResult, gapResult);
-
   // Step 3A — Raw topology index (plain data, no typed objects)
-  const topologyIndex = buildTopologyIndex(substrate, basinInversionResult, gapResult);
+  const topologyIndex = buildTopologyIndex(substrate, basinInversion, gapResult);
 
-  // Step 3B — Region identities (structural, no metrics)
+  // Step 3B — Region identities (structural, no metrics — always from gap)
   const identities = collectRegionIdentities(
-    regionSource,
     substrate,
-    basinInversionResult,
     gapResult
   );
 
@@ -680,16 +781,33 @@ export function interpretSubstrate(
   };
 
   // Step 6 — Corpus mode + periphery (authority: basin topology, not regions)
-  const corpus = deriveCorpusMode(basinInversionResult, topologyIndex, substrate.nodes.length);
+  const corpus = deriveCorpusMode(basinInversion, topologyIndex, substrate.nodes.length);
 
-  void paragraphs;
+  // Build nodeAnnotations — derived map, no substrate mutation
+  const nodeAnnotations = new Map<string, { basinId: number | null; regionId: string | null }>();
+  const regionByNode = new Map<string, string>();
+  for (const r of regions) {
+    for (const nodeId of r.nodeIds) regionByNode.set(nodeId, r.id);
+  }
+  for (const node of substrate.nodes) {
+    const bid = basinInversion?.basinByNodeId?.[node.paragraphId] ?? null;
+    const rid = regionByNode.get(node.paragraphId) ?? null;
+    nodeAnnotations.set(node.paragraphId, { basinId: bid, regionId: rid });
+  }
+
+  // Step 7 — Structural profiles (measurement layer)
+  const basinNodeProfiles = buildBasinNodeProfiles(substrate, basinInversion);
+  const structuralProfiles = buildStructuralProfiles(substrate, gapResult, basinNodeProfiles);
 
   return {
     gate,
     regions,
     regionMeta,
-    regionSource,
     ...corpus,
+    basinInversion,
+    nodeAnnotations,
+    structuralProfiles,
+    basinNodeProfiles,
   };
 }
 
@@ -698,10 +816,8 @@ export function interpretSubstrate(
  */
 export function buildPreSemanticInterpretation(
   substrate: GeometricSubstrate,
-  paragraphs: ShadowParagraph[],
   paragraphEmbeddings?: Map<string, Float32Array> | null,
-  _queryRelevanceBoost?: unknown,
-  basinInversionResult?: any
+  _queryRelevanceBoost?: unknown
 ): SubstrateInterpretation {
-  return interpretSubstrate(substrate, paragraphs, basinInversionResult, paragraphEmbeddings);
+  return interpretSubstrate(substrate, paragraphEmbeddings);
 }

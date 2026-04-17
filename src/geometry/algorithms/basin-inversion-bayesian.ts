@@ -37,6 +37,7 @@ import type {
   BasinInversionBasin,
   BasinInversionResult,
 } from '../../../shared/types';
+import type { MeasuredSubstrate } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -53,19 +54,7 @@ function quantile(sortedAscending: number[], p: number): number | null {
   return sortedAscending[lo] * (1 - w) + sortedAscending[hi] * w;
 }
 
-function meanAndStddev(values: number[]): { mu: number | null; sigma: number | null } {
-  if (values.length === 0) return { mu: null, sigma: null };
-  let sum = 0;
-  for (const v of values) sum += v;
-  const mu = sum / values.length;
-  let varSum = 0;
-  for (const v of values) {
-    const d = v - mu;
-    varSum += d * d;
-  }
-  const sigma = Math.sqrt(varSum / values.length);
-  return { mu, sigma };
-}
+
 
 class UnionFind {
   parent: Int32Array;
@@ -259,17 +248,11 @@ function computeNodeProfile(
 // Main entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function computeBasinInversion(
-  idsIn: string[],
-  vectorsIn: Float32Array[]
-): BasinInversionResult {
+export function computeBasinInversion(substrate: MeasuredSubstrate): BasinInversionResult {
+  const field = substrate.pairwiseField;
   const startMs = Date.now();
 
-  const validPairs = idsIn
-    .map((x, i) => ({ id: String(x || '').trim(), vec: vectorsIn[i] }))
-    .filter((p) => Boolean(p.id) && Boolean(p.vec));
-  const ids = validPairs.map((p) => p.id);
-  const alignedVectors = validPairs.map((p) => p.vec);
+  const ids = Array.from(field.perNode.keys()) as string[];
   const nodeCount = ids.length;
 
   if (nodeCount < 2) {
@@ -305,48 +288,40 @@ export function computeBasinInversion(
     };
   }
 
-  // ── Pairwise cosine similarity ───────────────────────────────────────
+  // ── Read pre-computed pairwise data from field ───────────────────────
+  // No dot-product pass: similarities are read from field.matrix (already
+  // computed by buildPairwiseField). The flat arrays are needed for histogram,
+  // trench depth, and bridge pair iteration — O(n²) Map reads, not O(n²·d).
   const pairCount = (nodeCount * (nodeCount - 1)) / 2;
   const similarities = new Float64Array(pairCount);
   const pairI = new Int32Array(pairCount);
   const pairJ = new Int32Array(pairCount);
 
-  let minS = Infinity;
-  let maxS = -Infinity;
   let k = 0;
   for (let i = 0; i < nodeCount; i++) {
-    const a = alignedVectors[i];
+    const row = field.matrix.get(ids[i]);
     for (let j = i + 1; j < nodeCount; j++) {
-      const b = alignedVectors[j];
-      let dot = 0;
-      const len = Math.min(a.length, b.length);
-      for (let t = 0; t < len; t++) dot += a[t] * b[t];
-      similarities[k] = dot;
+      similarities[k] = row?.get(ids[j]) ?? 0;
       pairI[k] = i;
       pairJ[k] = j;
-      if (dot < minS) minS = dot;
-      if (dot > maxS) maxS = dot;
       k++;
     }
   }
 
-  // Symmetric lookup matrix
-  const simMatrix = new Float64Array(nodeCount * nodeCount);
-  for (let p = 0; p < pairCount; p++) {
-    simMatrix[pairI[p] * nodeCount + pairJ[p]] = similarities[p];
-    simMatrix[pairJ[p] * nodeCount + pairI[p]] = similarities[p];
-  }
-  const pairLookup = (i: number, j: number): number => simMatrix[i * nodeCount + j];
+  // pairLookup via Map — no simMatrix allocation needed
+  const pairLookup = (i: number, j: number): number =>
+    field.matrix.get(ids[i])?.get(ids[j]) ?? 0;
 
-  // ── Global statistics (output compatibility) ─────────────────────────
-  const simArray = Array.from(similarities);
-  const { mu, sigma } = meanAndStddev(simArray);
-  const sorted = simArray.slice().sort((a, b) => a - b);
-  const p10 = quantile(sorted, 0.1);
-  const p90 = quantile(sorted, 0.9);
-  const discriminationRange = p10 != null && p90 != null ? p90 - p10 : null;
-  const T_low = mu != null && sigma != null ? mu - sigma : null;
-  const T_high = mu != null && sigma != null ? mu + sigma : null;
+  // ── Global statistics from pre-computed field ─────────────────────────
+  const mu: number | null = field.stats.mean;
+  const sigma: number | null = field.stats.stddev;
+  const p10: number | null = field.stats.p10;
+  const p90: number | null = field.stats.p90;
+  const minS = field.stats.min;
+  const maxS = field.stats.max;
+  const discriminationRange: number | null = field.stats.discriminationRange;
+  const T_low = mu !== null && sigma !== null ? mu - sigma : null;
+  const T_high = mu !== null && sigma !== null ? mu + sigma : null;
 
   // Histogram
   const binCount = Math.max(1, Math.ceil(Math.sqrt(pairCount)));

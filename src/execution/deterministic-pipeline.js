@@ -95,24 +95,33 @@ export async function computeDerivedFields({
         }
       }
     })(),
-    // ── Basin inversion (reads only geoRecord — fully independent) ─
+    // ── Basin inversion (reads from precomputed sources — fully independent) ─
     (async () => {
       try {
         if (basinInversion) {
           result.basinInversion = basinInversion;
         } else if (geoRecord?.meta?.basinInversion) {
           result.basinInversion = geoRecord.meta.basinInversion;
+        } else if (preSemantic?.basinInversion) {
+          result.basinInversion = preSemantic.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
-          const { computeBasinInversion } =
-            await import('../../geometry/algorithms/basin-inversion-bayesian');
+          // Rebuild substrate from packed geo record, then run full interpretation
+          const { measureSubstrate } = await import('../../geometry/measure');
+          const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
           const dims = geoRecord.meta.dimensions || 384;
           const paraIds = geoRecord.meta.paragraphIndex;
           const view = new Float32Array(geoRecord.paragraphEmbeddings);
-          const paraVectors = [];
+          const embeddingsMap = new Map();
           for (let i = 0; i < paraIds.length; i++) {
-            paraVectors.push(view.subarray(i * dims, (i + 1) * dims));
+            embeddingsMap.set(paraIds[i], view.subarray(i * dims, (i + 1) * dims));
           }
-          result.basinInversion = computeBasinInversion(paraIds, paraVectors);
+          // Build substrate and interpret — basin inversion computed inside interpret
+          const minimalSubstrate = measureSubstrate(
+            paraIds.map((id, idx) => ({ id, modelIndex: 0, dominantStance: 'neutral', contested: false, statementIds: [], statementCount: 0 })),
+            embeddingsMap
+          );
+          const interpretation = buildPreSemanticInterpretation(minimalSubstrate, embeddingsMap);
+          result.basinInversion = interpretation.basinInversion;
         }
         result.bayesianBasinInversion = result.basinInversion;
       } catch (err) {
@@ -436,8 +445,6 @@ export async function computePreSurveyPipeline({
   preBuiltSubstrate = null,
   preBuiltPreSemantic = null,
   preBuiltQueryRelevance = null,
-  preBuiltBasinInversion = null,
-  preBuiltBayesianBasinInversion = null,
 
   // ═══ Citation ordering (canonical) ═══
   citationSourceOrder = null, // Record<number, string> | null
@@ -527,30 +534,17 @@ export async function computePreSurveyPipeline({
     // Regen path — build geometry from scratch
     const { buildGeometricSubstrate } = await import('../../geometry/measure');
     const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
-    const { computeBasinInversion } =
-      await import('../../geometry/algorithms/basin-inversion-bayesian');
-
-    const paraVectors = Array.from(paragraphEmbeddings.values());
-    const paraIds = Array.from(paragraphEmbeddings.keys());
-    const basinInversionResult =
-      preBuiltBasinInversion ||
-      geoRecord?.meta?.basinInversion ||
-      computeBasinInversion(paraIds, paraVectors);
 
     substrate = buildGeometricSubstrate(
       shadowParagraphs,
       paragraphEmbeddings,
-      geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm',
-      undefined,
-      basinInversionResult
+      geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm'
     );
 
+    // Basin inversion is computed inside interpretSubstrate — no external call
     preSemantic = buildPreSemanticInterpretation(
       substrate,
-      shadowParagraphs,
-      paragraphEmbeddings,
-      undefined,
-      basinInversionResult
+      paragraphEmbeddings
     );
 
     regions = preSemantic?.regions || preSemantic?.regionization?.regions || [];
@@ -578,7 +572,7 @@ export async function computePreSurveyPipeline({
 
   try {
     const { enrichStatementsWithGeometry } = await import('../../geometry/annotate');
-    enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, regions || []);
+    enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, preSemantic);
   } catch (err) {
     console.warn(
       '[computePreSurveyPipeline] enrichStatementsWithGeometry failed (non-fatal):',
@@ -586,7 +580,7 @@ export async function computePreSurveyPipeline({
       {
         shadowStatements: shadowStatements?.length,
         shadowParagraphs: shadowParagraphs?.length,
-        regions: regions?.length,
+        regions: preSemantic?.regions?.length,
       }
     );
   }
@@ -663,40 +657,21 @@ export async function computePreSurveyPipeline({
     preSemantic,
     regions,
     geoRecord,
-    basinInversion: preBuiltBasinInversion,
+    basinInversion: preSemantic?.basinInversion ?? null,
     existingQueryRelevance: queryRelevance,
     modelCount,
     queryText,
     mixedProvenanceResult: null, // sourced from buildProvenancePipeline output inside computeDerivedFields
   });
 
-  // ── 9b. Forward pre-built basin inversion if computeDerivedFields couldn't compute it ──
-  // In the live path, StepExecutor computes basin inversion before geometry and passes it
-  // as preBuiltBasinInversion, but computeDerivedFields only reads from geoRecord (which
-  // StepExecutor doesn't pass). Patch it through so the mapper artifact + cognitive artifact
-  // can include it.
-  if (!derived.basinInversion && preBuiltBasinInversion) {
-    derived.basinInversion = preBuiltBasinInversion;
+  // Basin inversion is now always sourced from preSemantic.basinInversion.
+  // No forwarding or patching needed — computeDerivedFields reads it from
+  // the basinInversion param (which we set to preSemantic?.basinInversion above).
+  if (!derived.basinInversion && preSemantic?.basinInversion) {
+    derived.basinInversion = preSemantic.basinInversion;
   }
-
-  // Bayesian basin inversion (forward pre-built or compute from embeddings)
-  if (!derived.bayesianBasinInversion) {
-    if (preBuiltBayesianBasinInversion) {
-      derived.bayesianBasinInversion = preBuiltBayesianBasinInversion;
-    } else if (paragraphEmbeddings?.size > 0) {
-      try {
-        const { computeBasinInversionBayesian: _bayesian } =
-          await import('../../geometry/algorithms/basin-inversion-bayesian');
-        const _paraIds = Array.from(paragraphEmbeddings.keys());
-        const _paraVecs = _paraIds.map((id) => paragraphEmbeddings.get(id));
-        derived.bayesianBasinInversion = _bayesian(_paraIds, _paraVecs);
-      } catch (err) {
-        console.warn(
-          '[computePreSurveyPipeline] Bayesian basin inversion failed:',
-          getErrorMessage(err)
-        );
-      }
-    }
+  if (!derived.bayesianBasinInversion && derived.basinInversion) {
+    derived.bayesianBasinInversion = derived.basinInversion;
   }
 
   const elapsed = Date.now() - t0;
@@ -927,7 +902,6 @@ export async function computeProbeGeometry({ modelIndex, content, embeddingConfi
   const substrate = buildGeometricSubstrate(paragraphs, paragraphResult.embeddings);
   const preSemantic = buildPreSemanticInterpretation(
     substrate,
-    paragraphs,
     paragraphResult.embeddings
   );
 

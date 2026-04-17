@@ -253,7 +253,7 @@ export async function executeBatchPhase(step, context, options) {
           batchUpdates[providerId] = result;
         });
 
-        // Persist contexts before proceeding — guarantees mapping step reads fresh data
+        // Persist contexts before proceeding — mapping step must read fresh data
         try {
           await options.persistenceCoordinator.persistProviderContexts(
             context.sessionId,
@@ -261,7 +261,18 @@ export async function executeBatchPhase(step, context, options) {
             'batch'
           );
         } catch (err) {
-          console.error('[BatchPhase] Failed to persist provider contexts:', err);
+          const providerSummary = Object.keys(batchUpdates).join(', ') || '(none)';
+          console.error(
+            `[BatchPhase] Persistence failed for session ${context.sessionId} (providers: ${providerSummary}):`,
+            err
+          );
+          reject(
+            new Error(
+              `[BatchPhase] Failed to persist provider contexts for session ${context.sessionId} ` +
+                `(providers: ${providerSummary}): ${err instanceof Error ? err.message : String(err)}`
+            )
+          );
+          return;
         }
 
         const formattedResults = {};

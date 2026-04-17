@@ -48,6 +48,7 @@ export interface ShadowStatement {
   geometricCoordinates?: {
     paragraphId: string;
     regionId: string | null;
+    basinId: number | null;
     isolationScore: number;
   };
 }

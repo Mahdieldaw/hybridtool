@@ -398,7 +398,21 @@ const BusController = {
             reqId: requestId,
           });
           const iframeOrigin = iframe?.src ? new URL(iframe.src).origin : location.origin;
-          iframe.contentWindow?.postMessage(busMsg, iframeOrigin);
+          if (!iframe.contentWindow) {
+            const pending = pendingIframeResponses.get(requestId);
+            if (pending) {
+              clearTimeout(pending.timeoutId);
+              try {
+                pending.sendResponse(JSON.stringify({ error: 'iframe_contentWindow_unavailable' }));
+              } catch (_) {}
+              pendingIframeResponses.delete(requestId);
+            }
+            console.warn(
+              `[BusController-os] iframe.contentWindow is null for reqId: ${requestId}, message: ${message.name}`
+            );
+            return;
+          }
+          iframe.contentWindow.postMessage(busMsg, iframeOrigin);
         } catch (error) {
           console.error('[BusController-os] Failed to forward message to iframe:', error);
           try {

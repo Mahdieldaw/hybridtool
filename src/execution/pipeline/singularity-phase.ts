@@ -288,10 +288,12 @@ export async function executeSingularityPhase(
               const { buildEvidenceSubstrate } =
                 await import('../../../concierge-service/evidence-substrate.js');
               const cso = mappingArtifact?.meta?.citationSourceOrder || {};
+              const lookupCache = (mappingArtifact as any)?._editorialLookupCache;
               evidenceSubstrate = buildEvidenceSubstrate(
                 mappingArtifact,
                 mappingResult?.text || '',
-                cso
+                cso,
+                lookupCache ? { lookupCache } : undefined
               );
               if (evidenceSubstrate) {
                 console.log(

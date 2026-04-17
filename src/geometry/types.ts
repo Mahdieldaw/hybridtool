@@ -3,6 +3,7 @@
 // ===========================================================================
 
 import type { Stance } from '../shadow/statement-types';
+import type { BasinInversionResult } from '../../shared/types';
 
 // ------------------------------------------------------------------------------
 // SIMILARITY STATS (inlined from threshold.ts)
@@ -40,8 +41,6 @@ export interface NodeLocalStats {
   mutualNeighborhoodPatch: string[];
   mutualRankDegree: number;
 
-  // topographic basin id (from density inversion)
-  basinId?: number;
 }
 
 // ------------------------------------------------------------------------------
@@ -183,8 +182,7 @@ export interface PipelineGateResult {
   };
 }
 
-/** Which geometry source produced the regions array. */
-export type RegionSource = 'gap' | 'basin' | 'none';
+
 
 /** Single flat object merging region identity + mass + geometry metrics. */
 export interface MeasuredRegion {
@@ -226,14 +224,30 @@ export interface PeripheryResult {
   basinByNodeId: Record<string, number>;
 }
 
+/** Per-node basin alignment profile derived from pairwise similarity field. */
+export interface BasinNodeProfile {
+  basinId: number | null;
+  intraBasinSimilarity: number;   // avg similarity to nodes in assigned basin
+  interBasinSimilarity: number;   // avg similarity to nodes outside basin
+  separationDelta: number;        // intra - inter
+}
+
+/** Per-node structural profile: independent measurement signals. */
+export interface NodeStructuralProfile {
+  paragraphId: string;
+  connectivity: number;           // [0,1] mutual rank degree, normalized by (N-1)
+  gapStrength: number;            // [0,1] upper boundary from NodeGapProfile
+  basinId: number | null;         // categorical basin membership
+  basinSeparationDelta: number;   // intra-basin minus inter-basin similarity
+}
+
 /** Output of interpretSubstrate(). */
 export interface SubstrateInterpretation {
   gate: PipelineGateResult;
 
-  // Region lens
+  // Region lens (always from gap)
   regions: MeasuredRegion[];
   regionMeta: RegionizationMeta;
-  regionSource: RegionSource;
 
   // Basin lens (separate — do not conflate with regions)
   corpusMode: CorpusMode;
@@ -241,4 +255,14 @@ export interface SubstrateInterpretation {
   peripheralRatio: number;
   largestBasinRatio: number | null;
   basinByNodeId: Record<string, number>;
+
+  // Basin inversion result — parallel structural signal (L2 owned)
+  basinInversion: BasinInversionResult | null;
+
+  // Node annotations — replaces in-place mutation of substrate.nodes
+  nodeAnnotations: Map<string, { basinId: number | null; regionId: string | null }>;
+
+  // Structural profiles — per-node measurement signals (evidence layer)
+  structuralProfiles: Map<string, NodeStructuralProfile>;
+  basinNodeProfiles: Map<string, BasinNodeProfile>;
 }

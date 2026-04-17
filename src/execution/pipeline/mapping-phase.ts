@@ -337,8 +337,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     preBuiltSubstrate: substrate,
                     preBuiltPreSemantic: preSemanticInterpretation,
                     preBuiltQueryRelevance: queryRelevance,
-                    preBuiltBasinInversion: basinInversionResult,
-                    preBuiltBayesianBasinInversion: bayesianBasinInversionResult,
                     queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
                     turn: context.turn || 0,
@@ -511,6 +509,24 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                           editorialCitationSourceOrder,
                           continuityMap
                         );
+
+                      // Build lookup cache now while index arrays are in scope;
+                      // attach to cognitiveArtifact so singularity-phase can reuse it
+                      // without rebuilding all maps from the artifact.
+                      try {
+                        const { buildLookupCacheFromIndex } =
+                          await import('../../../concierge-service/evidence-substrate.js');
+                        const editorialLookupCache = buildLookupCacheFromIndex(
+                          indexedPassages,
+                          indexedUnclaimed
+                        );
+                        if (cognitiveArtifact) {
+                          (cognitiveArtifact as any)._editorialLookupCache = editorialLookupCache;
+                        }
+                      } catch (cacheErr) {
+                        // Non-blocking — substrate builder falls back to artifact resolution
+                        console.warn('[executeMappingPhase] Lookup cache build failed:', cacheErr);
+                      }
 
                       const validPassageKeys = new Set(indexedPassages.map((p) => p.passageKey));
                       const validUnclaimedKeys = new Set(indexedUnclaimed.map((u) => u.groupKey));

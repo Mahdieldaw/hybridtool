@@ -18,8 +18,9 @@ export type {
   MutualRankGraph,
   MeasuredRegion,
   SubstrateInterpretation,
-  RegionSource,
   RegionizationMeta,
+  BasinNodeProfile,
+  NodeStructuralProfile,
   GateVerdict,
   PipelineGateResult,
   CorpusMode,
@@ -37,7 +38,6 @@ export { DEFAULT_SUBSTRATE_CONFIG } from './measure';
 export {
   measureSubstrate,
   buildGeometricSubstrate,   // backward-compat alias
-  buildPairwiseField,
   buildMutualRankGraph,
   computeNodeStats,
   computeExtendedStatsFromArray,

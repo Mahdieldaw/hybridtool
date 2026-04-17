@@ -738,6 +738,7 @@ export interface PipelineShadowStatement {
   geometricCoordinates?: {
     paragraphId: string;
     regionId: string | null;
+    basinId: number | null;
     isolationScore: number;
   };
 }
@@ -868,7 +869,6 @@ export interface PreSemanticInterpretation {
     coveredNodes: number;
     totalNodes: number;
   };
-  regionSource?: 'gap' | 'basin' | 'none';
   corpusMode?: 'dominant-core' | 'parallel-cores' | 'no-geometry';
   peripheralNodeIds?: string[];
   peripheralRatio?: number;

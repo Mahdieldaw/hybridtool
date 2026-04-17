@@ -5,7 +5,7 @@
  *
  * Zero external dependencies. Optimized for browser extensions.
  */
-import { Claim, Edge } from '../../../../shared/types';
+import { Claim, Edge } from '../../../shared/types';
 
 // ============================================================================
 // TYPES
