@@ -1,6 +1,6 @@
 // @ts-nocheck
-import { DEFAULT_CONFIG } from '../../../clustering/index.js';
-import { getErrorMessage } from '../../../errors/handler.js';
+import { DEFAULT_CONFIG } from '../../clustering';
+import { getErrorMessage } from '../../errors/handler';
 
 /**
  * Build geometry async pipeline, processing embeddings and substrate.

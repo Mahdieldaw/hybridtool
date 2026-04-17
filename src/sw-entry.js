@@ -13,8 +13,8 @@ import {
 } from './system/net-rules-manager.js';
 import { BusController } from './system/bus-controller.js';
 import { LifecycleManager } from './system/lifecycle-manager.js';
-import { WorkflowCompiler } from './core/execution/workflow-compiler.js';
-import { ContextResolver } from './core/execution/io/context-resolver.js';
+import { WorkflowCompiler } from './execution/workflow-compiler.js';
+import { ContextResolver } from './execution/io/context-resolver.js';
 
 import { ClaudeAdapter } from './providers/claude-adapter.js';
 import { GeminiAdapter } from './providers/gemini-adapter.js';
@@ -1767,7 +1767,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     // ══════════════════════════════════════════════════════════════
     // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
     // ══════════════════════════════════════════════════════════════
-    const { buildArtifactForProvider } = await import('./core/execution/deterministic-pipeline.js');
+    const { buildArtifactForProvider } = await import('./execution/deterministic-pipeline.js');
     const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } =
       await import('../shared/provider-config');
     const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));

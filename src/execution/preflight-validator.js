@@ -3,8 +3,8 @@ import {
   selectBestProvider,
   isProviderAuthorized,
   PROVIDER_PRIORITIES,
-} from '../../../shared/provider-config.js';
-import { getProviderLocks } from '../../providers/provider-locks.js';
+} from '../../shared/provider-config';
+import { getProviderLocks } from '../providers/provider-locks';
 
 // Provider login URLs (duplicated from auth-config.ts for JS compatibility)
 const PROVIDER_URLS = {

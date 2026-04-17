@@ -24,7 +24,7 @@ import { safeLazy } from '../utils/safe-lazy';
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
 const CouncilOrbsVertical = safeLazy(() =>
-  import('../shell/status/CouncilOrbsVertical').then((m) => ({ default: m.CouncilOrbsVertical }))
+  import('../chat/CouncilOrbsVertical').then((m) => ({ default: m.CouncilOrbsVertical }))
 );
 
 // Lazy load DecisionMapSheet (named export adapter)

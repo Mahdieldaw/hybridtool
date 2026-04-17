@@ -2,7 +2,7 @@ import { useAtom } from 'jotai';
 import { EXAMPLE_PROMPT } from '../config/constants';
 import { embeddingModelIdAtom } from '../state';
 import { EMBEDDING_MODELS } from '../../src/clustering/config';
-import logoIcon from '../../assets/brand/logo-icon.png';
+import logoIcon from '../assets/brand/logo-icon.png';
 
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
@@ -40,11 +40,10 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
                 key={model.id}
                 onClick={() => setEmbeddingModelId(model.id)}
                 title={model.description}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-150 ${
-                  isActive
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-150 ${isActive
                     ? 'bg-brand-500/20 border-brand-400 text-brand-300'
                     : 'bg-surface-raised border-border-subtle text-text-muted hover:border-border-default hover:text-text-secondary'
-                }`}
+                  }`}
               >
                 {model.displayName}
                 <span className="ml-1.5 opacity-60">{model.dimensions}d</span>

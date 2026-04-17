@@ -64,7 +64,7 @@ export function NarrativePanel({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Provider badge + Raw Text toggle */}
+      {/* Provider badge + Raw Text toggle + Export/Copy buttons */}
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
         <div
           className="w-2.5 h-2.5 rounded-full flex-shrink-0"
@@ -74,7 +74,44 @@ export function NarrativePanel({
           {provider?.name || activeMappingPid || 'Mapper'}
         </span>
         <span className="text-[11px] text-text-muted ml-1">Narrative</span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Copy button - always visible */}
+          {artifact && (
+            <CopyButton
+              text={stringifyForDebug(artifact)}
+              label="Copy mapper artifact JSON"
+              variant="icon"
+              title="Copy artifact to clipboard"
+            />
+          )}
+
+          {/* Export button - always visible */}
+          <button
+            type="button"
+            className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-highlight transition-colors disabled:opacity-50"
+            disabled={!artifact}
+            onClick={() => {
+              if (!artifact) return;
+              try {
+                const text = stringifyForDebug(artifact);
+                const blob = new Blob([text], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `mapping_artifact_${aiTurnId || 'turn'}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 10_000);
+              } catch (e) {
+                console.error('Export failed:', e);
+              }
+            }}
+            title="Download artifact as JSON"
+          >
+            ⬇️
+          </button>
+
           <button
             type="button"
             className={clsx(
@@ -138,32 +175,6 @@ export function NarrativePanel({
 
           {rawOpen && (
             <div className="mt-2 rounded-lg border border-white/10 bg-black/10 p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <CopyButton
-                  text={rawJson || ''}
-                  label="Copy raw artifact JSON"
-                  variant="icon"
-                  disabled={!rawJson}
-                />
-                <button
-                  type="button"
-                  className="px-2 py-1 rounded-md text-[11px] border border-border-subtle text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors disabled:opacity-50"
-                  disabled={!rawJson}
-                  onClick={() => {
-                    const text = rawJson || '';
-                    if (!text) return;
-                    const blob = new Blob([text], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `mapping_artifact_${aiTurnId || 'turn'}.json`;
-                    a.click();
-                    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-                  }}
-                >
-                  Export
-                </button>
-              </div>
               {rawError && <div className="text-[11px] text-red-400 mb-2">{rawError}</div>}
               <pre className="text-[10px] text-text-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
                 {rawJson || (artifact ? '(empty)' : '(no artifact data)')}

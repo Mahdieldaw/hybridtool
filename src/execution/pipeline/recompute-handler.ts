@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { DEFAULT_THREAD } from '../../../../shared/messaging.js';
+import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { extractUserMessage } from '../io/context-resolver.js';
 import { runSingularityLLM } from './singularity-phase.js';
 

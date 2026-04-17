@@ -1,11 +1,11 @@
 // @ts-nocheck
-import { ArtifactProcessor } from '../../../../shared/artifact-processor.js';
-import { PROVIDER_LIMITS } from '../../../../shared/provider-limits.js';
-import { classifyError } from '../../../errors/classifier.js';
-import { logRetryEvent } from '../../../errors/retry.js';
-import { buildReactiveBridge } from '../utils/reactive-bridge.js';
+import { ArtifactProcessor } from '../../../shared/artifact-processor';
+import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
+import { classifyError } from '../../errors/classifier';
+import { logRetryEvent } from '../../errors/retry';
+import { buildReactiveBridge } from '../utils/reactive-bridge';
 import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
-import { isProviderAuthError, createMultiProviderAuthError } from '../../../errors/handler.js';
+import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {

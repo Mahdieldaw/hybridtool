@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { DEFAULT_THREAD } from '../../../../shared/messaging.js';
-import { PROVIDER_LIMITS } from '../../../../shared/provider-limits.js';
-import { runWithProviderHealth } from '../../../providers/health/provider-health-gate.js';
-import { isProviderAuthError, errorHandler } from '../../../errors/handler.js';
-import { authManager } from '../../../providers/auth-manager.js';
+import { DEFAULT_THREAD } from '../../../shared/messaging';
+import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
+import { runWithProviderHealth } from '../../providers/health/provider-health-gate';
+import { isProviderAuthError, errorHandler } from '../../errors/handler';
+import { authManager } from '../../providers/auth-manager';
 
 /**
  * Generic single-step LLM execution with partial recovery, parse, context persistence,

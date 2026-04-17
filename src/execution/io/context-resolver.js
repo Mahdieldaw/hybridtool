@@ -1,6 +1,6 @@
 // src/core/execution/io/context-resolver.js
-import { DEFAULT_THREAD } from '../../../../shared/messaging.js';
-import { parseSemanticMapperOutput } from '../../../../shared/parsing-utils.js';
+import { DEFAULT_THREAD } from '../../../shared/messaging';
+import { parseSemanticMapperOutput } from '../../../shared/parsing-utils';
 
 export function aggregateBatchOutputs(providerResponses = []) {
   try {

@@ -81,7 +81,7 @@ export async function computeDerivedFields({
       } else {
         try {
           if (queryEmbedding && substrate) {
-            const { computeQueryRelevance } = await import('../../geometry/annotate');
+            const { computeQueryRelevance } = await import('../geometry/annotate');
             result.queryRelevance = computeQueryRelevance({
               queryEmbedding,
               statements: shadowStatements,
@@ -106,8 +106,8 @@ export async function computeDerivedFields({
           result.basinInversion = preSemantic.basinInversion;
         } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
           // Rebuild substrate from packed geo record, then run full interpretation
-          const { measureSubstrate } = await import('../../geometry/measure');
-          const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
+          const { measureSubstrate } = await import('../geometry/measure');
+          const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
           const dims = geoRecord.meta.dimensions || 384;
           const paraIds = geoRecord.meta.paragraphIndex;
           const view = new Float32Array(geoRecord.paragraphEmbeddings);
@@ -204,7 +204,7 @@ export async function computeDerivedFields({
         basinByNodeId: preSemantic.basinByNodeId,
       };
     } else {
-      const { identifyPeriphery } = await import('../../geometry/interpret');
+      const { identifyPeriphery } = await import('../geometry/interpret');
       const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
       const preSemanticRegions =
         preSemantic?.regions ||
@@ -221,7 +221,7 @@ export async function computeDerivedFields({
   // passage-routing, provenance-refinement, statement-classification.
   try {
     if (enrichedClaims.length > 0) {
-      const { buildProvenancePipeline } = await import('../../provenance/engine');
+      const { buildProvenancePipeline } = await import('../provenance/engine');
 
       const statementTextsMap = new Map();
       for (const stmt of shadowStatements) {
@@ -288,7 +288,7 @@ export async function computeDerivedFields({
   try {
     if (enrichedClaims.length > 0) {
       const { analyzeGlobalStructure: computeStructuralAnalysis } =
-        await import('../../provenance/structure');
+        await import('../provenance/structure');
       result.cachedStructuralAnalysis = computeStructuralAnalysis({
         claims: enrichedClaims,
         edges: parsedEdges,
@@ -469,7 +469,7 @@ export async function computePreSurveyPipeline({
     if (!mappingText) {
       throw new Error('Either mappingText or parsedMappingResult is required');
     }
-    const { parseSemanticMapperOutput } = await import('../../provenance/semantic-mapper');
+    const { parseSemanticMapperOutput } = await import('../provenance/semantic-mapper');
     const parseResult = parseSemanticMapperOutput(mappingText);
     if (!parseResult?.success || !parseResult?.output) {
       throw new Error('Failed to parse mapping response text into claims/edges');
@@ -497,7 +497,7 @@ export async function computePreSurveyPipeline({
     if (!Array.isArray(batchSources) || batchSources.length === 0) {
       throw new Error('No shadow statements and no batch sources provided for reconstruction');
     }
-    const { extractShadowStatements, projectParagraphs } = await import('../../shadow');
+    const { extractShadowStatements, projectParagraphs } = await import('../shadow');
     const shadowResult = extractShadowStatements(batchSources);
     const paragraphResult = projectParagraphs(shadowResult.statements);
     shadowStatements = shadowResult.statements;
@@ -509,7 +509,7 @@ export async function computePreSurveyPipeline({
   }
 
   if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-    const { projectParagraphs } = await import('../../shadow');
+    const { projectParagraphs } = await import('../shadow');
     shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
   }
 
@@ -532,8 +532,8 @@ export async function computePreSurveyPipeline({
     regions = preSemantic?.regions || preSemantic?.regionization?.regions || [];
   } else {
     // Regen path — build geometry from scratch
-    const { buildGeometricSubstrate } = await import('../../geometry/measure');
-    const { buildPreSemanticInterpretation } = await import('../../geometry/interpret');
+    const { buildGeometricSubstrate } = await import('../geometry/measure');
+    const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
 
     substrate = buildGeometricSubstrate(
       shadowParagraphs,
@@ -553,7 +553,7 @@ export async function computePreSurveyPipeline({
     queryRelevance = null;
     try {
       if (queryEmbedding) {
-        const { computeQueryRelevance: _computeQR } = await import('../../geometry/annotate');
+        const { computeQueryRelevance: _computeQR } = await import('../geometry/annotate');
         queryRelevance = _computeQR({
           queryEmbedding,
           statements: shadowStatements,
@@ -571,7 +571,7 @@ export async function computePreSurveyPipeline({
   }
 
   try {
-    const { enrichStatementsWithGeometry } = await import('../../geometry/annotate');
+    const { enrichStatementsWithGeometry } = await import('../geometry/annotate');
     enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, preSemantic);
   } catch (err) {
     console.warn(
@@ -621,7 +621,7 @@ export async function computePreSurveyPipeline({
       };
     }
 
-    const { measureProvenance } = await import('../../provenance/measure');
+    const { measureProvenance } = await import('../provenance/measure');
     const measure = await measureProvenance({
       mapperClaims: mapperClaimsForProvenance,
       shadowStatements,
@@ -750,7 +750,7 @@ export async function assembleFromPreSurvey(
   mapperArtifact.preSemantic = preSemantic || null;
 
   // ── 14. Build cognitive artifact ──────────────────────────────────
-  const { buildCognitiveArtifact } = await import('../../../shared/cognitive-artifact');
+  const { buildCognitiveArtifact } = await import('../../shared/cognitive-artifact');
 
   const substrateGraph = buildSubstrateGraph({ substrate, regions });
 
@@ -857,11 +857,11 @@ export async function computeProbeGeometry({ modelIndex, content, embeddingConfi
     { buildPreSemanticInterpretation },
     { packEmbeddingMap },
   ] = await Promise.all([
-    import('../../shadow'),
-    import('../../clustering'),
-    import('../../geometry/measure'),
-    import('../../geometry/interpret'),
-    import('../../persistence/embedding-codec'),
+    import('../shadow'),
+    import('../clustering'),
+    import('../geometry/measure'),
+    import('../geometry/interpret'),
+    import('../persistence/embedding-codec'),
   ]);
 
   const { DEFAULT_CONFIG, generateStatementEmbeddings, generateEmbeddings } = clustering;

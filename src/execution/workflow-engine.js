@@ -1,4 +1,4 @@
-import { getHealthTracker } from '../../providers/health/provider-health-tracker.js';
+import { getHealthTracker } from '../providers/health/provider-health-tracker.js';
 import { executeBatchPhase } from './pipeline/batch-phase.ts';
 import { executeMappingPhase } from './pipeline/mapping-phase.ts';
 import { executeSingularityPhase } from './pipeline/singularity-phase.ts';
@@ -7,7 +7,7 @@ import { StreamingManager } from './io/streaming-manager.ts';
 import { ContextManager } from './io/context-manager.ts';
 import { PersistenceCoordinator } from './io/persistence-coordinator.ts';
 import { TurnEmitter } from './io/turn-emitter.ts';
-import { classifyError } from '../../errors/classifier.js';
+import { classifyError } from '../errors/classifier.js';
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */

@@ -5,7 +5,7 @@
  * Phase 3 completion: Zero database access, fully synchronous.
  * All data comes from ResolvedContext parameter.
  */
-import { DEFAULT_THREAD } from '../../../shared/messaging.js';
+import { DEFAULT_THREAD } from '../../shared/messaging';
 
 export class WorkflowCompiler {
   constructor(sessionManager) {

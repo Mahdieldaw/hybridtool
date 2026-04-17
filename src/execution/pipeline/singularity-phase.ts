@@ -1,6 +1,6 @@
 // @ts-nocheck
-import { ArtifactProcessor } from '../../../../shared/artifact-processor.js';
-import { getErrorMessage } from '../../../errors/handler.js';
+import { ArtifactProcessor } from '../../../shared/artifact-processor';
+import { getErrorMessage } from '../../errors/handler';
 import { executeGenericSingleStep } from '../utils/llm-runner.js';
 
 // Exported for use by recompute-handler
