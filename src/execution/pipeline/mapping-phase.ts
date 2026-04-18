@@ -214,8 +214,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
     substrateDegenerateReason,
     preSemanticInterpretation,
     substrate,
-    basinInversionResult,
-    bayesianBasinInversionResult,
   } = geometryResults;
 
   // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
@@ -354,7 +352,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       context.canonicalAiTurnId
                     ) {
                       const { packEmbeddingMap } =
-                        await import('../../persistence/embedding-codec.ts');
+                        await import('../../persistence/embedding-codec');
                       let dims = 0;
                       for (const v of claimEmbeddings.values()) {
                         const n = v?.length;

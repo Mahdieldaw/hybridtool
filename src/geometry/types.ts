@@ -49,6 +49,12 @@ export interface NodeLocalStats {
 
 export interface PairwiseFieldStats extends ExtendedSimilarityStats {
   discriminationRange: number; // p90 - p10
+  // Pre-computed histogram (sqrt(pairCount) bins, algorithm-independent)
+  histogram: number[];
+  binCount: number;
+  binMin: number;
+  binMax: number;
+  binWidth: number;
 }
 
 export interface PairwiseField {

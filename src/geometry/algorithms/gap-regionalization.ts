@@ -108,8 +108,10 @@ export function computeGapRegionalization(
     const id = String(n.id);
     classifiedMatrix.set(id, new Map());
 
-    // 2. Sorted profiles
-    const others = Array.from(simMatrix.get(id)!.entries()).sort((a, b) => b[1] - a[1]);
+    // 2. Sorted profiles — tie-break lexicographically to match measure.ts perNode ordering
+    const others = Array.from(simMatrix.get(id)!.entries()).sort((a, b) =>
+      b[1] !== a[1] ? b[1] - a[1] : a[0].localeCompare(b[0])
+    );
     const gaps: number[] = [];
     for (let i = 0; i < others.length - 1; i++) {
       gaps.push(others[i][1] - others[i + 1][1]);

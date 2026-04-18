@@ -15,6 +15,32 @@ function getErrorMessage(err) {
 }
 
 /**
+ * Extract a PeripheryResult-shaped object from a SubstrateInterpretation.
+ * Both call sites need the same shape — centralize access, not computation.
+ *
+ * @param {import('../../geometry/types').SubstrateInterpretation | null} preSemantic
+ * @returns {{ corpusMode: string, peripheralNodeIds: Set<string>, peripheralRatio: number, largestBasinRatio: number | null, basinByNodeId: Record<string, number> }}
+ */
+function resolvePeriphery(preSemantic) {
+  if (preSemantic && 'corpusMode' in preSemantic) {
+    return {
+      corpusMode: preSemantic.corpusMode,
+      peripheralNodeIds: preSemantic.peripheralNodeIds,
+      peripheralRatio: preSemantic.peripheralRatio,
+      largestBasinRatio: preSemantic.largestBasinRatio,
+      basinByNodeId: preSemantic.basinByNodeId,
+    };
+  }
+  return {
+    corpusMode: 'no-geometry',
+    peripheralNodeIds: new Set(),
+    peripheralRatio: 0,
+    largestBasinRatio: null,
+    basinByNodeId: {},
+  };
+}
+
+/**
  * Compute all deterministic derived fields from embeddings + semantic output.
  *
  * @param {object} input
@@ -41,15 +67,12 @@ export async function computeDerivedFields({
   substrate = null,
   preSemantic = null,
   regions = [],
-  geoRecord = null, // raw packed data for basin inversion
-  basinInversion = null, // pre-computed basin inversion
 
   // Pre-computed (optional — if provided, skip recomputation)
   existingQueryRelevance = null,
 
   // Config
   modelCount = 1,
-  queryText = '',
 
   // Pre-computed mixed-method provenance (from reconstructCanonicalProvenance)
   mixedProvenanceResult = null,
@@ -62,7 +85,6 @@ export async function computeDerivedFields({
     blastSurfaceResult: null,
     mixedProvenanceResult: null,
     basinInversion: null,
-    bayesianBasinInversion: null,
     queryRelevance: null,
     semanticEdges: [],
     derivedSupportEdges: [],
@@ -95,38 +117,9 @@ export async function computeDerivedFields({
         }
       }
     })(),
-    // ── Basin inversion (reads from precomputed sources — fully independent) ─
+    // ── Basin inversion — preSemantic is the sole authority ──────────────
     (async () => {
-      try {
-        if (basinInversion) {
-          result.basinInversion = basinInversion;
-        } else if (geoRecord?.meta?.basinInversion) {
-          result.basinInversion = geoRecord.meta.basinInversion;
-        } else if (preSemantic?.basinInversion) {
-          result.basinInversion = preSemantic.basinInversion;
-        } else if (geoRecord?.paragraphEmbeddings && geoRecord?.meta?.paragraphIndex?.length > 0) {
-          // Rebuild substrate from packed geo record, then run full interpretation
-          const { measureSubstrate } = await import('../geometry/measure');
-          const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
-          const dims = geoRecord.meta.dimensions || 384;
-          const paraIds = geoRecord.meta.paragraphIndex;
-          const view = new Float32Array(geoRecord.paragraphEmbeddings);
-          const embeddingsMap = new Map();
-          for (let i = 0; i < paraIds.length; i++) {
-            embeddingsMap.set(paraIds[i], view.subarray(i * dims, (i + 1) * dims));
-          }
-          // Build substrate and interpret — basin inversion computed inside interpret
-          const minimalSubstrate = measureSubstrate(
-            paraIds.map((id, idx) => ({ id, modelIndex: 0, dominantStance: 'neutral', contested: false, statementIds: [], statementCount: 0 })),
-            embeddingsMap
-          );
-          const interpretation = buildPreSemanticInterpretation(minimalSubstrate, embeddingsMap);
-          result.basinInversion = interpretation.basinInversion;
-        }
-        result.bayesianBasinInversion = result.basinInversion;
-      } catch (err) {
-        console.warn('[DeterministicPipeline] Basin inversion failed:', getErrorMessage(err));
-      }
+      result.basinInversion = preSemantic?.basinInversion ?? null;
     })(),
   ]);
 
@@ -193,28 +186,8 @@ export async function computeDerivedFields({
   }
 
   // ── Resolve periphery (required by provenance pipeline) ─────────────
-  let periphery = null;
-  try {
-    if (preSemantic && 'corpusMode' in preSemantic) {
-      periphery = {
-        corpusMode: preSemantic.corpusMode,
-        peripheralNodeIds: preSemantic.peripheralNodeIds,
-        peripheralRatio: preSemantic.peripheralRatio,
-        largestBasinRatio: preSemantic.largestBasinRatio,
-        basinByNodeId: preSemantic.basinByNodeId,
-      };
-    } else {
-      const { identifyPeriphery } = await import('../geometry/interpret');
-      const basinInversionResult = result.basinInversion || geoRecord?.meta?.basinInversion;
-      const preSemanticRegions =
-        preSemantic?.regions ||
-        geoRecord?.meta?.preSemanticInterpretation?.regions ||
-        preSemantic?.regionization?.regions;
-      periphery = identifyPeriphery(basinInversionResult, preSemanticRegions);
-    }
-  } catch (err) {
-    console.warn('[DeterministicPipeline] Periphery resolution failed:', getErrorMessage(err));
-  }
+  // preSemantic is the sole authority — periphery was computed inside interpret.ts.
+  const periphery = resolvePeriphery(preSemantic);
 
   // ── 5-phase provenance pipeline ───────────────────────────────────────
   // Replaces: claim-density, claim-provenance, blast-surface, conflict-validation,
@@ -371,7 +344,6 @@ export function assembleMapperArtifact({
     blastSurfaceResult,
     mixedProvenanceResult,
     basinInversion,
-    bayesianBasinInversion,
     claimProvenance,
     semanticEdges,
     derivedSupportEdges,
@@ -397,7 +369,6 @@ export function assembleMapperArtifact({
     },
     ...(claimProvenance ? { claimProvenance } : {}),
     ...(basinInversion ? { basinInversion } : {}),
-    ...(bayesianBasinInversion ? { bayesianBasinInversion } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(passageRoutingResult ? { passageRouting: passageRoutingResult } : {}),
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
@@ -450,9 +421,7 @@ export async function computePreSurveyPipeline({
   citationSourceOrder = null, // Record<number, string> | null
 
   // ═══ Context ═══
-  queryText = '',
   modelCount = 1,
-  turn = undefined,
 }) {
   const t0 = Date.now();
 
@@ -601,25 +570,7 @@ export async function computePreSurveyPipeline({
   let claimEmbeddings = inputClaimEmbeddings;
 
   try {
-    // Resolve periphery for Phase 1 (same logic as computeDerivedFields)
-    let peripheryForMeasure = null;
-    if (preSemantic && 'corpusMode' in preSemantic) {
-      peripheryForMeasure = {
-        corpusMode: preSemantic.corpusMode,
-        peripheralNodeIds: preSemantic.peripheralNodeIds,
-        peripheralRatio: preSemantic.peripheralRatio,
-        largestBasinRatio: preSemantic.largestBasinRatio,
-        basinByNodeId: preSemantic.basinByNodeId,
-      };
-    } else {
-      peripheryForMeasure = {
-        corpusMode: 'no-geometry',
-        peripheralNodeIds: new Set(),
-        peripheralRatio: 0,
-        largestBasinRatio: null,
-        basinByNodeId: {},
-      };
-    }
+    const peripheryForMeasure = resolvePeriphery(preSemantic);
 
     const { measureProvenance } = await import('../provenance/measure');
     const measure = await measureProvenance({
@@ -656,23 +607,11 @@ export async function computePreSurveyPipeline({
     substrate,
     preSemantic,
     regions,
-    geoRecord,
-    basinInversion: preSemantic?.basinInversion ?? null,
     existingQueryRelevance: queryRelevance,
     modelCount,
-    queryText,
     mixedProvenanceResult: null, // sourced from buildProvenancePipeline output inside computeDerivedFields
   });
 
-  // Basin inversion is now always sourced from preSemantic.basinInversion.
-  // No forwarding or patching needed — computeDerivedFields reads it from
-  // the basinInversion param (which we set to preSemantic?.basinInversion above).
-  if (!derived.basinInversion && preSemantic?.basinInversion) {
-    derived.basinInversion = preSemantic.basinInversion;
-  }
-  if (!derived.bayesianBasinInversion && derived.basinInversion) {
-    derived.bayesianBasinInversion = derived.basinInversion;
-  }
 
   const elapsed = Date.now() - t0;
   console.log(

@@ -1,12 +1,17 @@
 import { DEFAULT_THREAD } from './../../../shared/messaging.js';
+import type { SessionManager } from '../../persistence/session-manager.js';
+import type { SimpleRecord } from '../../persistence/simple-indexeddb-adapter.js';
+import type { ProviderResponseType } from '../../../shared/types/contract.js';
 
 const WORKFLOW_DEBUG = false;
-const wdbg = (...args) => {
+const wdbg = (...args: unknown[]) => {
   if (WORKFLOW_DEBUG) console.log(...args);
 };
 
 export class ContextManager {
-  constructor(sessionManager) {
+  sessionManager: SessionManager;
+
+  constructor(sessionManager: SessionManager) {
     this.sessionManager = sessionManager;
   }
 
@@ -17,15 +22,15 @@ export class ContextManager {
    * 3. Persisted context (fallback)
    */
   async resolveProviderContext(
-    providerId,
-    context,
-    payload,
-    workflowContexts,
-    previousResults,
-    resolvedContext,
+    providerId: string,
+    context: any,
+    payload: any,
+    workflowContexts: any,
+    previousResults: any,
+    resolvedContext: any,
     stepType = 'step'
   ) {
-    const providerContexts = {};
+    const providerContexts: Record<string, any> = {};
 
     // Tier 1: Prefer workflow cache context produced within this workflow run
     if (workflowContexts && workflowContexts[providerId]) {
@@ -39,7 +44,9 @@ export class ContextManager {
             workflowContexts[providerId]
           ).join(',')}`
         );
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+      }
       return providerContexts;
     }
 
@@ -55,7 +62,9 @@ export class ContextManager {
           wdbg(
             `[ContextManager] ${stepType} using historical context from ResolvedContext for ${providerId}`
           );
-        } catch (_) {}
+        } catch (err) {
+        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+      }
         return providerContexts;
       }
     }
@@ -74,7 +83,9 @@ export class ContextManager {
             wdbg(
               `[ContextManager] ${stepType} continuing conversation for ${providerId} via batch step`
             );
-          } catch (_) {}
+          } catch (err) {
+        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+      }
           return providerContexts;
         }
       }
@@ -98,7 +109,9 @@ export class ContextManager {
               persistedMeta
             ).join(',')}`
           );
-        } catch (_) {}
+        } catch (err) {
+        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+      }
         return providerContexts;
       }
     } catch (e) {
@@ -115,24 +128,24 @@ export class ContextManager {
    * Resolve source data for a mapping step from payload, historical turn, or previous step results.
    * Mirrors _resolveSourceData from mapping-phase — single source of truth for both live and recompute paths.
    */
-  async resolveHistoricalSources(payload, context, previousResults) {
+  async resolveHistoricalSources(payload: any, context: any, previousResults: any) {
     const sessionManager = this.sessionManager;
 
     if (Array.isArray(payload?.sourceData) && payload.sourceData.length > 0) {
       return payload.sourceData
-        .map((s) => {
+        .map((s: any) => {
           const providerId = String(s?.providerId || '').trim();
           const text = String(s?.text ?? s?.content ?? '').trim();
           return { providerId, text };
         })
-        .filter((s) => s.providerId && s.text);
+        .filter((s: { providerId: string; text: string }) => s.providerId && s.text);
     }
 
     if (payload.sourceHistorical) {
-      const { turnId, responseType } = payload.sourceHistorical;
+      const { turnId, responseType }: { turnId: string; responseType: ProviderResponseType } = payload.sourceHistorical;
       console.log(`[ContextManager] Resolving historical data from turn: ${turnId}`);
 
-      let aiTurn = null;
+      let aiTurn: SimpleRecord | null = null;
       try {
         const adapter = sessionManager?.adapter;
         if (adapter?.isReady && adapter.isReady()) {
@@ -151,7 +164,9 @@ export class ContextManager {
                   }
                 }
               }
-            } catch (ignored) {}
+            } catch (err) {
+              console.warn('[ContextManager] Turn lookup fallback failed (non-fatal):', String(err));
+            }
           }
         }
       } catch (e) {
@@ -200,76 +215,44 @@ export class ContextManager {
         }
       }
 
-      let sourceContainer;
-      switch (responseType) {
-        case 'mapping':
-          sourceContainer = aiTurn.mappingResponses || {};
-          break;
-        default:
-          sourceContainer = aiTurn.batchResponses || {};
-          break;
+      // Responses are stored flat in provider_responses with responseType discriminator.
+      // Read directly — there is no mappingResponses/batchResponses field on the turn record.
+      const respType = responseType || 'batch';
+      const latestMap = new Map<string, any>();
+      try {
+        const responses = await sessionManager.adapter?.getResponsesByTurnId(aiTurn.id as string);
+        (responses || [])
+          .filter((r: any) => r?.responseType === respType && r.text?.trim())
+          .forEach((r: any) => {
+            const existing = latestMap.get(r.providerId);
+            if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
+              latestMap.set(r.providerId, r);
+            }
+          });
+      } catch (e) {
+        console.warn('[ContextManager] getResponsesByTurnId failed for historical sources:', e);
       }
 
-      const latestMap = new Map();
-      Object.keys(sourceContainer).forEach((pid) => {
-        const versions = (sourceContainer[pid] || [])
-          .filter((r) => r.status === 'completed' && r.text?.trim())
-          .sort((a, b) => (b.responseIndex || 0) - (a.responseIndex || 0));
-        if (versions.length > 0) {
-          latestMap.set(pid, { providerId: pid, text: versions[0].text });
-        }
-      });
-
-      let sourceArray = Array.from(latestMap.values());
-
-      if (
-        sourceArray.length === 0 &&
-        sessionManager?.adapter?.isReady &&
-        sessionManager.adapter.isReady()
-      ) {
-        try {
-          const responses = await sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
-          const respType = responseType || 'batch';
-          const dbLatestMap = new Map();
-          (responses || [])
-            .filter((r) => r?.responseType === respType && r.text?.trim())
-            .forEach((r) => {
-              const existing = dbLatestMap.get(r.providerId);
-              if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
-                dbLatestMap.set(r.providerId, r);
-              }
-            });
-          sourceArray = Array.from(dbLatestMap.values()).map((r) => ({
-            providerId: r.providerId,
-            text: r.text,
-          }));
-          if (sourceArray.length > 0) {
-            console.log(
-              '[ContextManager] provider_responses fallback succeeded for historical sources'
-            );
-          }
-        } catch (e) {
-          console.warn(
-            '[ContextManager] provider_responses fallback failed for historical sources:',
-            e
-          );
-        }
-      }
+      const sourceArray = Array.from(latestMap.values()).map((r: any) => ({
+        providerId: r.providerId,
+        text: r.text,
+      }));
 
       console.log(`[ContextManager] Found ${sourceArray.length} historical sources`);
       return sourceArray;
     }
 
     if (payload.sourceStepIds) {
-      const sourceArray = [];
+      const sourceArray: { providerId: string; text: string }[] = [];
       for (const stepId of payload.sourceStepIds) {
         const stepResult = previousResults?.get?.(stepId);
         if (!stepResult || stepResult.status !== 'completed') continue;
         const results = stepResult.result?.results;
         if (!results || typeof results !== 'object') continue;
         Object.entries(results).forEach(([providerId, result]) => {
-          if (result.status === 'completed' && result.text && result.text.trim().length > 0) {
-            sourceArray.push({ providerId, text: result.text });
+          const r = result as any;
+          if (r.status === 'completed' && r.text && r.text.trim().length > 0) {
+            sourceArray.push({ providerId, text: r.text });
           }
         });
       }

@@ -812,7 +812,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       });
     }
     case 'bayesian-basins': {
-      const bayesian = artifact?.geometry?.bayesianBasinInversion ?? null;
+      const bayesian = artifact?.geometry?.basinInversion ?? null;
       const bMeta = bayesian?.meta?.bayesian ?? null;
       return ser({
         summary: {

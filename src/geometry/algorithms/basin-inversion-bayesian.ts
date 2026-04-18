@@ -317,27 +317,12 @@ export function computeBasinInversion(substrate: MeasuredSubstrate): BasinInvers
   const sigma: number | null = field.stats.stddev;
   const p10: number | null = field.stats.p10;
   const p90: number | null = field.stats.p90;
-  const minS = field.stats.min;
-  const maxS = field.stats.max;
   const discriminationRange: number | null = field.stats.discriminationRange;
   const T_low = mu !== null && sigma !== null ? mu - sigma : null;
   const T_high = mu !== null && sigma !== null ? mu + sigma : null;
 
-  // Histogram
-  const binCount = Math.max(1, Math.ceil(Math.sqrt(pairCount)));
-  const spread = maxS - minS;
-  const binMin = minS;
-  const binMax = maxS;
-  const binWidth = spread > 0 ? spread / binCount : 0;
-  const histogram = new Array<number>(binCount).fill(0);
-  if (binWidth > 0) {
-    for (const s of similarities) {
-      const raw = Math.floor((s - binMin) / binWidth);
-      histogram[raw < 0 ? 0 : raw >= binCount ? binCount - 1 : raw]++;
-    }
-  } else {
-    histogram[0] = pairCount;
-  }
+  // Histogram — read from pre-computed field stats (algorithm-independent)
+  const { histogram, binCount, binMin, binMax, binWidth } = field.stats;
 
   // ── Per-node change-point detection ──────────────────────────────────
   const profiles: NodeProfile[] = [];

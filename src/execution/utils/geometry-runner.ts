@@ -28,8 +28,6 @@ export async function buildGeometryAsync(
     substrateDegenerateReason: null,
     preSemanticInterpretation: null,
     substrate: null,
-    basinInversionResult: null,
-    bayesianBasinInversionResult: null,
   };
 
   try {
@@ -65,7 +63,7 @@ export async function buildGeometryAsync(
       geometryDiagnostics.stages.offscreen = { status: 'failed', error: getErrorMessage(err) };
     });
 
-    const clusteringModule = await import('../../../clustering/index.js');
+    const clusteringModule = await import('../../clustering/index.js');
     const {
       generateEmbeddings,
       generateTextEmbeddings,
@@ -308,8 +306,6 @@ export async function buildGeometryAsync(
           results.geometryParagraphEmbeddings
         );
         // Basin inversion is now computed inside interpret — read from result
-        results.basinInversionResult = results.preSemanticInterpretation?.basinInversion ?? null;
-        results.bayesianBasinInversionResult = results.basinInversionResult;
       } else {
         results.preSemanticInterpretation = null;
       }

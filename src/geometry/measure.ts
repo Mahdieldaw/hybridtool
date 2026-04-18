@@ -148,9 +148,32 @@ export function buildPairwiseField(
   }
 
   const baseStats = computeExtendedStatsFromArray(allSims);
+  const discriminationRange = baseStats.p90 - baseStats.p10;
+
+  // Histogram — sqrt(N) bins over [min, max], algorithm-independent
+  const binCount = Math.max(1, Math.ceil(Math.sqrt(allSims.length)));
+  const binMin = baseStats.min;
+  const binMax = baseStats.max;
+  const spread = binMax - binMin;
+  const binWidth = spread > 0 ? spread / binCount : 0;
+  const histogram = new Array<number>(binCount).fill(0);
+  if (binWidth > 0) {
+    for (const s of allSims) {
+      const raw = Math.floor((s - binMin) / binWidth);
+      histogram[raw < 0 ? 0 : raw >= binCount ? binCount - 1 : raw]++;
+    }
+  } else if (allSims.length > 0) {
+    histogram[0] = allSims.length;
+  }
+
   const stats: PairwiseFieldStats = {
     ...baseStats,
-    discriminationRange: baseStats.p90 - baseStats.p10,
+    discriminationRange,
+    histogram,
+    binCount,
+    binMin,
+    binMax,
+    binWidth,
   };
 
   return { matrix, perNode, stats, nodeCount: n };
@@ -369,6 +392,11 @@ function buildDegenerateSubstrate(
       mean: 0,
       stddev: 0,
       discriminationRange: 0,
+      histogram: [],
+      binCount: 0,
+      binMin: 0,
+      binMax: 0,
+      binWidth: 0,
     },
     nodeCount: n,
   };

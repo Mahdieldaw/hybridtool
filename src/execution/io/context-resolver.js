@@ -217,7 +217,9 @@ export class ContextResolver {
           if (candidates[0]?.meta && typeof candidates[0].meta === 'object') {
             normalizedTargetContext = candidates[0].meta;
           }
-        } catch (_) {}
+        } catch (err) {
+          console.warn('[ContextResolver] Provider response lookup failed (non-fatal):', err?.message || String(err));
+        }
       }
 
       if (
@@ -236,7 +238,9 @@ export class ContextResolver {
           if (meta && typeof meta === 'object' && 'conversationId' in meta) {
             normalizedTargetContext = meta;
           }
-        } catch (_) {}
+        } catch (err) {
+          console.warn('[ContextResolver] Session context lookup failed (non-fatal):', err?.message || String(err));
+        }
       }
 
       const providerContextsAtSourceTurn =
@@ -367,7 +371,8 @@ export class ContextResolver {
       if (!Array.isArray(claims) || claims.length === 0) return null;
 
       return { claims, edges: edges || [] };
-    } catch (_) {
+    } catch (err) {
+      console.warn('[ContextResolver] Mapping parse failed (non-fatal):', err?.message || String(err));
       return null;
     }
   }
