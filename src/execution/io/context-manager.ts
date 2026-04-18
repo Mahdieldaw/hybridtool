@@ -63,8 +63,8 @@ export class ContextManager {
             `[ContextManager] ${stepType} using historical context from ResolvedContext for ${providerId}`
           );
         } catch (err) {
-        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
-      }
+          console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+        }
         return providerContexts;
       }
     }
@@ -84,8 +84,8 @@ export class ContextManager {
               `[ContextManager] ${stepType} continuing conversation for ${providerId} via batch step`
             );
           } catch (err) {
-        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
-      }
+            console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+          }
           return providerContexts;
         }
       }
@@ -110,8 +110,8 @@ export class ContextManager {
             ).join(',')}`
           );
         } catch (err) {
-        console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
-      }
+          console.warn('[ContextManager] Debug log failed (non-fatal):', String(err));
+        }
         return providerContexts;
       }
     } catch (e) {
@@ -142,7 +142,8 @@ export class ContextManager {
     }
 
     if (payload.sourceHistorical) {
-      const { turnId, responseType }: { turnId: string; responseType: ProviderResponseType } = payload.sourceHistorical;
+      const { turnId, responseType }: { turnId: string; responseType: ProviderResponseType } =
+        payload.sourceHistorical;
       console.log(`[ContextManager] Resolving historical data from turn: ${turnId}`);
 
       let aiTurn: SimpleRecord | null = null;
@@ -165,7 +166,10 @@ export class ContextManager {
                 }
               }
             } catch (err) {
-              console.warn('[ContextManager] Turn lookup fallback failed (non-fatal):', String(err));
+              console.warn(
+                '[ContextManager] Turn lookup fallback failed (non-fatal):',
+                String(err)
+              );
             }
           }
         }

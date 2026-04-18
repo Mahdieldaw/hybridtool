@@ -8,10 +8,9 @@
 import { DEFAULT_THREAD } from '../../shared/messaging';
 
 export class WorkflowCompiler {
-  constructor(sessionManager) {
-    // Kept only for dependency injection - NEVER USED
-    this.sessionManager = sessionManager;
+  private defaults: { mapper: string | null };
 
+  constructor(_sessionManager: unknown) {
     this.defaults = {
       mapper: null,
     };
@@ -24,7 +23,7 @@ export class WorkflowCompiler {
    * @param {Object} resolvedContext - REQUIRED from ContextResolver
    * @returns {Object} Executable workflow
    */
-  compile(request, resolvedContext) {
+  compile(request: any, resolvedContext: any) {
     if (!resolvedContext) {
       throw new Error('[Compiler] resolvedContext required');
     }
@@ -32,12 +31,12 @@ export class WorkflowCompiler {
     this._validateRequest(request);
     this._validateContext(resolvedContext);
 
-    const compileRequest = this._applyBatchGating(request, resolvedContext);
+    const compileRequest = this._applyBatchGating(request);
 
     const workflowId = this._generateWorkflowId(resolvedContext.type);
     const steps = [];
     // Track created step IDs to ensure correct linkage
-    let batchStepId = null;
+    let batchStepId: string | undefined;
 
     console.log(`[Compiler] Compiling ${resolvedContext.type} workflow`);
 
@@ -54,7 +53,7 @@ export class WorkflowCompiler {
         }
         break;
 
-      case 'extend':
+      case 'extend': {
         // Singularity-only: user selected only the singularity provider via council orbs
         const isSingularityOnly =
           compileRequest.singularity &&
@@ -82,6 +81,7 @@ export class WorkflowCompiler {
           batchStepId = batchStep.stepId;
         }
         break;
+      }
 
       case 'recompute':
         if (resolvedContext.stepType === 'batch') {
@@ -154,7 +154,7 @@ export class WorkflowCompiler {
   // STEP CREATORS (Pure)
   // ============================================================================
 
-  _createBatchStep(request, context) {
+  _createBatchStep(request: any, context: any) {
     return {
       stepId: `batch-${Date.now()}`,
       type: 'prompt',
@@ -170,7 +170,7 @@ export class WorkflowCompiler {
     };
   }
 
-  _createMappingStep(request, context, linkIds = {}) {
+  _createMappingStep(request: any, context: any, linkIds: { batchStepId?: string } = {}) {
     // Include provider in stepId so UI can derive provider on failure without result payload
     const mappingProviderId =
       context.type === 'recompute'
@@ -216,7 +216,7 @@ export class WorkflowCompiler {
   // DECISION LOGIC (Pure)
   // ============================================================================
 
-  _needsMappingStep(request, context) {
+  _needsMappingStep(request: any, context: any) {
     if (context.type === 'recompute') {
       return context.stepType === 'mapping';
     }
@@ -226,7 +226,7 @@ export class WorkflowCompiler {
     return providers.length >= 2;
   }
 
-  _applyBatchGating(request, resolvedContext) {
+  _applyBatchGating(request: any) {
     // No-op: gating is now fully controlled by provider selection in the UI.
     // The providers array already reflects the user's council orb choices.
     return request;
@@ -236,7 +236,7 @@ export class WorkflowCompiler {
   // CONTEXT BUILDER (Pure)
   // ============================================================================
 
-  _buildWorkflowContext(request, context) {
+  _buildWorkflowContext(request: any, context: any) {
     let sessionId;
     let sessionCreated = false;
 
@@ -279,11 +279,11 @@ export class WorkflowCompiler {
   // UTILITIES (Pure)
   // ============================================================================
 
-  _getDefaultMapper(request) {
+  _getDefaultMapper(request: any) {
     return request.providers?.[0] || this.defaults.mapper;
   }
 
-  _generateWorkflowId(contextType) {
+  _generateWorkflowId(contextType: any) {
     return `wf-${contextType}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
   }
 
@@ -291,7 +291,7 @@ export class WorkflowCompiler {
   // VALIDATION
   // ============================================================================
 
-  _validateRequest(request) {
+  _validateRequest(request: any) {
     if (!request?.type) throw new Error('[Compiler] Request type required');
 
     const validTypes = ['initialize', 'extend', 'recompute'];
@@ -330,7 +330,7 @@ export class WorkflowCompiler {
     }
   }
 
-  _validateContext(context) {
+  _validateContext(context: any) {
     if (!context?.type) throw new Error('[Compiler] Context type required');
 
     const validTypes = ['initialize', 'extend', 'recompute'];

@@ -21,6 +21,7 @@ import {
   RegionsCard,
   StatementClassificationCard,
   PeripheralNodeCard,
+  SubstrateSnapshotCard,
 } from './cards';
 import { useInstrumentState } from '../hooks/instrument/useInstrumentState';
 import type { PipelineLayer } from '../hooks/instrument/useInstrumentState';
@@ -1162,6 +1163,16 @@ export const DecisionMapSheet = React.memo(() => {
                               {(
                                 [
                                   {
+                                    id: 'substrate-snapshot',
+                                    label: 'Substrate Snapshot',
+                                    content: (
+                                      <SubstrateSnapshotCard
+                                        artifact={mappingArtifactWithCitations}
+                                        selectedEntity={selectedEntity}
+                                      />
+                                    ),
+                                  },
+                                  {
                                     id: 'geometry',
                                     label: 'Geometry',
                                     content: (
@@ -1389,6 +1400,16 @@ export const DecisionMapSheet = React.memo(() => {
                               >
                                 {(
                                   [
+                                    {
+                                      id: 'substrate-snapshot',
+                                      label: 'Substrate Snapshot',
+                                      content: (
+                                        <SubstrateSnapshotCard
+                                          artifact={mappingArtifactWithCitations}
+                                          selectedEntity={selectedEntity}
+                                        />
+                                      ),
+                                    },
                                     {
                                       id: 'geometry',
                                       label: 'Geometry',

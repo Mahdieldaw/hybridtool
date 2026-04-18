@@ -618,6 +618,145 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
   const safeArr = (v: any): any[] => (Array.isArray(v) ? v : []);
 
   switch (layer) {
+    case 'substrate-snapshot': {
+      const basin = artifact?.geometry?.basinInversion ?? null;
+      const bMeta = basin?.meta?.bayesian ?? null;
+      const sub = artifact?.geometry?.substrate ?? null;
+      const ps = artifact?.geometry?.preSemantic ?? null;
+      const regions = safeArr(ps?.regions ?? ps?.regionization?.regions);
+      const nodes = safeArr(sub?.nodes);
+      const mutualEdges = safeArr(sub?.mutualEdges);
+      const basins = safeArr(basin?.basins);
+      const profiles = safeArr(bMeta?.profiles);
+      const claims = safeArr(artifact?.semantic?.claims);
+      const validatedConflicts = safeArr(artifact?.conflictValidation);
+      const claimProfiles = artifact?.passageRouting?.claimProfiles ?? {};
+      const diagnostics = artifact?.passageRouting?.routing?.diagnostics ?? null;
+
+      // Largest basin
+      let largestBasinRatio: number | null = null;
+      if (basins.length > 0 && nodes.length > 0) {
+        let best = basins[0];
+        for (const b of basins) {
+          if ((safeArr(b?.nodeIds).length ?? 0) > (safeArr(best?.nodeIds).length ?? 0)) best = b;
+        }
+        largestBasinRatio = safeArr(best?.nodeIds).length / nodes.length;
+      }
+
+      // Bayesian confidence
+      let logBFPositiveFrac: number | null = null;
+      if (profiles.length > 0) {
+        let positive = 0;
+        for (const p of profiles) {
+          if (typeof p?.logBayesFactor === 'number' && p.logBayesFactor > 0) positive++;
+        }
+        logBFPositiveFrac = positive / profiles.length;
+      }
+
+      // Participation
+      const participating = nodes.filter((n: any) => (n?.mutualRankDegree ?? 0) > 0).length;
+      const participationRate = nodes.length > 0 ? participating / nodes.length : null;
+
+      // Lens duality cells
+      const basinByNode = new Map<string, string | number>();
+      for (const b of basins) {
+        for (const nid of safeArr(b?.nodeIds)) basinByNode.set(String(nid), b?.basinId ?? 'unk');
+      }
+      const regionByNode = new Map<string, string>();
+      for (const r of regions) {
+        for (const nid of safeArr(r?.nodeIds)) regionByNode.set(String(nid), String(r?.id ?? 'unk'));
+      }
+      const cellCounts = new Map<string, number>();
+      let covered = 0;
+      for (const n of nodes) {
+        const nid = String(n?.paragraphId ?? n?.id ?? '');
+        if (!nid) continue;
+        const b = basinByNode.get(nid);
+        const r = regionByNode.get(nid);
+        if (b == null || r == null) continue;
+        covered++;
+        const key = `${b}::${r}`;
+        cellCounts.set(key, (cellCounts.get(key) ?? 0) + 1);
+      }
+      let dominantCellSize = 0;
+      let singletonCells = 0;
+      for (const count of cellCounts.values()) {
+        if (count > dominantCellSize) dominantCellSize = count;
+        if (count === 1) singletonCells++;
+      }
+
+      // Landscape distribution
+      const landscapeCounts = { northStar: 0, eastStar: 0, mechanism: 0, floor: 0 };
+      for (const [, profile] of Object.entries(claimProfiles) as Array<[string, any]>) {
+        const pos = profile?.landscapePosition;
+        if (pos && pos in landscapeCounts) landscapeCounts[pos as keyof typeof landscapeCounts]++;
+      }
+
+      // Mapper-geometry conflict agreement
+      let mapperLabeled = 0;
+      let validated = 0;
+      let bothMapperAndValidated = 0;
+      for (const c of validatedConflicts) {
+        if (c?.mapperLabeledConflict) mapperLabeled++;
+        if (c?.validated) validated++;
+        if (c?.mapperLabeledConflict && c?.validated) bothMapperAndValidated++;
+      }
+
+      return ser({
+        identity: {
+          nodeCount: nodes.length,
+          pairCount: basin?.pairCount ?? null,
+          claimCount: claims.length,
+          regionCount: regions.length,
+          basinCount: basins.length,
+        },
+        geometricCharacter: {
+          corpusMode: diagnostics?.corpusMode ?? null,
+          largestBasinRatio,
+          status: basin?.status ?? null,
+        },
+        substrateConfidence: {
+          discriminationRange: basin?.discriminationRange ?? null,
+          mu: basin?.mu ?? null,
+          sigma: basin?.sigma ?? null,
+          p10: basin?.p10 ?? null,
+          p90: basin?.p90 ?? null,
+          T_v: basin?.T_v ?? null,
+          bayesian: {
+            boundaryRatio: bMeta?.boundaryRatio ?? null,
+            medianBoundarySim: bMeta?.medianBoundarySim ?? null,
+            concentration: bMeta?.concentration ?? null,
+            logBFPositiveFrac,
+            profileCount: profiles.length,
+          },
+          mutualGraph: {
+            edgeCount: mutualEdges.length,
+            participatingNodes: participating,
+            participationRate,
+            isolatedNodes: nodes.length - participating,
+          },
+        },
+        lensDuality: {
+          basinCount: basins.length,
+          regionCount: regions.length,
+          crossTabCellCount: cellCounts.size,
+          nodesCovered: covered,
+          dominantCellSize,
+          dominantCellFraction: covered > 0 ? dominantCellSize / covered : null,
+          singletonCells,
+        },
+        semanticShape: {
+          claimCount: claims.length,
+          landscape: landscapeCounts,
+          conflicts: {
+            mapperLabeled,
+            validated,
+            bothMapperAndValidated,
+            validationRate: mapperLabeled > 0 ? bothMapperAndValidated / mapperLabeled : null,
+          },
+        },
+      });
+    }
     case 'geometry': {
       const basin = artifact?.geometry?.basinInversion ?? null;
       const sub = artifact?.geometry?.substrate ?? null;

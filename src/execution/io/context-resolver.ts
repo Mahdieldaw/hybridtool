@@ -1,16 +1,45 @@
-// src/core/execution/io/context-resolver.js
+// src/core/execution/io/context-resolver.ts
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { parseSemanticMapperOutput } from '../../../shared/parsing-utils';
+import type { ProviderResponseRecord, SessionRecord, AiTurnRecord, TurnRecord } from '../../persistence/types';
 
-export function aggregateBatchOutputs(providerResponses = []) {
+// Minimal structural interfaces for the injected session manager
+interface IAdapter {
+  isReady(): boolean;
+  get(store: 'sessions', id: string): Promise<SessionRecord | null>;
+  get(store: 'turns', id: string): Promise<TurnRecord | null>;
+  getTurnsBySessionId(sessionId: string): Promise<TurnRecord[]>;
+  getResponsesByTurnId(aiTurnId: string): Promise<ProviderResponseRecord[]>;
+}
+
+interface ISessionManager {
+  adapter: IAdapter;
+  getProviderContexts(
+    sessionId: string,
+    threadId: string,
+    opts: { contextRole: string }
+  ): Promise<Record<string, { meta?: Record<string, unknown> }> | null>;
+}
+
+type FrozenBatchMap = Record<string, {
+  providerId: string;
+  text: string;
+  status: string;
+  meta: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}>;
+
+export function aggregateBatchOutputs(providerResponses: ProviderResponseRecord[] = []): FrozenBatchMap {
   try {
-    const frozen = {};
-    const byProvider = new Map();
+    const frozen: FrozenBatchMap = {};
+    const byProvider = new Map<string, ProviderResponseRecord>();
     for (const r of providerResponses) {
       if (!r || r.responseType !== 'batch') continue;
       const pid = r.providerId;
       const existing = byProvider.get(pid);
-      const rank = (val) => (val?.status === 'completed' ? 2 : val?.status === 'streaming' ? 1 : 0);
+      const rank = (val: ProviderResponseRecord | undefined) =>
+        val?.status === 'completed' ? 2 : val?.status === 'streaming' ? 1 : 0;
       const currentRank = rank(r);
       const existingRank = rank(existing);
       if (
@@ -26,7 +55,7 @@ export function aggregateBatchOutputs(providerResponses = []) {
         providerId: pid,
         text: r.text || '',
         status: r.status || 'completed',
-        meta: r.meta || {},
+        meta: (r.meta as Record<string, unknown>) || {},
         createdAt: r.createdAt || Date.now(),
         updatedAt: r.updatedAt || r.createdAt || Date.now(),
       };
@@ -38,7 +67,10 @@ export function aggregateBatchOutputs(providerResponses = []) {
   }
 }
 
-export function findLatestMappingOutput(providerResponses = [], preferredProvider) {
+export function findLatestMappingOutput(
+  providerResponses: ProviderResponseRecord[] = [],
+  preferredProvider?: string
+): { providerId: string; text: string; meta: Record<string, unknown> } | null {
   try {
     if (!providerResponses || providerResponses.length === 0) return null;
     const mappingResponses = providerResponses.filter(
@@ -50,18 +82,20 @@ export function findLatestMappingOutput(providerResponses = [], preferredProvide
     );
     if (preferredProvider) {
       const preferred = mappingResponses.find((r) => r.providerId === preferredProvider);
-      if (preferred) return { providerId: preferred.providerId, text: preferred.text, meta: preferred.meta || {} };
+      if (preferred) return { providerId: preferred.providerId, text: preferred.text, meta: (preferred.meta as Record<string, unknown>) || {} };
     }
     const latest = mappingResponses[0];
-    return { providerId: latest.providerId, text: latest.text, meta: latest.meta || {} };
+    return { providerId: latest.providerId, text: latest.text, meta: (latest.meta as Record<string, unknown>) || {} };
   } catch (e) {
     console.warn('[ContextResolver] findLatestMappingOutput failed:', e);
     return null;
   }
 }
 
-export function extractUserMessage(userTurn) {
-  return userTurn?.text || userTurn?.content || '';
+export function extractUserMessage(userTurn: TurnRecord | null | undefined): string {
+  if (!userTurn) return '';
+  if (userTurn.type === 'user') return userTurn.text || userTurn.content || '';
+  return userTurn.content || '';
 }
 
 /**
@@ -77,16 +111,18 @@ export function extractUserMessage(userTurn) {
  */
 
 export class ContextResolver {
-  constructor(sessionManager) {
+  private sessionManager: ISessionManager;
+
+  constructor(sessionManager: ISessionManager) {
     this.sessionManager = sessionManager;
   }
 
   /**
    * Resolve context for any primitive request
-   * @param {Object} request initialize | extend | recompute
-   * @returns {Promise<Object>} ResolvedContext
+   * @param request initialize | extend | recompute
+   * @returns ResolvedContext
    */
-  async resolve(request) {
+  async resolve(request: { type: string; [key: string]: unknown }): Promise<unknown> {
     if (!request || !request.type) {
       throw new Error('[ContextResolver] request.type is required');
     }
@@ -104,7 +140,7 @@ export class ContextResolver {
   }
 
   // initialize: starting fresh
-  async _resolveInitialize(request) {
+  async _resolveInitialize(request: { providers?: string[]; [key: string]: unknown }): Promise<unknown> {
     return {
       type: 'initialize',
       providers: request.providers || [],
@@ -112,7 +148,13 @@ export class ContextResolver {
   }
 
   // extend: fetch last turn and extract provider contexts for requested providers
-  async _resolveExtend(request) {
+  async _resolveExtend(request: {
+    sessionId?: string;
+    threadId?: string;
+    providers?: string[];
+    forcedContextReset?: string[];
+    [key: string]: unknown;
+  }): Promise<unknown> {
     const { sessionId, threadId = DEFAULT_THREAD } = request;
     if (!sessionId) throw new Error('[ContextResolver] Extend requires sessionId');
 
@@ -124,7 +166,7 @@ export class ContextResolver {
     const lastTurn = await this._getTurn(session.lastTurnId);
     if (!lastTurn) throw new Error(`[ContextResolver] Last turn ${session.lastTurnId} not found`);
 
-    const sessionContexts = await this.sessionManager.getProviderContexts(sessionId, threadId, {
+    const sessionContexts = await this.sessionManager.getProviderContexts(sessionId, threadId as string, {
       contextRole: 'batch',
     });
 
@@ -133,7 +175,7 @@ export class ContextResolver {
     // 2. If forced reset -> New Joiner
     // 3. If context exists -> Continue
     // 4. If no context -> New Joiner
-    const resolvedContexts = {};
+    const resolvedContexts: Record<string, unknown> = {};
     const forcedResetSet = new Set(request.forcedContextReset || []);
 
     for (const pid of request.providers || []) {
@@ -155,38 +197,48 @@ export class ContextResolver {
       sessionId,
       lastTurnId: lastTurn.id,
       providerContexts: resolvedContexts,
-      previousContext: lastTurn.lastContextSummary || null,
-      previousAnalysis: await this._resolveLastStoredAnalysis(sessionId, session, lastTurn),
+      previousContext: (lastTurn as AiTurnRecord).lastContextSummary || null,
+      previousAnalysis: await this._resolveLastStoredAnalysis(sessionId, session, lastTurn as AiTurnRecord),
     };
   }
 
   // recompute: fetch source AI turn, gather frozen batch outputs and original user message
-  async _resolveRecompute(request) {
+  async _resolveRecompute(request: {
+    sessionId?: string;
+    sourceTurnId?: string;
+    stepType?: string;
+    targetProvider?: string;
+    userMessage?: string;
+    preferredMappingProvider?: string;
+    forcedContextReset?: string[];
+    [key: string]: unknown;
+  }): Promise<unknown> {
     const { sessionId, sourceTurnId, stepType, targetProvider } = request;
     if (!sessionId || !sourceTurnId) {
       throw new Error('[ContextResolver] Recompute requires sessionId and sourceTurnId');
     }
 
-    const sourceTurn = await this._getTurn(sourceTurnId);
-    if (!sourceTurn) throw new Error(`[ContextResolver] Source turn ${sourceTurnId} not found`);
+    const sourceTurnRaw = await this._getTurn(sourceTurnId);
+    if (!sourceTurnRaw) throw new Error(`[ContextResolver] Source turn ${sourceTurnId} not found`);
+    const sourceTurn = sourceTurnRaw as AiTurnRecord;
 
     // NEW: batch recompute - single provider retry using original user message OR custom override
     if (stepType === 'batch') {
-      const turnContexts = sourceTurn.providerContexts || {};
+      const turnContexts = (sourceTurn as unknown as Record<string, unknown>).providerContexts as Record<string, unknown> || {};
       const batchPid = targetProvider ? `${targetProvider}:batch` : null;
 
       // Extract specific context for target provider, prioritizing :batch
-      let targetContext = undefined;
+      let targetContext: unknown = undefined;
       if (batchPid && turnContexts[batchPid]) {
         targetContext = turnContexts[batchPid];
       } else if (targetProvider && turnContexts[targetProvider]) {
         targetContext = turnContexts[targetProvider];
       }
 
-      let normalizedTargetContext =
+      let normalizedTargetContext: Record<string, unknown> | undefined =
         targetContext && typeof targetContext === 'object' && 'meta' in targetContext
-          ? targetContext.meta
-          : targetContext;
+          ? (targetContext as { meta: Record<string, unknown> }).meta
+          : (targetContext as Record<string, unknown> | undefined);
 
       if (
         targetProvider &&
@@ -215,10 +267,10 @@ export class ContextResolver {
             return bt - at;
           });
           if (candidates[0]?.meta && typeof candidates[0].meta === 'object') {
-            normalizedTargetContext = candidates[0].meta;
+            normalizedTargetContext = candidates[0].meta as Record<string, unknown>;
           }
         } catch (err) {
-          console.warn('[ContextResolver] Provider response lookup failed (non-fatal):', err?.message || String(err));
+          console.warn('[ContextResolver] Provider response lookup failed (non-fatal):', err instanceof Error ? err.message : String(err));
         }
       }
 
@@ -236,14 +288,14 @@ export class ContextResolver {
           );
           const meta = sessionContexts?.[targetProvider]?.meta;
           if (meta && typeof meta === 'object' && 'conversationId' in meta) {
-            normalizedTargetContext = meta;
+            normalizedTargetContext = meta as Record<string, unknown>;
           }
         } catch (err) {
-          console.warn('[ContextResolver] Session context lookup failed (non-fatal):', err?.message || String(err));
+          console.warn('[ContextResolver] Session context lookup failed (non-fatal):', err instanceof Error ? err.message : String(err));
         }
       }
 
-      const providerContextsAtSourceTurn =
+      const providerContextsAtSourceTurn: Record<string, unknown> =
         targetProvider && normalizedTargetContext
           ? { [targetProvider]: normalizedTargetContext }
           : {};
@@ -280,13 +332,13 @@ export class ContextResolver {
       request.preferredMappingProvider
     );
 
-    const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
+    const providerContextsAtSourceTurn = (sourceTurn as unknown as Record<string, unknown>).providerContexts || {};
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
 
     // Extract frozen prompt metadata for singularity recomputes
     const singularityResponse = responses.find((r) => r.responseType === 'singularity');
-    const frozenSingularityPromptType = singularityResponse?.meta?.frozenSingularityPromptType;
-    const frozenSingularityPromptSeed = singularityResponse?.meta?.frozenSingularityPromptSeed;
+    const frozenSingularityPromptType = (singularityResponse?.meta as Record<string, unknown>)?.frozenSingularityPromptType;
+    const frozenSingularityPromptSeed = (singularityResponse?.meta as Record<string, unknown>)?.frozenSingularityPromptSeed;
 
     return {
       type: 'recompute',
@@ -304,7 +356,7 @@ export class ContextResolver {
   }
 
   // ===== helpers =====
-  async _getSessionMetadata(sessionId) {
+  async _getSessionMetadata(sessionId: string): Promise<SessionRecord | null> {
     try {
       if (this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
         return await this.sessionManager.adapter.get('sessions', sessionId);
@@ -316,7 +368,11 @@ export class ContextResolver {
     }
   }
 
-  async _resolveLastStoredAnalysis(sessionId, session, lastTurn) {
+  async _resolveLastStoredAnalysis(
+    sessionId: string,
+    session: SessionRecord,
+    lastTurn: AiTurnRecord
+  ): Promise<{ claims: unknown[]; edges: unknown[] } | null> {
     // Try last turn first
     const fromLast = await this._parseMappingFromTurn(lastTurn?.id);
     if (fromLast) return fromLast;
@@ -341,7 +397,7 @@ export class ContextResolver {
           for (let i = turns.length - 1; i >= 0; i--) {
             const t = turns[i];
             if (!t || typeof t !== 'object') continue;
-            if (t.type !== 'ai' && t.role !== 'assistant') continue;
+            if (t.type !== 'ai' && (t as unknown as Record<string, unknown>).role !== 'assistant') continue;
             const result = await this._parseMappingFromTurn(t.id);
             if (result) return result;
           }
@@ -354,7 +410,7 @@ export class ContextResolver {
     return null;
   }
 
-  async _parseMappingFromTurn(turnId) {
+  async _parseMappingFromTurn(turnId: string | null | undefined): Promise<{ claims: unknown[]; edges: unknown[] } | null> {
     if (!turnId) return null;
     try {
       const responses = await this._getProviderResponsesForTurn(turnId);
@@ -367,17 +423,17 @@ export class ContextResolver {
       const parsed = parseSemanticMapperOutput(String(mappingResp.text));
       if (!parsed.success || !parsed.output) return null;
 
-      const { claims, edges } = parsed.output;
+      const { claims, edges } = parsed.output as { claims: unknown[]; edges: unknown[] };
       if (!Array.isArray(claims) || claims.length === 0) return null;
 
       return { claims, edges: edges || [] };
     } catch (err) {
-      console.warn('[ContextResolver] Mapping parse failed (non-fatal):', err?.message || String(err));
+      console.warn('[ContextResolver] Mapping parse failed (non-fatal):', err instanceof Error ? err.message : String(err));
       return null;
     }
   }
 
-  async _getTurn(turnId) {
+  async _getTurn(turnId: string): Promise<TurnRecord | null> {
     try {
       if (this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
         return await this.sessionManager.adapter.get('turns', turnId);
@@ -390,8 +446,11 @@ export class ContextResolver {
   }
 
   // kept for legacy compatibility if strict filtering needed
-  _filterContexts(allContexts, requestedProviders) {
-    const filtered = {};
+  _filterContexts(
+    allContexts: Record<string, unknown>,
+    requestedProviders: string[]
+  ): Record<string, unknown> {
+    const filtered: Record<string, unknown> = {};
     for (const pid of requestedProviders) {
       if (allContexts[pid]) {
         filtered[pid] = { meta: allContexts[pid], continueThread: true };
@@ -400,7 +459,7 @@ export class ContextResolver {
     return filtered;
   }
 
-  async _getUserMessageForTurn(aiTurn) {
+  async _getUserMessageForTurn(aiTurn: AiTurnRecord): Promise<string> {
     const userTurnId = aiTurn.userTurnId;
     if (!userTurnId) return '';
     const userTurn = await this._getTurn(userTurnId);
@@ -411,7 +470,7 @@ export class ContextResolver {
    * Fetch provider responses for a given AI turn using adapter indices if available.
    * Simplified: always use the indexed adapter.getResponsesByTurnId for high performance.
    */
-  async _getProviderResponsesForTurn(aiTurnId) {
+  async _getProviderResponsesForTurn(aiTurnId: string): Promise<ProviderResponseRecord[]> {
     // No more fallbacks or readiness checks. Trust the adapter.
     // If this fails, it should throw an error, which is the desired "fail fast" behavior.
     return this.sessionManager.adapter.getResponsesByTurnId(aiTurnId);

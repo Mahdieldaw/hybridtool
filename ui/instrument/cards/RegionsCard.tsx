@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import clsx from 'clsx';
 import {
   fmtInt,
   fmtPct,
@@ -27,18 +26,16 @@ export function RegionsCard({
 
     const normalize = (input: unknown) => {
       if (!Array.isArray(input)) return [];
-      const out: Array<{ id: string; kind: 'basin' | 'gap'; nodeIds: string[] }> = [];
+      const out: Array<{ id: string; nodeIds: string[] }> = [];
       for (const r of input) {
         if (!r || typeof r !== 'object') continue;
         const rr = r as Record<string, unknown>;
         const id = typeof rr.id === 'string' ? rr.id : '';
         if (!id) continue;
-        const kindRaw = typeof rr.kind === 'string' ? rr.kind : '';
-        const kind = kindRaw === 'basin' || kindRaw === 'gap' ? kindRaw : 'basin';
         const nodeIds = Array.isArray(rr.nodeIds)
           ? rr.nodeIds.map((x) => String(x)).filter(Boolean)
           : [];
-        out.push({ id, kind, nodeIds });
+        out.push({ id, nodeIds });
       }
       return out;
     };
@@ -57,7 +54,8 @@ export function RegionsCard({
   const regionRows = useMemo(() => {
     return regions
       .map((r) => ({
-        ...r,
+        id: r.id,
+        nodeIds: r.nodeIds,
         size: r.nodeIds.length,
         ratio: totalNodes > 0 ? r.nodeIds.length / totalNodes : 0,
       }))
@@ -99,20 +97,6 @@ export function RegionsCard({
               key: 'id',
               header: 'Region',
               cell: (r: any) => <span className="font-mono text-[10px]">{r.id}</span>,
-            },
-            {
-              key: 'kind',
-              header: 'Kind',
-              cell: (r: any) => (
-                <span
-                  className={clsx(
-                    'text-[9px] uppercase',
-                    r.kind === 'basin' ? 'text-blue-400' : 'text-amber-400'
-                  )}
-                >
-                  {r.kind}
-                </span>
-              ),
             },
             {
               key: 'size',

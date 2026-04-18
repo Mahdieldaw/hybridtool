@@ -1,17 +1,30 @@
 import { getHealthTracker } from '../providers/health/provider-health-tracker.js';
-import { executeBatchPhase } from './pipeline/batch-phase.ts';
-import { executeMappingPhase } from './pipeline/mapping-phase.ts';
-import { executeSingularityPhase } from './pipeline/singularity-phase.ts';
-import { handleRecompute } from './pipeline/recompute-handler.ts';
-import { StreamingManager } from './io/streaming-manager.ts';
-import { ContextManager } from './io/context-manager.ts';
-import { PersistenceCoordinator } from './io/persistence-coordinator.ts';
-import { TurnEmitter } from './io/turn-emitter.ts';
+import { executeBatchPhase } from './pipeline/batch-phase.js';
+import { executeMappingPhase } from './pipeline/mapping-phase.js';
+import { executeSingularityPhase } from './pipeline/singularity-phase.js';
+import { handleRecompute } from './pipeline/recompute-handler.js';
+import { StreamingManager } from './io/streaming-manager.js';
+import { ContextManager } from './io/context-manager.js';
+import { PersistenceCoordinator } from './io/persistence-coordinator.js';
+import { TurnEmitter } from './io/turn-emitter.js';
 import { classifyError } from '../errors/classifier.js';
 
 export class WorkflowEngine {
-  /* _options: Reserved for future configuration or interface compatibility */
-  constructor(orchestrator, sessionManager, port, _options = {}) {
+  private orchestrator: any;
+  private sessionManager: any;
+  private port: any;
+  private healthTracker: any;
+  private streamingManager: StreamingManager;
+  private contextManager: ContextManager;
+  private persistenceCoordinator: PersistenceCoordinator;
+  private turnEmitter: TurnEmitter;
+  private _inflightContinuations: Map<string, any>;
+  private _executors: Record<string, (step: any, ctx: any, results: any, wfCtx: any, resolved: any, opts: any) => any>;
+  private currentRequest: any;
+  private currentUserMessage: string = '';
+  private _providerKeys: Record<string, string | null>;
+
+  constructor(orchestrator: any, sessionManager: any, port: any) {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;
     this.port = port;
@@ -34,7 +47,7 @@ export class WorkflowEngine {
       prompt: (step, ctx, _results, _wfCtx, _resolved, opts) => executeBatchPhase(step, ctx, opts),
       mapping: (step, ctx, results, wfCtx, _resolved, opts) =>
         executeMappingPhase(step, ctx, results, wfCtx, opts),
-      singularity: (step, ctx, results, _wfCtx, resolved, options) =>
+      singularity: (_step, ctx, results, _wfCtx, resolved, options) =>
         executeSingularityPhase(
           this.currentRequest || {},
           ctx,
@@ -52,7 +65,7 @@ export class WorkflowEngine {
     };
   }
 
-  _safePostMessage(message) {
+  _safePostMessage(message: any): boolean {
     const port = this.port;
     if (!port || typeof port.postMessage !== 'function') return false;
     try {
@@ -67,13 +80,13 @@ export class WorkflowEngine {
         this.port = null;
         try {
           this.streamingManager?.setPort?.(null);
-        } catch (_) {}
+        } catch (e) { console.warn('[WorkflowEngine] Failed to clear port on streaming manager:', e); }
       }
       return false;
     }
   }
 
-  async execute(request, resolvedContext) {
+  async execute(request: any, resolvedContext: any): Promise<void> {
     this.currentRequest = request;
     const { context, steps } = request;
     const stepResults = new Map();
@@ -108,11 +121,11 @@ export class WorkflowEngine {
       }
       // VALIDATION: Ensure only foundation/singularity steps are present in the main loop
       const invalidSteps = steps.filter(
-        (s) => !['prompt', 'mapping', 'singularity'].includes(s.type)
+        (s: any) => !['prompt', 'mapping', 'singularity'].includes(s.type)
       );
       if (invalidSteps.length > 0) {
         throw new Error(
-          `Foundation phase received unsupported steps: ${invalidSteps.map((s) => s.type).join(', ')}.`
+          `Foundation phase received unsupported steps: ${invalidSteps.map((s: any) => s.type).join(', ')}.`
         );
       }
 
@@ -172,7 +185,7 @@ export class WorkflowEngine {
               [criticalMessage, persistMessage].filter(Boolean).join(' | ') || 'Pipeline failed';
 
             if (typeof adapter.update === 'function') {
-              await adapter.update('turns', context.canonicalAiTurnId, (turn) => {
+              await adapter.update('turns', context.canonicalAiTurnId, (turn: any) => {
                 if (!turn) return turn;
                 return {
                   ...turn,
@@ -248,7 +261,7 @@ export class WorkflowEngine {
   // UNIFIED STEP EXECUTION
   // ═══════════════════════════════════════════════════════════════════════════
 
-  async _executeStep(step, context, stepResults, workflowContexts, resolvedContext) {
+  async _executeStep(step: any, context: any, stepResults: any, workflowContexts: any, resolvedContext: any): Promise<any> {
     const executor = this._executors[step.type];
     if (!executor) {
       throw new Error(`Unknown step type: ${step.type}`);
@@ -272,7 +285,7 @@ export class WorkflowEngine {
       this._emitStepUpdate(step, context, result, resolvedContext, 'completed');
 
       if (step.type === 'prompt' && result?.results) {
-        Object.entries(result.results).forEach(([pid, data]) => {
+        Object.entries(result.results).forEach(([pid, data]: [string, any]) => {
           if (data?.meta && Object.keys(data.meta).length > 0) {
             workflowContexts[pid] = data.meta;
           }
@@ -286,7 +299,7 @@ export class WorkflowEngine {
         }
       }
 
-      await this._persistStepResponse(step, context, result, resolvedContext);
+      await this._persistStepResponse(step, context, result);
 
       return result;
     } catch (error) {
@@ -304,8 +317,8 @@ export class WorkflowEngine {
     }
   }
 
-  _buildOptionsForStep(stepType) {
-    const baseOptions = {
+  _buildOptionsForStep(stepType: string): Record<string, any> {
+    const baseOptions: Record<string, any> = {
       port: this.port,
       streamingManager: this.streamingManager,
       persistenceCoordinator: this.persistenceCoordinator,
@@ -321,7 +334,7 @@ export class WorkflowEngine {
     return baseOptions;
   }
 
-  async _persistStepResponse(step, context, result, resolvedContext) {
+  async _persistStepResponse(step: any, context: any, result: any): Promise<void> {
     if (step.type === 'prompt') {
       const aiTurnId = context?.canonicalAiTurnId;
       if (!aiTurnId) return;
@@ -331,7 +344,7 @@ export class WorkflowEngine {
       if (entries.length === 0) return;
 
       await Promise.all(
-        entries.map(async ([providerId, r]) => {
+        entries.map(async ([providerId, r]: [string, any]) => {
           if (!providerId) return;
           try {
             await this.persistenceCoordinator.upsertProviderResponse(
@@ -378,7 +391,7 @@ export class WorkflowEngine {
             meta: result?.meta || {},
           }
         );
-      } catch (_) {}
+      } catch (e) { console.warn(`[WorkflowEngine] Failed to persist ${step.type} response for provider ${providerId}:`, e); }
     }
   }
 
@@ -386,11 +399,11 @@ export class WorkflowEngine {
   // CONTROL FLOW
   // ═══════════════════════════════════════════════════════════════════════════
 
-  async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext) {
+  async _checkHaltConditions(step: any, result: any, _request: any, _context: any, steps: any[], _stepResults: any, resolvedContext: any): Promise<string | null> {
     if (step.type === 'prompt') {
       const resultsObj = result?.results || {};
       const successfulCount = Object.values(resultsObj).filter(
-        (r) => r.status === 'completed'
+        (r: any) => r.status === 'completed'
       ).length;
       const mappingPlanned = Array.isArray(steps) && steps.some((s) => s && s.type === 'mapping');
       if (mappingPlanned && resolvedContext?.type !== 'recompute' && successfulCount < 2) {
@@ -401,7 +414,7 @@ export class WorkflowEngine {
     return null;
   }
 
-  async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
+  async _haltWorkflow(request: any, context: any, steps: any[], stepResults: any, resolvedContext: any, haltReason: string): Promise<void> {
     await this._persistAndFinalize(
       request,
       context,
@@ -414,7 +427,7 @@ export class WorkflowEngine {
 
   // --- HELPERS ---
 
-  _seedContexts(resolvedContext, stepResults, workflowContexts) {
+  _seedContexts(resolvedContext: any, stepResults: any, workflowContexts: any): void {
     if (resolvedContext && resolvedContext.type === 'recompute') {
       console.log('[WorkflowEngine] Seeding frozen batch outputs for recompute');
       try {
@@ -440,7 +453,7 @@ export class WorkflowEngine {
     if (resolvedContext && resolvedContext.type === 'extend') {
       try {
         const ctxs = resolvedContext.providerContexts || {};
-        const cachedProviders = [];
+        const cachedProviders: string[] = [];
         Object.entries(ctxs).forEach(([pid, meta]) => {
           if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
             workflowContexts[pid] = meta;
@@ -458,7 +471,7 @@ export class WorkflowEngine {
     }
   }
 
-  _emitStepUpdate(step, context, result, resolvedContext, status) {
+  _emitStepUpdate(step: any, context: any, result: any, resolvedContext: any, status: string): void {
     this._safePostMessage({
       type: 'WORKFLOW_STEP_UPDATE',
       sessionId: context.sessionId,
@@ -472,13 +485,13 @@ export class WorkflowEngine {
   }
 
   async _persistAndFinalize(
-    request,
-    context,
-    steps,
-    stepResults,
-    resolvedContext,
-    haltReason = null
-  ) {
+    request: any,
+    context: any,
+    steps: any[],
+    stepResults: any,
+    resolvedContext: any,
+    haltReason: string | null = null
+  ): Promise<void> {
     const result = this.persistenceCoordinator.buildPersistenceResultFromStepResults(
       steps,
       stepResults
@@ -488,7 +501,7 @@ export class WorkflowEngine {
       Object.keys(result.batchOutputs || {}).length > 0
         ? {
             responses: Object.fromEntries(
-              Object.entries(result.batchOutputs).map(([pid, data]) => [
+              Object.entries(result.batchOutputs).map(([pid, data]: [string, any]) => [
                 pid,
                 {
                   text: data.text || '',
@@ -510,7 +523,7 @@ export class WorkflowEngine {
         }
       : undefined;
 
-    const persistRequest = {
+    const persistRequest: Record<string, any> = {
       type: resolvedContext?.type || 'unknown',
       sessionId: context.sessionId,
       userMessage: this.currentUserMessage,
@@ -563,7 +576,7 @@ export class WorkflowEngine {
     );
   }
 
-  async _persistCheckpoint(request, context, resolvedContext) {
+  async _persistCheckpoint(request: any, context: any, resolvedContext: any): Promise<void> {
     if (!resolvedContext || resolvedContext.type === 'recompute') return;
     if (!context?.canonicalUserTurnId || !context?.canonicalAiTurnId) return;
 
@@ -583,7 +596,7 @@ export class WorkflowEngine {
     );
   }
 
-  async handleRetryRequest(message) {
+  async handleRetryRequest(message: any): Promise<void> {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
       console.log(
@@ -591,8 +604,8 @@ export class WorkflowEngine {
       );
 
       try {
-        (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));
-      } catch (_) {}
+        (providerIds || []).forEach((pid: string) => this.healthTracker.resetCircuit(pid));
+      } catch (e) { console.warn('[WorkflowEngine] Failed to reset circuit breakers:', e); }
 
       try {
         this.port.postMessage({
@@ -600,7 +613,7 @@ export class WorkflowEngine {
           sessionId: sessionId,
           aiTurnId: aiTurnId,
           phase: retryScope || 'batch',
-          providerStatuses: (providerIds || []).map((id) => ({
+          providerStatuses: (providerIds || []).map((id: string) => ({
             providerId: id,
             status: 'queued',
             progress: 0,
@@ -608,13 +621,13 @@ export class WorkflowEngine {
           completedCount: 0,
           totalCount: (providerIds || []).length,
         });
-      } catch (_) {}
+      } catch (e) { console.warn('[WorkflowEngine] Failed to post WORKFLOW_PROGRESS for retry:', e); }
     } catch (e) {
       console.warn('[WorkflowEngine] handleRetryRequest failed:', e);
     }
   }
 
-  async handleContinueCognitiveRequest(payload) {
+  async handleContinueCognitiveRequest(payload: any): Promise<any> {
     return handleRecompute(payload, {
       port: this.port,
       streamingManager: this.streamingManager,
