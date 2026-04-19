@@ -919,15 +919,27 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const { searchCorpus } = await import('./clustering/corpus-search.js');
 
           const turnRaw = await sm.adapter.get('turns', aiTurnId);
-          let shadowParagraphs = turnRaw?.mapping?.artifact?.shadow?.paragraphs || [];
+          const corpusTree = turnRaw?.mapping?.artifact?.corpus ?? null;
           console.log(
-            `[CORPUS_SEARCH] DB shadow paragraphs: ${shadowParagraphs.length}, artifact exists: ${!!turnRaw?.mapping?.artifact}`
+            `[CORPUS_SEARCH] DB corpus models: ${corpusTree?.models?.length ?? 0}, artifact exists: ${!!turnRaw?.mapping?.artifact}`
           );
 
-          if (!shadowParagraphs || shadowParagraphs.length === 0) {
-            console.log(
-              '[CORPUS_SEARCH] No DB shadow paragraphs — rebuilding from batch responses...'
-            );
+          // Build paragraph lookup from corpus tree. If corpus is absent (old session),
+          // rebuild from batch responses using shadow extraction.
+          const paraLookup = new Map();
+          if (corpusTree?.models?.length > 0) {
+            for (const model of corpusTree.models) {
+              for (const para of model.paragraphs ?? []) {
+                paraLookup.set(para.paragraphId, {
+                  id: para.paragraphId,
+                  modelIndex: para.modelIndex,
+                  paragraphIndex: para.paragraphOrdinal,
+                  _fullParagraph: para._fullParagraph,
+                });
+              }
+            }
+          } else {
+            console.log('[CORPUS_SEARCH] No corpus tree in DB — rebuilding from batch responses...');
             try {
               let responsesForTurn = [];
               if (sm.adapter?.getResponsesByTurnId) {
@@ -948,9 +960,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
               const seenBatchProviders = new Map();
               for (const r of allBatchResps) {
-                const pid = String(r.providerId || '')
-                  .trim()
-                  .toLowerCase();
+                const pid = String(r.providerId || '').trim().toLowerCase();
                 if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
               }
               console.log(
@@ -959,40 +969,33 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
               if (seenBatchProviders.size > 0) {
                 const { canonicalCitationOrder } = await import('../shared/provider-config');
-                const canonicalOrder = canonicalCitationOrder(
-                  Array.from(seenBatchProviders.keys())
-                );
-
+                const canonicalOrder = canonicalCitationOrder(Array.from(seenBatchProviders.keys()));
                 const batchSources = canonicalOrder
-                  .map((pid, idx) => {
+                  .map((pid, i) => {
                     const r = seenBatchProviders.get(pid);
-                    return { modelIndex: idx + 1, content: String(r?.text || '') };
+                    return { modelIndex: i + 1, content: String(r?.text || '') };
                   })
                   .filter((s) => s.content);
 
                 if (batchSources.length > 0) {
                   const { extractShadowStatements, projectParagraphs } = await import('./shadow');
                   const shadowResult = extractShadowStatements(batchSources);
-                  shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs || [];
+                  const shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs || [];
+                  for (const p of shadowParagraphs) {
+                    paraLookup.set(p.id, p);
+                  }
                   console.log(
                     `[CORPUS_SEARCH] Rebuilt ${shadowParagraphs.length} paragraphs from ${batchSources.length} batch sources`
                   );
                   if (shadowParagraphs.length > 0) {
-                    const sampleIds = shadowParagraphs
-                      .slice(0, 5)
-                      .map((p) => `${p.id}(m${p.modelIndex})`);
+                    const sampleIds = shadowParagraphs.slice(0, 5).map((p) => `${p.id}(m${p.modelIndex})`);
                     console.log(`[CORPUS_SEARCH] Sample rebuilt IDs: ${sampleIds.join(', ')}`);
                   }
                 }
               }
             } catch (err) {
-              console.warn('[CORPUS_SEARCH] rebuild shadow paragraphs failed:', err);
+              console.warn('[CORPUS_SEARCH] rebuild paragraphs failed:', err);
             }
-          }
-
-          const paraLookup = new Map();
-          for (const p of shadowParagraphs) {
-            paraLookup.set(p.id, p);
           }
 
           // Diagnostic: show embedding index IDs vs paraLookup IDs
@@ -1834,16 +1837,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     // ── Diagnostic ──
     console.log(
       `[Regenerate] Artifact diagnostics:`,
-      `shadow.paragraphs=${
-        Array.isArray(cognitiveArtifact?.shadow?.paragraphs)
-          ? cognitiveArtifact.shadow.paragraphs.length
-          : 'missing'
-      }`,
-      `shadow.statements=${
-        Array.isArray(cognitiveArtifact?.shadow?.statements)
-          ? cognitiveArtifact.shadow.statements.length
-          : 'missing'
-      }`,
+      `corpus.models=${cognitiveArtifact?.corpus?.models?.length ?? 'missing'}`,
       `claimProvenance=${cognitiveArtifact?.claimProvenance ? 'present' : 'missing'}`,
       `basinInversion=${
         cognitiveArtifact?.geometry?.basinInversion
@@ -1882,7 +1876,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
           mapperArtifact.claimDensity,
           mapperArtifact.passageRouting,
           mapperArtifact.statementClassification,
-          { paragraphs: Array.isArray(shadowParagraphs) ? shadowParagraphs : [] },
+          mapperArtifact.corpus ?? { paragraphs: [] },
           enrichedClaims,
           mapperArtifact.citationSourceOrder || {},
           continuityMap
@@ -1931,7 +1925,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
             mapperArtifact.claimDensity,
             mapperArtifact.passageRouting,
             mapperArtifact.statementClassification,
-            { paragraphs: Array.isArray(shadowParagraphs) ? shadowParagraphs : [] },
+            mapperArtifact.corpus ?? { paragraphs: [] },
             enrichedClaims,
             mapperArtifact.citationSourceOrder || {},
             continuityMap

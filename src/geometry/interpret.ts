@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════════════
+// ======================================
 // INTERPRET — substrate interpretation
 //
 // Inlines: interpretation/pipelineGates.ts, interpretation/regions.ts,
@@ -16,8 +16,7 @@
 //   These are two lenses. They must not be conflated.
 //
 // INVERSION TEST: L1. No semantic context crosses this boundary.
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ===========================================================
 
 import type {
   GeometricSubstrate,
@@ -34,6 +33,8 @@ import { isDegenerate } from './types';
 import { cosineSimilarity } from '../clustering/distance';
 import { computeGapRegionalization } from './algorithms/gap-regionalization';
 import { computeBasinInversion } from './algorithms/basin-inversion-bayesian';
+import type { BasinInversionResult } from '../../shared/types';
+import type { GapRegionalizationResult } from './algorithms/gap-regionalization';
 
 export type {
   SubstrateInterpretation,
@@ -47,7 +48,7 @@ export type {
   NodeStructuralProfile,
 } from './types';
 
-// ─── Gate constants ───────────────────────────────────────────────────────────
+// --- Gate constants ----------------------------------------
 
 const DISCRIMINATION_MIN_RANGE = 0.1;
 const ISOLATION_SKIP_THRESHOLD = 0.7;
@@ -65,7 +66,7 @@ function formatPct(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-// ─── Step 1: Gate evaluation ──────────────────────────────────────────────────
+// ----- Step 1: Gate evaluation ---------------------------------
 
 function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
   const { isolationRatio, edgeCount, density, discriminationRange, nodeCount } = substrate.health;
@@ -133,9 +134,7 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
   return { verdict: 'proceed', confidence: proceedConfidence, evidence, measurements };
 }
 
-
-
-// ─── Step 3A: Raw topology index ─────────────────────────────────────────────
+// ----- Step 3A: Raw topology index ---------------------------------------------------------------------------
 
 interface TopologyIndex {
   nodeToBasin: Map<string, number>; // paragraphId → basinId
@@ -147,8 +146,8 @@ interface TopologyIndex {
 
 function buildTopologyIndex(
   substrate: GeometricSubstrate,
-  basinInversion?: any,
-  gapResult?: any
+  basinInversion?: BasinInversionResult | null,
+  gapResult?: GapRegionalizationResult | null
 ): TopologyIndex {
   const nodeToBasin = new Map<string, number>();
   const nodeToGap = new Map<string, number>();
@@ -188,7 +187,7 @@ function buildTopologyIndex(
   return { nodeToBasin, nodeToGap, gapSizes, nodeIsolation, nodeNeighborhood };
 }
 
-// ─── Step 3B: Region construction (identity only) ────────────────────────────
+// ----- Step 3B: Region construction (identity only) ---------------------------------------------─
 
 interface RawRegionIdentity {
   id: string;
@@ -223,7 +222,7 @@ function unionStatementIdsStable(
 
 function collectRegionIdentities(
   substrate: GeometricSubstrate,
-  gapResult?: any
+  gapResult?: GapRegionalizationResult | null
 ): RawRegionIdentity[] {
   const nodesById = new Map(substrate.nodes.map((n) => [n.paragraphId, n]));
   const identities: RawRegionIdentity[] = [];
@@ -265,7 +264,7 @@ function collectRegionIdentities(
   return identities;
 }
 
-// ─── Step 4: Population phase ─────────────────────────────────────────────────
+// ----- Step 4: Population phase --------------------------------------------------------------------------------─
 
 interface PopulationMetrics {
   nodeCount: number;
@@ -429,7 +428,7 @@ function computePopulationMetrics(
   return result;
 }
 
-// ─── Step 5: Construct MeasuredRegion[] ──────────────────────────────────────
+// ----- Step 5: Construct MeasuredRegion[] ------------------------------------------------------------──
 
 function constructMeasuredRegions(
   identities: RawRegionIdentity[],
@@ -463,10 +462,10 @@ function constructMeasuredRegions(
   });
 }
 
-// ─── Step 6: Corpus mode + periphery (basin authority) ───────────────────────
+// ----- Step 6: Corpus mode + periphery (basin authority) -----------------------------------──
 
 export function identifyPeriphery(
-  basinInversion: any,
+  basinInversion: BasinInversionResult | null,
   regionsOrTopologyIndex?:
     | { kind: 'basin' | 'gap'; nodeIds: string[] }[]
     | { nodeToGap: Map<string, number>; gapSizes: Map<number, number> }
@@ -544,7 +543,7 @@ export function identifyPeriphery(
 }
 
 function deriveCorpusMode(
-  basinInversion: any,
+  basinInversion: BasinInversionResult | null,
   topologyIndex: TopologyIndex,
   _totalNodes: number
 ): Pick<
@@ -565,11 +564,11 @@ function deriveCorpusMode(
   };
 }
 
-// ─── Basin node profiles ──────────────────────────────────────────────────────
+// ----- Basin node profiles ------------------------------------------------------------------------------------------
 
 function buildBasinNodeProfiles(
   substrate: GeometricSubstrate,
-  basinInversion: any
+  basinInversion: BasinInversionResult | null
 ): Map<string, BasinNodeProfile> {
   const profiles = new Map<string, BasinNodeProfile>();
 
@@ -617,8 +616,10 @@ function buildBasinNodeProfiles(
       continue;
     }
 
-    let intraSum = 0, intraCount = 0;
-    let interSum = 0, interCount = 0;
+    let intraSum = 0,
+      intraCount = 0;
+    let interSum = 0,
+      interCount = 0;
 
     for (const [otherId, sim] of row) {
       if (otherId === pid) continue;
@@ -646,11 +647,11 @@ function buildBasinNodeProfiles(
   return profiles;
 }
 
-// ─── Structural profiles ──────────────────────────────────────────────────────
+// ----- Structural profiles ------------------------------------------------------------------------------------------
 
 function buildStructuralProfiles(
   substrate: GeometricSubstrate,
-  gapResult: any,
+  gapResult: GapRegionalizationResult | null,
   basinNodeProfiles: Map<string, BasinNodeProfile>
 ): Map<string, NodeStructuralProfile> {
   const profiles = new Map<string, NodeStructuralProfile>();
@@ -666,9 +667,7 @@ function buildStructuralProfiles(
 
     // Gap strength: upper boundary from NodeGapProfile (local discontinuity)
     const gapProfile = gapResult?.nodeProfiles?.[pid];
-    const gapStrength = gapProfile?.upperBoundary != null
-      ? clamp01(gapProfile.upperBoundary)
-      : 0;
+    const gapStrength = gapProfile?.upperBoundary != null ? clamp01(gapProfile.upperBoundary) : 0;
 
     // Basin fields from BasinNodeProfile
     const basinProfile = basinNodeProfiles.get(pid);
@@ -685,7 +684,7 @@ function buildStructuralProfiles(
   return profiles;
 }
 
-// ─── Orchestrator ─────────────────────────────────────────────────────────────
+// ----- Orchestrator ----------------------------------------------------------------------------------------------------─
 
 /**
  * Interpret a measured substrate: gate → basin → gap → collect → populate
@@ -712,9 +711,7 @@ export function interpretSubstrate(
   };
 
   // Compute basin internally — parallel structural signal
-  const basinInversion = gate.verdict !== 'skip_geometry'
-    ? computeBasinInversion(substrate)
-    : null;
+  const basinInversion = gate.verdict !== 'skip_geometry' ? computeBasinInversion(substrate) : null;
 
   if (gate.verdict === 'skip_geometry') {
     const periphery = identifyPeriphery(basinInversion);
@@ -741,7 +738,7 @@ export function interpretSubstrate(
   }
 
   // Compute gap result — regions are ALWAYS from gap
-  let gapResult: any = null;
+  let gapResult: GapRegionalizationResult | null = null;
   if (paragraphEmbeddings && paragraphEmbeddings.size > 0) {
     const nodes = substrate.nodes
       .map((n) => ({ id: n.paragraphId, embedding: paragraphEmbeddings.get(n.paragraphId)! }))
@@ -755,10 +752,7 @@ export function interpretSubstrate(
   const topologyIndex = buildTopologyIndex(substrate, basinInversion, gapResult);
 
   // Step 3B — Region identities (structural, no metrics — always from gap)
-  const identities = collectRegionIdentities(
-    substrate,
-    gapResult
-  );
+  const identities = collectRegionIdentities(substrate, gapResult);
 
   // Step 4 — Population phase (all regions known before metrics computed)
   const populationMetrics = computePopulationMetrics(identities, substrate, paragraphEmbeddings);

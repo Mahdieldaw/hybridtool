@@ -9,6 +9,7 @@ import {
   SortableTable,
   StatRow,
 } from './CardBase';
+import { getArtifactParagraphs } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // PERIPHERAL NODE CARD — excluded nodes from dominant-core routing
@@ -61,7 +62,7 @@ export function PeripheralNodeCard({ artifact }: { artifact: any }) {
   }, [basinInversion, largestBasinId, gapSingletons]);
 
   const paragraphs = useMemo(() => {
-    const list = safeArr<any>(artifact?.shadow?.paragraphs);
+    const list = safeArr<any>(getArtifactParagraphs(artifact));
     return list.filter((p) => allPotentialOutliers.has(String(p.id)));
   }, [artifact, allPotentialOutliers]);
 

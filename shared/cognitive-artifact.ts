@@ -18,10 +18,10 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
 
   const result: any = {
     paragraphClustering: mapper?.paragraphClustering ?? undefined,
-    shadow: {
-      statements: pipeline?.shadow?.extraction?.statements ?? mapper?.shadow?.statements ?? [],
-      paragraphs: pipeline?.paragraphProjection?.paragraphs ?? [],
-    },
+    // CorpusTree (persisted immutable input) and CorpusIndex (runtime-only, never serialized).
+    // Both forward from the mapper artifact where assembleMapperArtifact built them.
+    corpus: mapper?.corpus ?? undefined,
+    index: mapper?.index ?? undefined,
     geometry: {
       embeddingStatus: pipeline?.substrate ? 'computed' : 'failed',
       labels: pipeline?.labels ?? undefined,
@@ -96,6 +96,9 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
     'shadow',
     'substrate',
     'id',
+    // → corpus tree + index (promoted to top-level structured fields above)
+    'corpus',
+    'index',
   ]);
 
   if (mapper && typeof mapper === 'object') {

@@ -1,7 +1,6 @@
 // ============================================================================
 // GRAPH TYPES — graph computation layer (pure src-side)
 // ============================================================================
-import type { ShadowStatement } from './contract';
 
 export interface Claim {
   id: string;
@@ -21,7 +20,6 @@ export interface Claim {
   role?: 'anchor' | 'branch' | 'challenger' | 'supplement';
   quote?: string;
   support_count?: number;
-  sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
   sourceCoherence?: number;
 }
 
@@ -33,8 +31,6 @@ export interface Edge {
 
 export interface EnrichedClaim extends Claim {
   derivedType?: Claim['type'];
-  sourceStatementIds?: string[];
-  sourceStatements?: ShadowStatement[];
   geometricSignals?: {
     backedByPeak: boolean;
     backedByHill: boolean;

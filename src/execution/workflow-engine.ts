@@ -1,4 +1,5 @@
 import { getHealthTracker } from '../providers/health/provider-health-tracker.js';
+import type { ResolvedContext, PersistRequest } from '../../shared/types/contract';
 import { executeBatchPhase } from './pipeline/batch-phase.js';
 import { executeMappingPhase } from './pipeline/mapping-phase.js';
 import { executeSingularityPhase } from './pipeline/singularity-phase.js';
@@ -86,7 +87,7 @@ export class WorkflowEngine {
     }
   }
 
-  async execute(request: any, resolvedContext: any): Promise<void> {
+  async execute(request: any, resolvedContext: ResolvedContext): Promise<void> {
     this.currentRequest = request;
     const { context, steps } = request;
     const stepResults = new Map();
@@ -107,10 +108,7 @@ export class WorkflowEngine {
     }
 
     if (!context.sessionId || context.sessionId === 'new-session') {
-      context.sessionId =
-        context.sessionId && context.sessionId !== 'new-session'
-          ? context.sessionId
-          : `sid-${Date.now()}`;
+      context.sessionId = `sid-${Date.now()}`;
     }
 
     try {
@@ -501,7 +499,7 @@ export class WorkflowEngine {
       Object.keys(result.batchOutputs || {}).length > 0
         ? {
             responses: Object.fromEntries(
-              Object.entries(result.batchOutputs).map(([pid, data]: [string, any]) => [
+              Object.entries(result.batchOutputs || {}).map(([pid, data]: [string, any]) => [
                 pid,
                 {
                   text: data.text || '',
@@ -511,6 +509,7 @@ export class WorkflowEngine {
                 },
               ])
             ),
+            timestamp: Date.now(),
           }
         : undefined;
 
@@ -523,22 +522,23 @@ export class WorkflowEngine {
         }
       : undefined;
 
-    const persistRequest: Record<string, any> = {
-      type: resolvedContext?.type || 'unknown',
+    const persistRequest: PersistRequest = {
+      type: resolvedContext.type,
       sessionId: context.sessionId,
       userMessage: this.currentUserMessage,
       runId: context?.runId || request?.context?.runId,
       batch: batchPhase,
       singularity: singularityPhase,
+      ...(resolvedContext.type === 'recompute'
+        ? {
+            sourceTurnId: resolvedContext.sourceTurnId,
+            stepType: resolvedContext.stepType as any,
+            targetProvider: resolvedContext.targetProvider as any,
+          }
+        : {}),
+      ...(context?.canonicalUserTurnId ? { canonicalUserTurnId: context.canonicalUserTurnId } : {}),
+      ...(context?.canonicalAiTurnId ? { canonicalAiTurnId: context.canonicalAiTurnId } : {}),
     };
-    if (resolvedContext?.type === 'recompute') {
-      persistRequest.sourceTurnId = resolvedContext.sourceTurnId;
-      persistRequest.stepType = resolvedContext.stepType;
-      persistRequest.targetProvider = resolvedContext.targetProvider;
-    }
-    if (context?.canonicalUserTurnId)
-      persistRequest.canonicalUserTurnId = context.canonicalUserTurnId;
-    if (context?.canonicalAiTurnId) persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
 
     console.log(
       `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`

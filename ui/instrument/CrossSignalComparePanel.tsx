@@ -1,5 +1,6 @@
 import { useMemo, useCallback, useEffect, useState } from 'react';
 import { pearsonR, safeArr } from '../utils/math-utils';
+import { getCanonicalStatementsForClaim } from '../../shared/corpus-utils';
 
 interface CrossSignalComparePanelProps {
   artifact: any;
@@ -87,7 +88,10 @@ export function CrossSignalComparePanel({
         key: 'avgStatementRelevance',
         label: 'Avg Statement Relevance',
         get: (c) => {
-          const stmtIds = Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : [];
+          const idx = (artifact as any)?.index ?? null;
+          const stmtIds = idx
+            ? getCanonicalStatementsForClaim(idx, String(c?.id ?? ''))
+            : [];
           let sum = 0;
           let n = 0;
           for (const sid of stmtIds) {

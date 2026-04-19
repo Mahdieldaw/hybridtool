@@ -115,7 +115,6 @@ export async function buildProvenancePipeline(
   });
 
   // Use the input enrichedClaims (already-enriched with table cells etc.) for downstream phases.
-  // measure.enrichedClaims carries canonical sourceStatementIds for provenance consumers.
   const claimsForDownstream = enrichedClaims;
 
   // ── Phase 2: Validate ────────────────────────────────────────────────
@@ -166,6 +165,7 @@ export async function buildProvenancePipeline(
     claimEmbeddings: measure.claimEmbeddings,
     queryRelevanceScores,
     ownershipMap: measure.ownershipMap,
+    canonicalStatementIds: measure.canonicalStatementIds,
   });
 
   return {

@@ -38,7 +38,7 @@ function nowMs(): number {
 export interface ClassifyPhaseInput {
   shadowStatements: Array<{ id: string; modelIndex?: number }>;
   shadowParagraphs: ShadowParagraph[];
-  enrichedClaims: Array<{ id: string; sourceStatementIds?: string[] }>;
+  enrichedClaims: Array<{ id: string }>;
   claimDensityResult: ClaimDensityResult;
   passageRoutingResult: PassageRoutingResult | null;
   paragraphEmbeddings: Map<string, Float32Array>;
@@ -46,6 +46,8 @@ export interface ClassifyPhaseInput {
   queryRelevanceScores: Map<string, { querySimilarity: number }>;
   /** Required — provided by Phase 1 (runMeasurePhase). No fallback. */
   ownershipMap: Map<string, Set<string>>;
+  /** Canonical statement IDs per claim (from mixed-method provenance). */
+  canonicalStatementIds: Map<string, string[]>;
 }
 
 // ── Engine ────────────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ export function computeStatementClassification(
     claimEmbeddings,
     queryRelevanceScores,
     ownershipMap,
+    canonicalStatementIds,
   } = input;
 
   // ── 1. Claimed set from Phase 1 ownershipMap (no reconstruction) ─────
@@ -84,9 +87,9 @@ export function computeStatementClassification(
     if (!profile || !Array.isArray(profile.passages)) continue;
 
     const claimStmtSet = new Set(
-      Array.isArray(claim.sourceStatementIds)
-        ? claim.sourceStatementIds.filter((s): s is string => typeof s === 'string' && !!s.trim())
-        : []
+      (canonicalStatementIds.get(claim.id) ?? []).filter(
+        (s): s is string => typeof s === 'string' && !!s.trim()
+      )
     );
     if (claimStmtSet.size === 0) continue;
 

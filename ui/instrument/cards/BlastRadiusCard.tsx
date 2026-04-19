@@ -11,6 +11,7 @@ import {
   StatRow,
   SelectedEntity,
 } from './CardBase';
+import { getArtifactStatements } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // ROUTING CARD
@@ -515,7 +516,7 @@ export function MixedResolutionInline({ artifact }: { artifact: any }) {
   // Statement text lookup
   const stmtTextById = useMemo(() => {
     const m = new Map<string, string>();
-    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+    for (const s of safeArr<any>(getArtifactStatements(artifact))) {
       const id = String(s?.id ?? s?.statementId ?? '').trim();
       if (id) m.set(id, String(s?.text ?? ''));
     }

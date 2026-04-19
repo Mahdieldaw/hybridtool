@@ -3,6 +3,7 @@ import {
   getProviderAbbreviation,
   resolveProviderIdFromCitationOrder,
 } from '../../utils/provider-helpers';
+import { getCanonicalStatementsForClaim, getStatementCoordinates } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // TYPES
@@ -100,22 +101,31 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     return [];
   };
 
-  const normalizeShadowStatements = (input: any): any[] => {
-    if (!input) return [];
-    if (Array.isArray(input)) return input;
-    if (input instanceof Map) {
-      return Array.from(input.entries()).map(([k, v]) => ({
-        ...(v && typeof v === 'object' ? v : {}),
-        id: (v as any)?.id ?? (v as any)?.statementId ?? (v as any)?.sid ?? k,
-      }));
+  const flattenCorpusStatements = (artifact: any): any[] => {
+    const models: any[] = Array.isArray(artifact?.corpus?.models) ? artifact.corpus.models : [];
+    const out: any[] = [];
+    for (const m of models) {
+      const paras: any[] = Array.isArray(m?.paragraphs) ? m.paragraphs : [];
+      for (const p of paras) {
+        const stmts: any[] = Array.isArray(p?.statements) ? p.statements : [];
+        for (const s of stmts) {
+          out.push({
+            id: s.statementId,
+            statementId: s.statementId,
+            paragraphId: s.paragraphId ?? p.paragraphId,
+            modelIndex: typeof s.modelIndex === 'number' ? s.modelIndex : p.modelIndex,
+            text: s.text ?? '',
+            stance: s.stance,
+            confidence: s.confidence,
+            signals: s.signals,
+            geometricCoordinates: s.geometricCoordinates,
+            isTableCell: !!s.isTableCell,
+            tableMeta: s.tableMeta ?? null,
+          });
+        }
+      }
     }
-    if (typeof input === 'object') {
-      return Object.entries(input).map(([k, v]) => ({
-        ...(v && typeof v === 'object' ? v : {}),
-        id: (v as any)?.id ?? (v as any)?.statementId ?? (v as any)?.sid ?? k,
-      }));
-    }
-    return [];
+    return out;
   };
   const normalizeStatementId = (stmt: any): string => {
     const id = stmt?.id ?? stmt?.statementId ?? stmt?.sid;
@@ -142,7 +152,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
 
     // Statement ID → text lookup for twin text resolution
     const stmtTextMap = new Map<string, string>();
-    const allStmts: any[] = normalizeShadowStatements(a?.shadow?.statements);
+    const allStmts: any[] = flattenCorpusStatements(a);
     for (const stmt of allStmts) {
       const id = normalizeStatementId(stmt);
       const text = String(stmt.text ?? stmt.statement ?? stmt.content ?? '');
@@ -232,15 +242,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       null;
     const claimProvenance = a?.claimProvenance ?? a?.derived?.claimProvenance ?? null;
     const directTopIds = new Set<string>();
-    const claimsArr: any[] = Array.isArray(a?.semantic?.claims)
-      ? a.semantic.claims
-      : Array.isArray(a?.claims)
-        ? a.claims
-        : [];
-    const claimObj =
-      claimsArr.find((c: any) => String(c?.id ?? '').trim() === selectedClaimId) ?? null;
-    const sourceIds = Array.isArray(claimObj?.sourceStatementIds)
-      ? claimObj.sourceStatementIds
+    const idx = a?.index ?? null;
+    const sourceIds = idx
+      ? getCanonicalStatementsForClaim(idx, selectedClaimId)
       : [];
     for (const id of sourceIds) {
       const sid = String(id ?? '').trim();
@@ -304,7 +308,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
   return useMemo(() => {
     if (!artifact) return [];
     const a = artifact;
-    const statements: any[] = normalizeShadowStatements(a?.shadow?.statements);
+    const idx = a?.index ?? null;
+    const statements: any[] = flattenCorpusStatements(a);
 
     const routing = a?.passageRouting?.routing ?? null;
     const routeCategory: EvidenceRow['routeCategory'] = (() => {
@@ -380,8 +385,11 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       // Claim-relative fields
       const mixed = claimMaps?.mixedByStmt.get(stmtId) ?? null;
       // Exclusivity: single source of truth — claimProvenance.claimExclusivity.
-      // A statement is exclusive if no other claim lists it in sourceStatementIds.
       const isExclusive = selectedClaimId ? (claimMaps?.exclusiveIds.has(stmtId) ?? false) : false;
+
+      const resolvedParagraphId = idx
+        ? (getStatementCoordinates(idx, stmtId)?.paragraphId ?? String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? ''))
+        : String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
 
       return {
         statementId: stmtId,
@@ -389,7 +397,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         modelIndex,
         providerId,
         providerAbbrev,
-        paragraphId: String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? ''),
+        paragraphId: resolvedParagraphId,
 
         sim_claim: mixed?.globalSim ?? null,
         sim_query,
@@ -440,18 +448,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         inMixed: mixed != null,
         inDirectTopN: selectedClaimId ? (claimMaps?.directTopIds.has(stmtId) ?? false) : false,
 
-        paraCoverage: (() => {
-          const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
-          return claimMaps?.paraCoverageByPara.get(pid) ?? null;
-        })(),
-        inPassage: (() => {
-          const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
-          return claimMaps?.inPassageParas.has(pid) ?? false;
-        })(),
-        passageLength: (() => {
-          const pid = String(stmt.geometricCoordinates?.paragraphId ?? stmt.paragraphId ?? '');
-          return claimMaps?.passageLenByPara.get(pid) ?? null;
-        })(),
+        paraCoverage: claimMaps?.paraCoverageByPara.get(resolvedParagraphId) ?? null,
+        inPassage: claimMaps?.inPassageParas.has(resolvedParagraphId) ?? false,
+        passageLength: claimMaps?.passageLenByPara.get(resolvedParagraphId) ?? null,
 
         sc_claimed: globalMaps?.scClaimed.has(stmtId) ?? false,
         sc_inPassage: globalMaps?.scInPassage.has(stmtId) ?? false,

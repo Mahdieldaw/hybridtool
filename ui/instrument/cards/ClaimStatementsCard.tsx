@@ -9,6 +9,7 @@ import {
   SortableTable,
   StatRow,
 } from './CardBase';
+import { getCanonicalStatementsForClaim, getArtifactStatements } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // CLAIM STATEMENTS CARD — canonical roster: every claim with every statement
@@ -24,7 +25,7 @@ export function ClaimStatementsCard({ artifact }: { artifact: any }) {
   // Statement text + model lookup
   const statementById = useMemo(() => {
     const m = new Map<string, { text: string; modelIndex: number | null }>();
-    for (const s of safeArr<any>(artifact?.shadow?.statements)) {
+    for (const s of safeArr<any>(getArtifactStatements(artifact))) {
       const id = String(s?.id ?? s?.statementId ?? s?.sid ?? '').trim();
       if (!id) continue;
       m.set(id, {
@@ -99,12 +100,13 @@ export function ClaimStatementsCard({ artifact }: { artifact: any }) {
   };
 
   const rosterRows = useMemo<RosterRow[]>(() => {
+    const idx = artifact?.index ?? null;
     const out: RosterRow[] = [];
     for (const claim of claims) {
       const cid = String(claim?.id ?? '');
       const clabel = String(claim?.label ?? cid);
-      const stmtIds: string[] = Array.isArray(claim?.sourceStatementIds)
-        ? claim.sourceStatementIds.map(String)
+      const stmtIds: string[] = idx
+        ? getCanonicalStatementsForClaim(idx, cid)
         : [];
       const exData = exclusivityObj[cid];
       const exclusiveSet = new Set<string>(

@@ -330,7 +330,7 @@ function generateMapperArtifactId() {
   return `artifact-${Date.now()}-${artifactIdCounter}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function assembleMapperArtifact({
+export async function assembleMapperArtifact({
   derived,
   enrichedClaims,
   parsedNarrative = '',
@@ -338,6 +338,7 @@ export function assembleMapperArtifact({
   queryText = '',
   modelCount = 1,
   shadowStatements = [],
+  shadowParagraphs = [],
   turn = undefined,
 }) {
   const {
@@ -353,6 +354,16 @@ export function assembleMapperArtifact({
     statementClassification,
   } = derived;
 
+  // Build CorpusTree and CorpusIndex.
+  // Indices are in-memory only; NEVER serialized. Re-derived on artifact rebuild.
+  let corpus = null;
+  try {
+    const { buildCorpusTree } = await import('../../shared/corpus-utils');
+    corpus = buildCorpusTree(shadowStatements, shadowParagraphs);
+  } catch (err) {
+    console.warn('[assembleMapperArtifact] Failed to build CorpusTree (non-fatal):', err);
+  }
+
   return {
     id: generateMapperArtifactId(),
     query: queryText,
@@ -364,9 +375,7 @@ export function assembleMapperArtifact({
     narrative: String(parsedNarrative || '').trim(),
     conditionals: parsedConditionals,
     ...(blastSurfaceResult ? { blastSurface: blastSurfaceResult } : {}),
-    shadow: {
-      statements: shadowStatements,
-    },
+    ...(corpus ? { corpus } : {}),
     ...(claimProvenance ? { claimProvenance } : {}),
     ...(basinInversion ? { basinInversion } : {}),
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
@@ -675,7 +684,7 @@ export async function assembleFromPreSurvey(
   } = preSurvey;
 
   // ── Assemble mapper artifact ──────────────────────────────────────
-  const mapperArtifact = assembleMapperArtifact({
+  const mapperArtifact = await assembleMapperArtifact({
     derived,
     enrichedClaims,
     parsedNarrative,
@@ -683,6 +692,7 @@ export async function assembleFromPreSurvey(
     queryText,
     modelCount,
     shadowStatements,
+    shadowParagraphs,
     turn,
   });
 

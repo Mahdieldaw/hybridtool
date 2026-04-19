@@ -10,12 +10,12 @@ import type {
   ClaimDensityResult,
   PassageRoutingResult,
   StatementClassificationResult,
-  PipelineShadowParagraph,
   EditorialAST,
   EditorialThread,
   LandscapePosition,
   Claim,
 } from '../../shared/types';
+import type { CorpusTree } from '../../shared/types/corpus-tree';
 import type { SourceContinuityEntry } from '../provenance/surface';
 import { extractJsonFromContent } from '../../shared/parsing-utils';
 
@@ -65,17 +65,27 @@ export function buildPassageIndex(
   claimDensity: ClaimDensityResult,
   passageRouting: PassageRoutingResult,
   statementClassification: StatementClassificationResult,
-  shadow: { paragraphs: PipelineShadowParagraph[] },
+  corpus: CorpusTree | { paragraphs: any[] },
   claims: Claim[],
   citationSourceOrder: Record<string | number, string>,
   continuityMap: Map<string, SourceContinuityEntry>
 ): { passages: IndexedPassage[]; unclaimed: IndexedUnclaimedGroup[] } {
   const passages: IndexedPassage[] = [];
 
-  // Build paragraph lookup: (modelIndex, paragraphIndex) → PipelineShadowParagraph
-  const paragraphLookup = new Map<string, PipelineShadowParagraph>();
-  for (const p of shadow.paragraphs) {
-    paragraphLookup.set(`${p.modelIndex}:${p.paragraphIndex}`, p);
+  // Build paragraph lookup: (modelIndex, paragraphOrdinal) → { _fullParagraph, statements }
+  const paragraphLookup = new Map<string, { _fullParagraph?: string; statements?: any[] }>();
+  if ('models' in corpus) {
+    // CorpusTree path
+    for (const model of corpus.models) {
+      for (const para of model.paragraphs) {
+        paragraphLookup.set(`${para.modelIndex}:${para.paragraphOrdinal}`, para);
+      }
+    }
+  } else {
+    // Legacy flat-array path (should not occur in production)
+    for (const p of corpus.paragraphs) {
+      paragraphLookup.set(`${p.modelIndex}:${p.paragraphIndex}`, p);
+    }
   }
 
   // Build claim label lookup
@@ -145,11 +155,12 @@ export function buildPassageIndex(
   // Build unclaimed groups
   const unclaimed: IndexedUnclaimedGroup[] = [];
 
-  // Build a statement text lookup from shadow paragraphs
+  // Build a statement text lookup from corpus paragraphs
   const statementTextLookup = new Map<string, string>();
-  for (const p of shadow.paragraphs) {
-    for (const s of p.statements) {
-      statementTextLookup.set(s.id, s.text);
+  for (const para of paragraphLookup.values()) {
+    for (const s of para.statements ?? []) {
+      const sid = String(s.statementId ?? s.id ?? '');
+      if (sid) statementTextLookup.set(sid, s.text ?? '');
     }
   }
 

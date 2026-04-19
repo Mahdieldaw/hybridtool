@@ -6,6 +6,7 @@
  * All data comes from ResolvedContext parameter.
  */
 import { DEFAULT_THREAD } from '../../shared/messaging';
+import type { PrimitiveWorkflowRequest, ResolvedContext } from '../../shared/types/contract';
 
 export class WorkflowCompiler {
   private defaults: { mapper: string | null };
@@ -23,7 +24,7 @@ export class WorkflowCompiler {
    * @param {Object} resolvedContext - REQUIRED from ContextResolver
    * @returns {Object} Executable workflow
    */
-  compile(request: any, resolvedContext: any) {
+  compile(request: PrimitiveWorkflowRequest, resolvedContext: ResolvedContext) {
     if (!resolvedContext) {
       throw new Error('[Compiler] resolvedContext required');
     }
@@ -92,7 +93,8 @@ export class WorkflowCompiler {
           const rawCtx = resolvedContext.providerContextsAtSourceTurn
             ? resolvedContext.providerContextsAtSourceTurn[provider]
             : undefined;
-          const meta = rawCtx && rawCtx.meta ? rawCtx.meta : rawCtx;
+          const rawCtxObj = rawCtx as Record<string, unknown> | undefined;
+          const meta = rawCtxObj && rawCtxObj.meta ? rawCtxObj.meta : rawCtxObj;
           const providerContexts = meta
             ? { [provider]: { meta, continueThread: true } }
             : undefined;
@@ -131,7 +133,7 @@ export class WorkflowCompiler {
           type: 'singularity',
           payload: {
             singularityProvider: compileRequest.singularity || null,
-            originalPrompt: compileRequest.userMessage || resolvedContext?.sourceUserMessage,
+            originalPrompt: compileRequest.userMessage || (resolvedContext as any).sourceUserMessage,
             useThinking: !!compileRequest.useThinking,
           },
         });
@@ -146,7 +148,7 @@ export class WorkflowCompiler {
       workflowId,
       context: workflowContext,
       steps,
-      singularity: request.singularity,
+      singularity: (request as any).singularity,
     };
   }
 

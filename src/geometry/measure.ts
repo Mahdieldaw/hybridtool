@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════════════
+// ====================================================
 // MEASURE — geometric substrate construction
 //
 // Inlines: knn.ts, threshold.ts, mutualRank.ts, nodes.ts, substrate.ts
@@ -11,7 +11,7 @@
 //   health = deriveHealth(field, graph, nodes)             // already-computed values only
 //
 // INVERSION TEST: L1. Pure math on pairwise similarity distributions.
-// ═══════════════════════════════════════════════════════════════════════════
+// ====================================================
 
 import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type {
@@ -41,7 +41,7 @@ export const DEFAULT_SUBSTRATE_CONFIG: SubstrateConfig = {
   minParagraphs: 3,
 };
 
-// ─── Utilities ───────────────────────────────────────────────────────────────
+// --─ Utilities --------------------------------------------------------------─
 
 const QUANTIZATION = 1e6;
 
@@ -102,7 +102,7 @@ export function computeExtendedStatsFromArray(allSims: number[]): ExtendedSimila
   };
 }
 
-// ─── Phase 1: Pairwise field ──────────────────────────────────────────────────
+// --─ Phase 1: Pairwise field --------------------------------------------------
 
 export function buildPairwiseField(
   paragraphIds: string[],
@@ -179,7 +179,7 @@ export function buildPairwiseField(
   return { matrix, perNode, stats, nodeCount: n };
 }
 
-// ─── Phase 2: Mutual recognition graph ───────────────────────────────────────
+// --─ Phase 2: Mutual recognition graph --------------------------------------─
 
 export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGraph {
   const { perNode } = pairwiseField;
@@ -285,7 +285,7 @@ export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGr
   return { edges, adjacency, nodeStats, thresholdStats };
 }
 
-// ─── Phase 3: Node stats ──────────────────────────────────────────────────────
+// --─ Phase 3: Node stats ------------------------------------------------------
 
 export function computeNodeStats(
   paragraphs: ShadowParagraph[],
@@ -316,7 +316,7 @@ export function computeNodeStats(
   return nodes;
 }
 
-// ─── Phase 4: Health derivation ───────────────────────────────────────────────
+// --─ Phase 4: Health derivation ----------------------------------------------─
 
 function deriveHealth(
   pairwiseField: PairwiseField,
@@ -338,7 +338,7 @@ function deriveHealth(
   };
 }
 
-// ─── Degenerate substrate ─────────────────────────────────────────────────────
+// --─ Degenerate substrate ----------------------------------------------------─
 
 function buildDegenerateSubstrate(
   paragraphs: ShadowParagraph[],
@@ -420,7 +420,7 @@ function buildDegenerateSubstrate(
   };
 }
 
-// ─── Main entry point ─────────────────────────────────────────────────────────
+// --─ Main entry point --------------------------------------------------------─
 
 /**
  * Build a MeasuredSubstrate from paragraphs and their embeddings.

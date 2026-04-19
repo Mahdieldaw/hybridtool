@@ -35,6 +35,7 @@ import {
   PROBE_COMPLETE,
   PROBE_SESSION_START,
 } from '../../../shared/messaging';
+import { deriveArtifactIndex } from '../../../shared/corpus-utils';
 
 const PORT_DEBUG_UI = false;
 
@@ -72,17 +73,21 @@ function extractProviderFromStepId(
 
 function normalizeArtifactCandidate(input: unknown): any | null {
   if (!input) return null;
-  if (typeof input === 'object') return input as any;
-  if (typeof input !== 'string') return null;
-  const raw = input.trim();
-  if (!raw) return null;
-  if (!(raw.startsWith('{') || raw.startsWith('['))) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
+  let artifact: any | null = null;
+  if (typeof input === 'object') {
+    artifact = input as any;
+  } else if (typeof input === 'string') {
+    const raw = input.trim();
+    if (!raw || !(raw.startsWith('{') || raw.startsWith('['))) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      artifact = parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
   }
+  if (artifact) deriveArtifactIndex(artifact);
+  return artifact;
 }
 
 export function usePortMessageHandler(enabled: boolean = true) {

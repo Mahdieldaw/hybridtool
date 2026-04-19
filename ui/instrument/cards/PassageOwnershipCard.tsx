@@ -9,6 +9,7 @@ import {
   getProviderColor,
   CopyButton,
 } from './CardBase';
+import { getCanonicalStatementsForClaim, getArtifactParagraphs } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // PASSAGE OWNERSHIP CARD — per-model text view with claim highlighting
@@ -35,10 +36,9 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
   // ── Set of statement IDs owned by the selected claim ───────────────────
   const ownedStatementIds = useMemo(() => {
     if (!selectedClaimId) return new Set<string>();
-    const allClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims);
-    const claim = allClaims.find((c: any) => String(c?.id ?? '') === selectedClaimId);
-    const ids = safeArr<string>(claim?.sourceStatementIds).map(String);
-    return new Set(ids);
+    const idx = artifact?.index ?? null;
+    const ids = idx ? getCanonicalStatementsForClaim(idx, selectedClaimId) : [];
+    return new Set(ids.map(String));
   }, [selectedClaimId, artifact]);
 
   // ── Coverage & passage lookup for selected claim ───────────────────────
@@ -64,7 +64,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
 
   // ── Group shadow paragraphs by modelIndex ──────────────────────────────
   const modelGroups = useMemo(() => {
-    const paragraphs = safeArr<any>(artifact?.shadow?.paragraphs);
+    const paragraphs = safeArr<any>(getArtifactParagraphs(artifact));
     const byModel = new Map<number, any[]>();
     for (const p of paragraphs) {
       const mi = p.modelIndex as number;
@@ -116,9 +116,10 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
   // ── Helper: build copy text/html for a single claim ─────────────────────
   const buildClaimCopy = useCallback(
     (claimId: string) => {
-      const allClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims);
-      const claim = allClaims.find((c: any) => String(c?.id ?? '') === claimId);
-      const ownedIds = new Set(safeArr<string>(claim?.sourceStatementIds).map(String));
+      const idx = artifact?.index ?? null;
+      const ownedIds = new Set(
+        idx ? getCanonicalStatementsForClaim(idx, claimId).map(String) : []
+      );
 
       const profile = (artifact?.claimDensity?.profiles ?? {})[claimId];
       const covMap = new Map<string, number>();

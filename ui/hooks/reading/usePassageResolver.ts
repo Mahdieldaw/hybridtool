@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { LandscapePosition } from '../../reading/styles';
+import type { CorpusIndex } from '../../../shared/types/corpus-tree';
 
 export interface ResolvedPassage {
   kind: 'passage';
@@ -37,13 +38,28 @@ export function usePassageResolver(
   return useMemo(() => {
     if (!artifact) return { resolve: () => null };
 
-    // Build paragraph lookup: (modelIndex, paragraphIndex) → paragraph
-    const paragraphs: any[] = Array.isArray(artifact?.shadow?.paragraphs)
-      ? artifact.shadow.paragraphs
-      : [];
-    const paraLookup = new Map<string, any>();
-    for (const p of paragraphs) {
-      paraLookup.set(`${p.modelIndex}:${p.paragraphIndex}`, p);
+    const idx: CorpusIndex | null = artifact?.index ?? null;
+
+    // Build paragraph lookup: (modelIndex, paragraphOrdinal) → { _fullParagraph }
+    // Reads from corpus index + corpus tree.
+    const paraLookup = new Map<string, { _fullParagraph?: string }>();
+    if (idx) {
+      for (const [pid, pCoords] of idx.paragraphIndex) {
+        const node = artifact?.corpus?.models
+          ?.find((m: any) => m.modelIndex === pCoords.modelIndex)
+          ?.paragraphs?.find((p: any) => p.paragraphId === pid);
+        paraLookup.set(`${pCoords.modelIndex}:${pCoords.paragraphOrdinal}`, {
+          _fullParagraph: node?._fullParagraph,
+        });
+      }
+    }
+
+    // Statement text lookup for unclaimed groups — read from corpus index.
+    const statementTexts = new Map<string, string>();
+    if (idx) {
+      for (const [sid, sCoords] of idx.statementIndex) {
+        if (sCoords.text) statementTexts.set(sid, sCoords.text);
+      }
     }
 
     // Claim label lookup
@@ -65,14 +81,6 @@ export function usePassageResolver(
         for (const cid of conflictClusters[ci].claimIds ?? []) {
           claimToClusterIndex.set(cid, ci);
         }
-      }
-    }
-
-    // Statement text lookup for unclaimed groups
-    const statementTexts = new Map<string, string>();
-    for (const p of paragraphs) {
-      for (const s of p.statements ?? []) {
-        statementTexts.set(s.id, s.text);
       }
     }
 

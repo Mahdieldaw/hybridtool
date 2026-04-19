@@ -24,6 +24,7 @@ import { PipelineErrorBanner } from '../shell/chrome/PipelineErrorBanner';
 import { useProviderArtifact } from '../hooks/providers/useProviderArtifact';
 import { EditorialPreview } from '../reading/EditorialPreview';
 import { formatFullTurn } from '../utils/copy-format-utils';
+import { getArtifactStatements } from '../../shared/corpus-utils';
 
 interface CognitiveOutputRendererProps {
   aiTurn: AiTurn;
@@ -200,7 +201,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             onClick={() =>
               setDecisionMapOpen({
                 turnId: aiTurn.id,
-                tab: mappingArtifact?.shadow?.statements?.length ? 'shadow' : 'json',
+                tab: getArtifactStatements(mappingArtifact)?.length ? 'shadow' : 'json',
               })
             }
             className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"

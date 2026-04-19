@@ -50,6 +50,7 @@ export interface MeasurePhaseOutput {
   exclusivityMap: Map<string, ClaimExclusivity>;
   claimDensity: ClaimDensityResult;
   canonicalSets: Map<string, Set<string>>;
+  canonicalStatementIds: Map<string, string[]>;
   exclusiveIds: Map<string, string[]>;
   claimEmbeddings: Map<string, Float32Array>;
   competitiveWeights: Map<string, Map<string, number>>;
@@ -469,10 +470,6 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       support_count: supporters.length,
       type: 'assertive' as const,
       role: 'supplement' as const,
-      sourceStatementIds: canonicalStatementIds,
-      sourceStatements: canonicalStatementIds
-        .map((id) => statementsById.get(id))
-        .filter((s): s is ShadowStatement => s !== undefined),
       sourceRegionIds: Array.from(matchedRegionIds).sort(),
       supportRatio: totalModelCount > 0 ? supporters.length / totalModelCount : 0,
       provenanceBulk,
@@ -486,18 +483,29 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
   console.log(
     `[Provenance] MixedProvenance: recovery=${(recoveryRate * 100).toFixed(1)}% expansion=${(expansionRate * 100).toFixed(1)}% removal=${(removalRate * 100).toFixed(1)}%`
   );
-  console.log(
-    `[Provenance] Canonical statement counts: ${enrichedClaims.map((r) => `${r.id}:stmts=${r.sourceStatementIds?.length ?? 0}`).join(', ')}`
-  );
 
   // Exclusivity — single pass now that ownershipMap is complete
   const exclusivityMap = new Map<string, ClaimExclusivity>();
   const canonicalSets = new Map<string, Set<string>>();
   const exclusiveIdsMap = new Map<string, string[]>();
 
+  // Build canonical statement IDs per claim for index builder
+  const canonicalStatementIds = new Map<string, string[]>();
+
+  for (const [claimId, result] of Object.entries(perClaimMixed)) {
+    if (result.canonicalStatementIds) {
+      canonicalStatementIds.set(claimId, result.canonicalStatementIds);
+    }
+  }
+
+  // Log canonical counts
+  console.log(
+    `[Provenance] Canonical statement counts: ${Array.from(canonicalStatementIds).map(([id, stmts]) => `${id}:stmts=${stmts.length}`).join(', ')}`
+  );
+
   for (const claim of enrichedClaims) {
     const id = String(claim.id);
-    const sourceIds = claim.sourceStatementIds ?? [];
+    const sourceIds = canonicalStatementIds.get(id) ?? [];
     const exclusiveIds: string[] = [];
     const sharedIds: string[] = [];
     for (const sid of sourceIds) {
@@ -529,6 +537,7 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       },
     },
     canonicalSets,
+    canonicalStatementIds,
     exclusiveIds: exclusiveIdsMap,
     claimEmbeddings,
     competitiveWeights: normalizedWeights,

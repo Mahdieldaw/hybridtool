@@ -20,14 +20,10 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
 }) => {
   const paraRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  // Filter paragraphs to this model
+  // Filter paragraphs to this model from corpus tree
   const paragraphs = useMemo(() => {
-    const allParas: any[] = Array.isArray(artifact?.shadow?.paragraphs)
-      ? artifact.shadow.paragraphs
-      : [];
-    return allParas.filter(
-      (p: any) => (typeof p.modelIndex === 'number' ? p.modelIndex : 0) === modelIndex
-    );
+    const model = artifact?.corpus?.models?.find((m: any) => m.modelIndex === modelIndex);
+    return Array.isArray(model?.paragraphs) ? model.paragraphs : [];
   }, [artifact, modelIndex]);
 
   // Owned statement IDs for focused claim

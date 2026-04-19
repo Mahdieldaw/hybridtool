@@ -12,6 +12,7 @@ import { TurnMessage } from '../types';
 import { LLM_PROVIDERS_CONFIG } from '../config/constants';
 import { getProviderName } from './provider-helpers';
 import { parseSemanticMapperOutput } from '../../shared/parsing-utils';
+import { getCanonicalStatementsForClaim, getArtifactStatements, getArtifactParagraphs } from '../../shared/corpus-utils';
 // Tier 3: artifacts are ephemeral — not available on turn objects
 
 // ============================================================================
@@ -800,7 +801,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
     case 'provenance-comparison': {
       const saPerClaim: Record<string, any> = artifact?.statementAllocation?.perClaim ?? {};
       const stmtText = new Map<string, string>();
-      for (const s of safeArr(artifact?.shadow?.statements)) {
+      for (const s of safeArr(getArtifactStatements(artifact))) {
         stmtText.set(String(s.id), String(s.text ?? ''));
       }
       const TOP_N = 10;
@@ -828,9 +829,16 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       return ser(artifact?.mixedProvenance ?? null);
     case 'claim-statements': {
       const claims = safeArr(artifact?.semantic?.claims);
+      const idx = artifact?.index ?? null;
       const stmtText = new Map<string, string>();
-      for (const s of safeArr(artifact?.shadow?.statements)) {
+      for (const s of safeArr(getArtifactStatements(artifact))) {
         stmtText.set(String(s.id ?? s.statementId ?? s.sid ?? ''), String(s.text ?? ''));
+      }
+      // Also populate stmtText from index when available
+      if (idx) {
+        for (const [sid, sCoords] of idx.statementIndex) {
+          if (sCoords.text && !stmtText.has(sid)) stmtText.set(sid, sCoords.text);
+        }
       }
       const ownership = artifact?.claimProvenance?.statementOwnership ?? {};
       const exclusivity = artifact?.claimProvenance?.claimExclusivity ?? {};
@@ -842,8 +850,8 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
           const exclusiveSet = new Set<string>(
             Array.isArray(exData?.exclusiveIds) ? exData.exclusiveIds.map(String) : []
           );
-          const stmtIds: string[] = Array.isArray(c.sourceStatementIds)
-            ? c.sourceStatementIds.map(String)
+          const stmtIds: string[] = idx
+            ? getCanonicalStatementsForClaim(idx, cid)
             : [];
           return {
             claimId: cid,
@@ -868,7 +876,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
     }
     case 'blast-radius': {
       const stmtText = new Map<string, string>();
-      for (const s of safeArr(artifact?.shadow?.statements)) {
+      for (const s of safeArr(getArtifactStatements(artifact))) {
         stmtText.set(String(s.id), String(s.text ?? ''));
       }
       const expandStmtRefs = (value: any): any => {
@@ -1004,7 +1012,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
     case 'periphery': {
       const diag = artifact?.passageRouting?.routing?.diagnostics;
       const actualExcludedIds = new Set(safeArr(diag?.peripheralNodeIds));
-      const paragraphs = safeArr(artifact?.shadow?.paragraphs);
+      const paragraphs = safeArr(getArtifactParagraphs(artifact));
 
       const basins = safeArr(artifact?.geometry?.basinInversion?.basins);
       let largestBasinId = null;

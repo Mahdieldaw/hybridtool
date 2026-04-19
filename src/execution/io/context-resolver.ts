@@ -2,6 +2,7 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { parseSemanticMapperOutput } from '../../../shared/parsing-utils';
 import type { ProviderResponseRecord, SessionRecord, AiTurnRecord, TurnRecord } from '../../persistence/types';
+import type { ResolvedContext, InitializeContext, ExtendContext, RecomputeContext } from '../../../shared/types/contract';
 
 // Minimal structural interfaces for the injected session manager
 interface IAdapter {
@@ -122,7 +123,7 @@ export class ContextResolver {
    * @param request initialize | extend | recompute
    * @returns ResolvedContext
    */
-  async resolve(request: { type: string; [key: string]: unknown }): Promise<unknown> {
+  async resolve(request: { type: string; [key: string]: unknown }): Promise<ResolvedContext> {
     if (!request || !request.type) {
       throw new Error('[ContextResolver] request.type is required');
     }
@@ -140,7 +141,7 @@ export class ContextResolver {
   }
 
   // initialize: starting fresh
-  async _resolveInitialize(request: { providers?: string[]; [key: string]: unknown }): Promise<unknown> {
+  async _resolveInitialize(request: { providers?: string[]; [key: string]: unknown }): Promise<InitializeContext> {
     return {
       type: 'initialize',
       providers: request.providers || [],
@@ -154,7 +155,7 @@ export class ContextResolver {
     providers?: string[];
     forcedContextReset?: string[];
     [key: string]: unknown;
-  }): Promise<unknown> {
+  }): Promise<ExtendContext> {
     const { sessionId, threadId = DEFAULT_THREAD } = request;
     if (!sessionId) throw new Error('[ContextResolver] Extend requires sessionId');
 
@@ -196,7 +197,7 @@ export class ContextResolver {
       type: 'extend',
       sessionId,
       lastTurnId: lastTurn.id,
-      providerContexts: resolvedContexts,
+      providerContexts: resolvedContexts as ExtendContext['providerContexts'],
       previousContext: (lastTurn as AiTurnRecord).lastContextSummary || null,
       previousAnalysis: await this._resolveLastStoredAnalysis(sessionId, session, lastTurn as AiTurnRecord),
     };
@@ -212,7 +213,7 @@ export class ContextResolver {
     preferredMappingProvider?: string;
     forcedContextReset?: string[];
     [key: string]: unknown;
-  }): Promise<unknown> {
+  }): Promise<RecomputeContext> {
     const { sessionId, sourceTurnId, stepType, targetProvider } = request;
     if (!sessionId || !sourceTurnId) {
       throw new Error('[ContextResolver] Recompute requires sessionId and sourceTurnId');
@@ -307,10 +308,10 @@ export class ContextResolver {
         type: 'recompute',
         sessionId,
         sourceTurnId,
-        stepType,
-        targetProvider,
+        stepType: stepType!,
+        targetProvider: targetProvider!,
         // No frozen outputs required for batch; we are re-running fresh for a single provider
-        frozenBatchOutputs: {},
+        frozenBatchOutputs: {} as Record<string, unknown>,
         providerContextsAtSourceTurn,
         latestMappingOutput: null,
         sourceUserMessage,
@@ -332,7 +333,7 @@ export class ContextResolver {
       request.preferredMappingProvider
     );
 
-    const providerContextsAtSourceTurn = (sourceTurn as unknown as Record<string, unknown>).providerContexts || {};
+    const providerContextsAtSourceTurn = ((sourceTurn as unknown as Record<string, unknown>).providerContexts || {}) as Record<string, unknown>;
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
 
     // Extract frozen prompt metadata for singularity recomputes
@@ -347,8 +348,8 @@ export class ContextResolver {
       frozenBatchOutputs,
       latestMappingOutput,
       providerContextsAtSourceTurn,
-      stepType,
-      targetProvider,
+      stepType: stepType!,
+      targetProvider: targetProvider!,
       sourceUserMessage,
       frozenSingularityPromptType,
       frozenSingularityPromptSeed,

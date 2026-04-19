@@ -121,42 +121,22 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
     if (!artifact) return [];
     const a = artifact;
 
-    // Try shadow.paragraphs first (live artifact), fall back to reconstructing from nodes + statements
-    let paragraphs: any[] = Array.isArray(a?.shadow?.paragraphs) ? a.shadow.paragraphs : [];
-
-    // If shadow paragraphs are empty (dehydrated), reconstruct from geometry nodes + statements
-    if (paragraphs.length === 0 && nodeMap && nodeMap.size > 0) {
-      const stmtById = new Map<string, any>();
-      const stmts: any[] = Array.isArray(a?.shadow?.statements) ? a.shadow.statements : [];
-      for (const s of stmts) {
-        const id = String(s?.id ?? s?.statementId ?? s?.sid ?? '').trim();
-        if (id) stmtById.set(id, s);
-      }
-
-      paragraphs = Array.from(nodeMap.entries()).map(([paraId, node]) => {
-        const stmtIds: string[] = Array.isArray(node.statementIds) ? node.statementIds : [];
-        const stmtTexts = stmtIds
-          .map((sid) => stmtById.get(sid))
-          .filter(Boolean)
-          .map((s: any) => String(s.text ?? s.statement ?? s.content ?? ''));
-        return {
-          id: paraId,
-          modelIndex: node.modelIndex ?? 0,
-          statementIds: stmtIds,
-          dominantStance: node.dominantStance ?? null,
-          contested: node.contested ?? false,
-          confidence: 0,
-          _fullParagraph: stmtTexts.join(' '),
-        };
-      });
-    }
+    // Read paragraphs from corpus tree (immutable, always present on live artifact).
+    const corpusModels: any[] = Array.isArray(a?.corpus?.models) ? a.corpus.models : [];
+    const paragraphs: any[] = corpusModels.flatMap((m: any) =>
+      Array.isArray(m.paragraphs) ? m.paragraphs : []
+    );
 
     return paragraphs.map((para): ParagraphRow => {
-      const paraId = String(para.id ?? '').trim();
+      const paraId = String(para.paragraphId ?? para.id ?? '').trim();
       const node = nodeMap?.get(paraId) ?? null;
       const mixed = mixedParaMap?.get(paraId) ?? null;
 
-      const stmtIds: string[] = Array.isArray(para.statementIds) ? para.statementIds : [];
+      const stmts: any[] = Array.isArray(para.statements)
+        ? para.statements
+        : Array.isArray(para.statementIds)
+          ? para.statementIds
+          : [];
       const fullText = String(para._fullParagraph ?? '');
 
       const fin = (v: any): number | null =>
@@ -175,7 +155,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         modelIndex,
         providerId,
         providerAbbrev,
-        statementCount: stmtIds.length,
+        statementCount: stmts.length,
 
         dominantStance: typeof para.dominantStance === 'string' ? para.dominantStance : null,
         contested: para.contested === true,

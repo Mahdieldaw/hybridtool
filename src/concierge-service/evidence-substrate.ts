@@ -11,7 +11,6 @@
 import type {
   EditorialAST,
   EditorialThread,
-  PipelineShadowParagraph,
   CognitiveArtifact,
 } from '../../shared/types';
 import type { IndexedPassage, IndexedUnclaimedGroup } from './editorial-mapper';
@@ -57,12 +56,13 @@ function buildResolver(
   artifact: CognitiveArtifact,
   citationSourceOrder: Record<string | number, string>
 ) {
-  const paragraphs: PipelineShadowParagraph[] = Array.isArray(artifact?.shadow?.paragraphs)
-    ? artifact.shadow.paragraphs
-    : [];
-  const paraLookup = new Map<string, PipelineShadowParagraph>();
-  for (const p of paragraphs) {
-    paraLookup.set(`${p.modelIndex}:${p.paragraphIndex}`, p);
+  // Build paragraph lookup: (modelIndex:paragraphOrdinal) → { _fullParagraph }
+  // Reads from corpus tree attached to cognitive artifact.
+  const paraLookup = new Map<string, { _fullParagraph?: string; statements?: any[] }>();
+  for (const model of (artifact as any)?.corpus?.models ?? []) {
+    for (const para of model.paragraphs ?? []) {
+      paraLookup.set(`${para.modelIndex}:${para.paragraphOrdinal}`, para);
+    }
   }
 
   const claims: any[] = Array.isArray(artifact?.semantic?.claims) ? artifact.semantic.claims : [];
@@ -73,11 +73,19 @@ function buildResolver(
 
   const densityProfiles: Record<string, any> = (artifact as any)?.claimDensity?.profiles ?? {};
 
-  // Statement text lookup for unclaimed groups
+  // Statement text lookup for unclaimed groups — read from corpus index when available.
   const statementTexts = new Map<string, string>();
-  for (const p of paragraphs) {
-    for (const s of p.statements ?? []) {
-      statementTexts.set(s.id, s.text);
+  const idx = (artifact as any)?.index;
+  if (idx?.statementIndex) {
+    for (const [sid, sCoords] of idx.statementIndex) {
+      if (sCoords.text) statementTexts.set(sid, sCoords.text);
+    }
+  } else {
+    for (const para of paraLookup.values()) {
+      for (const s of para.statements ?? []) {
+        const sid = String(s.statementId ?? s.id ?? '');
+        if (sid) statementTexts.set(sid, s.text ?? '');
+      }
     }
   }
 

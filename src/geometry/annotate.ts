@@ -57,12 +57,15 @@ export function enrichStatementsWithGeometry(
   statements: ShadowStatement[],
   paragraphs: ShadowParagraph[],
   substrate: GeometricSubstrate,
-  interpretation?: SubstrateInterpretation | null
+  interpretation?: SubstrateInterpretation | null,
+  statementToParagraph?: Map<string, string>
 ): EnrichmentResult {
-  const statementToParagraph = new Map<string, string>();
-  for (const para of paragraphs) {
-    for (const stmtId of para.statementIds) {
-      statementToParagraph.set(stmtId, para.id);
+  const stmtToPara = statementToParagraph ?? new Map<string, string>();
+  if (!statementToParagraph) {
+    for (const para of paragraphs) {
+      for (const stmtId of para.statementIds) {
+        stmtToPara.set(stmtId, para.id);
+      }
     }
   }
 
@@ -75,7 +78,7 @@ export function enrichStatementsWithGeometry(
   let enrichedCount = 0;
 
   for (const stmt of statements) {
-    const paragraphId = statementToParagraph.get(stmt.id);
+    const paragraphId = stmtToPara.get(stmt.id);
     if (!paragraphId) {
       failures.push({ statementId: stmt.id, reason: 'no_paragraph' });
       continue;
@@ -117,14 +120,17 @@ export function computeQueryRelevance(input: {
   statementEmbeddings?: Map<string, Float32Array> | null;
   paragraphEmbeddings?: Map<string, Float32Array> | null;
   paragraphs: ShadowParagraph[];
+  statementToParagraph?: Map<string, string> | null;
 }): QueryRelevanceResult {
   const { queryEmbedding, statements, statementEmbeddings, paragraphEmbeddings, paragraphs } =
     input;
 
-  const statementToParagraph = new Map<string, string>();
-  for (const p of paragraphs) {
-    for (const sid of p.statementIds) {
-      statementToParagraph.set(sid, p.id);
+  const statementToParagraph = input.statementToParagraph ?? new Map<string, string>();
+  if (!input.statementToParagraph) {
+    for (const p of paragraphs) {
+      for (const sid of p.statementIds) {
+        statementToParagraph.set(sid, p.id);
+      }
     }
   }
 
@@ -172,7 +178,18 @@ export function annotateStatements(input: {
   statementEmbeddings?: Map<string, Float32Array> | null;
   paragraphEmbeddings?: Map<string, Float32Array> | null;
 }): { queryRelevance: QueryRelevanceResult | null } {
-  enrichStatementsWithGeometry(input.statements, input.paragraphs, input.substrate, input.interpretation);
+  const statementToParagraph = new Map<string, string>();
+  for (const p of input.paragraphs) {
+    for (const sid of p.statementIds) statementToParagraph.set(sid, p.id);
+  }
+
+  enrichStatementsWithGeometry(
+    input.statements,
+    input.paragraphs,
+    input.substrate,
+    input.interpretation,
+    statementToParagraph
+  );
 
   let queryRelevance: QueryRelevanceResult | null = null;
   if (input.queryEmbedding) {
@@ -182,6 +199,7 @@ export function annotateStatements(input: {
       statementEmbeddings: input.statementEmbeddings,
       paragraphEmbeddings: input.paragraphEmbeddings,
       paragraphs: input.paragraphs,
+      statementToParagraph,
     });
   }
 

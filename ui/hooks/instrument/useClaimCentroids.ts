@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import type { PipelineSubstrateGraph } from '../../../shared/types';
+import type { CorpusIndex } from '../../../shared/types/corpus-tree';
+import { getCanonicalStatementsForClaim, getStatementCoordinates } from '../../../shared/corpus-utils';
 
 export interface ClaimCentroid {
   claimId: string;
@@ -8,7 +10,7 @@ export interface ClaimCentroid {
   y: number;
   hasPosition: boolean;
   sourceParagraphIds: string[];
-  sourceStatementIds: string[];
+  canonicalStatementIds: string[];
   supporters: (string | number)[];
   provenanceBulk: number | null;
   role: string;
@@ -20,27 +22,22 @@ export interface ClaimCentroid {
 /**
  * Compute claim diamond positions and source paragraph sets.
  *
- * When `mixedProvenance` is provided, uses `canonicalStatementIds` for paragraph
- * resolution and weights each paragraph by the fraction of its statements that
- * are canonical for the claim (canonicalCount / totalCount). This gives paragraphs
- * where only a sliver of content survived less positional pull than paragraphs
- * fully owned by the claim.
- *
- * Falls back to equal-weight averaging over `claim.sourceStatementIds` when
- * mixed provenance is unavailable.
+ * Uses `canonicalStatementIds` from the CorpusIndex for paragraph resolution,
+ * weighting each paragraph by the fraction of its statements that are canonical
+ * for the claim (canonicalCount / totalCount). Falls back to mixedProvenance
+ * perClaim entries when the index is unavailable.
  */
 export function useClaimCentroids(
   claims: any[] | null | undefined,
   substrate: PipelineSubstrateGraph | null | undefined,
-  mixedProvenance?: any | null
+  mixedProvenance?: any | null,
+  index?: CorpusIndex | null
 ): ClaimCentroid[] {
   return useMemo(() => {
     if (!claims || !substrate?.nodes?.length) return [];
 
-    // Build statementId → paragraphId lookup + paragraph positions
-    const stmtToPara = new Map<string, string>();
+    // Build paragraph positions + total statement count per paragraph from substrate nodes
     const paraPosition = new Map<string, { x: number; y: number }>();
-    // Total statement count per paragraph (for weighting)
     const paraTotalStmts = new Map<string, number>();
 
     for (const node of substrate.nodes) {
@@ -51,11 +48,7 @@ export function useClaimCentroids(
       if (Number.isFinite(x) && Number.isFinite(y)) {
         paraPosition.set(pid, { x, y });
       }
-      const sids: string[] = node?.statementIds ?? [];
-      paraTotalStmts.set(pid, sids.length);
-      for (const sid of sids) {
-        if (sid) stmtToPara.set(String(sid), pid);
-      }
+      paraTotalStmts.set(pid, (node?.statementIds ?? []).length);
     }
 
     const perClaim = mixedProvenance?.perClaim;
@@ -64,19 +57,25 @@ export function useClaimCentroids(
     for (const claim of claims) {
       const claimId = String(claim.id ?? '');
 
-      // Prefer canonical statement IDs from mixed provenance when available
-      const mpEntry = perClaim?.[claimId];
-      const canonicalIds: string[] | null =
-        Array.isArray(mpEntry?.canonicalStatementIds) && mpEntry.canonicalStatementIds.length > 0
-          ? mpEntry.canonicalStatementIds
-          : null;
-      const stmtIds: string[] =
-        canonicalIds ?? (Array.isArray(claim.sourceStatementIds) ? claim.sourceStatementIds : []);
+      // Prefer index → mixedProvenance → empty
+      let stmtIds: string[];
+      if (index) {
+        stmtIds = getCanonicalStatementsForClaim(index, claimId);
+      } else {
+        const mpEntry = perClaim?.[claimId];
+        stmtIds =
+          Array.isArray(mpEntry?.canonicalStatementIds) && mpEntry.canonicalStatementIds.length > 0
+            ? mpEntry.canonicalStatementIds
+            : [];
+      }
 
-      // Resolve statements → paragraphs, counting canonical hits per paragraph
+      // Resolve statements → paragraphs via index (O(1)) or geometricCoordinates fallback
       const paraCanonicalCount = new Map<string, number>();
       for (const sid of stmtIds) {
-        const pid = stmtToPara.get(String(sid));
+        let pid: string | undefined;
+        if (index) {
+          pid = getStatementCoordinates(index, sid)?.paragraphId;
+        }
         if (pid) paraCanonicalCount.set(pid, (paraCanonicalCount.get(pid) ?? 0) + 1);
       }
       const unique = Array.from(paraCanonicalCount.keys());
@@ -105,7 +104,7 @@ export function useClaimCentroids(
         y: totalWeight > 0 ? sumY / totalWeight : 0,
         hasPosition: totalWeight > 0,
         sourceParagraphIds: unique,
-        sourceStatementIds: stmtIds.map(String),
+        canonicalStatementIds: stmtIds.map(String),
         supporters: Array.isArray(claim.supporters) ? claim.supporters : [],
         provenanceBulk: typeof claim.provenanceBulk === 'number' ? claim.provenanceBulk : null,
         role: String(claim.role ?? ''),
@@ -114,5 +113,5 @@ export function useClaimCentroids(
       });
     }
     return out;
-  }, [claims, substrate, mixedProvenance]);
+  }, [claims, substrate, mixedProvenance, index]);
 }

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { LandscapePosition, LANDSCAPE_ORDER } from '../../reading/styles';
+import type { CorpusIndex } from '../../../shared/types/corpus-tree';
 
 export interface ParagraphHighlight {
   state: 'passage' | 'dispersed' | 'none';
@@ -21,16 +22,13 @@ export function usePassageHighlight(
   return useMemo(() => {
     const map = new Map<string, ParagraphHighlight>();
 
-    // Build (modelIndex:paragraphIndex) → paragraphId cross-reference
-    const allParas: any[] = Array.isArray(artifact?.shadow?.paragraphs)
-      ? artifact.shadow.paragraphs
-      : [];
+    // Build (modelIndex:paragraphOrdinal) → paragraphId cross-reference via corpus index.
     const paraIdByCoord = new Map<string, string>();
-    for (const p of allParas) {
-      const mi = typeof p.modelIndex === 'number' ? p.modelIndex : 0;
-      const pi = typeof p.paragraphIndex === 'number' ? p.paragraphIndex : 0;
-      const id = String(p.id ?? p.paragraphId ?? '');
-      if (id) paraIdByCoord.set(`${mi}:${pi}`, id);
+    const idx: CorpusIndex | null = artifact?.index ?? null;
+    if (idx) {
+      for (const [pid, pCoords] of idx.paragraphIndex) {
+        paraIdByCoord.set(`${pCoords.modelIndex}:${pCoords.paragraphOrdinal}`, pid);
+      }
     }
 
     const densityProfiles: Record<string, any> = artifact?.claimDensity?.profiles ?? {};

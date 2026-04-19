@@ -18,14 +18,10 @@ export const ModelGrid: React.FC<ModelGridProps> = ({
   highlightMap,
 }) => {
   const modelIndices = useMemo(() => {
-    const allParas: any[] = Array.isArray(artifact?.shadow?.paragraphs)
-      ? artifact.shadow.paragraphs
-      : [];
-    const set = new Set<number>();
-    for (const p of allParas) {
-      set.add(typeof p.modelIndex === 'number' ? p.modelIndex : 0);
-    }
-    const indices = Array.from(set).sort((a, b) => a - b);
+    const models: any[] = Array.isArray(artifact?.corpus?.models) ? artifact.corpus.models : [];
+    const indices = models
+      .map((m: any) => (typeof m.modelIndex === 'number' ? m.modelIndex : 0))
+      .sort((a, b) => a - b);
     return indices.length > 0 ? indices : [0];
   }, [artifact]);
 
@@ -41,7 +37,7 @@ export const ModelGrid: React.FC<ModelGridProps> = ({
     return 'grid-cols-6';
   }, [modelIndices]);
 
-  if (!artifact?.shadow?.paragraphs?.length) {
+  if (!artifact?.corpus?.models?.length) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-text-muted">
         No model output available

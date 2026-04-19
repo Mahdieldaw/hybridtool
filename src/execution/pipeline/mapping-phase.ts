@@ -438,11 +438,12 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   if (mapperArtifact) {
                     try {
                       const embMap = statementEmbeddingResult?.embeddings;
-                      if (embMap) {
+                      if (embMap && mapperArtifact.index) {
+                        const { getCanonicalStatementsForClaim } =
+                          await import('../../../shared/corpus-utils');
+
                         for (const c of mapperArtifact.claims ?? []) {
-                          const sids = Array.isArray(c?.sourceStatementIds)
-                            ? c.sourceStatementIds
-                            : [];
+                          const sids = getCanonicalStatementsForClaim(mapperArtifact.index, c.id);
                           const vecs = [];
                           for (const sid of sids) {
                             const v = embMap.get(String(sid || '').trim());
@@ -502,7 +503,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                           preSurvey.derived.claimDensityResult,
                           preSurvey.derived.passageRoutingResult,
                           preSurvey.derived.statementClassification,
-                          { paragraphs: paragraphResult?.paragraphs ?? [] },
+                          mapperArtifact?.corpus ?? { paragraphs: [] },
                           enrichedClaims,
                           editorialCitationSourceOrder,
                           continuityMap

@@ -4,6 +4,7 @@ import { WorkflowEngine } from '../execution/workflow-engine.js';
 import { runPreflight, createAuthErrorMessage } from '../execution/preflight-validator.js';
 import { authManager } from '../providers/auth-manager.js';
 import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging';
+import { getArtifactParagraphs } from '../../shared/corpus-utils.ts';
 // Note: ContextResolver is now available via services; we don't import it directly here
 
 /**
@@ -452,7 +453,7 @@ export class ConnectionHandler {
       if (Number.isFinite(n) && n > 0) used.add(n);
     }
 
-    const shadowParagraphs = turn?.mapping?.artifact?.shadow?.paragraphs || [];
+    const shadowParagraphs = getArtifactParagraphs(turn?.mapping?.artifact) || [];
     for (const p of shadowParagraphs) {
       const n = Number(p?.modelIndex);
       if (Number.isFinite(n) && n > 0) used.add(n);

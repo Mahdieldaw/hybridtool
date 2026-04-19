@@ -11,6 +11,7 @@ import {
   LANDSCAPE_LABELS,
   SelectedEntity,
 } from './CardBase';
+import { getParagraphsForClaim } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // SUBSTRATE SNAPSHOT CARD
@@ -149,12 +150,12 @@ export function SubstrateSnapshotCard({
     if (uncoveredClaims > 0) items.push(`${uncoveredClaims} claim${uncoveredClaims !== 1 ? 's' : ''} with no routing profile`);
 
     const singleModelBasins = basins.filter((b: any) => {
-      const nodeList = safeArr(b?.nodeIds);
-      if (nodeList.length === 0) return false;
+      const nodeSet = new Set(safeArr(b?.nodeIds).map(String));
+      if (nodeSet.size === 0) return false;
       const models = new Set<number>();
       for (const n of nodes) {
         const nid = String(n?.paragraphId ?? n?.id ?? '');
-        if (nodeList.includes(nid) && typeof n?.modelIndex === 'number') models.add(n.modelIndex);
+        if (nodeSet.has(nid) && typeof n?.modelIndex === 'number') models.add(n.modelIndex);
       }
       return models.size <= 1;
     });
@@ -179,8 +180,11 @@ export function SubstrateSnapshotCard({
 
     const uncoveredRegions = regions.filter((r: any) => {
       const rNodeIds = new Set(safeArr(r?.nodeIds).map(String));
+      const idx = artifact?.index ?? null;
       return !claims.some((c: any) =>
-        safeArr(c?.sourceStatementIds).some((sid: any) => rNodeIds.has(String(sid)))
+        idx
+          ? getParagraphsForClaim(idx, String(c?.id ?? '')).some((pid) => rNodeIds.has(pid))
+          : false
       );
     }).length;
     if (uncoveredRegions > 0) {

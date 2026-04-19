@@ -132,9 +132,7 @@ export interface LinkedClaim {
   // Placeholder types for artifact compatibility (SA engine sets real values)
   type: Claim['type'];
   role: Claim['role'];
-  // Canonical statement IDs (post mixed-method provenance filter)
-  sourceStatementIds: string[];
-  sourceStatements: ShadowStatement[];
+  // Canonical source regions (post mixed-method provenance filter)
   sourceRegionIds: string[]; // which regions the source statements live in
   supportRatio: number; // supporters.length / totalModelCount
   provenanceBulk: number; // Σ paragraph weights for this claim
@@ -699,10 +697,6 @@ export interface MapperArtifact {
   // Blast Surface — provenance-derived damage assessment (instrumentation, runs alongside old filter)
   blastSurface?: BlastSurfaceResult | null;
 
-  shadow?: {
-    statements: ShadowStatement[];
-  };
-
   paragraphProjection?: ParagraphProjectionMeta;
   paragraphClustering?: any;
   substrate?: any;
@@ -1142,14 +1136,35 @@ export interface WorkflowRequest {
 // SECTION 2b: RESOLVED CONTEXT (Output of ContextResolver)
 // ============================================================================
 
-export type ResolvedContext = ExtendContext | Record<string, unknown>;
+export interface InitializeContext {
+  type: 'initialize';
+  providers: string[];
+}
 
 export interface ExtendContext {
   type: 'extend';
   sessionId: string;
   lastTurnId: string;
-  providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
+  providerContexts: Record<string, { meta?: Record<string, unknown>; continueThread?: boolean } | Record<string, unknown>>;
+  previousContext: string | null;
+  previousAnalysis: { claims: unknown[]; edges: unknown[] } | null;
 }
+
+export interface RecomputeContext {
+  type: 'recompute';
+  sessionId: string;
+  sourceTurnId: string;
+  stepType: string;
+  targetProvider: string;
+  frozenBatchOutputs: Record<string, unknown>;
+  providerContextsAtSourceTurn: Record<string, unknown>;
+  latestMappingOutput: { providerId: string; text: string; meta: Record<string, unknown> } | null;
+  sourceUserMessage: string;
+  frozenSingularityPromptType?: unknown;
+  frozenSingularityPromptSeed?: unknown;
+}
+
+export type ResolvedContext = InitializeContext | ExtendContext | RecomputeContext;
 
 export type ProviderOutput = {
   providerId?: string;

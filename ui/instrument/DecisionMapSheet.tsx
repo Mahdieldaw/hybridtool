@@ -10,6 +10,7 @@ import { useRoundActions } from '../hooks/chat/useRoundActions';
 import { m, AnimatePresence, LazyMotion, domAnimation } from 'framer-motion';
 import clsx from 'clsx';
 import { formatDecisionMapForMd } from '../utils/copy-format-utils';
+import { getArtifactStatements, getArtifactParagraphs } from '../../shared/corpus-utils';
 import { ParagraphSpaceView } from './ParagraphSpaceView';
 import {
   GeometryCard,
@@ -502,7 +503,7 @@ export const DecisionMapSheet = React.memo(() => {
       traversalGraph: mappingArtifact.traversal?.graph || null,
       forcingPoints: mappingArtifact.traversal?.forcingPoints || null,
       shadow: {
-        statements: mappingArtifact.shadow?.statements || [],
+        statements: getArtifactStatements(mappingArtifact),
       },
     };
   }, [mappingArtifact]);
@@ -583,7 +584,8 @@ export const DecisionMapSheet = React.memo(() => {
   const claimCentroids = useClaimCentroids(
     (mappingArtifact as any)?.semantic?.claims || null,
     (mappingArtifact as any)?.geometry?.substrate || null,
-    (mappingArtifact as any)?.mixedProvenance || null
+    (mappingArtifact as any)?.mixedProvenance || null,
+    (mappingArtifact as any)?.index ?? null
   );
 
   const semanticEdges = useMemo(
@@ -938,7 +940,7 @@ export const DecisionMapSheet = React.memo(() => {
                       regions={preSemanticRegions}
                       basinResult={(mappingArtifact as any)?.geometry?.basinInversion || null}
                       citationSourceOrder={citationSourceOrder || undefined}
-                      paragraphs={(mappingArtifact as any)?.shadow?.paragraphs || null}
+                      paragraphs={getArtifactParagraphs(mappingArtifact) || null}
                       claimCentroids={claimCentroids}
                       mapperEdges={semanticEdges}
                       selectedClaimId={instrumentSelectedClaimId}

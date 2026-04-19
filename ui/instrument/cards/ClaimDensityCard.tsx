@@ -10,6 +10,7 @@ import {
   LANDSCAPE_COLORS,
   LANDSCAPE_LABELS,
 } from './CardBase';
+import { getArtifactParagraphs } from '../../../shared/corpus-utils';
 
 // ============================================================================
 // CLAIM DENSITY CARD
@@ -58,7 +59,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
   // Total paragraph count per model (for contextual range display)
   const modelParaTotals = useMemo(() => {
     const totals = new Map<number, number>();
-    const paras = safeArr<any>(artifact?.shadow?.paragraphs);
+    const paras = safeArr<any>(getArtifactParagraphs(artifact));
     for (const p of paras) {
       const mi = typeof p?.modelIndex === 'number' ? p.modelIndex : -1;
       if (mi < 0) continue;

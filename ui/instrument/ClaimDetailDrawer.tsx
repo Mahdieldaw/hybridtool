@@ -2,6 +2,7 @@ import { useMemo, useEffect, useState } from 'react';
 import { m } from 'framer-motion';
 import MarkdownDisplay from '../shared/MarkdownDisplay';
 import { SupporterOrbs } from './SupporterOrbs';
+import { getCanonicalStatementsForClaim, getArtifactStatements } from '../../shared/corpus-utils';
 
 interface ClaimDetailDrawerProps {
   claim: any;
@@ -129,7 +130,7 @@ export function ClaimDetailDrawer({
   // Build statement text lookup
   const stmtTextMap = useMemo(() => {
     const map = new Map<string, string>();
-    for (const s of artifact?.shadow?.statements ?? []) {
+    for (const s of getArtifactStatements(artifact)) {
       map.set(String(s.id), String(s.text ?? ''));
     }
     return map;
@@ -297,9 +298,11 @@ export function ClaimDetailDrawer({
                 Provenance
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                <div className="text-text-muted">Source statements</div>
+                <div className="text-text-muted">Canonical statements</div>
                 <div className="text-text-primary text-right">
-                  {claim.sourceStatementIds?.length ?? '—'}
+                  {artifact?.index
+                    ? getCanonicalStatementsForClaim(artifact.index, String(claim.id ?? '')).length
+                    : '—'}
                 </div>
                 <div className="text-text-muted">Support ratio</div>
                 <div className="text-text-primary text-right">{fmt(claim.supportRatio)}</div>

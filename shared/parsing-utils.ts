@@ -716,7 +716,6 @@ export function parseSemanticMapperOutput(rawResponse: string): SemanticMapperPa
       text,
       supporters,
       stance: 'NEUTRAL',
-      sourceStatementIds: [],
     } as any);
   }
 
