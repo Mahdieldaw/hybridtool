@@ -55,7 +55,6 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
     semantic: {
       claims: mapper?.claims ?? [],
       edges: mapper?.edges ?? [],
-      conditionals: mapper?.conditionals ?? [],
       narrative: mapper?.narrative,
     },
     meta: {
@@ -75,7 +74,6 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
     // → semantic
     'claims',
     'edges',
-    'conditionals',
     'narrative',
     // → geometry
     'diagnostics',

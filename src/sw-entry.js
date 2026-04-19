@@ -803,13 +803,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         });
         return true;
 
-      case 'GET_CHEWED_SUBSTRATE_FOR_TURN':
-        sendResponse({
-          success: false,
-          error: 'Traversal removed — GET_CHEWED_SUBSTRATE_FOR_TURN is no longer supported',
-        });
-        return true;
-
       case 'GET_PARAGRAPH_EMBEDDINGS_RECORD':
         (async () => {
           const { aiTurnId } = message.payload || {};

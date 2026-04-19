@@ -8,27 +8,48 @@
  * The mapper artifact assembly + cognitive-artifact passthrough are automatic.
  */
 
-function getErrorMessage(err) {
+import type {
+  MixedProvenanceResult,
+  ClaimDensityResult,
+  BlastSurfaceResult,
+  PassageRoutingResult,
+  ProvenanceRefinementResult,
+  StatementClassificationResult,
+  MapperClaim,
+  EnrichedClaim,
+  Edge,
+  BasinInversionResult,
+  StructuralAnalysis,
+} from '../../shared/types';
+import type { GeometricSubstrate, SubstrateInterpretation, PeripheryResult, MeasuredRegion } from '../geometry';
+import type { ShadowStatement, ShadowParagraph } from '../shadow';
+import type { EmbeddingConfig } from '../clustering';
+import type { QueryRelevanceResult } from '../geometry/annotate';
+import type { ClaimExclusivity } from '../provenance/measure';
+
+function getErrorMessage(err: unknown): string {
   if (!err) return 'Unknown error';
   if (typeof err === 'string') return err;
-  return err?.message || String(err);
+  if (err && typeof err === 'object' && 'message' in err) {
+    const e = err as { message?: unknown };
+    if (typeof e.message === 'string') return e.message;
+  }
+  return String(err);
 }
 
 /**
  * Extract a PeripheryResult-shaped object from a SubstrateInterpretation.
  * Both call sites need the same shape — centralize access, not computation.
- *
- * @param {import('../../geometry/types').SubstrateInterpretation | null} preSemantic
- * @returns {{ corpusMode: string, peripheralNodeIds: Set<string>, peripheralRatio: number, largestBasinRatio: number | null, basinByNodeId: Record<string, number> }}
  */
-function resolvePeriphery(preSemantic) {
-  if (preSemantic && 'corpusMode' in preSemantic) {
+function resolvePeriphery(preSemantic: SubstrateInterpretation | null | undefined): PeripheryResult {
+  if (preSemantic && typeof preSemantic === 'object' && 'corpusMode' in preSemantic) {
+    const p = preSemantic as SubstrateInterpretation;
     return {
-      corpusMode: preSemantic.corpusMode,
-      peripheralNodeIds: preSemantic.peripheralNodeIds,
-      peripheralRatio: preSemantic.peripheralRatio,
-      largestBasinRatio: preSemantic.largestBasinRatio,
-      basinByNodeId: preSemantic.basinByNodeId,
+      corpusMode: p.corpusMode,
+      peripheralNodeIds: p.peripheralNodeIds,
+      peripheralRatio: p.peripheralRatio,
+      largestBasinRatio: p.largestBasinRatio,
+      basinByNodeId: p.basinByNodeId,
     };
   }
   return {
@@ -40,44 +61,81 @@ function resolvePeriphery(preSemantic) {
   };
 }
 
+interface DerivedFields {
+  claimProvenance: {
+    statementOwnership: Record<string, string[]>;
+    claimExclusivity: Record<string, ClaimExclusivity>;
+  } | null;
+  claimProvenanceExclusivity: Map<string, ClaimExclusivity> | null;
+  statementOwnership: Map<string, Set<string>> | null;
+  cachedStructuralAnalysis: StructuralAnalysis | null;
+  blastSurfaceResult: BlastSurfaceResult | null;
+  mixedProvenanceResult: MixedProvenanceResult | null;
+  basinInversion: BasinInversionResult | null;
+  queryRelevance: QueryRelevanceResult | null;
+  semanticEdges: Edge[];
+  derivedSupportEdges: Edge[];
+  passageRoutingResult: PassageRoutingResult | null;
+  claimDensityResult: ClaimDensityResult | null;
+  provenanceRefinement: ProvenanceRefinementResult | null;
+  statementClassification: StatementClassificationResult | null;
+}
+
+interface PreSurveyResult extends DerivedFields {
+  parsedClaims: MapperClaim[];
+  parsedEdges: Edge[];
+  parsedNarrative: string;
+  enrichedClaims: EnrichedClaim[];
+  claimEmbeddings: Map<string, Float32Array> | null;
+  shadowStatements: ShadowStatement[];
+  shadowParagraphs: ShadowParagraph[];
+  substrate: GeometricSubstrate | null;
+  preSemantic: SubstrateInterpretation | null;
+  regions: MeasuredRegion[];
+  claimRouting: PassageRoutingResult | null;
+  claimDensityScores: ClaimDensityResult | null;
+  derived: DerivedFields;
+  mapperClaimsForProvenance: MapperClaim[];
+  citationSourceOrder: Record<number, string> | null;
+}
+
 /**
  * Compute all deterministic derived fields from embeddings + semantic output.
- *
- * @param {object} input
- * @returns {Promise<object>} All derived fields — each null on failure.
  */
 export async function computeDerivedFields({
-  // Parsed semantic output
   enrichedClaims,
   mapperClaimsForProvenance,
   parsedEdges,
-  parsedConditionals,
-
-  // Shadow data
   shadowStatements,
   shadowParagraphs,
-
-  // Embeddings (already generated)
-  statementEmbeddings, // Map<string, Float32Array>
-  paragraphEmbeddings, // Map<string, Float32Array>
-  claimEmbeddings, // Map<string, Float32Array>
-  queryEmbedding = null, // Float32Array | null
-
-  // Geometry (already computed)
+  statementEmbeddings,
+  paragraphEmbeddings,
+  claimEmbeddings,
+  queryEmbedding = null,
   substrate = null,
   preSemantic = null,
   regions = [],
-
-  // Pre-computed (optional — if provided, skip recomputation)
   existingQueryRelevance = null,
-
-  // Config
   modelCount = 1,
-
-  // Pre-computed mixed-method provenance (from reconstructCanonicalProvenance)
   mixedProvenanceResult = null,
-}) {
-  const result = {
+}: {
+  enrichedClaims: EnrichedClaim[];
+  mapperClaimsForProvenance: MapperClaim[];
+  parsedEdges: Edge[];
+  shadowStatements: ShadowStatement[];
+  shadowParagraphs: ShadowParagraph[];
+  statementEmbeddings: Map<string, Float32Array> | null;
+  paragraphEmbeddings: Map<string, Float32Array>;
+  claimEmbeddings: Map<string, Float32Array> | null;
+  queryEmbedding?: Float32Array | null;
+  substrate?: GeometricSubstrate | null;
+  preSemantic?: SubstrateInterpretation | null;
+  regions?: MeasuredRegion[];
+  existingQueryRelevance?: QueryRelevanceResult | null;
+  modelCount?: number;
+  mixedProvenanceResult?: MixedProvenanceResult | null;
+}): Promise<DerivedFields> {
+  const result: DerivedFields = {
     claimProvenance: null,
     claimProvenanceExclusivity: null,
     statementOwnership: null,
@@ -133,57 +191,20 @@ export async function computeDerivedFields({
   const EDGE_PREREQUISITE = 'prerequisite';
 
   result.semanticEdges = (parsedEdges || [])
-    .filter((e) => e && e.from && e.to)
-    .map((e) => {
+    .filter((e) => !!e.from && !!e.to)
+    .map((e): Edge => {
       const raw = String(e.type || '').trim();
       const t = raw.toLowerCase();
-      if (t === 'conflicts' || t === 'conflict') {
-        return { ...e, type: EDGE_CONFLICTS };
-      }
-      if (t === 'prerequisite' || t === 'prerequisites') return { ...e, type: EDGE_PREREQUISITE };
-      if (t === 'supports' || t === 'support') return { ...e, type: EDGE_SUPPORTS };
-      if (t === 'tradeoff' || t === 'tradeoffs' || t === 'trade-off' || t === 'trade-offs') {
-        return { ...e, type: 'tradeoff' };
-      }
-      return { ...e, type: raw };
+      if (t === 'conflicts' || t === 'conflict') return { ...e, type: 'conflicts' };
+      if (t === 'prerequisite' || t === 'prerequisites') return { ...e, type: 'prerequisite' };
+      if (t === 'supports' || t === 'support') return { ...e, type: 'supports' };
+      if (t === 'tradeoff' || t === 'tradeoffs' || t === 'trade-off' || t === 'trade-offs') return { ...e, type: 'tradeoff' };
+      return { ...e, type: raw as Edge['type'] };
     })
     .filter((e) => {
-      const t = String(e.type || '')
-        .trim()
-        .toLowerCase();
-      return (
-        t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE
-      );
+      const t = e.type.toLowerCase();
+      return t === EDGE_SUPPORTS || t === EDGE_CONFLICTS || t === 'tradeoff' || t === EDGE_PREREQUISITE;
     });
-
-  // Derived support edges from conditionals (when no explicit supports exist)
-  const hasAnySupportEdges = result.semanticEdges.some(
-    (e) => String(e?.type || '') === EDGE_SUPPORTS
-  );
-  if (!hasAnySupportEdges) {
-    const supportKey = new Set();
-    for (const cond of parsedConditionals || []) {
-      const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
-      for (let i = 0; i < affected.length; i++) {
-        const a = String(affected[i] || '').trim();
-        if (!a) continue;
-        for (let j = i + 1; j < affected.length; j++) {
-          const b = String(affected[j] || '').trim();
-          if (!b || a === b) continue;
-          const k1 = `${a}::${b}::supports`;
-          if (!supportKey.has(k1)) {
-            supportKey.add(k1);
-            result.derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
-          }
-          const k2 = `${b}::${a}::supports`;
-          if (!supportKey.has(k2)) {
-            supportKey.add(k2);
-            result.derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
-          }
-        }
-      }
-    }
-  }
 
   // ── Resolve periphery (required by provenance pipeline) ─────────────
   // preSemantic is the sole authority — periphery was computed inside interpret.ts.
@@ -202,14 +223,14 @@ export async function computeDerivedFields({
       }
 
       const provenanceOutput = await buildProvenancePipeline({
-        mapperClaims: mapperClaimsForProvenance || [],
-        enrichedClaims,
-        edges: result.semanticEdges,
+        mapperClaims: (mapperClaimsForProvenance as MapperClaim[]) || [],
+        enrichedClaims: (enrichedClaims as EnrichedClaim[]),
+        edges: (result.semanticEdges as Edge[]),
         shadowStatements,
         shadowParagraphs,
         paragraphEmbeddings: paragraphEmbeddings || new Map(),
         statementEmbeddings: statementEmbeddings ?? null,
-        regions: regions || [],
+        regions: (regions || []) as MeasuredRegion[],
         totalModelCount: modelCount,
         periphery: periphery || {
           corpusMode: 'no-geometry',
@@ -263,8 +284,8 @@ export async function computeDerivedFields({
       const { analyzeGlobalStructure: computeStructuralAnalysis } =
         await import('../provenance/structure');
       result.cachedStructuralAnalysis = computeStructuralAnalysis({
-        claims: enrichedClaims,
-        edges: parsedEdges,
+        claims: (enrichedClaims as Claim[]),
+        edges: (parsedEdges as Edge[]),
         modelCount,
       });
     }
@@ -278,19 +299,28 @@ export async function computeDerivedFields({
 /**
  * Build the UI-facing substrate graph from raw geometry.
  * Shared by both StepExecutor (live) and buildArtifactForProvider (regen).
- *
- * @param {{ substrate: object, regions: object[] }} opts
- * @returns {object|null}
  */
-export function buildSubstrateGraph({ substrate, regions = [] }) {
+export function buildSubstrateGraph({
+  substrate,
+  regions = [],
+}: {
+  substrate: GeometricSubstrate | null | undefined;
+  regions?: MeasuredRegion[] | unknown[];
+}): unknown {
   if (!substrate || !substrate.layout2d?.coordinates) return null;
 
   const coords = substrate.layout2d.coordinates;
 
-  const regionsByNode = new Map();
+  const regionsByNode = new Map<string, string>();
   for (const r of regions) {
-    for (const nodeId of r?.nodeIds || []) {
-      if (nodeId && !regionsByNode.has(nodeId)) regionsByNode.set(nodeId, r.id);
+    if (!r || typeof r !== 'object') continue;
+    const region = r as Record<string, unknown>;
+    const nodeIds = Array.isArray(region.nodeIds) ? region.nodeIds : [];
+    for (const nodeId of nodeIds) {
+      const id = String(nodeId).trim();
+      if (id && !regionsByNode.has(id) && region.id) {
+        regionsByNode.set(id, String(region.id));
+      }
     }
   }
 
@@ -334,13 +364,22 @@ export async function assembleMapperArtifact({
   derived,
   enrichedClaims,
   parsedNarrative = '',
-  parsedConditionals = [],
   queryText = '',
   modelCount = 1,
   shadowStatements = [],
   shadowParagraphs = [],
   turn = undefined,
-}) {
+}: {
+  derived: unknown;
+  enrichedClaims: unknown[];
+  parsedNarrative?: string;
+  queryText?: string;
+  modelCount?: number;
+  shadowStatements?: ShadowStatement[];
+  shadowParagraphs?: ShadowParagraph[];
+  turn?: number | undefined;
+}): Promise<unknown> {
+  const derivedObj = (derived as Record<string, unknown>) || {};
   const {
     blastSurfaceResult,
     mixedProvenanceResult,
@@ -352,7 +391,7 @@ export async function assembleMapperArtifact({
     claimDensityResult,
     provenanceRefinement,
     statementClassification,
-  } = derived;
+  } = derivedObj;
 
   // Build CorpusTree and CorpusIndex.
   // Indices are in-memory only; NEVER serialized. Re-derived on artifact rebuild.
@@ -364,6 +403,11 @@ export async function assembleMapperArtifact({
     console.warn('[assembleMapperArtifact] Failed to build CorpusTree (non-fatal):', err);
   }
 
+  const edges = [
+    ...(Array.isArray(semanticEdges) ? semanticEdges : []),
+    ...(Array.isArray(derivedSupportEdges) ? derivedSupportEdges : []),
+  ];
+
   return {
     id: generateMapperArtifactId(),
     query: queryText,
@@ -371,9 +415,9 @@ export async function assembleMapperArtifact({
     timestamp: new Date().toISOString(),
     model_count: modelCount,
     claims: enrichedClaims,
-    edges: [...(semanticEdges || []), ...(derivedSupportEdges || [])],
+    edges,
     narrative: String(parsedNarrative || '').trim(),
-    conditionals: parsedConditionals,
+
     ...(blastSurfaceResult ? { blastSurface: blastSurfaceResult } : {}),
     ...(corpus ? { corpus } : {}),
     ...(claimProvenance ? { claimProvenance } : {}),
@@ -431,7 +475,23 @@ export async function computePreSurveyPipeline({
 
   // ═══ Context ═══
   modelCount = 1,
-}) {
+}: {
+  mappingText?: string | null;
+  parsedMappingResult?: Record<string, unknown> | null;
+  shadowStatements?: ShadowStatement[] | null;
+  shadowParagraphs?: ShadowParagraph[] | null;
+  batchSources?: Array<{ modelIndex: number; content: string }>;
+  statementEmbeddings: Map<string, Float32Array>;
+  paragraphEmbeddings: Map<string, Float32Array>;
+  queryEmbedding?: Float32Array | null;
+  geoRecord?: Record<string, unknown> | null;
+  claimEmbeddings?: Map<string, Float32Array> | null;
+  preBuiltSubstrate?: GeometricSubstrate | null;
+  preBuiltPreSemantic?: SubstrateInterpretation | null;
+  preBuiltQueryRelevance?: QueryRelevanceResult | null;
+  citationSourceOrder?: Record<number, string> | null;
+  modelCount?: number;
+}): Promise<unknown> {
   const t0 = Date.now();
 
   // ── 1. Parse mapping text (skip if caller already parsed) ────────
@@ -454,14 +514,12 @@ export async function computePreSurveyPipeline({
     }
     parsedClaims = Array.isArray(parseResult.output.claims) ? parseResult.output.claims : [];
     parsedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-    parsedNarrative = String(parseResult.output?.narrative || parseResult.narrative || '').trim();
+    parsedNarrative = String(parseResult.narrative || '').trim();
   }
 
   if (parsedClaims.length === 0) {
     throw new Error('Parsed 0 claims from mapping text');
   }
-
-  const parsedConditionals = [];
 
   console.log(
     `[computePreSurveyPipeline] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges`
@@ -507,16 +565,18 @@ export async function computePreSurveyPipeline({
     preSemantic = preBuiltPreSemantic;
     queryRelevance = preBuiltQueryRelevance;
 
-    regions = preSemantic?.regions || preSemantic?.regionization?.regions || [];
+    regions = preSemantic?.regions ?? [];
   } else {
     // Regen path — build geometry from scratch
     const { buildGeometricSubstrate } = await import('../geometry/measure');
     const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
 
+    const geoMeta = (geoRecord && typeof geoRecord === 'object' && 'meta' in geoRecord) ? (geoRecord as Record<string, unknown>).meta : null;
+    const embeddingBackend = (geoMeta && typeof geoMeta === 'object' && 'embeddingBackend' in geoMeta) ? (geoMeta as Record<string, unknown>).embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm' : 'wasm';
     substrate = buildGeometricSubstrate(
       shadowParagraphs,
       paragraphEmbeddings,
-      geoRecord?.meta?.embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm'
+      embeddingBackend
     );
 
     // Basin inversion is computed inside interpretSubstrate — no external call
@@ -525,7 +585,7 @@ export async function computePreSurveyPipeline({
       paragraphEmbeddings
     );
 
-    regions = preSemantic?.regions || preSemantic?.regionization?.regions || [];
+    regions = preSemantic?.regions ?? [];
 
     // ── 5. Query relevance ────────────────────────────────────────────
     queryRelevance = null;
@@ -543,7 +603,7 @@ export async function computePreSurveyPipeline({
     } catch (err) {
       console.warn(
         '[computePreSurveyPipeline] Query relevance failed:',
-        err?.message || String(err)
+        getErrorMessage(err)
       );
     }
   }
@@ -606,7 +666,6 @@ export async function computePreSurveyPipeline({
     enrichedClaims,
     mapperClaimsForProvenance,
     parsedEdges,
-    parsedConditionals,
     shadowStatements,
     shadowParagraphs,
     statementEmbeddings,
@@ -631,14 +690,12 @@ export async function computePreSurveyPipeline({
     parsedClaims,
     parsedEdges,
     parsedNarrative,
-    parsedConditionals,
     enrichedClaims,
     claimEmbeddings,
     shadowStatements,
     shadowParagraphs,
     substrate,
     preSemantic,
-    queryRelevance,
     regions,
     ...derived,
     claimRouting: derived.passageRoutingResult,
@@ -658,7 +715,7 @@ export async function computePreSurveyPipeline({
  * @param {object} opts
  */
 export async function assembleFromPreSurvey(
-  preSurvey,
+  preSurvey: Record<string, unknown>,
   {
     queryText = '',
     modelCount = 1,
@@ -667,28 +724,33 @@ export async function assembleFromPreSurvey(
     paragraphSemanticDensity = undefined,
     claimSemanticDensity = undefined,
     querySemanticDensity = undefined,
+  }: {
+    queryText?: string;
+    modelCount?: number;
+    turn?: number | undefined;
+    statementSemanticDensity?: unknown;
+    paragraphSemanticDensity?: unknown;
+    claimSemanticDensity?: unknown;
+    querySemanticDensity?: unknown;
   } = {}
-) {
-  const {
-    parsedNarrative,
-    enrichedClaims,
-    derived,
-    shadowStatements,
-    shadowParagraphs,
-    substrate,
-    preSemantic,
-    queryRelevance,
-    regions,
-    claimEmbeddings,
-    citationSourceOrder,
-  } = preSurvey;
+): Promise<Record<string, unknown>> {
+  const parsedNarrative = typeof preSurvey.parsedNarrative === 'string' ? preSurvey.parsedNarrative : '';
+  const enrichedClaims = Array.isArray(preSurvey.enrichedClaims) ? preSurvey.enrichedClaims : [];
+  const derived = preSurvey.derived as Record<string, unknown>;
+  const shadowStatements = Array.isArray(preSurvey.shadowStatements) ? (preSurvey.shadowStatements as ShadowStatement[]) : [];
+  const shadowParagraphs = Array.isArray(preSurvey.shadowParagraphs) ? (preSurvey.shadowParagraphs as ShadowParagraph[]) : [];
+  const substrate = (preSurvey.substrate as GeometricSubstrate) || null;
+  const preSemantic = (preSurvey.preSemantic as SubstrateInterpretation) || null;
+  const queryRelevance = preSurvey.queryRelevance;
+  const regions = Array.isArray(preSurvey.regions) ? (preSurvey.regions as MeasuredRegion[]) : [];
+  const claimEmbeddings = preSurvey.claimEmbeddings as Map<string, Float32Array> | undefined;
+  const citationSourceOrder = preSurvey.citationSourceOrder as Record<number, string> | undefined;
 
   // ── Assemble mapper artifact ──────────────────────────────────────
   const mapperArtifact = await assembleMapperArtifact({
     derived,
     enrichedClaims,
     parsedNarrative,
-    parsedConditionals: preSurvey.parsedConditionals || [],
     queryText,
     modelCount,
     shadowStatements,
@@ -696,7 +758,9 @@ export async function assembleFromPreSurvey(
     turn,
   });
 
-  mapperArtifact.preSemantic = preSemantic || null;
+  if (typeof mapperArtifact === 'object' && mapperArtifact !== null) {
+    (mapperArtifact as Record<string, unknown>).preSemantic = preSemantic || null;
+  }
 
   // ── 14. Build cognitive artifact ──────────────────────────────────
   const { buildCognitiveArtifact } = await import('../../shared/cognitive-artifact');
@@ -715,9 +779,9 @@ export async function assembleFromPreSurvey(
     ...(querySemanticDensity ? { querySemanticDensity } : {}),
   });
 
-  if (citationSourceOrder) {
-    cognitiveArtifact.citationSourceOrder = citationSourceOrder;
-    mapperArtifact.citationSourceOrder = citationSourceOrder;
+  if (citationSourceOrder && typeof mapperArtifact === 'object' && mapperArtifact !== null && typeof cognitiveArtifact === 'object' && cognitiveArtifact !== null) {
+    (cognitiveArtifact as Record<string, unknown>).citationSourceOrder = citationSourceOrder;
+    (mapperArtifact as Record<string, unknown>).citationSourceOrder = citationSourceOrder;
   }
   return {
     cognitiveArtifact,
@@ -747,7 +811,21 @@ export async function buildArtifactForProvider({
   queryText = '',
   modelCount = 1,
   turn = undefined,
-}) {
+}: {
+  mappingText: string;
+  shadowStatements?: ShadowStatement[] | null;
+  shadowParagraphs?: ShadowParagraph[] | null;
+  batchSources?: Array<{ modelIndex: number; content: string }>;
+  statementEmbeddings: Map<string, Float32Array>;
+  paragraphEmbeddings: Map<string, Float32Array>;
+  queryEmbedding?: Float32Array | null;
+  geoRecord?: Record<string, unknown> | null;
+  claimEmbeddings?: Map<string, Float32Array> | null;
+  citationSourceOrder?: Record<number, string> | null;
+  queryText?: string;
+  modelCount?: number;
+  turn?: number | undefined;
+}): Promise<Record<string, unknown>> {
   const preSurvey = await computePreSurveyPipeline({
     mappingText,
     shadowStatements: inputShadowStatements,
@@ -759,33 +837,39 @@ export async function buildArtifactForProvider({
     geoRecord,
     claimEmbeddings: inputClaimEmbeddings,
     citationSourceOrder,
-    queryText,
     modelCount,
-    turn,
   });
 
-  const result = await assembleFromPreSurvey(preSurvey, {
+  const result = await assembleFromPreSurvey(preSurvey as Record<string, unknown>, {
     queryText,
     modelCount,
     turn,
   });
 
   // Preserve the original return shape for backward compatibility
+  const preSurveyObj = (preSurvey as Record<string, unknown>) || {};
   return {
     ...result,
-    parsedClaims: preSurvey.parsedClaims,
-    parsedEdges: preSurvey.parsedEdges,
-    parsedConditionals: preSurvey.parsedConditionals,
-    parsedNarrative: preSurvey.parsedNarrative,
-    shadowStatements: preSurvey.shadowStatements,
-    shadowParagraphs: preSurvey.shadowParagraphs,
-    substrate: preSurvey.substrate,
-    preSemantic: preSurvey.preSemantic,
-    queryRelevance: preSurvey.queryRelevance,
+    parsedClaims: preSurveyObj.parsedClaims,
+    parsedEdges: preSurveyObj.parsedEdges,
+    parsedNarrative: preSurveyObj.parsedNarrative,
+    shadowStatements: preSurveyObj.shadowStatements,
+    shadowParagraphs: preSurveyObj.shadowParagraphs,
+    substrate: preSurveyObj.substrate,
+    preSemantic: preSurveyObj.preSemantic,
+    queryRelevance: preSurveyObj.queryRelevance,
   };
 }
 
-export async function computeProbeGeometry({ modelIndex, content, embeddingConfig = null }) {
+export async function computeProbeGeometry({
+  modelIndex,
+  content,
+  embeddingConfig = null,
+}: {
+  modelIndex: number;
+  content: string;
+  embeddingConfig?: EmbeddingConfig | null;
+}): Promise<Record<string, unknown>> {
   const text = String(content || '').trim();
   if (!text) {
     return {
@@ -819,13 +903,13 @@ export async function computeProbeGeometry({ modelIndex, content, embeddingConfi
   const shadowParagraphResult = projectParagraphs(shadowResult.statements);
   const rawStatements = shadowResult.statements || [];
   const rawParagraphs = shadowParagraphResult.paragraphs || [];
-  const statementIdMap = new Map();
-  const statements = rawStatements.map((s, idx) => {
+  const statementIdMap = new Map<string, string>();
+  const statements: typeof rawStatements = rawStatements.map((s, idx) => {
     const nextId = `probe_s_${modelIndex}_${idx}`;
     statementIdMap.set(s.id, nextId);
     return { ...s, id: nextId };
   });
-  const paragraphs = rawParagraphs.map((p, idx) => ({
+  const paragraphs: typeof rawParagraphs = rawParagraphs.map((p, idx) => ({
     ...p,
     id: `probe_p_${modelIndex}_${idx}`,
     statementIds: (p.statementIds || []).map((sid) => statementIdMap.get(sid) || sid),

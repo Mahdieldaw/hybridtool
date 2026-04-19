@@ -29,13 +29,6 @@ interface SemanticEdge {
   weight?: number;
 }
 
-interface Conditional {
-  id: string;
-  antecedent: string;
-  consequent: string;
-  confidence?: number;
-}
-
 interface SubstrateNode {
   id: string;
   position?: { x: number; y: number };
@@ -76,7 +69,6 @@ interface CognitiveArtifact {
   semantic: {
     claims: Claim[];
     edges: SemanticEdge[];
-    conditionals: Conditional[];
     narrative?: Narrative;
   };
 }

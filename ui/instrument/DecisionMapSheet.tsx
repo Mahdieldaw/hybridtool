@@ -428,11 +428,7 @@ export const DecisionMapSheet = React.memo(() => {
       : Array.isArray(mappingArtifact?.semantic?.edges)
         ? mappingArtifact.semantic.edges
         : [];
-    const conditionals = Array.isArray(mappingArtifact?.semantic?.conditionals)
-      ? mappingArtifact.semantic.conditionals
-      : [];
-    const topology = mappingArtifact?.traversal?.graph || null;
-    return { claims, edges, conditionals, topology, map: { claims, edges } } as any;
+    return { claims, edges, map: { claims, edges } } as any;
   }, [mappingArtifact, parsedSemanticFromText]);
 
   const graphData = useMemo(() => {
@@ -498,10 +494,7 @@ export const DecisionMapSheet = React.memo(() => {
     return {
       claims: mappingArtifact.semantic?.claims || [],
       edges: mappingArtifact.semantic?.edges || [],
-      conditionals: mappingArtifact.semantic?.conditionals || [],
       narrative: mappingArtifact.semantic?.narrative,
-      traversalGraph: mappingArtifact.traversal?.graph || null,
-      forcingPoints: mappingArtifact.traversal?.forcingPoints || null,
       shadow: {
         statements: getArtifactStatements(mappingArtifact),
       },

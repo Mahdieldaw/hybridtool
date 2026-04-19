@@ -105,7 +105,6 @@ export interface CognitiveArtifact {
   semantic: {
     claims: Claim[];
     edges: Edge[];
-    conditionals: any[];
     narrative?: string;
   };
   meta?: {

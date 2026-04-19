@@ -107,12 +107,7 @@ export function applyStreamingTurnUpdate(
           semantic: {
             claims: existingArtifact?.semantic?.claims || [],
             edges: existingArtifact?.semantic?.edges || [],
-            conditionals: existingArtifact?.semantic?.conditionals || [],
             narrative: nextText,
-          },
-          traversal: existingArtifact?.traversal || {
-            forcingPoints: [],
-            graph: { claims: [], edges: [], conditionals: [], tiers: [], maxTier: 0 },
           },
         } as any,
         timestamp: Date.now(),

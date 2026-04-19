@@ -335,9 +335,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     preBuiltSubstrate: substrate,
                     preBuiltPreSemantic: preSemanticInterpretation,
                     preBuiltQueryRelevance: queryRelevance,
-                    queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
-                    turn: context.turn || 0,
                   });
 
                   const { enrichedClaims, claimRouting, claimEmbeddings, claimDensityScores } =

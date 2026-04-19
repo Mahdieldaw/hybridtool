@@ -194,11 +194,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
           break;
         }
 
-        case 'CHEWED_SUBSTRATE_DEBUG': {
-          console.log('[ChewedSubstrate]', message);
-          break;
-        }
-
         case 'PREFLIGHT_WARNINGS': {
           const { warnings } = message;
           console.warn('[Preflight] Warnings:', warnings);
@@ -750,7 +745,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                           semantic: {
                             claims: [],
                             edges: [],
-                            conditionals: [],
                             narrative: errText || '',
                           },
                         },
