@@ -9,111 +9,175 @@
 import { DNRUtils } from './dnr-utils.js';
 
 // =============================================================================
+// TYPES
+// =============================================================================
+
+interface AlarmOptions {
+  name?: string;
+  once?: boolean;
+  immediately?: boolean;
+  delayInMinutes?: number;
+  periodInMinutes?: number;
+}
+
+interface AlarmHandle {
+  name: string;
+  once: boolean;
+  immediately: boolean;
+  delayInMinutes: number;
+  periodInMinutes: number | null;
+  listener: (alarm: chrome.alarms.Alarm) => void;
+}
+
+interface TrackedNetRule {
+  id: number;
+  key: string;
+  tabIds: number[] | null;
+}
+
+interface InputRule {
+  key?: string;
+  priority?: number;
+  action: chrome.declarativeNetRequest.RuleAction;
+  condition?: Partial<chrome.declarativeNetRequest.RuleCondition>;
+}
+
+interface NormalizedRule {
+  id: number;
+  priority: number;
+  key: string;
+  action: chrome.declarativeNetRequest.RuleAction;
+  condition: chrome.declarativeNetRequest.RuleCondition;
+}
+
+interface InjectAEHeadersOptions {
+  tabId: number;
+  urlFilter: string;
+  headerName: string;
+  headerValue: string;
+  durationMs?: number;
+}
+
+// =============================================================================
 // UTILITY DEPENDENCIES
 // =============================================================================
 
 const utils = {
-  // Type checking utilities
   is: {
-    null: (e) => e === null,
-    defined: (e) => undefined !== e,
-    undefined: (e) => undefined === e,
-    nil: (e) => e == null,
-    boolean: (e) => typeof e == 'boolean',
-    number: (e) => typeof e == 'number',
-    string: (e) => typeof e == 'string',
-    symbol: (e) => typeof e == 'symbol',
-    function: (e) => typeof e == 'function',
-    array: (e) => Array.isArray(e),
-    object: (e) => Object.prototype.toString.call(e) === '[object Object]',
-    error: (e) => e instanceof Error,
-    empty: (e) =>
-      !!utils.is.nil(e) ||
-      (utils.is.array(e)
-        ? e.length === 0
-        : utils.is.object(e)
-          ? Object.keys(e).length === 0
-          : !!utils.is.string(e) && e.trim().length === 0),
+    null: (e: unknown): e is null => e === null,
+    defined: (e: unknown): boolean => undefined !== e,
+    undefined: (e: unknown): e is undefined => undefined === e,
+    nil: (e: unknown): e is null | undefined => e == null,
+    boolean: (e: unknown): e is boolean => typeof e === 'boolean',
+    number: (e: unknown): e is number => typeof e === 'number',
+    string: (e: unknown): e is string => typeof e === 'string',
+    symbol: (e: unknown): e is symbol => typeof e === 'symbol',
+    function: (e: unknown): e is (...args: unknown[]) => unknown => typeof e === 'function',
+    array: (e: unknown): e is unknown[] => Array.isArray(e),
+    object: (e: unknown): boolean => Object.prototype.toString.call(e) === '[object Object]',
+    error: (e: unknown): e is Error => e instanceof Error,
+    empty(e: unknown): boolean {
+      if (e == null) return true;
+      if (Array.isArray(e)) return e.length === 0;
+      if (Object.prototype.toString.call(e) === '[object Object]')
+        return Object.keys(e as Record<string, unknown>).length === 0;
+      if (typeof e === 'string') return e.trim().length === 0;
+      return false;
+    },
   },
 
-  // Array utility for ensuring array type
-  ensureArray: (e) => (Array.isArray(e) ? e : [e]),
+  ensureArray<T>(e: T | T[]): T[] {
+    return Array.isArray(e) ? e : [e];
+  },
 
-  // Chrome alarms utility
   chrome: {
     alarms: {
-      run: (e, t = {}) => {
-        // Check if chrome.alarms API is available
-        if (!chrome.alarms || !chrome.alarms.onAlarm) {
+      run(callback: () => void, options: AlarmOptions = {}): AlarmHandle | null {
+        if (!chrome.alarms?.onAlarm) {
           console.warn('[htos] chrome.alarms API not available, skipping alarm setup');
-          if (t.immediately) e();
+          if (options.immediately) callback();
           return null;
         }
-        const a = {
-          name: t.name || utils.generateId(),
-          once: t.once || !1,
-          immediately: t.immediately || !1,
-          delayInMinutes: t.delayInMinutes || 1,
-          periodInMinutes: t.once ? null : t.periodInMinutes || 1,
-          listener: (t) => {
-            t.name === a.name &&
-              (a.once &&
-                (chrome.alarms.onAlarm.removeListener(a.listener), chrome.alarms.clear(a.name)),
-              e());
+        const handle: AlarmHandle = {
+          name: options.name ?? utils.generateId(),
+          once: options.once ?? false,
+          immediately: options.immediately ?? false,
+          delayInMinutes: options.delayInMinutes ?? 1,
+          periodInMinutes: options.once ? null : (options.periodInMinutes ?? 1),
+          listener(alarm: chrome.alarms.Alarm) {
+            if (alarm.name !== handle.name) return;
+            if (handle.once) {
+              chrome.alarms.onAlarm.removeListener(handle.listener);
+              chrome.alarms.clear(handle.name);
+            }
+            callback();
           },
         };
-        return (
-          chrome.alarms.onAlarm.addListener(a.listener),
-          chrome.alarms.create(a.name, {
-            delayInMinutes: a.delayInMinutes,
-            periodInMinutes: a.periodInMinutes,
-          }),
-          a.immediately && e(),
-          a
-        );
+        chrome.alarms.onAlarm.addListener(handle.listener);
+        chrome.alarms.create(handle.name, {
+          delayInMinutes: handle.delayInMinutes,
+          ...(handle.periodInMinutes != null && { periodInMinutes: handle.periodInMinutes }),
+        });
+        if (handle.immediately) callback();
+        return handle;
       },
-      off: (e) => {
-        if (!chrome.alarms || !chrome.alarms.onAlarm) return;
-        e &&
-          (typeof e == 'string'
-            ? chrome.alarms.clear(e)
-            : (chrome.alarms.onAlarm.removeListener(e.listener), chrome.alarms.clear(e.name)));
+
+      off(handle: string | AlarmHandle | null | undefined): void {
+        if (!chrome.alarms?.onAlarm || !handle) return;
+        if (typeof handle === 'string') {
+          chrome.alarms.clear(handle);
+        } else {
+          chrome.alarms.onAlarm.removeListener(handle.listener);
+          chrome.alarms.clear(handle.name);
+        }
       },
     },
   },
 
-  // Time constants
   time: {
-    MINUTE: 60000,
-    HOUR: 3600000,
-  },
+    MINUTE: 60_000,
+    HOUR: 3_600_000,
+  } as const,
 
-  // ID generator utility
-  generateId: () => `htos-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  generateId(): string {
+    return `htos-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  },
 };
 
 // =============================================================================
 // NET RULES MANAGER IMPLEMENTATION
 // =============================================================================
 
-const NetRulesManager = {
-  async init() {
-    // Bind public API methods (these are already the correct implementations)
-    this.register = this.register.bind(this);
-    this.unregister = this.unregister.bind(this);
+const DEFAULT_RESOURCE_TYPES = [
+  'main_frame',
+  'sub_frame',
+  'stylesheet',
+  'script',
+  'image',
+  'font',
+  'object',
+  'xmlhttprequest',
+  'ping',
+  'csp_report',
+  'media',
+  'websocket',
+  'webtransport',
+  'webbundle',
+  'other',
+] as chrome.declarativeNetRequest.ResourceType[];
 
-    // Initialize internal state
+const NetRulesManager = {
+  _lastRuleId: 1,
+  _rules: [] as TrackedNetRule[],
+
+  async init(): Promise<void> {
     this._lastRuleId = 1;
     this._rules = [];
-
-    // Drop all existing session rules to start clean
     await this._dropAllSessionRules();
-
-    // Start periodic cleanup for tab-specific rules
     this._cleanupTabRulesPeriodically();
   },
 
-  getNextRuleId() {
+  getNextRuleId(): number {
     return this._lastRuleId++;
   },
 
@@ -121,83 +185,52 @@ const NetRulesManager = {
   // PUBLIC API METHODS
   // =============================================================================
 
-  /**
-   * Register one or more network rules
-   * @param {Object|Array} e - Rule or array of rules to register
-   * @returns {String|Array} - Rule key(s) for unregistration
-   */
-  async register(e) {
+  async register(e: InputRule | InputRule[]): Promise<string | string[]> {
     const isArray = Array.isArray(e);
 
-    // Normalize to array and assign IDs
-    const normalizedRules = utils.ensureArray(e).map((inputRule) => {
+    const normalizedRules: NormalizedRule[] = utils.ensureArray(e).map((inputRule): NormalizedRule => {
       const ruleId = this.getNextRuleId();
-
+      const { key: inputKey, condition: inputCondition, priority: inputPriority, ...rest } = inputRule;
       return {
+        ...rest,
         id: ruleId,
-        priority: 1,
-        ...inputRule,
-        key: inputRule.key || String(ruleId),
+        priority: inputPriority ?? 1,
+        key: inputKey ?? String(ruleId),
         condition: {
-          resourceTypes: [
-            'main_frame',
-            'sub_frame',
-            'stylesheet',
-            'script',
-            'image',
-            'font',
-            'object',
-            'xmlhttprequest',
-            'ping',
-            'csp_report',
-            'media',
-            'websocket',
-            'webtransport',
-            'webbundle',
-            'other',
-          ],
-          ...inputRule.condition,
-        },
+          resourceTypes: DEFAULT_RESOURCE_TYPES,
+          ...inputCondition,
+        } as chrome.declarativeNetRequest.RuleCondition,
       };
     });
 
     // Remove duplicates by key (keep last occurrence)
-    // Use a Map to keep only the last occurrence by key (ES2021 compatible replacement for findLastIndex)
-    const ruleMap = new Map();
+    const ruleMap = new Map<string, NormalizedRule>();
     normalizedRules.forEach((r) => ruleMap.set(r.key, r));
     const filteredRules = Array.from(ruleMap.values());
 
-    // Find existing rules with same keys to replace
     const existingKeys =
       this._rules.length > 0 ? new Set(filteredRules.map((rule) => rule.key)) : null;
     const rulesToRemove = this._rules
       .filter((rule) => existingKeys && existingKeys.has(rule.key))
       .map((rule) => rule.id);
 
-    // Snapshot state for rollback on failure
     const prevRules = [...this._rules];
 
-    // Track new rules for cleanup
-    const newEntries = filteredRules.map((rule) => ({
+    const newEntries: TrackedNetRule[] = filteredRules.map((rule) => ({
       id: rule.id,
       key: rule.key,
-      tabIds: rule.condition.tabIds || null,
+      tabIds: rule.condition.tabIds ?? null,
     }));
     this._rules.push(...newEntries);
 
     const ruleKeys = filteredRules.map((rule) => rule.key);
-
-    // Build the payload for the DNR API without mutating original objects (remove the HTOS-internal 'key')
-    const addRules = filteredRules.map(({ key, ...r }) => r);
+    const addRules = filteredRules.map(
+      ({ key: _key, ...r }) => r as chrome.declarativeNetRequest.Rule
+    );
 
     try {
-      // Remove replaced rules first to avoid transient duplicates
       await this._unregisterByIds(rulesToRemove);
-
-      // Then add new rules to Chrome
-      await chrome.declarativeNetRequest.updateSessionRules({
-        addRules: addRules,
-      });
+      await chrome.declarativeNetRequest.updateSessionRules({ addRules });
     } catch (err) {
       // Reconcile internal state against Chrome's actual live rules to avoid
       // tracking IDs that Chrome already removed (which happens when unregister
@@ -216,16 +249,10 @@ const NetRulesManager = {
     return isArray ? ruleKeys : ruleKeys[0];
   },
 
-  /**
-   * Unregister rules by their keys
-   * @param {String|Array} e - Rule key(s) to unregister
-   */
-  async unregister(e) {
+  async unregister(e: string | string[]): Promise<void> {
     const keys = utils.ensureArray(e);
     if (keys.length === 0) return;
-
     const ruleIds = this._rules.filter((rule) => keys.includes(rule.key)).map((rule) => rule.id);
-
     await this._unregisterByIds(ruleIds);
   },
 
@@ -233,36 +260,24 @@ const NetRulesManager = {
   // INTERNAL METHODS
   // =============================================================================
 
-  /**
-   * Unregister rules by their internal IDs
-   * @param {Array} ruleIds - Array of rule IDs to remove
-   */
-  async _unregisterByIds(ruleIds) {
+  async _unregisterByIds(ruleIds: number[]): Promise<void> {
     if (ruleIds.length === 0) return;
 
-    // snapshot before mutation so we can roll back on Chrome API failue
+    // snapshot before mutation so we can roll back on Chrome API failure
     const prevRules = [...this._rules];
-
-    // Remove from internal tracking
     this._rules = this._rules.filter((rule) => !ruleIds.includes(rule.id));
 
-  try {
-    await chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: ruleIds,
-    });
-  } catch (err) {
-    //Chrome rejected the removal - restore tracking to stay consistent
-    this._rules = prevRules;
-    throw err;
-  }
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ruleIds });
+    } catch (err) {
+      // Chrome rejected the removal - restore tracking to stay consistent
+      this._rules = prevRules;
+      throw err;
+    }
   },
 
-  /**
-   * Drop all existing session rules (cleanup on init)
-   */
-  async _dropAllSessionRules() {
+  async _dropAllSessionRules(): Promise<void> {
     const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
-
     if (sessionRules.length !== 0) {
       await chrome.declarativeNetRequest.updateSessionRules({
         removeRuleIds: sessionRules.map((rule) => rule.id),
@@ -270,24 +285,17 @@ const NetRulesManager = {
     }
   },
 
-  /**
-   * Set up periodic cleanup of tab-specific rules
-   */
-  _cleanupTabRulesPeriodically() {
+  _cleanupTabRulesPeriodically(): void {
     utils.chrome.alarms.run(this._cleanUpTabRules.bind(this), {
       name: 'netRules.cleanupTabRules',
       periodInMinutes: 5,
     });
   },
 
-  /**
-   * Clean up rules for tabs that no longer exist
-   */
-  async _cleanUpTabRules() {
-    const rulesToRemove = [];
+  async _cleanUpTabRules(): Promise<void> {
+    const rulesToRemove: number[] = [];
     const rulesSnapshot = [...this._rules];
 
-    // Check each rule with tab restrictions
     for (const rule of rulesSnapshot) {
       if (!rule.tabIds) continue;
 
@@ -305,7 +313,7 @@ const NetRulesManager = {
           await chrome.tabs.get(tabId);
           hasValidTab = true;
           break;
-        } catch (error) {
+        } catch (_err) {
           // Tab doesn't exist, continue checking other tabs
         }
       }
@@ -324,37 +332,22 @@ const NetRulesManager = {
 // =============================================================================
 
 const CSPController = {
-  async init() {
+  _ruleIds: [] as string[],
+
+  async init(): Promise<void> {
     this._ruleIds = [];
     await this._updateNetRules();
-    // Note: In a real implementation, this would react to settings changes
-    // this._updateNetRulesWhenCspSettingsChange();
   },
 
-  /**
-   * Update network rules based on CSP settings
-   * This is a simplified version - in the full implementation it would read from shared state
-   */
-  async _updateNetRules() {
-    // Unregister existing rules
+  async _updateNetRules(): Promise<void> {
     await NetRulesManager.unregister(this._ruleIds);
     this._ruleIds = [];
-
-    const removeCspHeaderAction = {
-      type: 'modifyHeaders',
-      responseHeaders: [
-        {
-          header: 'content-security-policy',
-          operation: 'remove',
-        },
-      ],
-    };
 
     // CSP rules must be explicitly configured with specific URL patterns.
     // A blanket urlFilter:'*' would strip CSP headers from every response, which is
     // both a security risk and a violation of Manifest V3 review guidelines.
     // Callers should pass targeted URL filters (e.g. 'https://example.com/*') here.
-    const cspRules = [];
+    const cspRules: InputRule[] = [];
 
     if (cspRules.length === 0) return;
     const ruleKeys = await NetRulesManager.register(cspRules);
@@ -367,20 +360,17 @@ const CSPController = {
 // =============================================================================
 
 const UserAgentController = {
-  async init() {
+  async init(): Promise<void> {
     const userAgentRules = this._createUaRules();
     const langRules = this._createLangRules();
     await NetRulesManager.register([...userAgentRules, ...langRules]);
   },
 
-  /**
-   * Create user agent modification rules
-   */
-  _createUaRules() {
-    const createUrlFilter = (agent) => `*://*/*_vua=${agent}*`;
+  _createUaRules(): InputRule[] {
+    const createUrlFilter = (agent: string) => `*://*/*_vua=${agent}*`;
 
     // Example user agents - in real implementation this would come from configuration
-    const userAgents = {
+    const userAgents: Record<string, string> = {
       desktop:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       mobile:
@@ -392,14 +382,14 @@ const UserAgentController = {
       .map((key) => ({
         condition: {
           urlFilter: createUrlFilter(key),
-          resourceTypes: ['main_frame', 'sub_frame'],
+          resourceTypes: ['main_frame', 'sub_frame'] as chrome.declarativeNetRequest.ResourceType[],
         },
         action: {
-          type: 'modifyHeaders',
+          type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
           requestHeaders: [
             {
               header: 'user-agent',
-              operation: 'set',
+              operation: chrome.declarativeNetRequest.HeaderOperation.SET,
               value: userAgents[key],
             },
           ],
@@ -407,19 +397,16 @@ const UserAgentController = {
       }));
   },
 
-  /**
-   * Create language header modification rules
-   */
-  _createLangRules() {
-    const createLangUrlFilter = (lang) => `*://*/*_vlang=${lang}*`;
+  _createLangRules(): InputRule[] {
+    const createLangUrlFilter = (lang: string) => `*://*/*_vlang=${lang}*`;
 
-    const formatLanguage = (lang) =>
+    const formatLanguage = (lang: string): string =>
       lang.includes('_')
         ? `${lang.replace('_', '-')},${lang.slice(0, lang.indexOf('_'))};q=0.9`
         : `${lang};q=0.9`;
 
     // Example languages - in real implementation this would come from configuration
-    const languages = {
+    const languages: Record<string, string> = {
       en: 'en',
       es: 'es',
       fr: 'fr',
@@ -432,14 +419,14 @@ const UserAgentController = {
       .map((key) => ({
         condition: {
           urlFilter: createLangUrlFilter(key),
-          resourceTypes: ['main_frame', 'sub_frame'],
+          resourceTypes: ['main_frame', 'sub_frame'] as chrome.declarativeNetRequest.ResourceType[],
         },
         action: {
-          type: 'modifyHeaders',
+          type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
           requestHeaders: [
             {
               header: 'accept-language',
-              operation: 'set',
+              operation: chrome.declarativeNetRequest.HeaderOperation.SET,
               value: formatLanguage(languages[key]),
             },
           ],
@@ -453,19 +440,15 @@ const UserAgentController = {
 // =============================================================================
 
 const ArkoseController = {
-  async init() {
-    // Initialize DNRUtils
-    await DNRUtils.initialize();
+  _iframeUrl: '',
 
-    // Example iframe URL - in real implementation this would be configurable
+  async init(): Promise<void> {
+    await DNRUtils.initialize();
     this._iframeUrl = 'https://tcr9i.chat.openai.com';
     await this._allowArkoseIframe();
   },
 
-  /**
-   * Allow iframe by removing frame-blocking headers
-   */
-  async _allowArkoseIframe() {
+  async _allowArkoseIframe(): Promise<void> {
     if (!this._iframeUrl) return;
 
     await NetRulesManager.register({
@@ -473,32 +456,28 @@ const ArkoseController = {
         urlFilter: `${this._iframeUrl}*`,
       },
       action: {
-        type: 'modifyHeaders',
+        type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
         responseHeaders: [
           {
             header: 'content-security-policy',
-            operation: 'remove',
+            operation: chrome.declarativeNetRequest.HeaderOperation.REMOVE,
           },
           {
             header: 'permissions-policy',
-            operation: 'remove',
+            operation: chrome.declarativeNetRequest.HeaderOperation.REMOVE,
           },
         ],
       },
     });
   },
 
-  /**
-   * Inject AE (Arkose Enforcement) headers using DNRUtils
-   * @param {Object} options - Header injection options
-   * @param {number} options.tabId - Tab ID for scoped injection
-   * @param {string} options.urlFilter - URL pattern to match
-   * @param {string} options.headerName - Header name to inject
-   * @param {string} options.headerValue - Header value to inject
-   * @param {number} options.durationMs - Duration in milliseconds (optional)
-   * @returns {Promise<number>} Rule ID
-   */
-  async injectAEHeaders({ tabId, urlFilter, headerName, headerValue, durationMs }) {
+  async injectAEHeaders({
+    tabId,
+    urlFilter,
+    headerName,
+    headerValue,
+    durationMs,
+  }: InjectAEHeadersOptions): Promise<number> {
     try {
       const ruleId = NetRulesManager.getNextRuleId();
       await DNRUtils.registerHeaderRule({
@@ -528,11 +507,7 @@ const ArkoseController = {
     }
   },
 
-  /**
-   * Remove AE header rule by ID
-   * @param {number} ruleId - Rule ID to remove
-   */
-  async removeAEHeaderRule(ruleId) {
+  async removeAEHeaderRule(ruleId: number): Promise<void> {
     try {
       await DNRUtils.removeRule(ruleId);
       // Sync removal from NetRulesManager tracking
@@ -544,20 +519,22 @@ const ArkoseController = {
     }
   },
 
-  /**
-   * Remove all AE header rules for arkose provider
-   */
-  async removeAllAEHeaderRules() {
+  async removeAllAEHeaderRules(): Promise<void> {
     // Capture the IDs DNRUtils is tracking for 'arkose' BEFORE removal,
     // so we can sync NetRulesManager._rules after DNRUtils clears its own state.
-    const arkoseIds = new Set([
-      ...(DNRUtils.scopedRules?.get('arkose') ?? []),
-      ...(DNRUtils.sessionRules?.get('arkose') ?? []),
+    // DNRUtils maps are keyed by rule ID (number), so filter by providerId rather
+    // than calling .get('arkose') which the JS source incorrectly assumed.
+    const arkoseIds = new Set<number>([
+      ...Array.from(DNRUtils.scopedRules.values())
+        .filter((r) => r.providerId === 'arkose')
+        .map((r) => r.id),
+      ...Array.from(DNRUtils.sessionRules.values())
+        .filter((r) => r.providerId === 'arkose')
+        .map((r) => r.id),
     ]);
 
     try {
       await DNRUtils.removeProviderRules('arkose');
-      // Sync removal from NetRulesManager tracking (matches what removeAEHeaderRule does per-ID)
       if (arkoseIds.size > 0) {
         NetRulesManager._rules = NetRulesManager._rules.filter((r) => !arkoseIds.has(r.id));
       }
@@ -573,14 +550,13 @@ const ArkoseController = {
 // EXPORT
 // =============================================================================
 
-// For ES6 modules
 export { NetRulesManager, CSPController, UserAgentController, ArkoseController, utils };
 
-// For global browser usage
 if (typeof window !== 'undefined') {
-  window['HTOSNetRulesManager'] = NetRulesManager;
-  window['HTOSCSPController'] = CSPController;
-  window['HTOSUserAgentController'] = UserAgentController;
-  window['HTOSArkoseController'] = ArkoseController;
-  window['HTOSNetRulesUtils'] = utils;
+  const w = window as unknown as Record<string, unknown>;
+  w['HTOSNetRulesManager'] = NetRulesManager;
+  w['HTOSCSPController'] = CSPController;
+  w['HTOSUserAgentController'] = UserAgentController;
+  w['HTOSArkoseController'] = ArkoseController;
+  w['HTOSNetRulesUtils'] = utils;
 }

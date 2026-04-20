@@ -39,9 +39,63 @@ import { persistenceMonitor } from './persistence/persistence-monitor.js';
 // Global Services Registry
 import { ServiceRegistry } from './system/service-registry.js';
 
-const services = /** @type {import("./system/service-registry.js").ServiceRegistry} */ (
-  /** @type {unknown} */ (ServiceRegistry.getInstance())
-);
+// Shared types
+import type { EnrichedClaim, MapperClaim, ClaimDensityResult, PassageRoutingResult, StatementClassificationResult } from '../shared/types/contract';
+import type { AiTurn } from '../shared/types/turns';
+
+// ============================================================================
+// LOCAL INTERFACES
+// ============================================================================
+
+interface IServiceRegistry {
+  get(name: string): unknown;
+  register(name: string, instance: unknown): void;
+  unregister(name: string): boolean;
+  services: Map<string, unknown>;
+}
+
+interface ProviderConfig {
+  name: string;
+  Controller: new () => { init?: () => Promise<void> };
+  Adapter: new (controller: unknown) => { init?: () => Promise<void> };
+}
+
+interface GlobalServices {
+  orchestrator: FaultTolerantOrchestrator;
+  sessionManager: SessionManager;
+  compiler: InstanceType<typeof WorkflowCompiler>;
+  contextResolver: InstanceType<typeof ContextResolver>;
+  persistenceLayer: unknown;
+  authManager: typeof authManager;
+  providerRegistry: ProviderRegistry;
+}
+
+type RegenerateResult =
+  | { success: true; data: { artifact: Record<string, unknown>; claimCount: number; edgeCount: number } }
+  | { success: false; error: string };
+
+interface BuildArtifactResult {
+  cognitiveArtifact: Record<string, unknown> & { editorialAST?: unknown };
+  mapperArtifact: Record<string, unknown>;
+  enrichedClaims: EnrichedClaim[];
+  parsedClaims: MapperClaim[];
+  claimEmbeddings: Map<string, Float32Array> | null;
+}
+
+declare global {
+  interface Window {
+    HTOS_DEBUG: {
+      verifyProvider: (providerId: unknown) => Promise<unknown>;
+      verifyAll: () => Promise<unknown>;
+      getAuthStatus: (forceRefresh?: boolean) => Promise<unknown>;
+      executeSingle: (providerId: unknown, prompt: unknown, options?: { timeout?: number }) => Promise<unknown>;
+      getProviderAdapter: (providerId: unknown) => Promise<unknown>;
+    };
+  }
+  var HTOS_DEBUG: Window['HTOS_DEBUG'];
+}
+
+const services = ServiceRegistry.getInstance() as unknown as IServiceRegistry;
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
@@ -53,10 +107,10 @@ try {
   if (typeof fetch === 'function' && typeof globalThis !== 'undefined') {
     globalThis.fetch = fetch.bind(globalThis);
   }
-} catch (_) {}
+} catch (e) { console.error('[SW] fetch.bind failed:', e); }
 
 // Initialize BusController globally (needed for message bus)
-self['BusController'] = BusController;
+(self as unknown as Record<string, unknown>)['BusController'] = BusController;
 
 globalThis.HTOS_DEBUG = {
   verifyProvider: async (providerId) => authManager.verifyProvider(String(providerId || '')),
@@ -66,24 +120,24 @@ globalThis.HTOS_DEBUG = {
     const svcs = await initializeGlobalServices();
     const pid = String(providerId || '').toLowerCase();
     const p = String(prompt || '');
-    const timeout = Number.isFinite(options?.timeout) ? options.timeout : 60000;
+    const timeout = Number.isFinite(options?.timeout) ? options.timeout! : 60000;
     return svcs.orchestrator.executeSingle(p, pid, { timeout });
   },
   getProviderAdapter: async (providerId) => {
     const svcs = await initializeGlobalServices();
-    return svcs.providerRegistry?.getAdapter?.(String(providerId || '').toLowerCase()) || null;
+    return svcs.providerRegistry?.getAdapter?.(String(providerId || '').toLowerCase()) ?? null;
   },
 };
 
 // Debounce map for cookie changes
-const cookieChangeDebounce = new Map();
+const cookieChangeDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Top-level registration - ensures listener is always registered when SW loads
 chrome.cookies.onChanged.addListener((changeInfo) => {
   const key = `${changeInfo.cookie.domain}:${changeInfo.cookie.name}`;
 
   if (cookieChangeDebounce.has(key)) {
-    clearTimeout(cookieChangeDebounce.get(key));
+    clearTimeout(cookieChangeDebounce.get(key)!);
   }
 
   const timeoutId = setTimeout(() => {
@@ -108,7 +162,7 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
  * Unified startup handler
  * Drives the async initialization sequence for both install and startup events.
  */
-async function handleStartup(reason) {
+async function handleStartup(reason: string): Promise<void> {
   console.log(`[SW] Startup detected (${reason})`);
 
   // 1. Initialize Auth Manager
@@ -127,7 +181,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // CORE SERVICE INITIALIZATION
 // ============================================================================
 
-async function initializePersistence() {
+async function initializePersistence(): Promise<unknown> {
   // Check registry first
   if (services.get('persistenceLayer')) {
     return services.get('persistenceLayer');
@@ -142,7 +196,7 @@ async function initializePersistence() {
     services.register('persistenceLayer', pl);
 
     // Legacy global for debug only
-    self['__HTOS_PERSISTENCE_LAYER'] = pl;
+    (self as unknown as Record<string, unknown>)['__HTOS_PERSISTENCE_LAYER'] = pl;
 
     persistenceMonitor.recordConnection('HTOSPersistenceDB', 1, [
       'sessions',
@@ -166,18 +220,19 @@ async function initializePersistence() {
   }
 }
 
-async function initializeSessionManager(pl) {
+async function initializeSessionManager(pl: unknown): Promise<SessionManager> {
   // Check registry first
-  if (services.get('sessionManager') && services.get('sessionManager').adapter?.isReady()) {
-    return services.get('sessionManager');
+  const existing = services.get('sessionManager') as SessionManager | undefined;
+  if (existing?.adapter?.isReady()) {
+    return existing;
   }
 
-  const persistence = pl || services.get('persistenceLayer');
+  const persistence = (pl ?? services.get('persistenceLayer')) as { adapter?: unknown } | null;
   try {
     console.log('[SW] Creating new SessionManager');
     const sm = new SessionManager();
 
-    await sm.initialize({ adapter: persistence?.adapter });
+    await sm.initialize({ adapter: persistence?.adapter as import('./persistence/simple-indexeddb-adapter.js').SimpleIndexedDBAdapter | null | undefined });
     services.register('sessionManager', sm);
     console.log('[SW] ✅ SessionManager initialized');
     return sm;
@@ -191,45 +246,48 @@ async function initializeSessionManager(pl) {
 // PROVIDER ADAPTER REGISTRY
 // ============================================================================
 class ProviderRegistry {
-  constructor() {
-    this.adapters = new Map();
-    this.controllers = new Map();
-  }
-  register(providerId, controller, adapter) {
+  private adapters = new Map<string, unknown>();
+  private controllers = new Map<string, unknown>();
+
+  register(providerId: string, controller: unknown, adapter: unknown): void {
     this.controllers.set(providerId, controller);
     this.adapters.set(providerId, adapter);
   }
-  getAdapter(providerId) {
+
+  getAdapter(providerId: string): unknown {
     return this.adapters.get(String(providerId).toLowerCase());
   }
-  getController(providerId) {
+
+  getController(providerId: string): unknown {
     return this.controllers.get(String(providerId).toLowerCase());
   }
-  listProviders() {
+
+  listProviders(): string[] {
     return Array.from(this.adapters.keys());
   }
-  isAvailable(providerId) {
+
+  isAvailable(providerId: string): boolean {
     return this.adapters.has(String(providerId).toLowerCase());
   }
 }
 
-async function initializeProviders() {
+async function initializeProviders(): Promise<string[]> {
   console.log('[SW] Initializing providers...');
 
   if (services.get('providerRegistry')) {
-    return services.get('providerRegistry').listProviders();
+    return (services.get('providerRegistry') as ProviderRegistry).listProviders();
   }
 
   const providerRegistry = new ProviderRegistry();
 
-  const providerConfigs = [
+  const providerConfigs: ProviderConfig[] = [
     { name: 'claude', Controller: ClaudeProviderController, Adapter: ClaudeAdapter },
     { name: 'gemini', Controller: GeminiProviderController, Adapter: GeminiAdapter },
     {
       name: 'gemini-pro',
       Controller: GeminiProviderController,
       Adapter: class extends GeminiAdapter {
-        constructor(controller) {
+        constructor(controller: unknown) {
           super(controller, 'gemini-pro');
         }
       },
@@ -238,7 +296,7 @@ async function initializeProviders() {
       name: 'gemini-exp',
       Controller: GeminiProviderController,
       Adapter: class extends GeminiAdapter {
-        constructor(controller) {
+        constructor(controller: unknown) {
           super(controller, 'gemini-exp');
         }
       },
@@ -248,7 +306,7 @@ async function initializeProviders() {
     { name: 'grok', Controller: GrokProviderController, Adapter: GrokAdapter },
   ];
 
-  const initialized = [];
+  const initialized: string[] = [];
   for (const config of providerConfigs) {
     try {
       const controller = new config.Controller();
@@ -273,25 +331,36 @@ async function initializeProviders() {
 // ============================================================================
 // ORCHESTRATOR WRAPPER & INIT
 // ============================================================================
+interface ExecuteSingleOptions {
+  timeout?: number;
+  onPartial?: (providerId: string, chunk: unknown) => void;
+  [key: string]: unknown;
+}
+
+interface ExecuteParallelFanoutOptions {
+  sessionId?: string;
+  onPartial?: (providerId: string, chunk: unknown) => void;
+  onAllComplete?: (results: Map<string, unknown>, errors: Map<string, unknown>) => void | Promise<void>;
+  onProviderComplete?: (providerId: string, outcome: { status: 'fulfilled' | 'rejected'; value?: unknown; reason?: unknown; providerResponse?: unknown }) => void;
+  onError?: (err: unknown) => void;
+  useThinking?: boolean;
+  providerContexts?: Record<string, unknown>;
+  providerMeta?: Record<string, unknown>;
+}
+
 class FaultTolerantOrchestrator {
-  constructor(registry) {
-    this.activeRequests = new Map();
-    // Use registry directly or pass needed services
+  private activeRequests = new Map<string, { abortControllers: Map<string, AbortController> }>();
+  private registry: IServiceRegistry;
+
+  constructor(registry: IServiceRegistry) {
     this.registry = registry;
   }
 
-  // Delegate lifecycle manager access to the registry (if we register it)
-  get lifecycleManager() {
-    return this.registry.get('lifecycleManager');
+  private get lifecycleManager(): InstanceType<typeof LifecycleManager> | undefined {
+    return this.registry.get('lifecycleManager') as InstanceType<typeof LifecycleManager> | undefined;
   }
 
-  // ... (Full implementation of executeParallelFanout from prior version needed here?)
-  // NOTE: For brevity in this refactor, I assume the rest of orchestrator logic
-  // is preserved or imported. To be safe, I must include the implementation or logic.
-  // The user prompt implied we are FIXING things, so I should probably keep the implementation.
-  // I'll keep the implementation from the original file but cleaner.
-
-  async executeSingle(prompt, providerId, options = {}) {
+  async executeSingle(prompt: string, providerId: string, options: ExecuteSingleOptions = {}): Promise<unknown> {
     const { timeout = 60000 } = options;
 
     return new Promise((resolve, reject) => {
@@ -301,7 +370,7 @@ class FaultTolerantOrchestrator {
 
       this.executeParallelFanout(prompt, [providerId], {
         ...options,
-        onPartial: options.onPartial || (() => {}),
+        onPartial: options.onPartial ?? (() => {}),
         onError: (error) => {
           clearTimeout(timeoutId);
           reject(error);
@@ -321,7 +390,11 @@ class FaultTolerantOrchestrator {
     });
   }
 
-  async _prefetchGeminiTokens(providerRegistry, providers, providerMeta) {
+  async _prefetchGeminiTokens(
+    providerRegistry: ProviderRegistry | undefined,
+    providers: string[],
+    providerMeta: Record<string, Record<string, unknown>>
+  ): Promise<void> {
     if (!providerRegistry) return;
 
     const GEMINI_VARIANT_IDS = ['gemini', 'gemini-pro', 'gemini-exp'];
@@ -334,31 +407,31 @@ class FaultTolerantOrchestrator {
     const concurrencyLimit = Math.min(2, targets.length);
     const queue = [...targets];
 
-    const worker = async () => {
+    const worker = async (): Promise<void> => {
       while (queue.length > 0) {
         const pid = queue.shift();
         if (!pid) return;
 
         try {
-          const controller = providerRegistry.getController(pid);
+          const controller = providerRegistry.getController(pid) as { geminiSession?: { _fetchToken?: () => Promise<unknown> } } | null;
           if (!controller?.geminiSession?._fetchToken) continue;
 
           const jitterMs = 50 + Math.floor(Math.random() * 101);
-          await new Promise((resolve) => setTimeout(resolve, jitterMs));
+          await new Promise<void>((resolve) => setTimeout(resolve, jitterMs));
 
           const token = await controller.geminiSession._fetchToken();
           if (!providerMeta[pid]) providerMeta[pid] = {};
           providerMeta[pid]._prefetchedToken = token;
-        } catch (_) {}
+        } catch (e) {
+          console.warn(`[SW] Gemini token prefetch failed for ${pid}:`, e);
+        }
       }
     };
 
     await Promise.all(Array.from({ length: concurrencyLimit }, () => worker()));
   }
 
-  async executeParallelFanout(prompt, providers, options = {}) {
-    // ... [Logic identical to original but using this.registry.get('providerRegistry')] ...
-    // Implementing purely to ensure availability
+  executeParallelFanout(prompt: string, providers: string[], options: ExecuteParallelFanoutOptions = {}): void {
     const {
       sessionId = `req-${Date.now()}`,
       onPartial = () => {},
@@ -370,159 +443,189 @@ class FaultTolerantOrchestrator {
 
     if (this.lifecycleManager) this.lifecycleManager.keepalive(true);
 
-    const results = new Map();
-    const errors = new Map();
-    const abortControllers = new Map();
+    const results = new Map<string, unknown>();
+    const errors = new Map<string, unknown>();
+    const abortControllers = new Map<string, AbortController>();
     this.activeRequests.set(sessionId, { abortControllers });
 
-    const providerRegistry = this.registry.get('providerRegistry');
+    const providerRegistry = this.registry.get('providerRegistry') as ProviderRegistry | undefined;
 
-    await this._prefetchGeminiTokens(providerRegistry, providers, providerMeta);
+    this._prefetchGeminiTokens(
+      providerRegistry,
+      providers,
+      providerMeta as Record<string, Record<string, unknown>>
+    ).then(() => {
+      const providerPromises = providers.map((providerId) => {
+        return (async () => {
+          const abortController = new AbortController();
+          abortControllers.set(providerId, abortController);
 
-    const providerPromises = providers.map((providerId) => {
-      return (async () => {
-        const abortController = new AbortController();
-        abortControllers.set(providerId, abortController);
+          const adapter = providerRegistry?.getAdapter(providerId) as {
+            ask?: (prompt: string, ctx: unknown, sessionId: string, onChunk: (chunk: unknown) => void, signal: AbortSignal) => Promise<{ text?: string; ok?: boolean; errorCode?: string; meta?: Record<string, unknown>; [key: string]: unknown }>;
+            sendPrompt?: (req: unknown, onChunk: (chunk: unknown) => void, signal: AbortSignal) => Promise<{ text?: string; ok?: boolean; [key: string]: unknown }>;
+            controller?: { geminiSession?: { sharedState?: Record<string, unknown> } };
+          } | undefined;
 
-        const adapter = providerRegistry?.getAdapter(providerId);
-        if (!adapter) {
-          const err = new Error(`Provider ${providerId} not available`);
-          try {
-            if (options.onProviderComplete) {
-              options.onProviderComplete(providerId, { status: 'rejected', reason: err });
-            }
-          } catch (_) {}
-          return { providerId, status: 'rejected', reason: err };
-        }
-
-        let aggregatedText = '';
-
-        const request = {
-          originalPrompt: prompt,
-          sessionId,
-          meta: {
-            ...(providerContexts[providerId]?.meta || {}),
-            ...(providerMeta?.[providerId] || {}),
-            useThinking,
-          },
-        };
-
-        try {
-          const providerContext =
-            providerContexts[providerId]?.meta || providerContexts[providerId] || null;
-          const onChunk = (chunk) => {
-            const textChunk = typeof chunk === 'string' ? chunk : chunk.text;
-            if (textChunk) aggregatedText += textChunk;
-            onPartial(providerId, typeof chunk === 'string' ? { text: chunk } : chunk);
-          };
-
-          // Inject token
-          if (providerMeta?.[providerId]?._prefetchedToken && adapter.controller?.geminiSession) {
-            adapter.controller.geminiSession.sharedState = {
-              ...adapter.controller.geminiSession.sharedState,
-              prefetchedToken: providerMeta[providerId]._prefetchedToken,
-            };
-          }
-
-          let result;
-          if (typeof adapter.ask === 'function') {
-            result = await adapter.ask(
-              request.originalPrompt,
-              providerContext,
-              sessionId,
-              onChunk,
-              abortController.signal
-            );
-          } else {
-            result = await adapter.sendPrompt(request, onChunk, abortController.signal);
-          }
-
-          if (!result.text && aggregatedText) result.text = aggregatedText;
-
-          if (result && result.ok === false) {
-            const message =
-              (typeof result?.meta?.error === 'string' && result.meta.error) ||
-              (typeof result?.meta?.details === 'string' && result.meta.details) ||
-              (typeof result?.errorCode === 'string' && result.errorCode) ||
-              'Provider request failed';
-
-            const err = new Error(message);
-            const enrichedErr =
-              /** @type {Error & { code?: string; status?: number; headers?: any; details?: any; providerResponse?: any }} */ (
-                err
-              );
-            enrichedErr.code = result?.errorCode || 'unknown';
-            if (result?.meta && typeof result.meta === 'object') {
-              if (result.meta.status) enrichedErr.status = result.meta.status;
-              if (result.meta.headers) enrichedErr.headers = result.meta.headers;
-              if (result.meta.details) enrichedErr.details = result.meta.details;
-            }
-            enrichedErr.providerResponse = result;
+          if (!adapter) {
+            const err = new Error(`Provider ${providerId} not available`);
             try {
               if (options.onProviderComplete) {
-                options.onProviderComplete(providerId, {
-                  status: 'rejected',
-                  reason: enrichedErr,
-                  providerResponse: result,
-                });
+                options.onProviderComplete(providerId, { status: 'rejected', reason: err });
               }
-            } catch (_) {}
-            return { providerId, status: 'rejected', reason: enrichedErr };
-          }
-
-          // ✅ Granular completion signal
-          if (options.onProviderComplete) {
-            options.onProviderComplete(providerId, { status: 'fulfilled', value: result });
-          }
-
-          return { providerId, status: 'fulfilled', value: result };
-        } catch (error) {
-          if (aggregatedText) {
-            const name =
-              error && typeof error === 'object' && 'name' in error ? String(error.name) : 'Error';
-            const message =
-              error && typeof error === 'object' && 'message' in error
-                ? String(error.message)
-                : String(error);
-            const val = { text: aggregatedText, meta: {}, softError: { name, message } };
-            if (options.onProviderComplete) {
-              options.onProviderComplete(providerId, { status: 'fulfilled', value: val });
+            } catch (cbErr) {
+              console.warn('[SW] onProviderComplete threw (unavailable provider):', cbErr);
             }
-            return { providerId, status: 'fulfilled', value: val };
+            return { providerId, status: 'rejected' as const, reason: err };
           }
-          try {
-            if (options.onProviderComplete) {
-              options.onProviderComplete(providerId, { status: 'rejected', reason: error });
-            }
-          } catch (_) {}
-          return { providerId, status: 'rejected', reason: error };
-        }
-      })();
-    });
 
-    Promise.all(providerPromises)
-      .then(async (settledResults) => {
-        settledResults.forEach((item) => {
-          if (item.status === 'fulfilled') results.set(item.providerId, item.value);
-          else errors.set(item.providerId, item.reason);
-        });
-        await onAllComplete(results, errors);
-        this.activeRequests.delete(sessionId);
-        if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
-      })
-      .catch((err) => {
-        console.error('[FaultTolerantOrchestrator] onAllComplete threw:', err);
-        this.activeRequests.delete(sessionId);
-        if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
-        if (typeof options.onError === 'function') {
+          let aggregatedText = '';
+
+          const request = {
+            originalPrompt: prompt,
+            sessionId,
+            meta: {
+              ...((providerContexts[providerId] as { meta?: Record<string, unknown> })?.meta ?? {}),
+              ...((providerMeta as Record<string, Record<string, unknown>>)[providerId] ?? {}),
+              useThinking,
+            },
+          };
+
           try {
-            options.onError(err);
-          } catch (_) {}
-        }
+            const providerContext =
+              (providerContexts[providerId] as { meta?: unknown })?.meta ??
+              providerContexts[providerId] ??
+              null;
+            const onChunk = (chunk: unknown): void => {
+              const textChunk = typeof chunk === 'string' ? chunk : (chunk as { text?: string }).text;
+              if (textChunk) aggregatedText += textChunk;
+              onPartial(providerId, typeof chunk === 'string' ? { text: chunk } : chunk);
+            };
+
+            // Inject token
+            const pMeta = (providerMeta as Record<string, Record<string, unknown>>)[providerId];
+            if (pMeta?._prefetchedToken && adapter.controller?.geminiSession) {
+              adapter.controller.geminiSession.sharedState = {
+                ...adapter.controller.geminiSession.sharedState,
+                prefetchedToken: pMeta._prefetchedToken,
+              };
+            }
+
+            let result: { text?: string; ok?: boolean; errorCode?: string; meta?: Record<string, unknown>; [key: string]: unknown };
+            if (typeof adapter.ask === 'function') {
+              result = await adapter.ask(
+                request.originalPrompt,
+                providerContext,
+                sessionId,
+                onChunk,
+                abortController.signal
+              );
+            } else {
+              result = await adapter.sendPrompt!(request, onChunk, abortController.signal);
+            }
+
+            if (!result.text && aggregatedText) result.text = aggregatedText;
+
+            if (result && result.ok === false) {
+              const message =
+                (typeof result?.meta?.error === 'string' && result.meta.error) ||
+                (typeof result?.meta?.details === 'string' && result.meta.details) ||
+                (typeof result?.errorCode === 'string' && result.errorCode) ||
+                'Provider request failed';
+
+              const enrichedErr = new Error(message) as Error & {
+                code?: string;
+                status?: number;
+                headers?: unknown;
+                details?: unknown;
+                providerResponse?: unknown;
+              };
+              enrichedErr.code = result?.errorCode ?? 'unknown';
+              if (result?.meta && typeof result.meta === 'object') {
+                if (result.meta.status) enrichedErr.status = result.meta.status as number;
+                if (result.meta.headers) enrichedErr.headers = result.meta.headers;
+                if (result.meta.details) enrichedErr.details = result.meta.details;
+              }
+              enrichedErr.providerResponse = result;
+              try {
+                if (options.onProviderComplete) {
+                  options.onProviderComplete(providerId, {
+                    status: 'rejected',
+                    reason: enrichedErr,
+                    providerResponse: result,
+                  });
+                }
+              } catch (cbErr) {
+                console.warn('[SW] onProviderComplete threw (error result):', cbErr);
+              }
+              return { providerId, status: 'rejected' as const, reason: enrichedErr };
+            }
+
+            // ✅ Granular completion signal
+            try {
+              if (options.onProviderComplete) {
+                options.onProviderComplete(providerId, { status: 'fulfilled', value: result });
+              }
+            } catch (cbErr) {
+              console.warn('[SW] onProviderComplete threw (fulfilled):', cbErr);
+            }
+
+            return { providerId, status: 'fulfilled' as const, value: result };
+          } catch (error) {
+            if (aggregatedText) {
+              const name =
+                error && typeof error === 'object' && 'name' in error ? String((error as { name: unknown }).name) : 'Error';
+              const message =
+                error && typeof error === 'object' && 'message' in error
+                  ? String((error as { message: unknown }).message)
+                  : String(error);
+              const val = { text: aggregatedText, meta: {}, softError: { name, message } };
+              try {
+                if (options.onProviderComplete) {
+                  options.onProviderComplete(providerId, { status: 'fulfilled', value: val });
+                }
+              } catch (cbErr) {
+                console.warn('[SW] onProviderComplete threw (soft error):', cbErr);
+              }
+              return { providerId, status: 'fulfilled' as const, value: val };
+            }
+            try {
+              if (options.onProviderComplete) {
+                options.onProviderComplete(providerId, { status: 'rejected', reason: error });
+              }
+            } catch (cbErr) {
+              console.warn('[SW] onProviderComplete threw (caught error):', cbErr);
+            }
+            return { providerId, status: 'rejected' as const, reason: error };
+          }
+        })();
       });
+
+      Promise.all(providerPromises)
+        .then(async (settledResults) => {
+          settledResults.forEach((item) => {
+            if (item.status === 'fulfilled') results.set(item.providerId, (item as { providerId: string; status: 'fulfilled'; value: unknown }).value);
+            else errors.set(item.providerId, (item as { providerId: string; status: 'rejected'; reason: unknown }).reason);
+          });
+          await onAllComplete(results, errors);
+          this.activeRequests.delete(sessionId);
+          if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
+        })
+        .catch((err) => {
+          console.error('[FaultTolerantOrchestrator] onAllComplete threw:', err);
+          this.activeRequests.delete(sessionId);
+          if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
+          if (typeof options.onError === 'function') {
+            try {
+              options.onError(err);
+            } catch (cbErr) {
+              console.warn('[SW] onError callback threw:', cbErr);
+            }
+          }
+        });
+    });
   }
 
-  _abortRequest(sessionId) {
+  _abortRequest(sessionId: string): void {
     const request = this.activeRequests.get(sessionId);
     if (request) {
       request.abortControllers.forEach((c) => c.abort());
@@ -532,21 +635,21 @@ class FaultTolerantOrchestrator {
   }
 }
 
-async function initializeOrchestrator() {
-  if (services.get('orchestrator')) return services.get('orchestrator');
+async function initializeOrchestrator(): Promise<FaultTolerantOrchestrator> {
+  if (services.get('orchestrator')) return services.get('orchestrator') as FaultTolerantOrchestrator;
 
   try {
     const lm = new LifecycleManager();
     services.register('lifecycleManager', lm);
 
     // Legacy global
-    self['lifecycleManager'] = lm;
+    (self as unknown as Record<string, unknown>)['lifecycleManager'] = lm;
 
     const orchestrator = new FaultTolerantOrchestrator(services);
     services.register('orchestrator', orchestrator);
 
     // Legacy global
-    self['faultTolerantOrchestrator'] = orchestrator;
+    (self as unknown as Record<string, unknown>)['faultTolerantOrchestrator'] = orchestrator;
 
     console.log('[SW] ✓ FaultTolerantOrchestrator initialized');
     return orchestrator;
@@ -560,21 +663,19 @@ async function initializeOrchestrator() {
 // GLOBAL SERVICES (Unified Init)
 // ============================================================================
 
-let globalServicesPromise = null;
+let globalServicesPromise: Promise<GlobalServices> | null = null;
 
-async function initializeGlobalServices() {
-  // If already running or complete strings, return it.
-  // But we want to support re-init with new prefs if strictly requested (rare).
-  // For now, simple singleton promise pattern.
+async function initializeGlobalServices(): Promise<GlobalServices> {
+  // If already running or complete, return it.
   if (globalServicesPromise) return globalServicesPromise;
 
-  const existingOrchestrator = services.get('orchestrator');
-  const existingSessionManager = services.get('sessionManager');
+  const existingOrchestrator = services.get('orchestrator') as FaultTolerantOrchestrator | undefined;
+  const existingSessionManager = services.get('sessionManager') as SessionManager | undefined;
   const existingCompiler = services.get('compiler');
   const existingContextResolver = services.get('contextResolver');
   const existingPersistenceLayer = services.get('persistenceLayer');
   const existingAuthManager = services.get('authManager');
-  const existingProviderRegistry = services.get('providerRegistry');
+  const existingProviderRegistry = services.get('providerRegistry') as ProviderRegistry | undefined;
 
   if (
     existingOrchestrator &&
@@ -585,13 +686,13 @@ async function initializeGlobalServices() {
     existingAuthManager &&
     existingProviderRegistry
   ) {
-    const ready = {
+    const ready: GlobalServices = {
       orchestrator: existingOrchestrator,
       sessionManager: existingSessionManager,
-      compiler: existingCompiler,
-      contextResolver: existingContextResolver,
+      compiler: existingCompiler as InstanceType<typeof WorkflowCompiler>,
+      contextResolver: existingContextResolver as InstanceType<typeof ContextResolver>,
       persistenceLayer: existingPersistenceLayer,
-      authManager: existingAuthManager,
+      authManager,
       providerRegistry: existingProviderRegistry,
     };
     globalServicesPromise = Promise.resolve(ready);
@@ -614,29 +715,25 @@ async function initializeGlobalServices() {
       await initializeProviders();
       await initializeOrchestrator();
 
-      const compiler = services.get('compiler') || new WorkflowCompiler(sm);
+      const compiler = (services.get('compiler') as InstanceType<typeof WorkflowCompiler> | undefined) ?? new WorkflowCompiler(sm);
       if (!services.get('compiler')) services.register('compiler', compiler);
 
-      const contextResolver = services.get('contextResolver') || new ContextResolver(sm);
+      const contextResolver = (services.get('contextResolver') as InstanceType<typeof ContextResolver> | undefined) ?? new ContextResolver(sm as never);
       if (!services.get('contextResolver')) services.register('contextResolver', contextResolver);
 
       // MapperService deprecated; semantic mapper handles mapping now.
-      // If backward compatibility is desired, inject an adapter via options instead of registering a global MapperService.
-      // services.register('mapperService', mapperService);
-
-      // ResponseProcessor removed — previously registered here. If needed, inject via options or service adapter.
+      // ResponseProcessor removed — previously registered here.
 
       console.log('[SW] ✅ Global services registry ready');
 
-      // Return object map for consumers expecting specific structure
       return {
-        orchestrator: services.get('orchestrator'),
+        orchestrator: services.get('orchestrator') as FaultTolerantOrchestrator,
         sessionManager: sm,
         compiler,
         contextResolver,
         persistenceLayer: pl,
         authManager,
-        providerRegistry: services.get('providerRegistry'),
+        providerRegistry: services.get('providerRegistry') as ProviderRegistry,
       };
     } catch (error) {
       console.error('[SW] ❌ Global services initialization failed:', error);
@@ -652,7 +749,7 @@ async function initializeGlobalServices() {
   return globalServicesPromise;
 }
 
-async function initializeGlobalInfrastructure() {
+async function initializeGlobalInfrastructure(): Promise<void> {
   console.log('[SW] Initializing global infrastructure...');
   try {
     await NetRulesManager.init();
@@ -662,7 +759,7 @@ async function initializeGlobalInfrastructure() {
     await DNRUtils.initialize();
     await OffscreenController.init();
     await BusController.init();
-    self['bus'] = BusController;
+    (self as unknown as Record<string, unknown>)['bus'] = BusController;
   } catch (e) {
     console.error('[SW] Infra init failed', e);
   }
@@ -673,7 +770,7 @@ async function initializeGlobalInfrastructure() {
 // ============================================================================
 const OffscreenController = {
   _initialized: false,
-  async isReady() {
+  async isReady(): Promise<boolean> {
     try {
       if (this._initialized) return true;
       if (await chrome.offscreen.hasDocument()) {
@@ -681,11 +778,12 @@ const OffscreenController = {
         return true;
       }
       return false;
-    } catch (_) {
+    } catch (e) {
+      console.error('[SW] offscreen.hasDocument check failed:', e);
       return false;
     }
   },
-  async init() {
+  async init(): Promise<void> {
     if (this._initialized) return;
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -707,7 +805,7 @@ const OffscreenController = {
       } catch (e) {
         console.error(`[SW] Offscreen init failed (attempt ${attempt}/${maxAttempts})`, e);
         if (attempt < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await new Promise<void>((resolve) => setTimeout(resolve, 1000));
         }
       }
     }
@@ -719,7 +817,11 @@ const OffscreenController = {
 // ============================================================================
 // UNIFIED MESSAGE HANDLER
 // ============================================================================
-async function handleUnifiedMessage(message, _sender, sendResponse) {
+async function handleUnifiedMessage(
+  message: Record<string, unknown>,
+  _sender: chrome.runtime.MessageSender,
+  sendResponse: (response: unknown) => void
+): Promise<boolean> {
   try {
     const svcs = await initializeGlobalServices();
     const sm = svcs.sessionManager;
@@ -739,8 +841,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case 'VERIFY_AUTH_TOKEN':
         (async () => {
-          const pid = message.payload?.providerId;
-          const force = !!message.payload?.force;
+          const pid = (message.payload as { providerId?: string; force?: boolean } | undefined)?.providerId;
+          const force = !!((message.payload as { force?: boolean } | undefined)?.force);
           if (force) {
             authManager.invalidateCache(pid);
           }
@@ -757,11 +859,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         (async () => {
           await OffscreenController.init();
 
-          const response = await new Promise((resolve) => {
+          const response = await new Promise<unknown>((resolve) => {
             let settled = false;
-            const timeoutMs = Number.isFinite(message?.payload?.timeoutMs)
-              ? message.payload.timeoutMs
-              : 45000;
+            const payload = message?.payload as { timeoutMs?: number } | undefined;
+            const timeoutMs = Number.isFinite(payload?.timeoutMs) ? payload!.timeoutMs! : 45000;
             const timeoutId = setTimeout(
               () => {
                 settled = true;
@@ -790,7 +891,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
       // Delegates to doRegenerateEmbeddings() which handles dedup + full pipeline.
       case 'REGENERATE_EMBEDDINGS':
         (async () => {
-          const { aiTurnId, providerId, embeddingModelId } = message.payload || {};
+          const payload = message.payload as { aiTurnId?: string; providerId?: string; embeddingModelId?: string } | undefined;
+          const { aiTurnId, providerId, embeddingModelId } = payload ?? {};
           if (!aiTurnId || !providerId) {
             sendResponse({ success: false, error: 'Missing aiTurnId or providerId' });
             return;
@@ -805,29 +907,32 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case 'GET_PARAGRAPH_EMBEDDINGS_RECORD':
         (async () => {
-          const { aiTurnId } = message.payload || {};
-          const key = String(aiTurnId || '').trim();
+          const payload = message.payload as { aiTurnId?: string } | undefined;
+          const key = String(payload?.aiTurnId ?? '').trim();
           if (!key) {
             sendResponse({ success: true, data: { ok: false, reason: 'missing_aiTurnId' } });
             return;
           }
-          const geoRecord = await sm.loadEmbeddings(key);
-          const meta = geoRecord?.meta || null;
+          const geoRecord = await sm.loadEmbeddings(key) as Record<string, unknown> & { meta?: Record<string, unknown>; paragraphEmbeddings?: unknown } | null;
+          const meta = (geoRecord?.meta as Record<string, unknown> | undefined) ?? null;
           const hasPara = !!geoRecord?.paragraphEmbeddings;
-          const hasIndex = !!meta?.paragraphIndex;
+          const hasIndex = !!(meta?.paragraphIndex);
           const dims = meta?.dimensions;
 
           if (!hasPara || !hasIndex || !dims) {
-            let knownTurnIds = null;
+            let knownTurnIds: string[] | null = null;
             try {
-              if (sm?.adapter?.all) {
-                const all = await sm.adapter.all('embeddings');
+              const adapter = (sm as unknown as { adapter?: { all?: (store: string) => Promise<unknown[]> } }).adapter;
+              if (adapter?.all) {
+                const all = await adapter.all('embeddings');
                 const ids = (Array.isArray(all) ? all : [])
-                  .map((r) => String(r?.aiTurnId || r?.id || '').trim())
+                  .map((r) => String((r as Record<string, unknown>)?.aiTurnId ?? (r as Record<string, unknown>)?.id ?? '').trim())
                   .filter(Boolean);
                 knownTurnIds = ids.slice(0, 200);
               }
-            } catch (_) {}
+            } catch (e) {
+              console.warn('[SW] GET_PARAGRAPH_EMBEDDINGS_RECORD: failed to list known turn IDs:', e);
+            }
             sendResponse({
               success: true,
               data: {
@@ -838,91 +943,99 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 hasParagraphEmbeddings: hasPara,
                 hasParagraphIndex: hasIndex,
                 dimensions: typeof dims === 'number' ? dims : null,
-                meta: meta || null,
+                meta: meta ?? null,
                 knownTurnIds,
               },
             });
             return;
           }
 
-          let safeBuffer = geoRecord.paragraphEmbeddings;
+          let safeBuffer: ArrayBuffer | null = geoRecord.paragraphEmbeddings as ArrayBuffer;
           if (safeBuffer && !(safeBuffer instanceof ArrayBuffer)) {
-            if (ArrayBuffer.isView(safeBuffer)) {
+            const raw = safeBuffer as unknown;
+            if (ArrayBuffer.isView(raw as ArrayBufferView)) {
+              const view = raw as ArrayBufferView;
               if (
-                safeBuffer.byteOffset === 0 &&
-                safeBuffer.byteLength === safeBuffer.buffer.byteLength
+                view.byteOffset === 0 &&
+                view.byteLength === view.buffer.byteLength
               ) {
-                safeBuffer = safeBuffer.buffer;
+                safeBuffer = view.buffer as ArrayBuffer;
               } else {
-                safeBuffer = safeBuffer.buffer.slice(
-                  safeBuffer.byteOffset,
-                  safeBuffer.byteOffset + safeBuffer.byteLength
-                );
+                safeBuffer = view.buffer.slice(
+                  view.byteOffset,
+                  view.byteOffset + view.byteLength
+                ) as ArrayBuffer;
               }
-            } else if (Array.isArray(safeBuffer)) {
-              safeBuffer = new Float32Array(safeBuffer).buffer;
+            } else if (Array.isArray(raw)) {
+              safeBuffer = new Float32Array(raw as number[]).buffer;
             } else if (
-              typeof safeBuffer === 'object' &&
-              safeBuffer.type === 'Buffer' &&
-              Array.isArray(safeBuffer.data)
+              typeof raw === 'object' &&
+              raw !== null &&
+              (raw as { type?: string }).type === 'Buffer' &&
+              Array.isArray((raw as { data?: unknown }).data)
             ) {
-              safeBuffer = new Uint8Array(safeBuffer.data).buffer;
+              safeBuffer = new Uint8Array((raw as { data: number[] }).data).buffer;
             } else {
-              // Try to blindly extract values if it's an object with numeric keys, handle edge cases
-              const vals = Object.values(safeBuffer).filter((v) => typeof v === 'number');
-
-              const expectedLength = meta.paragraphIndex.length * meta.dimensions;
+              const vals = Object.values(raw as Record<string, unknown>).filter((v) => typeof v === 'number') as number[];
+              const paragraphIndex = meta!.paragraphIndex as string[];
+              const dimensions = meta!.dimensions as number;
+              const expectedLength = paragraphIndex.length * dimensions;
 
               if (vals.length > 0 && vals.length === expectedLength) {
                 safeBuffer = new Float32Array(vals).buffer;
               } else {
                 console.warn(
                   `[sw-entry] Invalid paragraphEmbeddings format or length mismatch. Expected ${expectedLength} floats, got ${vals.length}. Format was:`,
-                  typeof safeBuffer
+                  typeof raw
                 );
                 safeBuffer = null;
               }
             }
           }
 
-          const payload = {
+          const payload2 = {
             ok: true,
             aiTurnId: key,
             buffer: safeBuffer,
-            index: meta.paragraphIndex,
-            dimensions: meta.dimensions,
-            timestamp: meta.timestamp || null,
+            index: (meta as Record<string, unknown>).paragraphIndex,
+            dimensions: (meta as Record<string, unknown>).dimensions,
+            timestamp: (meta as Record<string, unknown>).timestamp ?? null,
           };
-          sendResponse({ success: true, data: payload });
+          sendResponse({ success: true, data: payload2 });
         })().catch((e) => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 
       case 'CORPUS_SEARCH':
         (async () => {
-          const { aiTurnId, queryText } = message.payload || {};
+          const payload = message.payload as { aiTurnId?: string; queryText?: string } | undefined;
+          const { aiTurnId, queryText } = payload ?? {};
           if (!aiTurnId || !queryText) {
             sendResponse({ success: false, error: 'Missing aiTurnId or queryText' });
             return;
           }
 
-          const geoRecord = await sm.loadEmbeddings(aiTurnId);
+          const geoRecord = await sm.loadEmbeddings(aiTurnId) as Record<string, unknown> | null;
           const { unpackEmbeddingMap } = await import('./persistence/embedding-codec.js');
-          const { generateTextEmbeddings, structuredTruncate } = await import('./clustering');
+          const { generateTextEmbeddings, structuredTruncate } = await import('./clustering/index.js');
           const { getConfigForModel } = await import('./clustering/config.js');
           const { searchCorpus } = await import('./clustering/corpus-search.js');
 
-          const turnRaw = await sm.adapter.get('turns', aiTurnId);
-          const corpusTree = turnRaw?.mapping?.artifact?.corpus ?? null;
+          const adapter = (sm as unknown as { adapter: { get: (store: string, id: string) => Promise<unknown> } }).adapter;
+          const turnRaw = await adapter.get('turns', aiTurnId) as Record<string, unknown> | null;
+          const corpusTree = (turnRaw?.mapping as Record<string, unknown> | undefined)?.artifact
+            ? ((turnRaw!.mapping as Record<string, unknown>).artifact as Record<string, unknown>).corpus as { models?: unknown[] } | null
+            : null;
           console.log(
-            `[CORPUS_SEARCH] DB corpus models: ${corpusTree?.models?.length ?? 0}, artifact exists: ${!!turnRaw?.mapping?.artifact}`
+            `[CORPUS_SEARCH] DB corpus models: ${corpusTree?.models?.length ?? 0}, artifact exists: ${!!(turnRaw as Record<string, unknown> | null)?.mapping}`
           );
 
           // Build paragraph lookup from corpus tree. If corpus is absent (old session),
           // rebuild from batch responses using shadow extraction.
-          const paraLookup = new Map();
-          if (corpusTree?.models?.length > 0) {
-            for (const model of corpusTree.models) {
-              for (const para of model.paragraphs ?? []) {
+          const paraLookup = new Map<string, { id: string; modelIndex: number; paragraphIndex: number; _fullParagraph?: string; statements?: Array<{ text: string }> }>();
+          if ((corpusTree?.models?.length ?? 0) > 0) {
+            for (const model of corpusTree!.models!) {
+              const m = model as { paragraphs?: Array<{ paragraphId: string; modelIndex: number; paragraphOrdinal: number; _fullParagraph?: string }> };
+              for (const para of m.paragraphs ?? []) {
                 paraLookup.set(para.paragraphId, {
                   id: para.paragraphId,
                   modelIndex: para.modelIndex,
@@ -934,14 +1047,16 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           } else {
             console.log('[CORPUS_SEARCH] No corpus tree in DB — rebuilding from batch responses...');
             try {
-              let responsesForTurn = [];
-              if (sm.adapter?.getResponsesByTurnId) {
-                responsesForTurn = (await sm.adapter.getResponsesByTurnId(aiTurnId)) || [];
+              let responsesForTurn: unknown[] = [];
+              const smAdapter = (sm as unknown as { adapter?: { getResponsesByTurnId?: (id: string) => Promise<unknown[]> } }).adapter;
+              if (smAdapter?.getResponsesByTurnId) {
+                responsesForTurn = (await smAdapter.getResponsesByTurnId(aiTurnId)) ?? [];
                 console.log(`[CORPUS_SEARCH] Loaded ${responsesForTurn.length} responses for turn`);
               } else {
                 console.warn('[CORPUS_SEARCH] adapter.getResponsesByTurnId not available!');
               }
-              const allBatchResps = responsesForTurn
+              type RespRecord = { responseType?: string; providerId?: string; text?: string; updatedAt?: number; createdAt?: number };
+              const allBatchResps = (responsesForTurn as RespRecord[])
                 .filter(
                   (r) =>
                     r && r.responseType === 'batch' && r.providerId && String(r.text || '').trim()
@@ -951,7 +1066,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 );
               console.log(`[CORPUS_SEARCH] Batch responses found: ${allBatchResps.length}`);
 
-              const seenBatchProviders = new Map();
+              const seenBatchProviders = new Map<string, RespRecord>();
               for (const r of allBatchResps) {
                 const pid = String(r.providerId || '').trim().toLowerCase();
                 if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
@@ -961,7 +1076,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               );
 
               if (seenBatchProviders.size > 0) {
-                const { canonicalCitationOrder } = await import('../shared/provider-config');
+                const { canonicalCitationOrder } = await import('../shared/provider-config.js');
                 const canonicalOrder = canonicalCitationOrder(Array.from(seenBatchProviders.keys()));
                 const batchSources = canonicalOrder
                   .map((pid, i) => {
@@ -971,17 +1086,17 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                   .filter((s) => s.content);
 
                 if (batchSources.length > 0) {
-                  const { extractShadowStatements, projectParagraphs } = await import('./shadow');
+                  const { extractShadowStatements, projectParagraphs } = await import('./shadow/index.js');
                   const shadowResult = extractShadowStatements(batchSources);
                   const shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs || [];
                   for (const p of shadowParagraphs) {
-                    paraLookup.set(p.id, p);
+                    paraLookup.set(p.id, p as unknown as { id: string; modelIndex: number; paragraphIndex: number; _fullParagraph?: string });
                   }
                   console.log(
                     `[CORPUS_SEARCH] Rebuilt ${shadowParagraphs.length} paragraphs from ${batchSources.length} batch sources`
                   );
                   if (shadowParagraphs.length > 0) {
-                    const sampleIds = shadowParagraphs.slice(0, 5).map((p) => `${p.id}(m${p.modelIndex})`);
+                    const sampleIds = shadowParagraphs.slice(0, 5).map((p) => `${p.id}(m${(p as { modelIndex?: number }).modelIndex})`);
                     console.log(`[CORPUS_SEARCH] Sample rebuilt IDs: ${sampleIds.join(', ')}`);
                   }
                 }
@@ -992,7 +1107,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           // Diagnostic: show embedding index IDs vs paraLookup IDs
-          const embeddingParaIds = geoRecord?.meta?.paragraphIndex || [];
+          const embeddingParaIds = (geoRecord?.meta as Record<string, unknown> | undefined)?.paragraphIndex as string[] || [];
           const matchCount = embeddingParaIds.filter((id) => paraLookup.has(id)).length;
           console.log(
             `[CORPUS_SEARCH] paraLookup size: ${paraLookup.size}, embedding index IDs: ${embeddingParaIds.length}, matched: ${matchCount}/${embeddingParaIds.length}`
@@ -1004,10 +1119,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               `[CORPUS_SEARCH] ID MISMATCH — embedding IDs: [${sampleEmbIds}] vs paraLookup IDs: [${sampleParaIds}]`
             );
           }
-          const paragraphEmbeddings = new Map();
-          const paragraphMeta = [];
-          const paragraphMetaSeen = new Set();
-          const appendEmbeddingRecord = (record, probeMeta = null) => {
+
+          type EmbeddingRecord = { paragraphEmbeddings?: unknown; meta?: { paragraphIndex?: string[]; dimensions?: number } };
+          const paragraphEmbeddings = new Map<string, Float32Array>();
+          const paragraphMeta: Array<{ id: string; modelIndex: number; paragraphIndex: number }> = [];
+          const paragraphMetaSeen = new Set<string>();
+          const appendEmbeddingRecord = (record: EmbeddingRecord | null, probeMeta: { modelIndex?: number } | null = null): void => {
             if (
               !record?.paragraphEmbeddings ||
               !record?.meta?.paragraphIndex?.length ||
@@ -1016,10 +1133,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               return;
             const dims = record.meta.dimensions;
             const unpacked = unpackEmbeddingMap(
-              record.paragraphEmbeddings,
+              record.paragraphEmbeddings as ArrayBuffer,
               record.meta.paragraphIndex,
               dims
-            );
+            ) as Map<string, Float32Array>;
             for (const [pid, vec] of unpacked.entries()) {
               if (paragraphMetaSeen.has(pid)) continue;
               paragraphMetaSeen.add(pid);
@@ -1033,25 +1150,27 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             }
           };
 
-          appendEmbeddingRecord(geoRecord);
+          appendEmbeddingRecord(geoRecord as EmbeddingRecord);
 
-          const probeRecords = await sm.adapter
+          const smAdapter2 = (sm as unknown as { adapter: { getByIndex: (store: string, index: string, key: string) => Promise<unknown[]>; get: (store: string, id: string) => Promise<unknown> } }).adapter;
+          const probeRecords = await smAdapter2
             .getByIndex('metadata', 'byEntityId', aiTurnId)
-            .catch(() => []);
-          for (const rec of probeRecords || []) {
+            .catch((e: unknown) => { console.warn('[CORPUS_SEARCH] getByIndex failed:', e); return [] as unknown[]; });
+
+          for (const rec of (probeRecords ?? []) as Array<Record<string, unknown>>) {
             if (rec?.type !== 'probe_geo_record') continue;
-            const probeValue = rec?.value || {};
-            const embeddingId = probeValue?.embeddingId || rec?.key;
+            const probeValue = (rec?.value as Record<string, unknown>) ?? {};
+            const embeddingId = (probeValue?.embeddingId as string) || (rec?.key as string);
             if (!embeddingId) continue;
-            const probeEmbeddingRecord = await sm.adapter
+            const probeEmbeddingRecord = await smAdapter2
               .get('embeddings', embeddingId)
-              .catch(() => null);
+              .catch((e: unknown) => { console.warn('[CORPUS_SEARCH] get probe embedding failed:', e); return null; });
             if (!probeEmbeddingRecord) continue;
             const probeParagraphIds = Array.isArray(probeValue?.paragraphIds)
-              ? probeValue.paragraphIds
+              ? (probeValue.paragraphIds as string[])
               : [];
             const probeParagraphs = Array.isArray(probeValue?.paragraphs)
-              ? probeValue.paragraphs
+              ? (probeValue.paragraphs as string[])
               : [];
             for (let i = 0; i < probeParagraphIds.length; i++) {
               const pid = probeParagraphIds[i];
@@ -1063,7 +1182,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 _fullParagraph: String(probeParagraphs[i] || ''),
               });
             }
-            appendEmbeddingRecord(probeEmbeddingRecord, {
+            appendEmbeddingRecord(probeEmbeddingRecord as EmbeddingRecord, {
               modelIndex: Number(probeValue?.modelIndex) || 0,
             });
           }
@@ -1074,20 +1193,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           // Embed the query using the same model that was used for the corpus
-          const corpusModelId = geoRecord?.meta?.embeddingModelId || 'bge-base-en-v1.5';
+          const corpusModelId = (geoRecord?.meta as Record<string, unknown> | undefined)?.embeddingModelId as string || 'bge-base-en-v1.5';
           const corpusEmbeddingConfig = getConfigForModel(corpusModelId);
           const truncated = structuredTruncate(queryText.trim(), 1200);
           const prefixed = truncated.toLowerCase().startsWith('represent this sentence')
             ? truncated
             : `Represent this sentence for searching relevant passages: ${truncated}`;
           const queryBatch = await generateTextEmbeddings([prefixed], corpusEmbeddingConfig);
-          const queryEmbedding = queryBatch.embeddings.get('0');
+          const queryEmbedding = (queryBatch.embeddings as Map<string, Float32Array>).get('0');
           if (!queryEmbedding) {
             sendResponse({ success: false, error: 'Query embedding failed' });
             return;
           }
 
-          const hits = searchCorpus(queryEmbedding, paragraphEmbeddings, paragraphMeta, 50);
+          const hits = (searchCorpus(queryEmbedding, paragraphEmbeddings, paragraphMeta, 50) as unknown) as Array<{ paragraphId: string; [key: string]: unknown }>;
 
           // Enrich hits with paragraph text
           const results = hits.map((h) => {
@@ -1108,11 +1227,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case 'DEBUG_EXECUTE_SINGLE':
         (async () => {
-          const providerId = String(message.payload?.providerId || '').toLowerCase();
-          const prompt = String(message.payload?.prompt || '');
-          const timeout = Number.isFinite(message.payload?.timeout)
-            ? message.payload.timeout
-            : 60000;
+          const payload = message.payload as { providerId?: string; prompt?: string; timeout?: number } | undefined;
+          const providerId = String(payload?.providerId || '').toLowerCase();
+          const prompt = String(payload?.prompt || '');
+          const timeout = Number.isFinite(payload?.timeout) ? payload!.timeout! : 60000;
           if (!providerId) throw new Error('Missing providerId');
           if (!prompt) throw new Error('Missing prompt');
           const orchestrator = svcs.orchestrator;
@@ -1125,58 +1243,66 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         return true;
 
       case 'GET_FULL_HISTORY': {
-        const allSessions = (await sm.adapter.getAllSessions()) || [];
+        const smAdapter = (sm as unknown as { adapter: { getAllSessions: () => Promise<Array<Record<string, unknown>>> } }).adapter;
+        const allSessions = (await smAdapter.getAllSessions()) ?? [];
         const sessions = allSessions
           .map((r) => ({
             id: r.id,
             sessionId: r.id,
-            title: r.title || 'New Chat',
+            title: (r.title as string | undefined) || 'New Chat',
             startTime: r.createdAt,
             lastActivity: r.updatedAt || r.lastActivity,
-            messageCount: r.turnCount || 0,
+            messageCount: (r.turnCount as number | undefined) || 0,
             firstMessage: '',
           }))
-          .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+          .sort((a, b) => ((b.lastActivity as number) || 0) - ((a.lastActivity as number) || 0));
         sendResponse({ success: true, data: { sessions } });
         return true;
       }
 
-      // ... (Preserving specific logic for GET_HISTORY_SESSION to be safe, but delegating to existing logic or abbreviated here?)
-      // I must assume the logic from lines 800-1000 is still desired.
-      // I will implement a cleaner version utilizing sm.adapter directly.
       case 'GET_HISTORY_SESSION': {
         (async () => {
-          const sessionId = message.sessionId || message.payload?.sessionId;
+          const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
           if (!sessionId) throw new Error('Missing sessionId');
 
-          // Implementation identical to original logic via helper would be best
-          // Restoring full logic to ensure history works
-          const sessionRecord = await sm.adapter.get('sessions', sessionId);
-          let turns = await sm.adapter.getTurnsBySessionId(sessionId);
+          const smAdapter = (sm as unknown as {
+            adapter: {
+              get: (store: string, id: string) => Promise<Record<string, unknown> | null>;
+              getTurnsBySessionId: (id: string) => Promise<Array<Record<string, unknown>>>;
+              getResponsesByTurnId?: (id: string) => Promise<Array<Record<string, unknown>>>;
+              getContextsBySessionId?: (id: string) => Promise<Array<Record<string, unknown>>>;
+            };
+          }).adapter;
+
+          const sessionRecord = await smAdapter.get('sessions', sessionId);
+          let turns = await smAdapter.getTurnsBySessionId(sessionId);
           turns = Array.isArray(turns)
-            ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt))
+            ? turns.sort((a, b) => ((a.sequence as number) ?? (a.createdAt as number)) - ((b.sequence as number) ?? (b.createdAt as number)))
             : [];
 
-          const bucketizeResponses = (resps) => {
-            const buckets = {
+          type ResponseBucket = { providerId: string; text: string; status: string; createdAt: number; updatedAt: number; meta: Record<string, unknown>; responseIndex: number };
+          type Buckets = { providers: Record<string, ResponseBucket[]>; mappingResponses: Record<string, ResponseBucket[]>; singularityResponses: Record<string, ResponseBucket[]> };
+
+          const bucketizeResponses = (resps: Array<Record<string, unknown>>): Buckets => {
+            const buckets: Buckets = {
               providers: {},
               mappingResponses: {},
               singularityResponses: {},
             };
 
-            for (const r of resps || []) {
+            for (const r of resps ?? []) {
               if (!r) continue;
-              const providerId = r.providerId;
+              const providerId = r.providerId as string;
               if (!providerId) continue;
 
-              const entry = {
+              const entry: ResponseBucket = {
                 providerId,
-                text: r.text || '',
-                status: r.status || 'completed',
-                createdAt: r.createdAt || Date.now(),
-                updatedAt: r.updatedAt || r.createdAt || Date.now(),
-                meta: r.meta || {},
-                responseIndex: r.responseIndex ?? 0,
+                text: (r.text as string) || '',
+                status: (r.status as string) || 'completed',
+                createdAt: (r.createdAt as number) || Date.now(),
+                updatedAt: (r.updatedAt as number) || (r.createdAt as number) || Date.now(),
+                meta: (r.meta as Record<string, unknown>) || {},
+                responseIndex: (r.responseIndex as number) ?? 0,
               };
 
               if (r.responseType === 'batch') {
@@ -1197,7 +1323,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             return buckets;
           };
 
-          const rounds = [];
+          const rounds: unknown[] = [];
           for (let i = 0; i < turns.length; i++) {
             const user = turns[i];
             if (!user || user.type !== 'user') continue;
@@ -1206,85 +1332,89 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             if (!allAi.length) continue;
 
             const nextTurn = turns[i + 1];
-            let primaryAi = null;
+            let primaryAi: Record<string, unknown> | null = null;
 
             const defaultPrimary =
               nextTurn &&
               nextTurn.type === 'ai' &&
               nextTurn.userTurnId === user.id &&
-              !nextTurn.meta?.isHistoricalRerun &&
+              !(nextTurn.meta as AiTurn['meta'])?.isHistoricalRerun &&
               nextTurn.sequence !== -1
                 ? nextTurn
-                : allAi.find((t) => !t.meta?.isHistoricalRerun && t.sequence !== -1) || allAi[0];
+                : allAi.find((t) => !(t.meta as AiTurn['meta'])?.isHistoricalRerun && t.sequence !== -1) || allAi[0];
             primaryAi = defaultPrimary;
 
-            let pipelineStatus =
+            let pipelineStatus: string | undefined =
               typeof primaryAi?.pipelineStatus === 'string'
-                ? primaryAi.pipelineStatus
-                : typeof primaryAi?.meta?.pipelineStatus === 'string'
-                  ? primaryAi.meta.pipelineStatus
+                ? primaryAi.pipelineStatus as string
+                : typeof (primaryAi?.meta as Record<string, unknown> | undefined)?.pipelineStatus === 'string'
+                  ? (primaryAi.meta as Record<string, unknown>).pipelineStatus as string
                   : undefined;
 
-            let providers = {};
-            let mappingResponses = {};
-            let singularityResponses = {};
+            let providers: Record<string, ResponseBucket[]> = {};
+            let mappingResponses: Record<string, ResponseBucket[]> = {};
+            let singularityResponses: Record<string, ResponseBucket[]> = {};
             try {
-              if (sm.adapter.getResponsesByTurnId) {
-                const resps = await sm.adapter.getResponsesByTurnId(primaryAi.id);
+              if (smAdapter.getResponsesByTurnId) {
+                const resps = await smAdapter.getResponsesByTurnId(primaryAi!.id as string);
                 const buckets = bucketizeResponses(resps);
                 providers = buckets.providers || {};
                 mappingResponses = buckets.mappingResponses || {};
                 singularityResponses = buckets.singularityResponses || {};
               }
-            } catch (_) {}
+            } catch (e) {
+              console.warn('[SW] GET_HISTORY_SESSION: failed to load responses for turn:', primaryAi?.id, e);
+            }
 
             rounds.push({
               userTurnId: user.id,
-              aiTurnId: primaryAi.id,
+              aiTurnId: primaryAi!.id,
               user: {
                 id: user.id,
-                text: user.text || user.content || '',
-                createdAt: user.createdAt || 0,
+                text: (user.text as string) || (user.content as string) || '',
+                createdAt: (user.createdAt as number) || 0,
               },
               ...(primaryAi?.batch ? { batch: primaryAi.batch } : {}),
               // Tier 3: mapping.artifact is ephemeral — not sent in history payload.
               // UI rebuilds artifacts on demand via BUILD_ARTIFACT / REGENERATE_EMBEDDINGS.
               ...(primaryAi?.singularity ? { singularity: primaryAi.singularity } : {}),
               ...(primaryAi?.meta ? { meta: primaryAi.meta } : {}),
-              ...(Array.isArray(primaryAi?.probeSessions) && primaryAi.probeSessions.length > 0
-                ? { probeSessions: primaryAi.probeSessions }
+              ...(Array.isArray(primaryAi?.probeSessions) && (primaryAi!.probeSessions as unknown[]).length > 0
+                ? { probeSessions: primaryAi!.probeSessions }
                 : {}),
               ...(Object.keys(providers).length > 0 ? { providers } : {}),
               ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
               ...(Object.keys(singularityResponses).length > 0 ? { singularityResponses } : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
-              createdAt: user.createdAt || 0,
-              completedAt: primaryAi.updatedAt || 0,
+              createdAt: (user.createdAt as number) || 0,
+              completedAt: (primaryAi!.updatedAt as number) || 0,
             });
           }
 
           // Fetch contexts
-          let providerContexts = {};
+          let providerContexts: Record<string, unknown> = {};
           try {
-            if (sm.adapter.getContextsBySessionId) {
-              const ctxs = await sm.adapter.getContextsBySessionId(sessionId);
+            if (smAdapter.getContextsBySessionId) {
+              const ctxs = await smAdapter.getContextsBySessionId(sessionId);
               (ctxs || []).forEach((c) => {
                 if (c?.providerId)
-                  providerContexts[c.providerId] = {
-                    ...(c.meta || {}),
-                    ...(c.contextData || {}),
-                    metadata: c.metadata || null,
+                  providerContexts[c.providerId as string] = {
+                    ...(c.meta as Record<string, unknown> || {}),
+                    ...(c.contextData as Record<string, unknown> || {}),
+                    metadata: (c.metadata as unknown) || null,
                   };
               });
             }
-          } catch (_) {}
+          } catch (e) {
+            console.warn('[SW] GET_HISTORY_SESSION: failed to load provider contexts for session:', sessionId, e);
+          }
 
           sendResponse({
             success: true,
             data: {
               id: sessionId,
               sessionId,
-              title: sessionRecord?.title || 'Chat',
+              title: (sessionRecord?.title as string) || 'Chat',
               turns: rounds,
               providerContexts,
             },
@@ -1294,13 +1424,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           // instrument panel is instant when opened. doRegenerateEmbeddings
           // deduplicates — if the UI fires REGENERATE_EMBEDDINGS before this
           // completes, they share the same in-flight promise.
-          const latestRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+          const latestRound = rounds.length > 0 ? rounds[rounds.length - 1] as Record<string, unknown> : null;
           const latestMapper =
-            latestRound?.meta?.mapper ||
-            Object.keys(latestRound?.mappingResponses || {})[0] ||
+            (latestRound?.meta as Record<string, unknown> | undefined)?.mapper as string ||
+            Object.keys((latestRound?.mappingResponses as Record<string, unknown> | undefined) ?? {})[0] ||
             null;
           if (latestRound?.aiTurnId && latestMapper) {
-            doRegenerateEmbeddings(latestRound.aiTurnId, latestMapper, sm).catch(() => {});
+            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm).catch(() => {});
           }
         })().catch((e) => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
@@ -1308,12 +1438,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case 'GET_SESSION': {
         const operationId = persistenceMonitor.startOperation('GET_SESSION', {
-          sessionId: message.sessionId || message.payload?.sessionId,
+          sessionId: (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId,
         });
 
         try {
-          const sessionId = message.sessionId || message.payload?.sessionId;
-          const session = await sm.getOrCreateSession(sessionId);
+          const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
+          const session = await sm.getOrCreateSession(sessionId!);
           persistenceMonitor.endOperation(operationId, {
             sessionFound: !!session,
           });
@@ -1322,54 +1452,29 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           persistenceMonitor.endOperation(operationId, null, error);
           const handledError = await errorHandler.handleError(error, {
             operation: 'getSession',
-            sessionId: message.sessionId || message.payload?.sessionId,
-            retry: () => sm.getOrCreateSession(message.sessionId || message.payload?.sessionId),
+            sessionId: (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId,
+            retry: () => sm.getOrCreateSession(((message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId)!),
           });
           sendResponse({ success: false, error: getErrorMessage(handledError) });
         }
         return true;
       }
 
-      case 'SAVE_TURN': {
-        const sessionId = message.sessionId || message.payload?.sessionId;
-        await sm.addTurn(sessionId, message.turn);
-        sendResponse({ success: true });
-        return true;
-      }
-
       case 'UPDATE_PROVIDER_CONTEXT': {
-        const sessionId = message.sessionId || message.payload?.sessionId;
+        const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
         await sm.updateProviderContext(
-          sessionId,
-          message.providerId || message.payload?.providerId,
-          message.context || message.payload?.context
+          sessionId || '',
+          (message.providerId as string | undefined) || (message.payload as { providerId?: string } | undefined)?.providerId || '',
+          ((message.context as unknown) || (message.payload as { context?: unknown } | undefined)?.context) as import('../shared/types').ProviderOutput | undefined
         );
-        sendResponse({ success: true });
-        return true;
-      }
-
-      case 'CREATE_THREAD': {
-        const sessionId = message.sessionId || message.payload?.sessionId;
-        const thread = await sm.createThread(
-          sessionId,
-          message.title || message.payload?.title,
-          message.sourceAiTurnId || message.payload?.sourceAiTurnId
-        );
-        sendResponse({ success: true, thread });
-        return true;
-      }
-
-      case 'SWITCH_THREAD': {
-        const sessionId = message.sessionId || message.payload?.sessionId;
-        await sm.switchThread(sessionId, message.threadId || message.payload?.threadId);
         sendResponse({ success: true });
         return true;
       }
 
       case 'DELETE_SESSION': {
-        const sessionId = message.sessionId || message.payload?.sessionId;
+        const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
         try {
-          const removed = await sm.deleteSession(sessionId);
+          const removed = await sm.deleteSession(sessionId || '');
           // Return explicit removed boolean so UI can react optimistically
           sendResponse({ success: true, removed });
         } catch (e) {
@@ -1381,7 +1486,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case 'DELETE_SESSIONS': {
         try {
-          const ids = (message.sessionIds || message.payload?.sessionIds || []).filter(Boolean);
+          const ids = ((message.sessionIds as string[] | undefined) || (message.payload as { sessionIds?: string[] } | undefined)?.sessionIds || []).filter(Boolean);
           if (!Array.isArray(ids) || ids.length === 0) {
             sendResponse({ success: false, error: 'No sessionIds provided' });
             return true;
@@ -1414,8 +1519,8 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
       case 'RENAME_SESSION': {
         try {
-          const sessionId = message.sessionId || message.payload?.sessionId;
-          const newTitleRaw = message.title || message.payload?.title;
+          const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
+          const newTitleRaw = (message.title as string | undefined) || (message.payload as { title?: string } | undefined)?.title;
           if (!sessionId) {
             sendResponse({ success: false, error: 'Missing sessionId' });
             return true;
@@ -1427,25 +1532,22 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           }
 
           // Persistence-first rename using adapter directly if available, fallback to session op
-          if (sm.adapter && sm.adapter.get) {
-            const record = await sm.adapter.get('sessions', sessionId);
+          const smAdapter = sm as unknown as { adapter?: { get?: (store: string, id: string) => Promise<Record<string, unknown> | null>; put?: (store: string, record: Record<string, unknown>) => Promise<void> }; sessions?: Record<string, Record<string, unknown>> };
+          if (smAdapter.adapter?.get && smAdapter.adapter?.put) {
+            const record = await smAdapter.adapter.get('sessions', sessionId);
             if (!record) {
               sendResponse({ success: false, error: `Session ${sessionId} not found` });
               return true;
             }
             record.title = newTitle;
             record.updatedAt = Date.now();
-            await sm.adapter.put('sessions', record);
+            await smAdapter.adapter.put('sessions', record);
 
             // Updates local cache if needed
-            if (sm.sessions && sm.sessions[sessionId]) {
-              sm.sessions[sessionId].title = newTitle;
-              sm.sessions[sessionId].updatedAt = record.updatedAt;
+            if (smAdapter.sessions?.[sessionId]) {
+              smAdapter.sessions[sessionId].title = newTitle;
+              smAdapter.sessions[sessionId].updatedAt = record.updatedAt;
             }
-          } else {
-            // Fallback if SM doesn't expose adapter in expected way (shouldn't happen with new architecture)
-            // But for safety:
-            // await sm.renameSession(sessionId, newTitle); // If such method existed
           }
 
           sendResponse({
@@ -1465,21 +1567,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         const layer = services.get('persistenceLayer');
         const status = {
           persistenceEnabled: true,
-          sessionManagerType: sm?.constructor?.name || 'unknown',
+          sessionManagerType: (sm as unknown as { constructor?: { name?: string } })?.constructor?.name || 'unknown',
           persistenceLayerAvailable: !!layer,
-          adapterStatus: sm?.getPersistenceStatus ? sm.getPersistenceStatus() : null,
+          adapterStatus: (sm as unknown as { getPersistenceStatus?: () => unknown })?.getPersistenceStatus?.() ?? null,
         };
         sendResponse({ success: true, status });
         return true;
       }
-      // --- ADD THIS HERE ---
+
       default: {
-        // This catches "htos.keepalive" or any typos so the channel closes properly
+        // Catches "htos.keepalive" or any typos so the channel closes properly
         console.warn('[SW] Unknown message type ignored:', message.type);
         sendResponse({ success: false, error: 'Unknown message type' });
         return true;
       }
-      // ---------------------
     }
   } catch (e) {
     sendResponse({ success: false, error: getErrorMessage(e) });
@@ -1497,28 +1598,35 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 // Deduplication: concurrent calls for the same turnId::providerId share
 // the same in-flight promise.
 
-const regenInflight = new Map(); // "turnId::providerId" → Promise<result>
+const regenInflight = new Map<string, Promise<RegenerateResult>>();
 
 /**
  * Run the full regenerate-embeddings pipeline and return the result.
  * Returns { success: true, data: { artifact, claimCount, edgeCount } }
  * or { success: false, error: string }.
  */
-function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
+function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: SessionManager, requestedModelId?: string): Promise<RegenerateResult> {
   const resolvedModelId = requestedModelId || 'bge-base-en-v1.5';
   const cacheKey = `${aiTurnId}::${String(providerId || '')
     .trim()
     .toLowerCase()}::${resolvedModelId}`;
 
-  if (regenInflight.has(cacheKey)) return regenInflight.get(cacheKey);
+  if (regenInflight.has(cacheKey)) return regenInflight.get(cacheKey)!;
 
-  const work = (async () => {
-    const normalizeProvId = (pid) =>
+  const work = (async (): Promise<RegenerateResult> => {
+    const normalizeProvId = (pid: unknown): string =>
       String(pid || '')
         .trim()
         .toLowerCase();
 
-    const turnRaw = await sm.adapter.get('turns', aiTurnId);
+    type SmAdapterFull = {
+      get: (store: string, id: string) => Promise<Record<string, unknown> | null>;
+      getResponsesByTurnId?: (id: string) => Promise<Array<Record<string, unknown>>>;
+      put: (store: string, record: Record<string, unknown>) => Promise<void>;
+    };
+    const smAdapter = (sm as unknown as { adapter: SmAdapterFull }).adapter;
+
+    const turnRaw = await smAdapter.get('turns', aiTurnId);
     if (!turnRaw) return { success: false, error: 'Turn not found' };
 
     // ── Minimal imports (geometry I/O + codec only) ──
@@ -1528,7 +1636,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       generateTextEmbeddings,
       stripInlineMarkdown,
       structuredTruncate,
-    } = await import('./clustering');
+    } = await import('./clustering/index.js');
     const { getConfigForModel } = await import('./clustering/config.js');
     const { packEmbeddingMap, unpackEmbeddingMap } =
       await import('./persistence/embedding-codec.js');
@@ -1536,23 +1644,23 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     const dims = embeddingConfig.embeddingDimensions;
 
     // ── Load query text (shared) ──
-    const userTurnId = turnRaw.userTurnId;
+    const userTurnId = turnRaw.userTurnId as string | undefined;
     let queryText = '';
     if (userTurnId) {
       try {
-        const userTurn = await sm.adapter.get('turns', userTurnId);
-        queryText = userTurn?.text || userTurn?.content || '';
+        const userTurn = await smAdapter.get('turns', userTurnId);
+        queryText = (userTurn?.text as string) || (userTurn?.content as string) || '';
       } catch (err) {
         console.error(`[Regenerate] Failed to load user turn for aiTurnId=${aiTurnId}:`, err);
       }
     }
 
-    const readCitationOrderFromMeta = (meta) => {
+    const readCitationOrderFromMeta = (meta: Record<string, unknown> | null | undefined): string[] => {
       try {
         const raw = meta?.citationSourceOrder;
         if (!raw || typeof raw !== 'object') return [];
-        const entries = Object.entries(raw)
-          .map(([k, v]) => [Number(k), String(v || '').trim()])
+        const entries = Object.entries(raw as Record<string, string>)
+          .map(([k, v]) => [Number(k), String(v || '').trim()] as [number, string])
           .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
         entries.sort((a, b) => a[0] - b[0]);
         return entries.map(([, pid]) => normalizeProvId(pid));
@@ -1562,10 +1670,10 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     };
 
     // ── A. Load provider responses (mappingResp + text only) ──
-    let responsesForTurn = [];
+    let responsesForTurn: Array<Record<string, unknown>> = [];
     try {
-      if (sm.adapter?.getResponsesByTurnId) {
-        const resps = await sm.adapter.getResponsesByTurnId(aiTurnId);
+      if (smAdapter?.getResponsesByTurnId) {
+        const resps = await smAdapter.getResponsesByTurnId(aiTurnId);
         responsesForTurn = Array.isArray(resps) ? resps : [];
       }
     } catch (err) {
@@ -1582,7 +1690,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
             normalizeProvId(r.providerId) === normalizeProvId(providerId)
         )
         .sort(
-          (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+          (a, b) => ((b.updatedAt as number) || (b.createdAt as number) || 0) - ((a.updatedAt as number) || (a.createdAt as number) || 0)
         )?.[0] || null;
 
     const mappingText = String(mappingResp?.text || '').trim();
@@ -1591,11 +1699,11 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     }
 
     // ── B. Shadow + batch sources (no parsing here) ──
-    const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta);
+    const citationOrderArr = readCitationOrderFromMeta(mappingResp?.meta as Record<string, unknown> | null);
 
-    let shadowStatements = null;
-    let shadowParagraphs = null;
-    let batchSources = [];
+    let shadowStatements: import('./shadow/index.js').ShadowStatement[] | null = null;
+    let shadowParagraphs: import('./shadow/index.js').ShadowParagraph[] | null = null;
+    let batchSources: Array<{ modelIndex: number; content: string }> = [];
 
     // Always rebuild batch sources from DB responses (canonical ordering)
     try {
@@ -1603,15 +1711,15 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
         .filter(
           (r) => r && r.responseType === 'batch' && r.providerId && String(r.text || '').trim()
         )
-        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        .sort((a, b) => ((b.updatedAt as number) || (b.createdAt as number) || 0) - ((a.updatedAt as number) || (a.createdAt as number) || 0));
 
-      const seenBatchProviders = new Map();
+      const seenBatchProviders = new Map<string, Record<string, unknown>>();
       for (const r of allBatchResps) {
         const pid = normalizeProvId(r.providerId);
         if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
       }
 
-      const { canonicalCitationOrder } = await import('../shared/provider-config');
+      const { canonicalCitationOrder } = await import('../shared/provider-config.js');
       const canonicalOrder = canonicalCitationOrder(Array.from(seenBatchProviders.keys()));
 
       batchSources = canonicalOrder
@@ -1638,7 +1746,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     // ── B.1 Always re-extract shadow from batch (ground truth for current code) ──
     // Never trust stored shadow statements — extraction rules may have changed.
     if (batchSources.length > 0) {
-      const { extractShadowStatements, projectParagraphs } = await import('./shadow');
+      const { extractShadowStatements, projectParagraphs } = await import('./shadow/index.js');
       const shadowResult = extractShadowStatements(batchSources);
       shadowStatements = shadowResult.statements;
       shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
@@ -1650,12 +1758,25 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       return { success: false, error: 'No shadow statements for embedding generation' };
     }
     if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-      const { projectParagraphs } = await import('./shadow');
+      const { projectParagraphs } = await import('./shadow/index.js');
       shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
     }
 
     // ── C. Geometry embeddings — regenerate if missing or stale ──
-    let geoRecord = await sm.loadEmbeddings(aiTurnId);
+    type GeoRecord = {
+      statementEmbeddings?: unknown;
+      paragraphEmbeddings?: unknown;
+      queryEmbedding?: ArrayBuffer;
+      meta?: {
+        statementIndex?: string[];
+        paragraphIndex?: string[];
+        embeddingModelId?: string;
+        embeddingVersion?: number;
+        dimensions?: number;
+        paragraphCount?: number;
+      };
+    };
+    let geoRecord = await sm.loadEmbeddings(aiTurnId) as GeoRecord | null;
 
     // Check if cached embeddings match current shadow extraction
     const cachedStmtIds = new Set(geoRecord?.meta?.statementIndex || []);
@@ -1699,7 +1820,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
         embeddingConfig
       );
 
-      let queryEmbedding = null;
+      let queryEmbedding: Float32Array | null = null;
       if (queryText) {
         const cleaned = stripInlineMarkdown(String(queryText)).trim();
         const truncated = structuredTruncate(cleaned, 1740);
@@ -1709,7 +1830,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
             : truncated;
         if (prefixed) {
           const batch = await generateTextEmbeddings([prefixed], embeddingConfig);
-          queryEmbedding = batch.embeddings.get('0') || null;
+          queryEmbedding = (batch.embeddings as Map<string, Float32Array>).get('0') || null;
         }
       }
 
@@ -1725,7 +1846,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       await sm.persistEmbeddings(aiTurnId, {
         statementEmbeddings: packedStatements.buffer,
         paragraphEmbeddings: packedParagraphs.buffer,
-        queryEmbedding: queryBuffer,
+        queryEmbedding: queryBuffer as ArrayBuffer | null,
         meta: {
           embeddingModelId: resolvedModelId,
           dimensions: dims,
@@ -1734,11 +1855,10 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
           paragraphCount: packedParagraphs.index.length,
           statementIndex: packedStatements.index,
           paragraphIndex: packedParagraphs.index,
-          embeddingVersion: 2,
           timestamp: Date.now(),
         },
       });
-      geoRecord = await sm.loadEmbeddings(aiTurnId);
+      geoRecord = await sm.loadEmbeddings(aiTurnId) as GeoRecord | null;
     }
 
     if (!geoRecord?.statementEmbeddings || !geoRecord?.paragraphEmbeddings) {
@@ -1746,16 +1866,16 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     }
 
     const statementEmbeddings = unpackEmbeddingMap(
-      geoRecord.statementEmbeddings,
-      geoRecord.meta.statementIndex,
-      geoRecord.meta.dimensions
-    );
+      geoRecord.statementEmbeddings as ArrayBuffer,
+      geoRecord.meta!.statementIndex!,
+      geoRecord.meta!.dimensions!
+    ) as Map<string, Float32Array>;
     const paragraphEmbeddings = unpackEmbeddingMap(
-      geoRecord.paragraphEmbeddings,
-      geoRecord.meta.paragraphIndex,
-      geoRecord.meta.dimensions
-    );
-    const queryEmbedding =
+      geoRecord.paragraphEmbeddings as ArrayBuffer,
+      geoRecord.meta!.paragraphIndex!,
+      geoRecord.meta!.dimensions!
+    ) as Map<string, Float32Array>;
+    const queryEmbedding: Float32Array | null =
       geoRecord?.queryEmbedding && geoRecord.queryEmbedding.byteLength > 0
         ? new Float32Array(geoRecord.queryEmbedding)
         : null;
@@ -1765,10 +1885,10 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     // ══════════════════════════════════════════════════════════════
     const { buildArtifactForProvider } = await import('./execution/deterministic-pipeline.js');
     const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } =
-      await import('../shared/provider-config');
+      await import('../shared/provider-config.js');
     const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));
 
-    const buildResult = await buildArtifactForProvider({
+    const buildResultRaw = await buildArtifactForProvider({
       mappingText,
       shadowStatements:
         Array.isArray(shadowStatements) && shadowStatements.length > 0 ? shadowStatements : null,
@@ -1778,18 +1898,18 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       statementEmbeddings,
       paragraphEmbeddings,
       queryEmbedding,
-      geoRecord,
+      geoRecord: geoRecord as Record<string, unknown>,
       claimEmbeddings: null, // always regenerate for now
       citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
       queryText,
       modelCount,
-    });
+    }) as Record<string, unknown>;
 
-    const { cognitiveArtifact, mapperArtifact, enrichedClaims, parsedClaims, claimEmbeddings } =
-      buildResult;
+    const buildResult = buildResultRaw as unknown as BuildArtifactResult;
+    const { cognitiveArtifact, mapperArtifact, enrichedClaims, parsedClaims, claimEmbeddings } = buildResult;
 
     // ── Persist claim embeddings ──
-    const hashString = (input) => {
+    const hashString = (input: string): string => {
       let h = 5381;
       for (let i = 0; i < input.length; i++) {
         h = ((h << 5) + h) ^ input.charCodeAt(i);
@@ -1830,11 +1950,11 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     // ── Diagnostic ──
     console.log(
       `[Regenerate] Artifact diagnostics:`,
-      `corpus.models=${cognitiveArtifact?.corpus?.models?.length ?? 'missing'}`,
+      `corpus.models=${(cognitiveArtifact?.corpus as { models?: unknown[] } | undefined)?.models?.length ?? 'missing'}`,
       `claimProvenance=${cognitiveArtifact?.claimProvenance ? 'present' : 'missing'}`,
       `basinInversion=${
-        cognitiveArtifact?.geometry?.basinInversion
-          ? cognitiveArtifact.geometry.basinInversion.status
+        (cognitiveArtifact?.geometry as { basinInversion?: { status?: string } } | undefined)?.basinInversion
+          ? (cognitiveArtifact.geometry as { basinInversion: { status?: string } }).basinInversion.status
           : 'missing'
       }`,
       `blastSurface=${cognitiveArtifact?.blastSurface ? 'present' : 'missing'}`
@@ -1851,7 +1971,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
               normalizeProvId(r.providerId) === normalizeProvId(providerId)
           )
           .sort(
-            (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+            (a, b) => ((b.updatedAt as number) || (b.createdAt as number) || 0) - ((a.updatedAt as number) || (a.createdAt as number) || 0)
           )[0] || null;
 
       if (
@@ -1864,21 +1984,21 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
           await import('./concierge-service/editorial-mapper.js');
         const { buildSourceContinuityMap } = await import('./provenance/surface.js');
 
-        const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
+        const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity as ClaimDensityResult);
         const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
-          mapperArtifact.claimDensity,
-          mapperArtifact.passageRouting,
-          mapperArtifact.statementClassification,
-          mapperArtifact.corpus ?? { paragraphs: [] },
+          mapperArtifact.claimDensity as ClaimDensityResult,
+          mapperArtifact.passageRouting as PassageRoutingResult,
+          mapperArtifact.statementClassification as StatementClassificationResult,
+          (mapperArtifact.corpus as { paragraphs: unknown[] } | undefined) ?? { paragraphs: [] },
           enrichedClaims,
-          mapperArtifact.citationSourceOrder || {},
+          (mapperArtifact.citationSourceOrder as Record<string, string>) || {},
           continuityMap
         );
 
-        const validPassageKeys = new Set(idxPassages.map((p) => p.passageKey));
-        const validUnclaimedKeys = new Set(idxUnclaimed.map((u) => u.groupKey));
+        const validPassageKeys = new Set(idxPassages.map((p: { passageKey: string }) => p.passageKey));
+        const validUnclaimedKeys = new Set(idxUnclaimed.map((u: { groupKey: string }) => u.groupKey));
         const parsed = parseEditorialOutput(
-          editorialResp.text,
+          editorialResp.text as string,
           validPassageKeys,
           validUnclaimedKeys
         );
@@ -1886,7 +2006,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
         if (parsed.success && parsed.ast) {
           cognitiveArtifact.editorialAST = parsed.ast;
           console.log(
-            `[Regenerate] Editorial AST restored: ${parsed.ast.threads.length} thread(s)`
+            `[Regenerate] Editorial AST restored: ${(parsed.ast as { threads: unknown[] }).threads.length} thread(s)`
           );
         } else {
           console.warn('[Regenerate] Editorial re-parse failed:', parsed.errors);
@@ -1895,7 +2015,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
     } catch (editorialErr) {
       console.warn(
         '[Regenerate] Editorial restore (non-blocking):',
-        editorialErr?.message || editorialErr
+        (editorialErr as { message?: string })?.message || editorialErr
       );
     }
 
@@ -1907,41 +2027,41 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       mapperArtifact.statementClassification
     ) {
       try {
-        const orchestrator = services.get('orchestrator');
+        const orchestrator = services.get('orchestrator') as FaultTolerantOrchestrator | undefined;
         if (orchestrator) {
           const { buildSourceContinuityMap } = await import('./provenance/surface.js');
           const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
             await import('./concierge-service/editorial-mapper.js');
 
-          const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity);
+          const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity as ClaimDensityResult);
           const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
-            mapperArtifact.claimDensity,
-            mapperArtifact.passageRouting,
-            mapperArtifact.statementClassification,
-            mapperArtifact.corpus ?? { paragraphs: [] },
+            mapperArtifact.claimDensity as ClaimDensityResult,
+            mapperArtifact.passageRouting as PassageRoutingResult,
+            mapperArtifact.statementClassification as StatementClassificationResult,
+            (mapperArtifact.corpus as { paragraphs: unknown[] } | undefined) ?? { paragraphs: [] },
             enrichedClaims,
-            mapperArtifact.citationSourceOrder || {},
+            (mapperArtifact.citationSourceOrder as Record<string, string>) || {},
             continuityMap
           );
 
-          const validPassageKeys = new Set(idxPassages.map((p) => p.passageKey));
-          const validUnclaimedKeys = new Set(idxUnclaimed.map((u) => u.groupKey));
+          const validPassageKeys = new Set(idxPassages.map((p: { passageKey: string }) => p.passageKey));
+          const validUnclaimedKeys = new Set(idxUnclaimed.map((u: { groupKey: string }) => u.groupKey));
 
-          const concentrations = idxPassages.map((p) => p.concentrationRatio);
-          const landscapeComp = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
-          idxPassages.forEach((p) => {
-            landscapeComp[p.landscapePosition]++;
+          const concentrations = idxPassages.map((p: { concentrationRatio: number }) => p.concentrationRatio);
+          const landscapeComp: { northStar: number; mechanism: number; eastStar: number; floor: number } = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
+          idxPassages.forEach((p: { landscapePosition: string }) => {
+            landscapeComp[p.landscapePosition as keyof typeof landscapeComp]++;
           });
 
           const editorialPrompt = buildEditorialPrompt(queryText, idxPassages, idxUnclaimed, {
             passageCount: idxPassages.length,
             claimCount: enrichedClaims.length,
-            conflictCount: mapperArtifact.passageRouting?.routing?.conflictClusters?.length ?? 0,
+            conflictCount: (mapperArtifact.passageRouting as { routing?: { conflictClusters?: unknown[] } } | undefined)?.routing?.conflictClusters?.length ?? 0,
             concentrationSpread: {
               min: concentrations.length ? Math.min(...concentrations) : 0,
               max: concentrations.length ? Math.max(...concentrations) : 0,
               mean: concentrations.length
-                ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length
+                ? concentrations.reduce((a: number, b: number) => a + b, 0) / concentrations.length
                 : 0,
             },
             landscapeComposition: landscapeComp,
@@ -1950,7 +2070,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
           // Thread continuation: prefer mapping cursor (semantic mapper's thread),
           // fall back to batch cursor, fall back to fresh conversation.
           const editorialProviderContexts = (() => {
-            const mappingMeta = mappingResp?.meta;
+            const mappingMeta = mappingResp?.meta as Record<string, unknown> | undefined;
             if (
               mappingMeta &&
               typeof mappingMeta === 'object' &&
@@ -1964,21 +2084,21 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
                 r.responseType === 'batch' &&
                 normalizeProvId(r.providerId) === normalizeProvId(providerId)
             );
-            const batchMeta = batchResp?.meta;
+            const batchMeta = batchResp?.meta as Record<string, unknown> | undefined;
             if (batchMeta && typeof batchMeta === 'object' && Object.keys(batchMeta).length > 0) {
               return { [providerId]: { meta: batchMeta, continueThread: true } };
             }
             return {};
           })();
 
-          const editorialResult = await new Promise((res) => {
+          const editorialResult = await new Promise<{ text: string; meta?: unknown }>((res) => {
             orchestrator.executeParallelFanout(editorialPrompt, [providerId], {
               sessionId: `regen-editorial-${aiTurnId}`,
               useThinking: false,
               providerContexts: editorialProviderContexts,
               onPartial: () => {},
               onAllComplete: async (results) => {
-                const result = results?.get?.(providerId);
+                const result = results?.get?.(providerId) as { text?: string; meta?: unknown } | undefined;
                 if (result?.text) res({ text: result.text, meta: result.meta });
                 else res({ text: '' });
               },
@@ -1995,14 +2115,14 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
             if (parsed.success && parsed.ast) {
               cognitiveArtifact.editorialAST = parsed.ast;
               console.log(
-                `[Regenerate] Editorial generated: ${parsed.ast.threads.length} thread(s)`
+                `[Regenerate] Editorial generated: ${(parsed.ast as { threads: unknown[] }).threads.length} thread(s)`
               );
 
               // Persist so future regens don't need another LLM call
-              if (sm?.adapter) {
+              if (smAdapter) {
                 try {
                   const now = Date.now();
-                  await sm.adapter.put('provider_responses', {
+                  await smAdapter.put('provider_responses', {
                     id: `pr-${aiTurnId}-${providerId}-editorial-0-${now}`,
                     sessionId: responsesForTurn[0]?.sessionId || '',
                     aiTurnId,
@@ -2011,12 +2131,14 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
                     responseIndex: 0,
                     text: editorialResult.text,
                     status: 'completed',
-                    meta: editorialResult.meta || {},
+                    meta: (editorialResult.meta as Record<string, unknown>) || {},
                     createdAt: now,
                     updatedAt: now,
                     completedAt: now,
                   });
-                } catch (_) {}
+                } catch (persistErr) {
+                  console.warn('[Regenerate] Failed to persist editorial response:', persistErr);
+                }
               }
             } else {
               console.warn('[Regenerate] Editorial parse failed:', parsed.errors);
@@ -2026,7 +2148,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       } catch (editorialGenErr) {
         console.warn(
           '[Regenerate] Editorial generation (non-blocking):',
-          editorialGenErr?.message || editorialGenErr
+          (editorialGenErr as { message?: string })?.message || editorialGenErr
         );
       }
     }
@@ -2036,7 +2158,7 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
       data: {
         artifact: cognitiveArtifact,
         claimCount: enrichedClaims.length,
-        edgeCount: mapperArtifact.edges?.length || 0,
+        edgeCount: (mapperArtifact.edges as unknown[] | undefined)?.length || 0,
       },
     };
   })().finally(() => {
@@ -2048,39 +2170,40 @@ function doRegenerateEmbeddings(aiTurnId, providerId, sm, requestedModelId) {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request?.$bus) return false;
-  if (request?.__fromUnified) return false;
-  if (request?.type === 'offscreen.heartbeat') {
+  if ((request as Record<string, unknown>)?.$bus) return false;
+  if ((request as Record<string, unknown>)?.__fromUnified) return false;
+  if ((request as Record<string, unknown>)?.type === 'offscreen.heartbeat') {
     sendResponse({ alive: true });
     return true;
   }
-  if (request?.type === 'htos.keepalive') {
+  if ((request as Record<string, unknown>)?.type === 'htos.keepalive') {
     sendResponse({ success: true });
     return true;
   }
-  if (request?.type === 'htos.activity') {
+  if ((request as Record<string, unknown>)?.type === 'htos.activity') {
     try {
-      const lm = services.get('lifecycleManager');
+      const lm = services.get('lifecycleManager') as { recordActivity?: () => void } | undefined;
       if (lm && typeof lm.recordActivity === 'function') {
         lm.recordActivity();
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[SW] htos.activity handler failed:', e);
+    }
     sendResponse({ success: true });
     return true;
   }
-  if (request?.type === 'GET_HEALTH_STATUS') {
+  if ((request as Record<string, unknown>)?.type === 'GET_HEALTH_STATUS') {
     // Return health
     const health = { serviceWorker: 'active', registry: Array.from(services.services.keys()) };
     sendResponse({ success: true, status: health });
     return true;
   }
-  if (request?.type) {
-    // 2. Ensure handleUnifiedMessage calls sendResponse even if type is unknown
-    handleUnifiedMessage(request, sender, sendResponse).catch((err) => {
+  if ((request as Record<string, unknown>)?.type) {
+    handleUnifiedMessage(request as Record<string, unknown>, sender, sendResponse).catch((err) => {
       try {
         sendResponse({ success: false, error: getErrorMessage(err) });
       } catch (e) {
-        /* ignore channel closed */
+        console.warn('[SW] sendResponse after channel close:', e);
       }
     });
     return true;
@@ -2102,7 +2225,9 @@ chrome.runtime.onConnect.addListener(async (port) => {
     console.error('[SW] Failed to initialize connection handler:', error);
     try {
       port.postMessage({ type: 'INITIALIZATION_FAILED', error: getErrorMessage(error) });
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[SW] Failed to send INITIALIZATION_FAILED to port:', e);
+    }
   }
 });
 
@@ -2116,12 +2241,12 @@ chrome.action?.onClicked.addListener(async () => {
       if (typeof tab.windowId === 'number') {
         try {
           await chrome.windows.update(tab.windowId, { focused: true });
-        } catch (_) {}
+        } catch (e) { console.error('[SW] chrome.windows.update failed:', e); }
       }
       await chrome.tabs.update(tab.id, { active: true });
       return;
     }
-  } catch (_) {}
+  } catch (e) { console.error('[SW] chrome.tabs.query failed:', e); }
   await chrome.tabs.create({ url });
 });
 

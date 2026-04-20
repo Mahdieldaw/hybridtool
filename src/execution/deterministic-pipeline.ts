@@ -284,7 +284,7 @@ export async function computeDerivedFields({
       const { analyzeGlobalStructure: computeStructuralAnalysis } =
         await import('../provenance/structure');
       result.cachedStructuralAnalysis = computeStructuralAnalysis({
-        claims: (enrichedClaims as Claim[]),
+        claims: (enrichedClaims as EnrichedClaim[]),
         edges: (parsedEdges as Edge[]),
         modelCount,
       });

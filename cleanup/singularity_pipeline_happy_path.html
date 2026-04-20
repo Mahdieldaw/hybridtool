@@ -1,0 +1,184 @@
+
+<style>
+#mermaid-container { width: 100%; overflow-x: auto; overflow-y: auto; max-height: 600px; border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 12px; box-sizing: border-box; }
+#mermaid-container svg { min-width: 900px; }
+.zoom-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.zoom-btn { background: var(--color-background-secondary); border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 4px 10px; font-size: 13px; color: var(--color-text-primary); cursor: pointer; }
+.zoom-btn:hover { background: var(--color-background-tertiary); }
+#zoom-label { font-size: 12px; color: var(--color-text-secondary); min-width: 40px; }
+</style>
+<div class="zoom-controls">
+  <button class="zoom-btn" onclick="zoom(-0.2)">−</button>
+  <button class="zoom-btn" onclick="zoom(0.2)">+</button>
+  <span id="zoom-label">100%</span>
+  <button class="zoom-btn" onclick="resetZoom()">reset</button>
+</div>
+<div id="mermaid-container"><div id="mermaid-out">Loading diagram…</div></div>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"Anthropic Sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '12px',
+    fontFamily: '"Anthropic Sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+    primaryColor: dark ? '#2a2a28' : '#f1efe8',
+    primaryBorderColor: dark ? '#5f5e5a' : '#b4b2a9',
+    secondaryColor: dark ? '#1e2a38' : '#e6f1fb',
+    tertiaryColor: dark ? '#1a2e26' : '#e1f5ee',
+    clusterBkg: dark ? '#1e1e1c' : '#f8f7f2',
+    clusterBorder: dark ? '#5f5e5a' : '#b4b2a9',
+  },
+});
+const diagram = `flowchart TD
+    Execute["WorkflowEngine.execute()\\nworkflow-engine.js:145"]
+    Execute --> Checkpoint
+    Checkpoint[("_persistCheckpoint()\\nturns store")]
+    Checkpoint --> StepLoop
+    StepLoop["_executeStep() loop"]
+    StepLoop -->|"step.type='prompt'"| ExecPrompt
+    ExecPrompt["executePromptStep()\\nStepExecutor.js:33"]
+    ExecPrompt --> Bridge["buildReactiveBridge()"]
+    Bridge --> Templates["PROMPT_TEMPLATES.withBridgeAndPrior()"]
+    Templates --> HealthLimits["healthTracker.shouldAttempt()\\n+ PROVIDER_LIMITS check"]
+    HealthLimits --> BatchFanout["orchestrator.executeParallelFanout()\\nparallel model calls"]
+    BatchFanout --> PersistBatchResp[("_persistStepResponse()\\nprovider_responses type='batch'")]
+    PersistBatchResp --> WitnessGate{"successfulCount >= 2?"}
+    WitnessGate -->|"NO"| HaltInsufficient["HALT: insufficient_witnesses"]
+    WitnessGate -->|"YES"| MappingEntry
+    MappingEntry["executeMappingStep()\\nStepExecutor.js:403"]
+    MappingEntry --> ResolveSource["_resolveSourceData()\\nStepExecutor.js:1862"]
+    ResolveSource --> ShadowExtract["extractShadowStatements()"]
+    ShadowExtract --> ParagraphProject["projectParagraphs()"]
+    ParagraphProject --> GeoStart
+    ParagraphProject --> BuildSemPrompt
+    subgraph GEO ["Geometry Pipeline (async — StepExecutor)"]
+        GeoStart["Geometry promise start"]
+        GeoStart --> EmbedQuery["generateTextEmbeddings(query)"]
+        GeoStart --> EmbedPara["generateEmbeddings(paragraphs)"]
+        GeoStart --> EmbedStmt["generateStatementEmbeddings()"]
+        GeoStart --> EmbedCells["generateTextEmbeddings(cells)"]
+        EmbedQuery & EmbedPara & EmbedStmt & EmbedCells --> BasinInv["computeBasinInversion()"]
+        BasinInv --> BuildSubstrate["buildGeometricSubstrate()"]
+        BuildSubstrate --> DegCheck{"isDegenerate?"}
+        DegCheck -->|"YES"| GeoFallback["skip preSemantic"]
+        DegCheck -->|"NO"| PreSemantic["buildPreSemanticInterpretation()"]
+        PreSemantic --> QueryRel["computeQueryRelevance()"]
+        QueryRel --> EnrichGeo["enrichStatementsWithGeometry()"]
+        EnrichGeo --> PersistEmbed[("persistEmbeddings()\\nembeddings store")]
+        GeoFallback --> PersistEmbed
+    end
+    subgraph SEM ["Semantic Mapper LLM"]
+        BuildSemPrompt["buildSemanticMapperPrompt()"]
+        BuildSemPrompt --> SemanticFanout["orchestrator.executeParallelFanout()\\nsemantic mapper LLM"]
+        SemanticFanout --> ParseSemantic["parseSemanticMapperOutput()"]
+    end
+    PersistEmbed --> PreSurveyEntry
+    ParseSemantic --> PreSurveyEntry
+    subgraph PRESURVEY ["computePreSurveyPipeline() — deterministicPipeline.js:792"]
+        PreSurveyEntry["computePreSurveyPipeline()\\nreuses preBuilt geometry"]
+        PreSurveyEntry --> ParseMapping["parseSemanticMapperOutput()\\nparsedClaims, parsedEdges"]
+        ParseMapping --> ClaimEmbed["generateClaimEmbeddings()"]
+        ClaimEmbed --> Provenance["reconstructProvenance()"]
+        Provenance --> DensityLift["Density lift computation\\nclaim.density + densityLift"]
+        DensityLift --> DerivedFields
+    end
+    subgraph DERIVED ["computeDerivedFields() — all re-derived"]
+        DerivedFields["computeDerivedFields()\\ndeterministicPipeline.js:23"]
+        DerivedFields --> BasinInvDerived["computeBasinInversion()\\nexplicit derived field"]
+        DerivedFields --> ClaimProv["computeStatementOwnership()\\n+ computeClaimExclusivity()\\n+ computeClaimOverlap()"]
+        DerivedFields --> StructAnalysis["computeStructuralAnalysis()\\nvia core/PromptMethods.ts"]
+        DerivedFields --> MixedProv["computeMixedMethodProvenance()"]
+        DerivedFields --> TableAlloc["allocateCellUnitsToClaims()"]
+        DerivedFields --> BlastSurf["computeBlastSurface()\\nINSTRUMENTATION ONLY"]
+        DerivedFields --> EdgeNorm["Semantic edge normalization\\nsupports|conflicts|prerequisite|tradeoff\\n+ derived support edges from conditionals"]
+        DerivedFields --> Alignment["computeAlignment()"]
+        DerivedFields --> Complete["buildStatementFates()\\n+ findUnattendedRegions()\\n+ buildCompletenessReport()"]
+        DerivedFields --> ShadowDelta["computeShadowDelta()"]
+        DerivedFields --> ClaimDensityComp["computeClaimDensity()"]
+        DerivedFields --> RoutingPipeline
+        subgraph ROUTING ["Routing Pipeline"]
+            RoutingPipeline["Routing entry"]
+            RoutingPipeline --> ConflictVal["computeConflictValidation()\\n+ triangle residual"]
+            ConflictVal --> PassageRoute["computePassageRouting()\\nACTIVE layer — evidence concentration"]
+            PassageRoute --> PassageAdapter["buildClaimRoutingFromPassage()\\nprimary claimRouting"]
+            ConflictVal --> FragRes["computeFragilityResolution()"]
+            FragRes --> QSI["computeQuestionSelectionInstrumentation()\\nINSTRUMENTATION ONLY"]
+            PassageAdapter --> RoutingFallback{"passage produced\\nclaimRouting?"}
+            QSI --> RoutingFallback
+            RoutingFallback -->|"YES"| RoutingDone["claimRouting\\nfrom passage routing"]
+            RoutingFallback -->|"NO: fallback"| FallbackRoute["computeClaimRouting()\\nfrom blast surface QSI"]
+            FallbackRoute --> RoutingDone
+        end
+        RoutingDone --> ProvRefine["computeProvenanceRefinement()\\n3-tier allegiance for joint statements"]
+        ProvRefine --> PassagePrune["computePassagePruning()\\nspeculative per-claim, 4-rule engine"]
+        PassagePrune --> StmtClass["computeStatementClassification()\\ngeometric grouping: claimed vs unclaimed"]
+    end
+    StmtClass --> PersistClaimEmbed[("persistClaimEmbeddings()\\nStepExecutor-only")]
+    PersistClaimEmbed --> PostSurveyAssembly
+    subgraph ASSEMBLY ["assembleFromPreSurvey() — deterministicPipeline.js:1220"]
+        PostSurveyAssembly["assembleFromPreSurvey()\\nsurvey gates always empty (survey disabled)"]
+        PostSurveyAssembly --> BuildConditionals["buildConditionalsFromGates()\\nfalls back to parsedConditionals"]
+        BuildConditionals --> TraversalBuild["buildTraversalData()\\nflat tier-0, no conflict tiering"]
+        TraversalBuild --> ForcingPts["extractForcingPointsFromGraph()\\nwraps traversalEngine.ts"]
+        ForcingPts --> AssembleArt["assembleMapperArtifact()\\n+ passageRouting + claimDensity\\n+ provenanceRefinement + passagePruning\\n+ statementClassification"]
+        AssembleArt --> BuildSubGraph["buildSubstrateGraph()\\nnodes with x,y + regionId"]
+        BuildSubGraph --> CogArtifact["buildCognitiveArtifact()\\nmapper + shadow + substrate.graph"]
+    end
+    CogArtifact --> Diagnostics["validateStructuralMapping()\\n+ sourceCoherence + claimProvenance"]
+    Diagnostics --> PersistSemCtx[("persistProviderContexts()\\nsemantic mapper cursor")]
+    PersistSemCtx --> PersistMapResp[("_persistStepResponse()\\nprovider_responses type='mapping'")]
+    subgraph EDITORIAL ["Editorial Model LLM (primary reading surface)"]
+        PersistMapResp --> PassageIdx["buildPassageIndex()\\neditorialMapper.ts"]
+        PassageIdx --> EditPrompt["buildEditorialPrompt()\\npassages + unclaimed groups"]
+        EditPrompt --> EditFanout["orchestrator.executeParallelFanout()\\neditorial LLM"]
+        EditFanout --> ParseEdit["parseEditorialOutput()\\nvalidates passage/unclaimed IDs"]
+        ParseEdit --> EditAST["EditorialAST\\norientation + threads with roles\\nanchor|support|context|reframe|alternative"]
+        EditAST --> PersistEditResp[("_persistStepResponse()\\nprovider_responses type='editorial'")]
+    end
+    PersistEditResp --> Orchestrate["orchestrateSingularityPhase()\\nCognitivePipelineHandler.js:30"]
+    Orchestrate --> TraversalGate{"hasForcingPoints\\n&& !isTraversalContinuation?"}
+    TraversalGate -->|"YES: pause"| PersistPause[("pipelineStatus='awaiting_traversal'")]
+    PersistPause --> MsgPause["postMessage: MAPPER_ARTIFACT_READY\\n+ TURN_FINALIZED"]
+    MsgPause --> PipelineHalted["Pipeline HALTED"]
+    TraversalGate -->|"NO: run singularity"| ImportCS["import ConciergeService"]
+    ImportCS --> BuildConcierge["ConciergeService.buildConciergePrompt()"]
+    BuildConcierge --> ExecSing["executeSingularityStep()\\nStepExecutor.js:2195"]
+    ExecSing --> GenericStep["_executeGenericSingleStep()\\nStepExecutor.js:2024"]
+    GenericStep --> SingFanout["orchestrator.executeParallelFanout()\\nsingularity LLM"]
+    SingFanout --> ParseConcierge["ConciergeService.parseConciergeOutput()"]
+    ParseConcierge --> PersistSingCtx[("persistProviderContexts()\\nsingularity cursor")]
+    PersistSingCtx --> PersistConciergeState[("setConciergePhaseState()\\nmetadata store")]
+    PersistConciergeState --> PersistSingResp[("upsertProviderResponse()\\nprovider_responses type='singularity'")]
+    PersistSingResp --> Finalize["_persistAndFinalize()\\nworkflow-engine.js:442"]
+    Finalize --> PersistFinal[("persistWorkflowResult()\\nturns + sessions (no artifact — Tier 3 ephemeral)")]
+    PersistFinal --> EmitDone["turnEmitter.emitTurnFinalized()"]
+    EmitDone --> MsgDone["postMessage: WORKFLOW_COMPLETE\\n+ TURN_FINALIZED"]`;
+try {
+  const { svg } = await mermaid.render('pipeline-svg', diagram);
+  document.getElementById('mermaid-out').innerHTML = svg;
+} catch(e) {
+  document.getElementById('mermaid-out').textContent = 'Render error: ' + e.message;
+}
+</script>
+<script>
+let scale = 1;
+function zoom(delta) {
+  scale = Math.max(0.3, Math.min(2.5, scale + delta));
+  const svg = document.querySelector('#mermaid-out svg');
+  if (svg) svg.style.transform = 'scale('+scale+')';
+  document.getElementById('zoom-label').textContent = Math.round(scale*100)+'%';
+}
+function resetZoom() {
+  scale = 1;
+  const svg = document.querySelector('#mermaid-out svg');
+  if (svg) svg.style.transform = '';
+  document.getElementById('zoom-label').textContent = '100%';
+}
+</script>

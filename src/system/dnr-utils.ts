@@ -3,29 +3,74 @@
  * - Provides scoped and temporary DNR rule management
  * - Implements provider gates
  * - Ensures minimal blast radius for network modifications
- *
- * Build-phase safe: emitted to dist/core/*
  */
 
+type DNRRule = chrome.declarativeNetRequest.Rule;
+type DNRRuleInput = Omit<DNRRule, 'id'>;
+type MatchedRuleInfo = chrome.declarativeNetRequest.MatchedRuleInfoDebug;
+
+interface TrackedRule {
+  id: number;
+  tabId?: number;
+  providerId?: string;
+  rule: DNRRule;
+  expiresAt?: number | null;
+  isTemporary?: boolean;
+}
+
+type HeaderOperationName = 'set' | 'remove' | 'append';
+
+interface HeaderRuleOptions {
+  tabId?: number;
+  urlFilter: string;
+  resourceTypes?: chrome.declarativeNetRequest.ResourceType[];
+  headerName: string;
+  headerValue?: string;
+  operation?: string;
+  providerId?: string;
+  ruleId?: number;
+  durationMs?: number;
+}
+
+interface PersistedRulesData {
+  scopedRules?: Array<[number, TrackedRule]>;
+  sessionRules?: Array<[number, TrackedRule]>;
+  ruleIdCounter?: number;
+  timestamp?: number;
+}
+
+interface ActiveRulesSnapshot {
+  dynamic: DNRRule[];
+  session: DNRRule[];
+  tracked: {
+    dynamic: TrackedRule[];
+    session: TrackedRule[];
+  };
+}
+
 export class DNRUtils {
-  static scopedRules = new Map();
-  static sessionRules = new Map();
+  static scopedRules: Map<number, TrackedRule> = new Map();
+  static sessionRules: Map<number, TrackedRule> = new Map();
   static ruleIdCounter = 10000; // Start high to avoid conflicts
   static debugEnabled = false;
-  static debugListener;
-  static cleanupInterval;
+  static debugListener: ((info: MatchedRuleInfo) => void) | undefined;
+  static cleanupInterval: ReturnType<typeof setInterval> | undefined;
   static initialized = false;
   static STORAGE_KEY = 'dnr_rules_backup';
 
   // Gated debug logger (off by default)
-  static dbg(...args) {
+  static dbg(...args: unknown[]): void {
     if (this.debugEnabled) console.debug(...args);
   }
 
   /** Register a tab-scoped DNR rule */
-  static async registerTabScoped(tabId, rule, providerId) {
+  static async registerTabScoped(
+    tabId: number,
+    rule: DNRRuleInput,
+    providerId?: string
+  ): Promise<number> {
     const ruleId = this.ruleIdCounter++;
-    const fullRule = {
+    const fullRule: DNRRule = {
       ...rule,
       id: ruleId,
       condition: { ...rule.condition, tabIds: [tabId] },
@@ -58,9 +103,13 @@ export class DNRUtils {
   }
 
   /** Register a temporary DNR rule with auto-expiration */
-  static async registerTemporary(rule, durationMs, providerId) {
+  static async registerTemporary(
+    rule: DNRRuleInput,
+    durationMs: number,
+    providerId?: string
+  ): Promise<number> {
     const ruleId = this.ruleIdCounter++;
-    const fullRule = { ...rule, id: ruleId };
+    const fullRule: DNRRule = { ...rule, id: ruleId };
     const expiresAt = Date.now() + durationMs;
     try {
       await chrome.declarativeNetRequest.updateDynamicRules({
@@ -92,7 +141,7 @@ export class DNRUtils {
   }
 
   /** Clean up expired rules */
-  static async cleanupExpiredRules() {
+  static async cleanupExpiredRules(): Promise<void> {
     const now = Date.now();
 
     // Check expired dynamic rules
@@ -146,19 +195,24 @@ export class DNRUtils {
     providerId,
     ruleId,
     durationMs,
-  }) {
+  }: HeaderRuleOptions): Promise<number> {
     const finalRuleId = ruleId || this.ruleIdCounter++;
-    const isTabScoped = !!tabId;
-    const isTemporary = !!durationMs;
+    const isTabScoped = typeof tabId === 'number';
+    const isTemporary = typeof durationMs === 'number' && durationMs > 0;
 
     const op = operation.toLowerCase();
-    const validOps = ['set', 'remove', 'append'];
-    const finalOp = validOps.includes(op) ? op : 'set';
-    if (!validOps.includes(op)) {
+    const validOps: HeaderOperationName[] = ['set', 'remove', 'append'];
+    const finalOp = (validOps as string[]).includes(op) ? (op as HeaderOperationName) : 'set';
+    if (!(validOps as string[]).includes(op)) {
       console.warn(`DNR: Invalid operation "${op}" for header rule, defaulting to "set"`);
     }
 
-    const rule = {
+    const headerOperation =
+      chrome.declarativeNetRequest.HeaderOperation[
+        finalOp.toUpperCase() as keyof typeof chrome.declarativeNetRequest.HeaderOperation
+      ];
+
+    const rule: DNRRule = {
       id: finalRuleId,
       priority: 1,
       action: {
@@ -166,15 +220,16 @@ export class DNRUtils {
         requestHeaders: [
           {
             header: headerName,
-            operation: chrome.declarativeNetRequest.HeaderOperation[finalOp.toUpperCase()],
+            operation: headerOperation,
             value: headerValue,
           },
         ],
       },
       condition: {
-        urlFilter: urlFilter,
-        resourceTypes: resourceTypes || [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST],
-        ...(isTabScoped && { tabIds: [tabId] }),
+        urlFilter,
+        resourceTypes:
+          resourceTypes || [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST],
+        ...(isTabScoped && { tabIds: [tabId as number] }),
       },
     };
 
@@ -191,7 +246,7 @@ export class DNRUtils {
           tabId,
           providerId,
           rule,
-          expiresAt: isTemporary ? Date.now() + durationMs : null,
+          expiresAt: isTemporary ? Date.now() + (durationMs as number) : null,
           isTemporary,
         });
       } else {
@@ -220,7 +275,7 @@ export class DNRUtils {
           this.removeRule(finalRuleId).catch((err) =>
             console.warn(`Failed to auto-remove expired header rule ${finalRuleId}:`, err)
           );
-        }, durationMs);
+        }, durationMs as number);
       }
 
       return finalRuleId;
@@ -232,33 +287,14 @@ export class DNRUtils {
 
   /** Register a temporary header modification rule with auto-expiration */
   static async registerTemporaryHeaderRule(
-    {
-      tabId,
-      urlFilter,
-      resourceTypes,
-      headerName,
-      headerValue,
-      operation = 'set',
-      providerId,
-      ruleId,
-    },
-    durationMs
-  ) {
-    return this.registerHeaderRule({
-      tabId,
-      urlFilter,
-      resourceTypes,
-      headerName,
-      headerValue,
-      operation,
-      providerId,
-      ruleId,
-      durationMs,
-    });
+    options: Omit<HeaderRuleOptions, 'durationMs'>,
+    durationMs: number
+  ): Promise<number> {
+    return this.registerHeaderRule({ ...options, durationMs });
   }
 
   /** Remove a DNR rule by ID */
-  static async removeRule(ruleId) {
+  static async removeRule(ruleId: number): Promise<void> {
     const scopedRule = this.scopedRules.get(ruleId);
     const sessionRule = this.sessionRules.get(ruleId);
 
@@ -291,7 +327,7 @@ export class DNRUtils {
   }
 
   /** Remove all rules for a specific provider */
-  static async removeProviderRules(providerId) {
+  static async removeProviderRules(providerId: string): Promise<void> {
     const dynamicProviderRules = Array.from(this.scopedRules.values()).filter(
       (rule) => rule.providerId === providerId
     );
@@ -330,11 +366,11 @@ export class DNRUtils {
   }
 
   /** Get all active rules (both dynamic and session) */
-  static async getActiveRules() {
+  static async getActiveRules(): Promise<ActiveRulesSnapshot> {
     try {
       const [dynamicRules, sessionRules] = await Promise.all([
-        chrome.declarativeNetRequest.getDynamicRules().catch(() => []),
-        chrome.declarativeNetRequest.getSessionRules().catch(() => []),
+        chrome.declarativeNetRequest.getDynamicRules().catch((): DNRRule[] => []),
+        chrome.declarativeNetRequest.getSessionRules().catch((): DNRRule[] => []),
       ]);
 
       return {
@@ -359,7 +395,7 @@ export class DNRUtils {
   }
 
   /** Enable debug mode with rule match logging */
-  static enableDebugMode() {
+  static enableDebugMode(): void {
     if (this.debugEnabled) {
       this.dbg('DNR: Debug mode already enabled');
       return;
@@ -370,14 +406,13 @@ export class DNRUtils {
       return;
     }
 
-    this.debugListener = (info) => {
+    this.debugListener = (info: MatchedRuleInfo) => {
       this.dbg('DNR Rule Match:', {
         ruleId: info.rule.ruleId,
         tabId: info.request.tabId,
         url: info.request.url,
         method: info.request.method,
         resourceType: info.request.type,
-        action: info.rule.action,
         timestamp: new Date().toISOString(),
       });
     };
@@ -388,7 +423,7 @@ export class DNRUtils {
   }
 
   /** Disable debug mode */
-  static disableDebugMode() {
+  static disableDebugMode(): void {
     if (!this.debugEnabled) {
       this.dbg('DNR: Debug mode already disabled');
       return;
@@ -404,19 +439,21 @@ export class DNRUtils {
   }
 
   /** Start periodic cleanup of expired rules */
-  static startPeriodicCleanup(intervalMs = 5 * 60 * 1000) {
+  static startPeriodicCleanup(intervalMs: number = 5 * 60 * 1000): void {
     // 5 minutes default
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
     }
 
     this.cleanupInterval = setInterval(() => {
-      this.cleanupExpiredRules().catch((err) => console.warn('Periodic DNR cleanup failed:', err));
+      this.cleanupExpiredRules().catch((err) =>
+        console.warn('Periodic DNR cleanup failed:', err)
+      );
     }, intervalMs);
   }
 
   /** Stop periodic cleanup */
-  static stopPeriodicCleanup() {
+  static stopPeriodicCleanup(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = undefined;
@@ -425,12 +462,12 @@ export class DNRUtils {
   }
 
   /** Initialize DNR utils and restore persisted rules */
-  static async initialize() {
+  static async initialize(): Promise<void> {
     if (this.initialized) return;
 
     try {
       if (chrome.alarms && chrome.alarms.onAlarm) {
-        chrome.alarms.onAlarm.addListener((alarm) => {
+        chrome.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm) => {
           if (alarm.name.startsWith('dnr-expire-')) {
             const ruleId = parseInt(alarm.name.replace('dnr-expire-', ''), 10);
             if (!isNaN(ruleId)) {
@@ -456,9 +493,9 @@ export class DNRUtils {
   }
 
   /** Persist rules to storage for service worker restart recovery */
-  static async persistRules() {
+  static async persistRules(): Promise<void> {
     try {
-      const rulesData = {
+      const rulesData: PersistedRulesData = {
         scopedRules: Array.from(this.scopedRules.entries()),
         sessionRules: Array.from(this.sessionRules.entries()),
         ruleIdCounter: this.ruleIdCounter,
@@ -472,11 +509,10 @@ export class DNRUtils {
   }
 
   /** Restore rules from storage after service worker restart */
-  static async restorePersistedRules() {
+  static async restorePersistedRules(): Promise<void> {
     try {
       const result = await chrome.storage.local.get(this.STORAGE_KEY);
-      /** @type {any} */
-      const rulesData = result[this.STORAGE_KEY];
+      const rulesData = result[this.STORAGE_KEY] as PersistedRulesData | undefined;
 
       if (!rulesData) return;
 
@@ -486,15 +522,17 @@ export class DNRUtils {
       }
 
       // Load stored maps
-      const storedScopedRules = rulesData.scopedRules ? new Map(rulesData.scopedRules) : new Map();
-      const storedSessionRules = rulesData.sessionRules
+      const storedScopedRules: Map<number, TrackedRule> = rulesData.scopedRules
+        ? new Map(rulesData.scopedRules)
+        : new Map();
+      const storedSessionRules: Map<number, TrackedRule> = rulesData.sessionRules
         ? new Map(rulesData.sessionRules)
         : new Map();
 
       // Fetch live rules from Chrome to reconcile
       const [liveDynamic, liveSession] = await Promise.all([
-        chrome.declarativeNetRequest.getDynamicRules().catch(() => []),
-        chrome.declarativeNetRequest.getSessionRules().catch(() => []),
+        chrome.declarativeNetRequest.getDynamicRules().catch((): DNRRule[] => []),
+        chrome.declarativeNetRequest.getSessionRules().catch((): DNRRule[] => []),
       ]);
 
       const liveDynamicIds = new Set(liveDynamic.map((r) => r.id));
@@ -533,7 +571,7 @@ export class DNRUtils {
   }
 
   /** Clear persisted rules from storage */
-  static async clearPersistedRules() {
+  static async clearPersistedRules(): Promise<void> {
     try {
       await chrome.storage.local.remove(this.STORAGE_KEY);
       this.dbg('DNR: Cleared persisted rules');
@@ -545,21 +583,21 @@ export class DNRUtils {
 
 /** Provider DNR Prerequisite Gate */
 export class ProviderDNRGate {
-  static providerRules = new Map();
+  static providerRules: Map<string, number[]> = new Map();
 
   /** Ensure provider prerequisites are met before network operations */
-  static async ensureProviderDnrPrereqs(providerId, tabId) {
+  static async ensureProviderDnrPrereqs(providerId: string, tabId?: number): Promise<void> {
     DNRUtils.dbg(`DNR Gate: Ensuring prerequisites for ${providerId}`);
     const rules = this.getProviderRules(providerId);
     if (rules.length === 0) {
       DNRUtils.dbg(`DNR Gate: No prerequisites needed for ${providerId}`);
       return;
     }
-    const ruleIds = [];
+    const ruleIds: number[] = [];
     try {
       for (const rule of rules) {
-        let ruleId;
-        if (tabId) {
+        let ruleId: number;
+        if (typeof tabId === 'number') {
           // Tab-scoped rule
           ruleId = await DNRUtils.registerTabScoped(tabId, rule, providerId);
         } else {
@@ -573,20 +611,22 @@ export class ProviderDNRGate {
       DNRUtils.dbg(`DNR Gate: Activated ${ruleIds.length} rules for ${providerId}`);
     } catch (error) {
       for (const ruleId of ruleIds) {
-        await DNRUtils.removeRule(ruleId).catch(() => {});
+        await DNRUtils.removeRule(ruleId).catch((err) =>
+          console.warn(`DNR Gate: rollback removeRule ${ruleId} failed:`, err)
+        );
       }
       throw error;
     }
   }
 
   /** Clean up provider rules after workflow completion */
-  static async cleanupProviderRules(providerId) {
+  static async cleanupProviderRules(providerId: string): Promise<void> {
     await DNRUtils.removeProviderRules(providerId);
     this.providerRules.delete(providerId);
   }
 
   /** Get provider-specific DNR rules */
-  static getProviderRules(providerId) {
+  static getProviderRules(providerId: string): DNRRuleInput[] {
     switch (providerId) {
       case 'claude':
         return [

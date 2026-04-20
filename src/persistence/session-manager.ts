@@ -1687,7 +1687,7 @@ export class SessionManager {
     providerId: string,
     record: {
       claimEmbeddings: ArrayBuffer;
-      meta: { dimensions: number; claimCount: number; claimIndex: string[]; timestamp: number };
+      meta: { dimensions: number; claimCount: number; claimIndex: string[]; claimsHash?: string; timestamp: number };
     }
   ): Promise<void> {
     try {

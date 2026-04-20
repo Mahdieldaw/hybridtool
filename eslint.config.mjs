@@ -38,6 +38,7 @@ const commonGlobals = {
   // Events
   Event: 'readonly',
   CustomEvent: 'readonly',
+  MessageEvent: 'readonly',
   MouseEvent: 'readonly',
   KeyboardEvent: 'readonly',
   PointerEvent: 'readonly',
@@ -47,6 +48,7 @@ const commonGlobals = {
   HTMLDivElement: 'readonly',
   HTMLElement: 'readonly',
   HTMLCanvasElement: 'readonly',
+  HTMLIFrameElement: 'readonly',
   HTMLInputElement: 'readonly',
   HTMLTextAreaElement: 'readonly',
   HTMLImageElement: 'readonly',
@@ -183,7 +185,10 @@ export default [
       'react-hooks/exhaustive-deps': 'warn',
 
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
     },
 
     settings: {

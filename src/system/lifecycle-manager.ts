@@ -6,24 +6,27 @@
  */
 
 export class LifecycleManager {
+  private lastActivity: number;
+  private readonly INACTIVITY_THRESHOLD: number;
+
   constructor() {
     this.lastActivity = Date.now();
     this.INACTIVITY_THRESHOLD = 20 * 60 * 1000; // 20 minutes
   }
 
-  recordActivity() {
+  recordActivity(): void {
     this.lastActivity = Date.now();
   }
 
-  isIdle() {
+  isIdle(): boolean {
     return Date.now() - this.lastActivity > this.INACTIVITY_THRESHOLD;
   }
 
-  getIdleTime() {
+  getIdleTime(): number {
     return Date.now() - this.lastActivity;
   }
 
-  keepalive(enable) {
+  keepalive(enable: boolean): void {
     if (enable) {
       this.recordActivity();
     }
