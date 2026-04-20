@@ -84,14 +84,6 @@ export function RoutingCard({
       ? claimObj.supportRatio
       : null;
 
-  const gateForClaim = useMemo(() => {
-    return (
-      safeArr<any>(artifact?.surveyGates).find((g: any) =>
-        Array.isArray(g?.affectedClaims) ? g.affectedClaims.map(String).includes(claimId) : false
-      ) ?? null
-    );
-  }, [artifact, claimId]);
-
   if (!routing || !claimId) return null;
 
   return (
@@ -204,26 +196,7 @@ export function RoutingCard({
               value={fmtInt(safeArr(isolate?.supporters).length)}
               title="Number of distinct models backing this claim."
             />
-            <StatRow
-              label="Misleadingness"
-              value={gateForClaim ? 'vulnerable' : 'stands'}
-              color={gateForClaim ? 'text-amber-400' : 'text-emerald-400'}
-              title="Whether a survey gate was generated for this claim (vulnerable = needs user validation)."
-            />
-            <StatRow
-              label="Gate"
-              value={gateForClaim ? String(gateForClaim.id ?? 'gate') : '—'}
-              title="Survey gate ID assigned to this claim, if any."
-            />
           </div>
-          {gateForClaim && (
-            <div
-              className="text-[10px] text-text-muted truncate"
-              title={String(gateForClaim.question ?? '')}
-            >
-              {String(gateForClaim.question ?? '')}
-            </div>
-          )}
         </div>
       )}
 

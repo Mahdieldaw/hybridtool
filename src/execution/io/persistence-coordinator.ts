@@ -82,12 +82,24 @@ export class PersistenceCoordinator {
         if (step.type === 'mapping') {
           const providerId = result?.providerId || (step?.payload?.mappingProvider as string);
           if (!providerId) return;
+          let persistedArtifact = result?.mapping?.artifact;
+          // Strip derived/runtime-only fields before persisting.
+          // - geometry: pure L1 math on embeddings, rebuilt on regen
+          // - index: runtime Maps, can't survive structuredClone; rebuilt via deriveArtifactIndex
+          // - substrateSummary / substrate: L1 math on embeddings, rebuilt on regen
+          // - corpus: rebuilt from batch responses via shadow extraction on regen
+          // - semantic.{claims,edges,narrative}: re-parsed from mapping response text on regen
+          if (persistedArtifact && typeof persistedArtifact === 'object') {
+            const { geometry, index, substrateSummary, substrate, corpus, semantic, ...rest } =
+              persistedArtifact as any;
+            persistedArtifact = rest;
+          }
           out.mappingOutputs![providerId] = {
             providerId,
             text: result?.text || '',
             status: result?.status || 'completed',
             meta: result?.meta || {},
-            ...(result?.mapping?.artifact ? { artifact: result.mapping.artifact } : {}),
+            ...(persistedArtifact ? { artifact: persistedArtifact } : {}),
           };
           return;
         }

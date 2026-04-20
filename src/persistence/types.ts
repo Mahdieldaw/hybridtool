@@ -127,10 +127,6 @@ export interface ProviderResponseRecord {
   metadata?: Record<string, any>;
   /** @deprecated Ephemeral Tier 3 artifacts are no longer persisted here. */
   artifact?: any;
-  /** Tier 2: Per-provider mutable survey gates */
-  surveyGates?: any[];
-  /** Tier 2: Per-provider mutable survey rationale */
-  surveyRationale?: string;
   tokenUsage?: {
     promptTokens: number;
     completionTokens: number;

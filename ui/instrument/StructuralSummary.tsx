@@ -28,15 +28,15 @@ export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
   const lines = useMemo(() => {
     const result: SummaryLine[] = [];
 
-    // ═══════════════════════════════════════════════════════════════════
+    // ==================================================================═
     // LINE 1: PRIMARY SHAPE + RESIDUAL (if meaningful)
-    // ═══════════════════════════════════════════════════════════════════
+    // ==================================================================═
     const shapeLine = buildShapeLine(analysis, layers);
     if (shapeLine) result.push(shapeLine);
 
-    // ═══════════════════════════════════════════════════════════════════
+    // ==================================================================═
     // LINE 2: SECONDARY PATTERN — the most notable structural nuance
-    // ═══════════════════════════════════════════════════════════════════
+    // ==================================================================═
     const patternLine = buildPatternLine(problemStructure?.patterns);
     if (patternLine) result.push(patternLine);
 
@@ -63,9 +63,9 @@ export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================═
 // Helper: describe a single layer using agreed templates
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================═
 
 function describeLayer(
   layer: StructureLayer,
@@ -209,9 +209,9 @@ function describeLayer(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================═
 // SHAPE LINE — constructs primary description, optionally appends residual
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================═
 
 function buildShapeLine(
   analysis: StructuralAnalysis,
@@ -240,9 +240,9 @@ function buildShapeLine(
   };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================═
 // PATTERN LINE — secondary patterns only (keystone, chain, conditional)
-// ═══════════════════════════════════════════════════════════════════════════
+// ==========================================================================═
 
 const PATTERN_PRIORITY: Record<string, number> = {
   keystone: 0,

@@ -156,7 +156,6 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
 
   const substrate = artifact?.substrate;
   const paragraphProjection = artifact?.paragraphProjection;
-  const paragraphClustering = artifact?.paragraphClustering;
 
   const hasAnyGeo =
     dual.geoConflicts !== null ||
@@ -228,15 +227,6 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
               nodes · {substrate.meta.embeddingBackend}
             </div>
           )}
-          {paragraphClustering && (
-            <div>
-              <span className="text-text-secondary">Clustering:</span>{' '}
-              {paragraphClustering.meta.totalClusters} clusters ·{' '}
-              {paragraphClustering.meta.singletonCount} singletons ·{' '}
-              {paragraphClustering.meta.uncertainCount} uncertain
-            </div>
-          )}
-
           {/* Dual-signal instrumentation */}
           {hasAnyGeo && (
             <div className="mt-4 pt-3 border-t border-border-subtle space-y-3 min-w-0 overflow-hidden">

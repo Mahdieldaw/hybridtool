@@ -81,7 +81,6 @@ export function NarrativePanel({
               text={stringifyForDebug(artifact)}
               label="Copy mapper artifact JSON"
               variant="icon"
-              title="Copy artifact to clipboard"
             />
           )}
 

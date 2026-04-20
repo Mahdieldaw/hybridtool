@@ -668,15 +668,23 @@ class BusControllerImpl {
     if (promises.length === 0) return null;
     return new Promise((resolve) => {
       let settled = 0;
-      promises.forEach(async (p) => {
-        const value = await p;
-        if (utils.is.nil(value)) {
-          settled += 1;
-          if (settled === promises.length) resolve(null);
-        } else {
-          resolve(value);
-        }
-      });
+      for (const p of promises) {
+        Promise.resolve(p).then(
+          (value) => {
+            if (utils.is.nil(value)) {
+              settled += 1;
+              if (settled === promises.length) resolve(null);
+            } else {
+              resolve(value);
+            }
+          },
+          (err) => {
+            console.error('[BusController._pick] promise rejected:', err);
+            settled += 1;
+            if (settled === promises.length) resolve(null);
+          }
+        );
+      }
     });
   }
 }

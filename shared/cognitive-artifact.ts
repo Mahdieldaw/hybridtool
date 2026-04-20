@@ -17,7 +17,6 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
   }
 
   const result: any = {
-    paragraphClustering: mapper?.paragraphClustering ?? undefined,
     // CorpusTree (persisted immutable input) and CorpusIndex (runtime-only, never serialized).
     // Both forward from the mapper artifact where assembleMapperArtifact built them.
     corpus: mapper?.corpus ?? undefined,
@@ -90,7 +89,6 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
     'turn',
     'timestamp',
     // → special / renamed / nested
-    'paragraphClustering',
     'shadow',
     'substrate',
     'id',

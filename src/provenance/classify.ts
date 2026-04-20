@@ -25,7 +25,7 @@ import type {
   UnclaimedParagraphEntry,
 } from '../../shared/types';
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ------------------------------------------------------------------------------------------------------------───
 
 function nowMs(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -33,7 +33,7 @@ function nowMs(): number {
     : Date.now();
 }
 
-// ── Input ─────────────────────────────────────────────────────────────────
+// ── Input ------------------------------------------------------------------------------------------------------------─────
 
 export interface ClassifyPhaseInput {
   shadowStatements: Array<{ id: string; modelIndex?: number }>;
@@ -50,7 +50,7 @@ export interface ClassifyPhaseInput {
   canonicalStatementIds: Map<string, string[]>;
 }
 
-// ── Engine ────────────────────────────────────────────────────────────────
+// ── Engine ------------------------------------------------------------------------------------------------------------────
 
 export function computeStatementClassification(
   input: ClassifyPhaseInput
@@ -72,7 +72,7 @@ export function computeStatementClassification(
   // ── 1. Claimed set from Phase 1 ownershipMap (no reconstruction) ─────
   const claimedStmts = ownershipMap;
 
-  // ── 2. Build passage membership lookup ────────────────────────────────
+  // ── 2. Build passage membership lookup ------------------------------------------------------──
   const paraByKey = new Map<string, ShadowParagraph>();
   for (const para of shadowParagraphs) {
     paraByKey.set(`${para.modelIndex}:${para.paragraphIndex}`, para);
@@ -107,7 +107,7 @@ export function computeStatementClassification(
     }
   }
 
-  // ── 3. Populate claimed entries ───────────────────────────────────────
+  // ── 3. Populate claimed entries ------------------------------------------------------─────────
   const claimed: Record<string, ClaimedStatementEntry> = {};
   for (const [stmtId, claimIdSet] of claimedStmts) {
     claimed[stmtId] = {
@@ -117,7 +117,7 @@ export function computeStatementClassification(
     };
   }
 
-  // ── 4. Identify paragraphs with unclaimed statements ──────────────────
+  // ── 4. Identify paragraphs with unclaimed statements ------------------────────
   const allStmtIds = new Set(shadowStatements.map((s) => s.id));
   let mixedParagraphCount = 0;
   let fullyUnclaimedParagraphCount = 0;
@@ -152,7 +152,7 @@ export function computeStatementClassification(
     }
   }
 
-  // ── 5. Compute per-paragraph claim similarities ───────────────────────
+  // ── 5. Compute per-paragraph claim similarities ------------------------------------───
   const claimIds = enrichedClaims.map((c) => c.id);
   const claimEmbList: Array<{ id: string; emb: Float32Array }> = [];
   for (const id of claimIds) {
@@ -207,7 +207,7 @@ export function computeStatementClassification(
     });
   }
 
-  // ── 6. Group by nearestClaimId ────────────────────────────────────────
+  // ── 6. Group by nearestClaimId ------------------------------------------------------------------------
   const groupMap = new Map<string, ScoredParagraph[]>();
   for (const sp of scoredParagraphs) {
     if (!groupMap.has(sp.bestClaimId)) groupMap.set(sp.bestClaimId, []);
@@ -246,7 +246,7 @@ export function computeStatementClassification(
     });
   }
 
-  // ── 7. Summary ────────────────────────────────────────────────────────
+  // ── 7. Summary ------------------------------------------------------------------------------------------──────
   const totalStatements = shadowStatements.length;
   const claimedCount = Object.keys(claimed).length;
   let unclaimedCount = 0;

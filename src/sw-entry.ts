@@ -174,7 +174,9 @@ async function handleStartup(reason: string): Promise<void> {
 chrome.runtime.onStartup.addListener(() => handleStartup('startup'));
 
 chrome.runtime.onInstalled.addListener((details) => {
-  handleStartup(`installed: ${details.reason}`);
+  handleStartup(`installed: ${details.reason}`).catch((err) =>
+    console.error('[onInstalled] handleStartup failed:', err)
+  );
 });
 
 // ============================================================================
@@ -751,18 +753,23 @@ async function initializeGlobalServices(): Promise<GlobalServices> {
 
 async function initializeGlobalInfrastructure(): Promise<void> {
   console.log('[SW] Initializing global infrastructure...');
-  try {
-    await NetRulesManager.init();
-    CSPController.init();
-    await UserAgentController.init();
-    await ArkoseController.init();
-    await DNRUtils.initialize();
-    await OffscreenController.init();
-    await BusController.init();
-    (self as unknown as Record<string, unknown>)['bus'] = BusController;
-  } catch (e) {
-    console.error('[SW] Infra init failed', e);
-  }
+
+  const run = async (name: string, fn: () => Promise<void> | void) => {
+    try {
+      await fn();
+    } catch (e) {
+      console.error(`[SW] Infra init failed — ${name}:`, e);
+    }
+  };
+
+  await run('NetRulesManager', () => NetRulesManager.init());
+  await run('CSPController', () => CSPController.init());
+  await run('UserAgentController', () => UserAgentController.init());
+  await run('ArkoseController', () => ArkoseController.init());
+  await run('DNRUtils', () => DNRUtils.initialize());
+  await run('OffscreenController', () => OffscreenController.init());
+  await run('BusController', () => BusController.init());
+  (self as unknown as Record<string, unknown>)['bus'] = BusController;
 }
 
 // ============================================================================
@@ -1443,7 +1450,12 @@ async function handleUnifiedMessage(
 
         try {
           const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
-          const session = await sm.getOrCreateSession(sessionId!);
+          if (!sessionId) {
+            console.warn('[GET_SESSION] sessionId is undefined — cannot retrieve session');
+            sendResponse({ success: false, error: 'sessionId missing' });
+            return true;
+          }
+          const session = await sm.getOrCreateSession(sessionId);
           persistenceMonitor.endOperation(operationId, {
             sessionFound: !!session,
           });

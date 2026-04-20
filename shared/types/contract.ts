@@ -698,7 +698,6 @@ export interface MapperArtifact {
   blastSurface?: BlastSurfaceResult | null;
 
   paragraphProjection?: ParagraphProjectionMeta;
-  paragraphClustering?: any;
   substrate?: any;
   // Editorial AST lives on CognitiveArtifact (set post-build in StepExecutor / rebuild path).
   // Persisted as a responseType:"editorial" provider response; re-parsed on artifact rebuild.

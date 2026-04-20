@@ -184,13 +184,8 @@ export function formatSessionForMarkdown(fullSession: {
       if (targetMapPid && mapResponses[targetMapPid]) {
         const resps = mapResponses[targetMapPid];
         const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
-        if (latest && (latest.text || (latest as any)?.meta?.rawMappingText)) {
-          const meta = (latest as any).meta || {};
-          const fromMeta = typeof meta.rawMappingText === 'string' ? meta.rawMappingText : '';
-          const fromText = typeof latest.text === 'string' ? latest.text : '';
-          const rawText = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
-
-          const parsed = parseSemanticMapperOutput(rawText);
+        if (latest?.text) {
+          const parsed = parseSemanticMapperOutput(latest.text);
           const narrative = parsed.narrative || '';
 
           decisionMap = {
@@ -925,7 +920,6 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       return ser({
         claimDensity: artifact?.claimDensity ?? null,
         passageRouting: artifact?.passageRouting ?? null,
-        surveyGates: artifact?.surveyGates ?? null,
       });
     case 'stmt-classification': {
       const sc = artifact?.statementClassification ?? null;

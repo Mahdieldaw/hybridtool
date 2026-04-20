@@ -3,7 +3,6 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   isDecisionMapOpenAtom,
   toastAtom,
-  providerContextsAtom,
   currentSessionIdAtom,
 } from '../state';
 import { useRoundActions } from '../hooks/chat/useRoundActions';
@@ -378,8 +377,6 @@ export const DecisionMapSheet = React.memo(() => {
   const evidenceRows = useEvidenceRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
   const paragraphRows = useParagraphRows(mappingArtifactWithCitations, instrumentSelectedClaimId);
 
-  const providerContexts = useAtomValue(providerContextsAtom);
-
   const rawMappingText = useMemo(() => {
     const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : null;
     const mappingResponses = aiTurnSafe?.mappingResponses;
@@ -390,9 +387,6 @@ export const DecisionMapSheet = React.memo(() => {
       const t = typeof last?.text === 'string' ? last.text : typeof last === 'string' ? last : '';
       if (typeof t === 'string' && t.trim()) return t;
     }
-    const ctx = pid ? providerContexts?.[pid] : null;
-    const v = ctx?.rawMappingText;
-    if (typeof v === 'string' && v.trim()) return v;
     const narrative = (mappingArtifact as any)?.semantic?.narrative;
     if (typeof narrative === 'string') return narrative;
     if (narrative && typeof narrative === 'object') {
@@ -403,7 +397,7 @@ export const DecisionMapSheet = React.memo(() => {
       }
     }
     return '';
-  }, [activeMappingPid, providerContexts, mappingArtifact, aiTurnSafe]);
+  }, [activeMappingPid, mappingArtifact, aiTurnSafe]);
 
   const parsedSemanticFromText = useMemo(() => {
     const raw = String(rawMappingText || '').trim();

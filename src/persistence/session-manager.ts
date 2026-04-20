@@ -74,8 +74,6 @@ type ExistingProviderResponse = {
   status?: unknown;
   meta?: Record<string, unknown>;
   artifact?: unknown;
-  surveyGates?: unknown[];
-  surveyRationale?: string;
   createdAt?: number;
   updatedAt?: number;
 };
@@ -900,18 +898,7 @@ export class SessionManager {
         existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
       const createdAtKeep = existing?.createdAt || now;
 
-      // Phase 2: Extract survey gates/rationale from artifact (new home)
-      // Fall back to existing record's gates — StepExecutor may have persisted
-      // them directly before this bulk save runs.
       const outputAny = output as any;
-      const artifactObj = outputAny?.artifact;
-      const surveyGates = Array.isArray(artifactObj?.surveyGates)
-        ? artifactObj.surveyGates
-        : Array.isArray(existing?.surveyGates)
-          ? existing.surveyGates
-          : undefined;
-      const surveyRationale =
-        artifactObj?.surveyRationale ?? existing?.surveyRationale ?? undefined;
 
       recordsToSave.push({
         id: respId,
@@ -923,9 +910,6 @@ export class SessionManager {
         text: outputAny?.text || existing?.text || '',
         status: normalizeStatus(outputAny?.status ?? existing?.status),
         meta: this._safeMeta(outputAny?.meta ?? existing?.meta ?? {}),
-        // Tier 2: survey gates live on the provider response
-        ...(surveyGates ? { surveyGates } : {}),
-        ...(surveyRationale != null ? { surveyRationale } : {}),
         // Tier 3: artifact is ephemeral — NOT persisted.
         createdAt: createdAtKeep,
         updatedAt: now,
@@ -1018,12 +1002,6 @@ export class SessionManager {
 
     const artifact = value['artifact'];
     if (artifact !== undefined) out.artifact = artifact;
-
-    const surveyGates = value['surveyGates'];
-    if (Array.isArray(surveyGates)) out.surveyGates = surveyGates;
-
-    const surveyRationale = value['surveyRationale'];
-    if (isString(surveyRationale)) out.surveyRationale = surveyRationale;
 
     const createdAt = value['createdAt'];
     if (isNumber(createdAt)) out.createdAt = createdAt;

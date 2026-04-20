@@ -65,8 +65,6 @@ export function parseSessionTurns(fullSession: any): {
           createdAt,
           updatedAt,
           meta: resp?.meta || {},
-          ...(Array.isArray(resp?.surveyGates) ? { surveyGates: resp.surveyGates } : {}),
-          ...(resp?.surveyRationale != null ? { surveyRationale: resp.surveyRationale } : {}),
         } as ProviderResponse;
       };
 

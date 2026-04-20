@@ -221,7 +221,7 @@ export class DNRUtils {
           {
             header: headerName,
             operation: headerOperation,
-            value: headerValue,
+            ...(headerOperation !== 'remove' && { value: headerValue }),
           },
         ],
       },

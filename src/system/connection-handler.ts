@@ -354,9 +354,9 @@ export class ConnectionHandler {
 
       if (msg['type'] === 'KEEPALIVE_PING') {
         try {
-          this.port!.postMessage({ type: 'KEEPALIVE_PONG', timestamp: Date.now() });
-        } catch {
-          // port closed
+          this.port?.postMessage({ type: 'KEEPALIVE_PONG', timestamp: Date.now() });
+        } catch (err) {
+          console.warn('[ConnectionHandler] KEEPALIVE_PONG failed — port likely closed:', err);
         }
         return;
       }
@@ -383,9 +383,9 @@ export class ConnectionHandler {
             break;
           case 'reconnect':
             try {
-              this.port!.postMessage({ type: 'reconnect_ack', serverTime: Date.now() });
-            } catch {
-              // port closed
+              this.port?.postMessage({ type: 'reconnect_ack', serverTime: Date.now() });
+            } catch (err) {
+              console.warn('[ConnectionHandler] reconnect_ack failed — port likely closed:', err);
             }
             break;
           case 'abort':

@@ -206,12 +206,9 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
   const {
     embeddingResult,
     statementEmbeddingResult,
-    geometryParagraphEmbeddings,
     queryEmbedding,
     queryRelevance,
     substrateSummary,
-    substrateDegenerate,
-    substrateDegenerateReason,
     preSemanticInterpretation,
     substrate,
   } = geometryResults;
@@ -307,7 +304,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
             let mapperArtifact = null;
             let cognitiveArtifact = null;
             const rawText = finalResult?.text || '';
-            let structuralValidation = null;
 
             if (finalResult?.text) {
               // 4. Parse (New Parser) — no geometry dependency
@@ -318,11 +314,11 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                 // (geometry is already done, but kept here for consistency)
 
                 try {
-                  // ── PRE-SURVEY PIPELINE (shared with regenerate flow) ──
-                  const { computePreSurveyPipeline, assembleFromPreSurvey } =
+                  // ── UNIFIED ARTIFACT PIPELINE (single-pass) ──────────────────
+                  const { executeFullArtifactPipeline } =
                     await import('../deterministic-pipeline.js');
 
-                  const preSurvey = await computePreSurveyPipeline({
+                  const pipelineResult = await executeFullArtifactPipeline({
                     parsedMappingResult: {
                       ...parseResult.output,
                       narrative: parseResult.narrative || '',
@@ -335,77 +331,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     preBuiltSubstrate: substrate,
                     preBuiltPreSemantic: preSemanticInterpretation,
                     preBuiltQueryRelevance: queryRelevance,
-                    modelCount: citationOrder.length,
-                  });
-
-                  const { enrichedClaims, claimRouting, claimEmbeddings, claimDensityScores } =
-                    preSurvey;
-
-                  // ── PERSIST CLAIM EMBEDDINGS (executeMappingPhase-only) ──────────
-                  try {
-                    if (
-                      claimEmbeddings &&
-                      claimEmbeddings.size > 0 &&
-                      options.sessionManager &&
-                      context.canonicalAiTurnId
-                    ) {
-                      const { packEmbeddingMap } =
-                        await import('../../persistence/embedding-codec');
-                      let dims = 0;
-                      for (const v of claimEmbeddings.values()) {
-                        const n = v?.length;
-                        if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
-                          dims = n;
-                          break;
-                        }
-                      }
-                      if (dims > 0) {
-                        const packedClaims = packEmbeddingMap(claimEmbeddings, dims);
-                        options.sessionManager
-                          .persistClaimEmbeddings(
-                            context.canonicalAiTurnId,
-                            payload.mappingProvider,
-                            {
-                              claimEmbeddings: packedClaims.buffer,
-                              meta: {
-                                dimensions: dims,
-                                claimCount: packedClaims.index.length,
-                                claimIndex: packedClaims.index,
-                                timestamp: Date.now(),
-                              },
-                            }
-                          )
-                          .catch((err) =>
-                            console.warn(
-                              '[executeMappingPhase] Claim embedding persistence failed:',
-                              err
-                            )
-                          );
-                      } else {
-                        console.warn(
-                          `[executeMappingPhase] Claim embedding persistence skipped: invalid dimensions (aiTurnId=${context.canonicalAiTurnId}, provider=${payload.mappingProvider})`
-                        );
-                      }
-                    }
-                  } catch (err) {
-                    console.warn(
-                      '[executeMappingPhase] Claim embedding persistence setup failed:',
-                      err
-                    );
-                  }
-
-                  const semanticContinuationMeta = (() => {
-                    try {
-                      const meta = finalResult?.meta;
-                      if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
-                        return { ...meta };
-                      }
-                    } catch (_) {}
-                    return null;
-                  })();
-
-                  // ── POST-SEMANTIC ASSEMBLY ────────────────────────────────
-                  const assemblyResult = await assembleFromPreSurvey(preSurvey, {
+                    citationSourceOrder: null,
                     queryText: payload.originalPrompt,
                     modelCount: citationOrder.length,
                     turn: context.turn || 0,
@@ -417,15 +343,24 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       embeddingResult?.semanticDensityScores?.size > 0
                         ? Object.fromEntries(embeddingResult.semanticDensityScores)
                         : undefined,
-                    claimSemanticDensity:
-                      claimDensityScores?.size > 0
-                        ? Object.fromEntries(claimDensityScores)
-                        : undefined,
                   });
 
-                  mapperArtifact = assemblyResult.mapperArtifact;
-                  cognitiveArtifact = assemblyResult.cognitiveArtifact;
-                  const { cachedStructuralAnalysis } = assemblyResult;
+                  mapperArtifact = pipelineResult.mapperArtifact;
+                  cognitiveArtifact = pipelineResult.cognitiveArtifact;
+                  const enrichedClaims = pipelineResult.enrichedClaims;
+                  const preSurvey = pipelineResult;
+
+                  const semanticContinuationMeta = (() => {
+                    try {
+                      const meta = finalResult?.meta;
+                      if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+                        return { ...meta };
+                      }
+                    } catch (err) {
+                      console.warn('[executeMappingPhase] Failed to parse semantic continuation meta:', err);
+                    }
+                    return null;
+                  })();
 
                   // ── POST-ASSEMBLY MUTATIONS (executeMappingPhase-only) ────────────
                   if (paragraphResult?.meta)
@@ -706,9 +641,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               await import('../../../shared/provider-config');
             const citationSourceOrder = buildCitationSourceOrder(citationOrder);
 
-            if (mapperArtifact && typeof mapperArtifact === 'object') {
-              mapperArtifact.citationSourceOrder = citationSourceOrder;
-            }
             if (cognitiveArtifact && typeof cognitiveArtifact === 'object') {
               cognitiveArtifact.citationSourceOrder = citationSourceOrder;
             }
@@ -726,8 +658,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               meta: {
                 ...providerThreadMeta,
                 citationSourceOrder,
-                rawMappingText: rawText,
-                semanticMapperPrompt: mappingPrompt,
               },
             };
 

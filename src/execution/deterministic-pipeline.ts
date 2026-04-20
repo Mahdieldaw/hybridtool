@@ -81,23 +81,6 @@ interface DerivedFields {
   statementClassification: StatementClassificationResult | null;
 }
 
-interface PreSurveyResult extends DerivedFields {
-  parsedClaims: MapperClaim[];
-  parsedEdges: Edge[];
-  parsedNarrative: string;
-  enrichedClaims: EnrichedClaim[];
-  claimEmbeddings: Map<string, Float32Array> | null;
-  shadowStatements: ShadowStatement[];
-  shadowParagraphs: ShadowParagraph[];
-  substrate: GeometricSubstrate | null;
-  preSemantic: SubstrateInterpretation | null;
-  regions: MeasuredRegion[];
-  claimRouting: PassageRoutingResult | null;
-  claimDensityScores: ClaimDensityResult | null;
-  derived: DerivedFields;
-  mapperClaimsForProvenance: MapperClaim[];
-  citationSourceOrder: Record<number, string> | null;
-}
 
 /**
  * Compute all deterministic derived fields from embeddings + semantic output.
@@ -707,7 +690,307 @@ export async function computePreSurveyPipeline({
 }
 
 /**
+ * Unified pipeline: compute all derived fields and assemble artifacts in a single pass.
+ * No mid-pipeline claim embedding persistence — claim embeddings flow through
+ * the system naturally, computed once and returned for optional downstream use.
+ */
+export async function executeFullArtifactPipeline({
+  // ═══ Mapping text (required unless parsedMappingResult provided) ═══
+  mappingText = null,
+  parsedMappingResult = null,
+
+  // ═══ Shadow data ═══
+  shadowStatements: inputShadowStatements = null,
+  shadowParagraphs: inputShadowParagraphs = null,
+  batchSources = [],
+
+  // ═══ Geometry embeddings (required) ═══
+  statementEmbeddings,
+  paragraphEmbeddings,
+  queryEmbedding = null,
+
+  // ═══ Raw geo record (for basin inversion, density model, metadata) ═══
+  geoRecord = null,
+
+  // ═══ Claim embeddings (pre-computed or null → generate) ═══
+  claimEmbeddings: inputClaimEmbeddings = null,
+
+  // ═══ Pre-built geometry (skip-if-provided, avoids redundant substrate build) ═══
+  preBuiltSubstrate = null,
+  preBuiltPreSemantic = null,
+  preBuiltQueryRelevance = null,
+
+  // ═══ Citation ordering and assembly context ═══
+  citationSourceOrder = null,
+  queryText = '',
+  modelCount = 1,
+  turn = undefined,
+
+  // ═══ Semantic density (optional, from embeddings) ═══
+  statementSemanticDensity = undefined,
+  paragraphSemanticDensity = undefined,
+  claimSemanticDensity = undefined,
+  querySemanticDensity = undefined,
+}: {
+  mappingText?: string | null;
+  parsedMappingResult?: Record<string, unknown> | null;
+  shadowStatements?: ShadowStatement[] | null;
+  shadowParagraphs?: ShadowParagraph[] | null;
+  batchSources?: Array<{ modelIndex: number; content: string }>;
+  statementEmbeddings: Map<string, Float32Array>;
+  paragraphEmbeddings: Map<string, Float32Array>;
+  queryEmbedding?: Float32Array | null;
+  geoRecord?: Record<string, unknown> | null;
+  claimEmbeddings?: Map<string, Float32Array> | null;
+  preBuiltSubstrate?: GeometricSubstrate | null;
+  preBuiltPreSemantic?: SubstrateInterpretation | null;
+  preBuiltQueryRelevance?: QueryRelevanceResult | null;
+  citationSourceOrder?: Record<number, string> | null;
+  queryText?: string;
+  modelCount?: number;
+  turn?: number | undefined;
+  statementSemanticDensity?: unknown;
+  paragraphSemanticDensity?: unknown;
+  claimSemanticDensity?: unknown;
+  querySemanticDensity?: unknown;
+}): Promise<Record<string, unknown>> {
+  const t0 = Date.now();
+
+  // ── 1. Parse mapping text ──────────────────────────────────────
+  let parsedClaims, parsedEdges, parsedNarrative;
+
+  if (parsedMappingResult) {
+    parsedClaims = Array.isArray(parsedMappingResult.claims) ? parsedMappingResult.claims : [];
+    parsedEdges = Array.isArray(parsedMappingResult.edges) ? parsedMappingResult.edges : [];
+    parsedNarrative = String(parsedMappingResult.narrative || '').trim();
+  } else {
+    if (!mappingText) {
+      throw new Error('Either mappingText or parsedMappingResult is required');
+    }
+    const { parseSemanticMapperOutput } = await import('../provenance/semantic-mapper');
+    const parseResult = parseSemanticMapperOutput(mappingText);
+    if (!parseResult?.success || !parseResult?.output) {
+      throw new Error('Failed to parse mapping response text into claims/edges');
+    }
+    parsedClaims = Array.isArray(parseResult.output.claims) ? parseResult.output.claims : [];
+    parsedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
+    parsedNarrative = String(parseResult.narrative || '').trim();
+  }
+
+  if (parsedClaims.length === 0) {
+    throw new Error('Parsed 0 claims from mapping text');
+  }
+
+  console.log(
+    `[executeFullArtifactPipeline] Parsed ${parsedClaims.length} claims, ${parsedEdges.length} edges`
+  );
+
+  // ── 3. Shadow reconstruction ──────────────────────────────────────
+  let shadowStatements = inputShadowStatements;
+  let shadowParagraphs = inputShadowParagraphs;
+
+  if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+    if (!Array.isArray(batchSources) || batchSources.length === 0) {
+      throw new Error('No shadow statements and no batch sources provided for reconstruction');
+    }
+    const { extractShadowStatements, projectParagraphs } = await import('../shadow');
+    const shadowResult = extractShadowStatements(batchSources);
+    const paragraphResult = projectParagraphs(shadowResult.statements);
+    shadowStatements = shadowResult.statements;
+    shadowParagraphs = paragraphResult.paragraphs;
+  }
+
+  if (!Array.isArray(shadowStatements) || shadowStatements.length === 0) {
+    throw new Error('No shadow statements available after reconstruction');
+  }
+
+  if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
+    const { projectParagraphs } = await import('../shadow');
+    shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
+  }
+
+  // ── 4. Build geometry ──────────────────────────────────────────
+  if (!statementEmbeddings || statementEmbeddings.size === 0) {
+    throw new Error('Statement embeddings are required');
+  }
+  if (!paragraphEmbeddings || paragraphEmbeddings.size === 0) {
+    throw new Error('Paragraph embeddings are required');
+  }
+
+  let substrate, preSemantic, queryRelevance, regions;
+
+  if (preBuiltSubstrate) {
+    substrate = preBuiltSubstrate;
+    preSemantic = preBuiltPreSemantic;
+    queryRelevance = preBuiltQueryRelevance;
+    regions = preSemantic?.regions ?? [];
+  } else {
+    const { buildGeometricSubstrate } = await import('../geometry/measure');
+    const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
+
+    const geoMeta = (geoRecord && typeof geoRecord === 'object' && 'meta' in geoRecord) ? (geoRecord as Record<string, unknown>).meta : null;
+    const embeddingBackend = (geoMeta && typeof geoMeta === 'object' && 'embeddingBackend' in geoMeta) ? (geoMeta as Record<string, unknown>).embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm' : 'wasm';
+    substrate = buildGeometricSubstrate(
+      shadowParagraphs,
+      paragraphEmbeddings,
+      embeddingBackend
+    );
+
+    preSemantic = buildPreSemanticInterpretation(
+      substrate,
+      paragraphEmbeddings
+    );
+
+    regions = preSemantic?.regions ?? [];
+
+    queryRelevance = null;
+    try {
+      if (queryEmbedding) {
+        const { computeQueryRelevance: _computeQR } = await import('../geometry/annotate');
+        queryRelevance = _computeQR({
+          queryEmbedding,
+          statements: shadowStatements,
+          statementEmbeddings,
+          paragraphEmbeddings,
+          paragraphs: shadowParagraphs,
+        });
+      }
+    } catch (err) {
+      console.warn(
+        '[executeFullArtifactPipeline] Query relevance failed:',
+        getErrorMessage(err)
+      );
+    }
+  }
+
+  try {
+    const { enrichStatementsWithGeometry } = await import('../geometry/annotate');
+    enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, preSemantic);
+  } catch (err) {
+    console.warn(
+      '[executeFullArtifactPipeline] enrichStatementsWithGeometry failed (non-fatal):',
+      err
+    );
+  }
+
+  // ── 6. Phase 1 bootstrap — claim embeddings + canonical provenance ───
+  const mapperClaimsForProvenance = parsedClaims.map((c) => ({
+    id: c.id,
+    label: c.label,
+    text: c.text,
+    supporters: Array.isArray(c.supporters) ? c.supporters : [],
+  }));
+
+  let enrichedClaims;
+  let claimEmbeddings = inputClaimEmbeddings;
+
+  try {
+    const peripheryForMeasure = resolvePeriphery(preSemantic);
+
+    const { measureProvenance } = await import('../provenance/measure');
+    const measure = await measureProvenance({
+      mapperClaims: mapperClaimsForProvenance,
+      shadowStatements,
+      shadowParagraphs,
+      paragraphEmbeddings,
+      statementEmbeddings: statementEmbeddings ?? null,
+      regions: regions || [],
+      totalModelCount: modelCount,
+      periphery: peripheryForMeasure,
+      precomputedClaimEmbeddings: claimEmbeddings ?? undefined,
+    });
+
+    enrichedClaims = measure.enrichedClaims;
+    claimEmbeddings = measure.claimEmbeddings;
+  } catch (err) {
+    console.error('[executeFullArtifactPipeline] Phase 1 bootstrap failed:', getErrorMessage(err));
+    throw err;
+  }
+
+  // ── 7. Compute derived fields ──────────────────────────────────
+  const derived = await computeDerivedFields({
+    enrichedClaims,
+    mapperClaimsForProvenance,
+    parsedEdges,
+    shadowStatements,
+    shadowParagraphs,
+    statementEmbeddings,
+    paragraphEmbeddings,
+    claimEmbeddings,
+    queryEmbedding,
+    substrate,
+    preSemantic,
+    regions,
+    existingQueryRelevance: queryRelevance,
+    modelCount,
+    mixedProvenanceResult: null,
+  });
+
+  // ── 8. Assemble mapper artifact ────────────────────────────────
+  const mapperArtifact = await assembleMapperArtifact({
+    derived,
+    enrichedClaims,
+    parsedNarrative,
+    queryText,
+    modelCount,
+    shadowStatements,
+    shadowParagraphs,
+    turn,
+  });
+
+  if (typeof mapperArtifact === 'object' && mapperArtifact !== null) {
+    (mapperArtifact as Record<string, unknown>).preSemantic = preSemantic || null;
+  }
+
+  // ── 9. Build cognitive artifact ────────────────────────────────
+  const { buildCognitiveArtifact } = await import('../../shared/cognitive-artifact');
+
+  const substrateGraph = buildSubstrateGraph({ substrate, regions });
+
+  const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
+    shadow: { extraction: { statements: shadowStatements } },
+    paragraphProjection: { paragraphs: shadowParagraphs },
+    substrate: { graph: substrateGraph },
+    preSemantic: preSemantic || null,
+    ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),
+    ...(statementSemanticDensity ? { statementSemanticDensity } : {}),
+    ...(paragraphSemanticDensity ? { paragraphSemanticDensity } : {}),
+    ...(claimSemanticDensity ? { claimSemanticDensity } : {}),
+    ...(querySemanticDensity ? { querySemanticDensity } : {}),
+  });
+
+  if (citationSourceOrder && typeof mapperArtifact === 'object' && mapperArtifact !== null && typeof cognitiveArtifact === 'object' && cognitiveArtifact !== null) {
+    (cognitiveArtifact as Record<string, unknown>).citationSourceOrder = citationSourceOrder;
+    (mapperArtifact as Record<string, unknown>).citationSourceOrder = citationSourceOrder;
+  }
+
+  const elapsed = Date.now() - t0;
+  console.log(`[executeFullArtifactPipeline] Complete: ${enrichedClaims.length} claims in ${elapsed}ms`);
+
+  return {
+    cognitiveArtifact,
+    mapperArtifact,
+    enrichedClaims,
+    claimEmbeddings,
+    cachedStructuralAnalysis: derived.cachedStructuralAnalysis ?? null,
+    // Expose intermediate data for diagnostic/post-processing
+    parsedClaims,
+    parsedEdges,
+    parsedNarrative,
+    shadowStatements,
+    shadowParagraphs,
+    substrate,
+    preSemantic,
+    queryRelevance,
+    regions,
+  };
+}
+
+/**
  * Post-semantic assembly: mapper artifact → cognitive artifact.
+ *
+ * DEPRECATED: Use executeFullArtifactPipeline instead.
+ * Kept for backward compatibility.
  *
  * Takes the pre-survey intermediates and assembles the final artifacts.
  *
@@ -795,7 +1078,8 @@ export async function assembleFromPreSurvey(
 /**
  * PHASE 0 KEYSTONE: buildArtifactForProvider
  *
- * Thin wrapper: computePreSurveyPipeline → assembleFromPreSurvey.
+ * Unified wrapper: single-pass pipeline computation.
+ * Used by sw-entry.ts (REGENERATE_EMBEDDINGS path).
  */
 export async function buildArtifactForProvider({
   mappingText,
@@ -826,7 +1110,7 @@ export async function buildArtifactForProvider({
   modelCount?: number;
   turn?: number | undefined;
 }): Promise<Record<string, unknown>> {
-  const preSurvey = await computePreSurveyPipeline({
+  return executeFullArtifactPipeline({
     mappingText,
     shadowStatements: inputShadowStatements,
     shadowParagraphs: inputShadowParagraphs,
@@ -837,28 +1121,10 @@ export async function buildArtifactForProvider({
     geoRecord,
     claimEmbeddings: inputClaimEmbeddings,
     citationSourceOrder,
-    modelCount,
-  });
-
-  const result = await assembleFromPreSurvey(preSurvey as Record<string, unknown>, {
     queryText,
     modelCount,
     turn,
   });
-
-  // Preserve the original return shape for backward compatibility
-  const preSurveyObj = (preSurvey as Record<string, unknown>) || {};
-  return {
-    ...result,
-    parsedClaims: preSurveyObj.parsedClaims,
-    parsedEdges: preSurveyObj.parsedEdges,
-    parsedNarrative: preSurveyObj.parsedNarrative,
-    shadowStatements: preSurveyObj.shadowStatements,
-    shadowParagraphs: preSurveyObj.shadowParagraphs,
-    substrate: preSurveyObj.substrate,
-    preSemantic: preSurveyObj.preSemantic,
-    queryRelevance: preSurveyObj.queryRelevance,
-  };
 }
 
 export async function computeProbeGeometry({
