@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { LandscapePosition } from '../../reading/styles';
 import type { CorpusIndex } from '../../../shared/types/corpus-tree';
+import { resolveModelDisplayName } from '../../../shared/citation-utils';
 
 export interface ResolvedPassage {
   kind: 'passage';
@@ -142,7 +143,7 @@ export function usePassageResolver(
       }
 
       const rp = routingProfiles[claimId];
-      const modelName = cso[modelIndex + 1] || cso[modelIndex] || `model-${modelIndex}`;
+      const modelName = resolveModelDisplayName(modelIndex, cso);
 
       return {
         kind: 'passage',

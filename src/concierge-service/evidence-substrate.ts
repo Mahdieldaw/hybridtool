@@ -14,6 +14,7 @@ import type {
   CognitiveArtifact,
   EvidenceSubstrateLookupCache,
 } from '../../shared/types';
+import { resolveModelDisplayName } from '../../shared/citation-utils';
 import type { IndexedPassage, IndexedUnclaimedGroup } from './editorial-mapper';
 
 export type { EvidenceSubstrateLookupCache };
@@ -134,9 +135,7 @@ function buildResolver(
       if (sp?._fullParagraph) textParts.push(sp._fullParagraph);
     }
 
-    const modelName =
-      citationSourceOrder[modelIndex] ||
-      `model-${modelIndex}`;
+    const modelName = resolveModelDisplayName(modelIndex, citationSourceOrder);
 
     return {
       text: textParts.join('\n\n') || '',

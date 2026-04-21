@@ -84,7 +84,11 @@ export function buildCorpusTree(
       .slice()
       .sort((a, b) => a.paragraphIndex - b.paragraphIndex);
 
-    const paragraphNodes: ParagraphNode[] = paras.map((para, paragraphOrdinal) => {
+    const paragraphNodes: ParagraphNode[] = paras.map((para) => {
+      // CRITICAL: We must preserve the original model-local paragraphIndex. 
+      // Do not use the map's array index, as filtering or tables can cause the array
+      // index to drift from the actual paragraph coordinate used in passage routing.
+      const paragraphOrdinal = para.paragraphIndex;
       const statementNodes: StatementNode[] = para.statementIds
         .map((sid, statementOrdinal): StatementNode | null => {
           const s = stmtById.get(sid);

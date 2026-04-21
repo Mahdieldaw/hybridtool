@@ -20,6 +20,7 @@ import { useProviderArtifact } from '../providers/useProviderArtifact';
 import { normalizeProviderId } from '../../utils/provider-id-mapper';
 import type { AiTurnWithUI } from '../../types';
 import { deriveArtifactIndex } from '../../../shared/corpus-utils';
+import { getCitationSourceOrder } from '../../../shared/citation-utils';
 
 function isAiTurn(turn: unknown): turn is AiTurnWithUI {
   return !!turn && typeof turn === 'object' && (turn as any).type === 'ai';
@@ -123,10 +124,7 @@ export function useArtifactResolution(turnId: string | null | undefined): Artifa
   }, [artifactFromAtom]);
 
   const citationSourceOrder = useMemo(() => {
-    const fromArtifact =
-      (mappingArtifact as any)?.citationSourceOrder ??
-      (mappingArtifact as any)?.meta?.citationSourceOrder ??
-      null;
+    const fromArtifact = getCitationSourceOrder(mappingArtifact);
     if (fromArtifact) return fromArtifact;
 
     const pid = activeMappingPid ? normalizeProviderId(String(activeMappingPid)) : null;
@@ -139,10 +137,7 @@ export function useArtifactResolution(turnId: string | null | undefined): Artifa
 
   const artifactWithCitations = useMemo(() => {
     if (!mappingArtifact || !citationSourceOrder) return mappingArtifact;
-    const existing =
-      (mappingArtifact as any)?.citationSourceOrder ??
-      (mappingArtifact as any)?.meta?.citationSourceOrder ??
-      null;
+    const existing = getCitationSourceOrder(mappingArtifact);
     if (existing) return mappingArtifact;
     return { ...(mappingArtifact as any), citationSourceOrder };
   }, [mappingArtifact, citationSourceOrder]);

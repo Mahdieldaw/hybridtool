@@ -285,15 +285,14 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         for (const pc of cdProfile.paragraphCoverage ?? []) {
           if (
             pc.modelIndex === passage.modelIndex &&
-            pc.paragraphIndex >= passage.startParagraphIndex &&
-            pc.paragraphIndex <= passage.endParagraphIndex
+            pc.paragraphOrdinal >= passage.startParagraphOrdinal &&
+            pc.paragraphOrdinal <= passage.endParagraphOrdinal
           ) {
             passageLenByPara.set(String(pc.paragraphId), passage.length);
             if (isMulti) inPassageParas.add(String(pc.paragraphId));
           }
         }
-      }
-    }
+      }    }
 
     return {
       mixedByStmt,

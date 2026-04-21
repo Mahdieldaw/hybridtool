@@ -1,7 +1,10 @@
 import { INITIAL_PROVIDERS, getProviderById as registryGetById } from '../config/provider-registry';
 import { PROVIDER_COLORS } from '../config/constants';
 import type { ProviderConfig } from '../config/provider-registry';
-import { normalizeProviderId } from './provider-id-mapper';
+import {
+  normalizeProviderId,
+  resolveProviderId,
+} from '../../shared/citation-utils';
 
 /**
  * Get the full configuration object for a provider.
@@ -60,8 +63,5 @@ export function resolveProviderIdFromCitationOrder(
   modelIndex: number | null | undefined,
   citationSourceOrder?: Record<string | number, string>
 ): string | null {
-  if (!citationSourceOrder || modelIndex == null || !Number.isFinite(modelIndex)) return null;
-  const raw = citationSourceOrder[modelIndex];
-  const pid = raw ? normalizeProviderId(String(raw)) : '';
-  return pid ? pid : null;
+  return resolveProviderId(modelIndex, citationSourceOrder ?? null);
 }

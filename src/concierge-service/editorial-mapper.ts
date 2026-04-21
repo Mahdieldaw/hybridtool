@@ -18,10 +18,11 @@ import type {
 import type { CorpusTree } from '../../shared/types/corpus-tree';
 import type { SourceContinuityEntry } from '../provenance/surface';
 import { extractJsonFromContent } from '../../shared/parsing-utils';
+import { resolveModelDisplayName } from '../../shared/citation-utils';
 
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 // Passage Index types
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 
 export interface IndexedPassage {
   passageKey: string;
@@ -57,9 +58,9 @@ export interface IndexedUnclaimedGroup {
   maxQueryRelevance: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 // buildPassageIndex
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 
 export function buildPassageIndex(
   claimDensity: ClaimDensityResult,
@@ -122,9 +123,7 @@ export function buildPassageIndex(
       }
 
       const continuity = continuityMap.get(passageKey);
-      const modelName =
-        citationSourceOrder[passageEntry.modelIndex] ||
-        `model-${passageEntry.modelIndex}`;
+      const modelName = resolveModelDisplayName(passageEntry.modelIndex, citationSourceOrder);
 
       passages.push({
         passageKey,
@@ -195,9 +194,9 @@ export function buildPassageIndex(
   return { passages, unclaimed };
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 // Editorial prompt builder
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 
 const LANDSCAPE_LABELS: Record<LandscapePosition, string> = {
   northStar: 'North Star (high concentration + high density)',
@@ -226,7 +225,7 @@ export function buildEditorialPrompt(
 ): string {
   const sections: string[] = [];
 
-  // ── Role ──
+  // -- Role --
   sections.push(`You are an editorial arranger. You receive a set of pre-extracted passages from multiple AI models responding to a user query. Your job is to arrange these passages into a threaded reading document.
 
 CRITICAL CONSTRAINTS:
@@ -235,18 +234,18 @@ CRITICAL CONSTRAINTS:
 - Each thread must have at least one item with role "anchor".
 - A passage ID may appear in at most one thread.`);
 
-  // ── User query ──
+  // -- User query --
   sections.push(`## User Query
 ${userQuery}`);
 
-  // ── Corpus shape ──
+  // -- Corpus shape --
   sections.push(`## Corpus Shape
 - ${corpusShape.passageCount} passages across ${corpusShape.claimCount} claims
 - ${corpusShape.conflictCount} conflict cluster(s)
 - Concentration spread: min=${corpusShape.concentrationSpread.min.toFixed(2)}, max=${corpusShape.concentrationSpread.max.toFixed(2)}, mean=${corpusShape.concentrationSpread.mean.toFixed(2)}
 - Landscape: ${corpusShape.landscapeComposition.northStar} northStar, ${corpusShape.landscapeComposition.mechanism} mechanism, ${corpusShape.landscapeComposition.eastStar} eastStar, ${corpusShape.landscapeComposition.floor} floor`);
 
-  // ── Passages ──
+  // -- Passages --
   const passageLines = passages.map((p) => {
     const extent = p.paragraphCount > 1 ? ` (${p.paragraphCount} paragraphs)` : '';
     const conflict =
@@ -271,7 +270,7 @@ ${p.text}`;
   });
   sections.push(`## Passages\n${passageLines.join('\n\n---\n\n')}`);
 
-  // ── Unclaimed groups ──
+  // -- Unclaimed groups --
   if (unclaimed.length > 0) {
     const unclaimedLines = unclaimed.map((u) => {
       const stmts = u.paragraphs
@@ -287,11 +286,11 @@ ${stmts}`;
     sections.push(`## Unclaimed Groups\n${unclaimedLines.join('\n\n---\n\n')}`);
   }
 
-  // ── Roles ──
+  // -- Roles --
   sections.push(`## Item Roles
 ${ROLE_DESCRIPTIONS}`);
 
-  // ── Output contract ──
+  // -- Output contract --
   sections.push(`## Output Format
 Return ONLY a JSON object inside a code fence. No text before or after.
 
@@ -333,9 +332,9 @@ Rules:
   return sections.join('\n\n');
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 // Editorial output parser
-// ─────────────────────────────────────────────────────────────────────────
+// -------------------------------------------------------------------------
 
 export interface EditorialParseResult {
   success: boolean;

@@ -15,9 +15,9 @@ import {
 } from '../utils/provider-helpers';
 
 type ParagraphData = {
-  id: string;
+  paragraphId: string;
   _fullParagraph?: string;
-  statements?: Array<{ id: string; text: string; stance?: string }>;
+  statements?: Array<{ statementId: string; text: string; stance?: string }>;
 };
 
 interface Props {
@@ -1555,7 +1555,7 @@ export function ParagraphSpaceView({
               >
                 <div className="px-3 py-2">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-mono text-text-muted">{p.id}</span>
+                    <span className="text-[10px] font-mono text-text-muted">{p.paragraphId}</span>
                     <button
                       className="text-[10px] text-text-muted hover:text-text-primary"
                       onClick={() => setSelectedParagraphId(null)}
@@ -1570,7 +1570,7 @@ export function ParagraphSpaceView({
                     <div className="space-y-1">
                       {p.statements.map((s) => (
                         <div
-                          key={s.id}
+                          key={s.statementId}
                           className="text-[11px] text-text-muted border-l-2 border-white/10 pl-2"
                         >
                           {s.stance && (

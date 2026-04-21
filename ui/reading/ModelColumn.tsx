@@ -47,7 +47,7 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
   useEffect(() => {
     if (!focusedClaimId) return;
     for (const para of paragraphs) {
-      const paraId = String(para.id ?? para.paragraphId ?? '');
+      const paraId = String(para.paragraphId ?? '');
       const hl = highlightMap.get(paraId);
       if (hl?.state === 'passage') {
         const el = paraRefs.current.get(paraId);
@@ -74,7 +74,7 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
       {/* Scrollable paragraph list */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
         {paragraphs.map((para: any, paraIndex: number) => {
-          const paraId = String(para.id ?? para.paragraphId ?? '');
+          const paraId = String(para.paragraphId ?? '');
           const stmts: any[] = Array.isArray(para.statements) ? para.statements : [];
           const hl = highlightMap.get(paraId);
           const hlState = hl?.state ?? 'none';
@@ -106,7 +106,7 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
                     'text-sm leading-relaxed py-0.5 whitespace-pre-wrap',
                     hasFocus
                       ? stmts.some((s: any) =>
-                          ownedStatementIds.has(String(s.id ?? s.statementId ?? ''))
+                          ownedStatementIds.has(String(s.statementId ?? ''))
                         )
                         ? 'text-text-primary'
                         : 'text-text-secondary'
@@ -118,7 +118,7 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
               ) : (
                 // Fallback: stitch statements if _fullParagraph missing
                 stmts.map((stmt: any, stmtIndex: number) => {
-                  const sid = String(stmt.id ?? stmt.statementId ?? '');
+                  const sid = String(stmt.statementId ?? '');
                   const text = String(stmt.text ?? stmt.statement ?? stmt.content ?? '');
                   const isOwned = ownedStatementIds.has(sid);
 

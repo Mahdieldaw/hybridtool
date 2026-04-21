@@ -4,6 +4,7 @@ import {
   getProviderColor,
   getProviderConfig,
 } from '../utils/provider-helpers';
+import { resolveProviderId } from '../../shared/citation-utils';
 
 interface SupporterOrbsProps {
   supporters: (string | number)[];
@@ -19,13 +20,9 @@ function getProviderFromSupporter(
     const config = getProviderConfig(s);
     if (config) return config;
   }
-  if (
-    citationSourceOrder &&
-    (typeof s === 'number' || (typeof s === 'string' && s.trim().length > 0 && !isNaN(Number(s))))
-  ) {
-    const providerId = citationSourceOrder[Number(s)];
+    const providerId = resolveProviderId(s, citationSourceOrder);
     if (providerId) return getProviderConfig(providerId) || null;
-  }
+
   return null;
 }
 

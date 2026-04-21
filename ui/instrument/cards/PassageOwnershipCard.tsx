@@ -10,6 +10,7 @@ import {
   CopyButton,
 } from './CardBase';
 import { getCanonicalStatementsForClaim, getArtifactParagraphs } from '../../../shared/corpus-utils';
+import { getCitationSourceOrder } from '../../../shared/citation-utils';
 
 // ============================================================================
 // PASSAGE OWNERSHIP CARD — per-model text view with claim highlighting
@@ -19,7 +20,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [openModelIndex, setOpenModelIndex] = useState<number | null>(null);
 
-  // ── Claims list from density profiles ──────────────────────────────────
+  // -- Claims list from density profiles ----------------------------------
   const claims = useMemo(() => {
     const profiles: Record<string, any> = artifact?.claimDensity?.profiles ?? {};
     const allClaims = safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims);
@@ -33,7 +34,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [artifact]);
 
-  // ── Set of statement IDs owned by the selected claim ───────────────────
+  // -- Set of statement IDs owned by the selected claim -------------------
   const ownedStatementIds = useMemo(() => {
     if (!selectedClaimId) return new Set<string>();
     const idx = artifact?.index ?? null;
@@ -41,28 +42,28 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     return new Set(ids.map(String));
   }, [selectedClaimId, artifact]);
 
-  // ── Coverage & passage lookup for selected claim ───────────────────────
+  // -- Coverage & passage lookup for selected claim -----------------------
   const { coverageByKey, passageRanges } = useMemo(() => {
     const profile = selectedClaimId
       ? (artifact?.claimDensity?.profiles ?? {})[selectedClaimId]
       : null;
-    const covMap = new Map<string, number>(); // "modelIndex:paragraphIndex" → coverage
+    const covMap = new Map<string, number>(); // "modelIndex:paragraphOrdinal" → coverage
     for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
-      const key = `${entry.modelIndex}:${entry.paragraphIndex}`;
+      const key = `${entry.modelIndex}:${entry.paragraphOrdinal}`;
       covMap.set(key, entry.coverage ?? 0);
     }
     const passages = safeArr<any>(profile?.passages);
     return { coverageByKey: covMap, passageRanges: passages };
   }, [selectedClaimId, artifact]);
 
-  // ── Is a paragraph within a passage? ───────────────────────────────────
-  const isInPassage = (mi: number, pi: number): boolean => {
+  // -- Is a paragraph within a passage? -----------------------------------
+  const isInPassage = (mi: number, po: number): boolean => {
     return passageRanges.some(
-      (p: any) => p.modelIndex === mi && pi >= p.startParagraphIndex && pi <= p.endParagraphIndex
+      (p: any) => p.modelIndex === mi && po >= p.startParagraphIndex && po <= p.endParagraphIndex
     );
   };
 
-  // ── Group shadow paragraphs by modelIndex ──────────────────────────────
+  // -- Group shadow paragraphs by modelIndex ------------------------------
   const modelGroups = useMemo(() => {
     const paragraphs = safeArr<any>(getArtifactParagraphs(artifact));
     const byModel = new Map<number, any[]>();
@@ -71,15 +72,14 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       if (!byModel.has(mi)) byModel.set(mi, []);
       byModel.get(mi)!.push(p);
     }
-    // Sort paragraphs within each model by index
+    // Sort paragraphs within each model by ordinal
     for (const arr of byModel.values()) {
-      arr.sort((a: any, b: any) => (a.paragraphIndex ?? 0) - (b.paragraphIndex ?? 0));
+      arr.sort((a: any, b: any) => (a.paragraphOrdinal ?? 0) - (b.paragraphOrdinal ?? 0));
     }
     return Array.from(byModel.entries())
       .sort(([a], [b]) => a - b)
       .map(([mi, paras]) => {
-        const order =
-          artifact?.citationSourceOrder ?? artifact?.meta?.citationSourceOrder ?? undefined;
+        const order = getCitationSourceOrder(artifact) ?? undefined;
         const pid = resolveProviderIdFromCitationOrder(mi, order);
         return {
           modelIndex: mi,
@@ -93,7 +93,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       });
   }, [artifact]);
 
-  // ── Per-model hit summary (owned stmts / coverage paras) ──────────────
+  // -- Per-model hit summary (owned stmts / coverage paras) --------------
   const modelHitCounts = useMemo(() => {
     if (!selectedClaimId) return new Map<number, { stmts: number; paras: number }>();
     const m = new Map<number, { stmts: number; paras: number }>();
@@ -101,11 +101,11 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       let stmts = 0;
       let paras = 0;
       for (const p of g.paragraphs) {
-        const pi = p.paragraphIndex as number;
-        const hasCoverage = coverageByKey.has(`${g.modelIndex}:${pi}`);
+        const po = p.paragraphOrdinal as number;
+        const hasCoverage = coverageByKey.has(`${g.modelIndex}:${po}`);
         if (hasCoverage) paras++;
         for (const s of safeArr<any>(p.statements)) {
-          if (ownedStatementIds.has(String(s?.id ?? ''))) stmts++;
+          if (ownedStatementIds.has(String(s?.statementId ?? ''))) stmts++;
         }
       }
       m.set(g.modelIndex, { stmts, paras });
@@ -113,7 +113,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     return m;
   }, [selectedClaimId, modelGroups, coverageByKey, ownedStatementIds]);
 
-  // ── Helper: build copy text/html for a single claim ─────────────────────
+  // -- Helper: build copy text/html for a single claim ---------------------
   const buildClaimCopy = useCallback(
     (claimId: string) => {
       const idx = artifact?.index ?? null;
@@ -124,13 +124,13 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       const profile = (artifact?.claimDensity?.profiles ?? {})[claimId];
       const covMap = new Map<string, number>();
       for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
-        covMap.set(`${entry.modelIndex}:${entry.paragraphIndex}`, entry.coverage ?? 0);
+        covMap.set(`${entry.modelIndex}:${entry.paragraphOrdinal}`, entry.coverage ?? 0);
       }
       const passages = safeArr<any>(profile?.passages);
-      const inPass = (mi: number, pi: number) =>
+      const inPass = (mi: number, po: number) =>
         passages.some(
           (p: any) =>
-            p.modelIndex === mi && pi >= p.startParagraphIndex && pi <= p.endParagraphIndex
+            p.modelIndex === mi && po >= p.startParagraphIndex && po <= p.endParagraphIndex
         );
 
       const esc = (s: string) =>
@@ -146,9 +146,9 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
         let stmtCount = 0;
         let paraCount = 0;
         for (const p of g.paragraphs) {
-          if (covMap.has(`${g.modelIndex}:${p.paragraphIndex}`)) paraCount++;
+          if (covMap.has(`${g.modelIndex}:${p.paragraphOrdinal}`)) paraCount++;
           for (const s of safeArr<any>(p.statements)) {
-            if (ownedIds.has(String(s?.id ?? ''))) stmtCount++;
+            if (ownedIds.has(String(s?.statementId ?? ''))) stmtCount++;
           }
         }
         const hitsDesc =
@@ -163,17 +163,17 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
         );
 
         for (const para of g.paragraphs) {
-          const paraIdx = para.paragraphIndex as number;
-          const covKey = `${g.modelIndex}:${paraIdx}`;
+          const po = para.paragraphOrdinal as number;
+          const covKey = `${g.modelIndex}:${po}`;
           const hasCoverage = covMap.has(covKey);
-          const isPassage = inPass(g.modelIndex, paraIdx);
+          const isPassage = inPass(g.modelIndex, po);
           const coverage = covMap.get(covKey) ?? 0;
           const stmts = safeArr<any>(para.statements);
-          const hasOwned = stmts.some((s: any) => ownedIds.has(String(s?.id ?? '')));
+          const hasOwned = stmts.some((s: any) => ownedIds.has(String(s?.statementId ?? '')));
           if (!hasCoverage && !hasOwned) continue;
 
           plain.push(
-            `  ${isPassage ? `[PASSAGE ¶${paraIdx} ${fmtPct(coverage)}]` : `[¶${paraIdx} ${fmtPct(coverage)}]`}`
+            `  ${isPassage ? `[PASSAGE ¶${po} ${fmtPct(coverage)}]` : `[¶${po} ${fmtPct(coverage)}]`}`
           );
           const borderStyle = isPassage
             ? 'border-left:3px solid #f59e0b;background:#fef3c7;padding:4px 8px;margin:4px 0;border-radius:3px'
@@ -185,12 +185,12 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
             : '';
           html.push(`<div style="${borderStyle}">`);
           html.push(
-            `<div style="font-size:10px;color:#888;margin-bottom:2px">${passageTag}¶${paraIdx} — ${fmtPct(coverage)} coverage</div>`
+            `<div style="font-size:10px;color:#888;margin-bottom:2px">${passageTag}¶${po} — ${fmtPct(coverage)} coverage</div>`
           );
 
           for (const s of stmts) {
             const text = String(s?.text ?? '');
-            if (ownedIds.has(String(s?.id ?? ''))) {
+            if (ownedIds.has(String(s?.statementId ?? ''))) {
               plain.push(`    >> ${text}`);
               html.push(
                 `<mark style="background:#bae6fd;color:#0c4a6e;border-radius:2px;padding:0 2px">${esc(text)}</mark> `
@@ -208,7 +208,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     [artifact, claims, modelGroups]
   );
 
-  // ── Copy text/html: single claim when selected, all claims otherwise ───
+  // -- Copy text/html: single claim when selected, all claims otherwise ---
   const { copyText, copyHtml } = useMemo(() => {
     if (claims.length === 0) return { copyText: '', copyHtml: '' };
 
@@ -236,7 +236,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
 
   return (
     <div className="space-y-2">
-      {/* ── Claim selector + copy button ───────────────────────────── */}
+      {/* -- Claim selector + copy button ----------------------------- */}
       <div className="flex items-center gap-2 mb-2">
         <select
           aria-label="Select a claim"
@@ -265,7 +265,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
 
       {selectedClaimId && (
         <div className="space-y-2">
-          {/* ── Legend ──────────────────────────────────────────────── */}
+          {/* -- Legend ------------------------------------------------ */}
           <div className="flex items-center gap-4 text-[9px] text-text-muted">
             <span className="flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-sm bg-sky-500/20 border border-sky-500/40" />{' '}
@@ -281,7 +281,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
             </span>
           </div>
 
-          {/* ── Model accordions ───────────────────────────────────── */}
+          {/* -- Model accordions ------------------------------------- */}
           {modelGroups.map((g) => {
             const isOpen = openModelIndex === g.modelIndex;
             const hits = modelHitCounts.get(g.modelIndex);
@@ -318,15 +318,14 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
                 {isOpen && (
                   <div id={`model-panel-${g.modelIndex}`} role="region" className="px-3 pb-3 space-y-1">
                     {g.paragraphs.map((para: any, pi: number) => {
-                      const paraIdx = para.paragraphIndex as number;
-                      const covKey = `${g.modelIndex}:${paraIdx}`;
-                      const hasCoverage = coverageByKey.has(covKey);
-                      const inPassage = isInPassage(g.modelIndex, paraIdx);
+                      const paraOrdinal = para.paragraphOrdinal as number;
+                      const covKey = `${g.modelIndex}:${paraOrdinal}`; const hasCoverage = coverageByKey.has(covKey);
+                      const inPassage = isInPassage(g.modelIndex, paraOrdinal);
                       const coverage = coverageByKey.get(covKey) ?? 0;
 
                       return (
                         <div
-                          key={para.id ?? pi}
+                          key={para.paragraphId ?? pi}
                           className={clsx(
                             'rounded-sm py-1 px-2 transition-colors',
                             inPassage
@@ -340,7 +339,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
                           {hasCoverage && (
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className="text-[8px] text-text-muted font-mono">
-                                ¶{paraIdx}
+                                ¶{paraOrdinal}
                               </span>
                               <span className="text-[8px] text-text-muted font-mono">
                                 {fmtPct(coverage)}
@@ -352,7 +351,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
                           )}
                           {/* statements */}
                           {safeArr<any>(para.statements).map((s: any, si: number) => {
-                            const stmtId = String(s?.id ?? '');
+                            const stmtId = String(s?.statementId ?? '');
                             const owned = ownedStatementIds.has(stmtId);
                             return (
                               <div

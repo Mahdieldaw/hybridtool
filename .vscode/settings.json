@@ -1,5 +1,15 @@
 {
   "typescript.tsdk": "node_modules\\typescript\\lib",
   "javascript.updateImportsOnFileMove.enabled": "always",
-  "typescript.updateImportsOnFileMove.enabled": "always"
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "search.useIgnoreFiles": true,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/*.d.ts": true,
+    "**/coverage": true,
+    "**/*.log": true,
+    "**/*.lock": true
+  }
 }

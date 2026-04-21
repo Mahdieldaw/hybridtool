@@ -63,7 +63,7 @@ export function PeripheralNodeCard({ artifact }: { artifact: any }) {
 
   const paragraphs = useMemo(() => {
     const list = safeArr<any>(getArtifactParagraphs(artifact));
-    return list.filter((p) => allPotentialOutliers.has(String(p.id)));
+    return list.filter((p) => allPotentialOutliers.has(String(p.paragraphId)));
   }, [artifact, allPotentialOutliers]);
 
   const isParallel = diagnostics?.corpusMode === 'parallel-cores';
@@ -118,17 +118,17 @@ export function PeripheralNodeCard({ artifact }: { artifact: any }) {
               {
                 key: 'idx',
                 header: '¶',
-                sortValue: (p: any) => p.paragraphIndex,
+                sortValue: (p: any) => p.paragraphOrdinal,
                 cell: (p: any) => (
-                  <span className="font-mono text-text-muted text-[10px]">¶{p.paragraphIndex}</span>
+                  <span className="font-mono text-text-muted text-[10px]">¶{p.paragraphOrdinal}</span>
                 ),
               },
               {
                 key: 'status',
                 header: 'Status',
-                sortValue: (p: any) => (peripheralNodeIds.has(String(p.id)) ? 0 : 1),
+                sortValue: (p: any) => (peripheralNodeIds.has(String(p.paragraphId)) ? 0 : 1),
                 cell: (p: any) => {
-                  const excluded = peripheralNodeIds.has(String(p.id));
+                  const excluded = peripheralNodeIds.has(String(p.paragraphId));
                   return (
                     <span
                       className={clsx(
@@ -147,17 +147,17 @@ export function PeripheralNodeCard({ artifact }: { artifact: any }) {
                 key: 'type',
                 header: 'Type',
                 sortValue: (p: any) => {
-                  const bid = basinByNodeId[p.id];
+                  const bid = basinByNodeId[p.paragraphId];
                   const isBasin = bid != null && bid !== largestBasinId;
-                  const isGap = gapSingletons.has(String(p.id));
+                  const isGap = gapSingletons.has(String(p.paragraphId));
                   if (isBasin && isGap) return 0;
                   if (isBasin) return 1;
                   return 2;
                 },
                 cell: (p: any) => {
-                  const bid = basinByNodeId[p.id];
+                  const bid = basinByNodeId[p.paragraphId];
                   const isBasin = bid != null && bid !== largestBasinId;
-                  const isGap = gapSingletons.has(String(p.id));
+                  const isGap = gapSingletons.has(String(p.paragraphId));
                   const labels = [];
                   if (isBasin) labels.push('Basin Outlier');
                   if (isGap) labels.push('Region Outlier');
@@ -184,7 +184,7 @@ export function PeripheralNodeCard({ artifact }: { artifact: any }) {
                 key: 'origin',
                 header: 'Origin',
                 cell: (p: any) => {
-                  const bid = basinByNodeId[p.id];
+                  const bid = basinByNodeId[p.paragraphId];
                   return (
                     <span className="font-mono text-[9px] text-text-muted">
                       {bid != null ? `basin b_${bid}` : 'region singleton'}
