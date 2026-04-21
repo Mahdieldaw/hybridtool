@@ -499,10 +499,27 @@ export function validateEdgesAndAllegiance(input: ValidateInput): ValidateOutput
   for (const pr of pairResults) {
     let validated = false;
     let failReason = pr.failReason;
-    if (pr.crossPoolProx !== null) {
-      if (muProximity === null) failReason = 'muProximity not available';
-      else validated = pr.crossPoolProx > muProximity;
+
+    if (pr.triangleResult && muResidual !== null) {
+      // NEW SYSTEM: Triangulation
+      // Dynamic threshold: residual must be greater than the corpus mean
+      validated = pr.triangleResult.residual > muResidual;
+      if (!validated) {
+        failReason = `triangle residual ${pr.triangleResult.residual.toFixed(3)} <= mu ${muResidual.toFixed(3)}`;
+      }
+    } else if (pr.crossPoolProx !== null) {
+      // OLD SYSTEM: Cross-pool proximity
+      if (muProximity === null) {
+        failReason = 'muProximity not available';
+      } else {
+        // Must be GREATER than mean: proves they are arguing about the exact same localized topic
+        validated = pr.crossPoolProx > muProximity;
+        if (!validated) {
+          failReason = `cross-pool prox ${pr.crossPoolProx.toFixed(3)} <= mu ${muProximity.toFixed(3)}`;
+        }
+      }
     }
+
     validatedConflicts.push({
       edgeFrom: pr.aId,
       edgeTo: pr.bId,

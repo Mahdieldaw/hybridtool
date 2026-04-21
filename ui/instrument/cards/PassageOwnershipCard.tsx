@@ -16,6 +16,9 @@ import { getCitationSourceOrder } from '../../../shared/citation-utils';
 // PASSAGE OWNERSHIP CARD — per-model text view with claim highlighting
 // ============================================================================
 
+/** Helper to get the model-local paragraph index regardless of object shape */
+const getParaIdx = (p: any) => (p?.paragraphOrdinal ?? p?.paragraphIndex ?? 0) as number;
+
 export function PassageOwnershipCard({ artifact }: { artifact: any }) {
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [openModelIndex, setOpenModelIndex] = useState<number | null>(null);
@@ -47,9 +50,9 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     const profile = selectedClaimId
       ? (artifact?.claimDensity?.profiles ?? {})[selectedClaimId]
       : null;
-    const covMap = new Map<string, number>(); // "modelIndex:paragraphOrdinal" → coverage
+    const covMap = new Map<string, number>(); // "modelIndex:paragraphIndex" → coverage
     for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
-      const key = `${entry.modelIndex}:${entry.paragraphOrdinal}`;
+      const key = `${entry.modelIndex}:${entry.paragraphIndex}`;
       covMap.set(key, entry.coverage ?? 0);
     }
     const passages = safeArr<any>(profile?.passages);
@@ -74,7 +77,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     }
     // Sort paragraphs within each model by ordinal
     for (const arr of byModel.values()) {
-      arr.sort((a: any, b: any) => (a.paragraphOrdinal ?? 0) - (b.paragraphOrdinal ?? 0));
+      arr.sort((a: any, b: any) => getParaIdx(a) - getParaIdx(b));
     }
     return Array.from(byModel.entries())
       .sort(([a], [b]) => a - b)
@@ -101,11 +104,11 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       let stmts = 0;
       let paras = 0;
       for (const p of g.paragraphs) {
-        const po = p.paragraphOrdinal as number;
+        const po = getParaIdx(p);
         const hasCoverage = coverageByKey.has(`${g.modelIndex}:${po}`);
         if (hasCoverage) paras++;
         for (const s of safeArr<any>(p.statements)) {
-          if (ownedStatementIds.has(String(s?.statementId ?? ''))) stmts++;
+          if (ownedStatementIds.has(String(s?.statementId ?? s?.id ?? ''))) stmts++;
         }
       }
       m.set(g.modelIndex, { stmts, paras });
@@ -124,7 +127,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       const profile = (artifact?.claimDensity?.profiles ?? {})[claimId];
       const covMap = new Map<string, number>();
       for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
-        covMap.set(`${entry.modelIndex}:${entry.paragraphOrdinal}`, entry.coverage ?? 0);
+        covMap.set(`${entry.modelIndex}:${entry.paragraphIndex}`, entry.coverage ?? 0);
       }
       const passages = safeArr<any>(profile?.passages);
       const inPass = (mi: number, po: number) =>
@@ -146,9 +149,10 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
         let stmtCount = 0;
         let paraCount = 0;
         for (const p of g.paragraphs) {
-          if (covMap.has(`${g.modelIndex}:${p.paragraphOrdinal}`)) paraCount++;
+          const po = getParaIdx(p);
+          if (covMap.has(`${g.modelIndex}:${po}`)) paraCount++;
           for (const s of safeArr<any>(p.statements)) {
-            if (ownedIds.has(String(s?.statementId ?? ''))) stmtCount++;
+            if (ownedIds.has(String(s?.statementId ?? s?.id ?? ''))) stmtCount++;
           }
         }
         const hitsDesc =
@@ -163,13 +167,13 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
         );
 
         for (const para of g.paragraphs) {
-          const po = para.paragraphOrdinal as number;
+          const po = getParaIdx(para);
           const covKey = `${g.modelIndex}:${po}`;
           const hasCoverage = covMap.has(covKey);
           const isPassage = inPass(g.modelIndex, po);
           const coverage = covMap.get(covKey) ?? 0;
           const stmts = safeArr<any>(para.statements);
-          const hasOwned = stmts.some((s: any) => ownedIds.has(String(s?.statementId ?? '')));
+          const hasOwned = stmts.some((s: any) => ownedIds.has(String(s?.statementId ?? s?.id ?? '')));
           if (!hasCoverage && !hasOwned) continue;
 
           plain.push(
@@ -190,7 +194,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
 
           for (const s of stmts) {
             const text = String(s?.text ?? '');
-            if (ownedIds.has(String(s?.statementId ?? ''))) {
+            if (ownedIds.has(String(s?.statementId ?? s?.id ?? ''))) {
               plain.push(`    >> ${text}`);
               html.push(
                 `<mark style="background:#bae6fd;color:#0c4a6e;border-radius:2px;padding:0 2px">${esc(text)}</mark> `
@@ -277,7 +281,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
             </span>
             <span className="flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-sm border-l-2 border-l-white/20 bg-white/3" />{' '}
-              covered paragraph
+              dispersed paragraph
             </span>
           </div>
 
@@ -318,9 +322,10 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
                 {isOpen && (
                   <div id={`model-panel-${g.modelIndex}`} role="region" className="px-3 pb-3 space-y-1">
                     {g.paragraphs.map((para: any, pi: number) => {
-                      const paraOrdinal = para.paragraphOrdinal as number;
-                      const covKey = `${g.modelIndex}:${paraOrdinal}`; const hasCoverage = coverageByKey.has(covKey);
-                      const inPassage = isInPassage(g.modelIndex, paraOrdinal);
+                      const po = getParaIdx(para);
+                      const covKey = `${g.modelIndex}:${po}`;
+                      const hasCoverage = coverageByKey.has(covKey);
+                      const inPassage = isInPassage(g.modelIndex, po);
                       const coverage = coverageByKey.get(covKey) ?? 0;
 
                       return (
@@ -339,7 +344,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
                           {hasCoverage && (
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className="text-[8px] text-text-muted font-mono">
-                                ¶{paraOrdinal}
+                                ¶{po}
                               </span>
                               <span className="text-[8px] text-text-muted font-mono">
                                 {fmtPct(coverage)}
@@ -351,7 +356,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
                           )}
                           {/* statements */}
                           {safeArr<any>(para.statements).map((s: any, si: number) => {
-                            const stmtId = String(s?.statementId ?? '');
+                            const stmtId = String(s?.statementId ?? s?.id ?? '');
                             const owned = ownedStatementIds.has(stmtId);
                             return (
                               <div

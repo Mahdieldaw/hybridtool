@@ -436,7 +436,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                           preSurvey.derived.claimDensityResult,
                           preSurvey.derived.passageRoutingResult,
                           preSurvey.derived.statementClassification,
-                          mapperArtifact?.corpus ?? { paragraphs: [] },
+                          mapperArtifact?.corpus ?? { models: [] },
                           enrichedClaims,
                           editorialCitationSourceOrder,
                           continuityMap

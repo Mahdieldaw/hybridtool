@@ -112,8 +112,9 @@ function splitIntoSentences(paragraph: string): string[] {
     .replace(/\b(\d+)\./g, '$1|||');
 
   // Split on sentence boundaries: ASCII (.!?) and CJK (。！？)
+  // Also split on newlines to prevent headers/bullets from merging with prose
   const sentences = protectedText
-    .split(/(?<=[.!?。！？])(?:\s+|(?=[^\s.!?。！？])|$)/)
+    .split(/(?<=[.!?。！？\n])(?:\s+|(?=[^\s.!?。！？])|$)/)
     .map((s) => s.replace(/\|\|\|/g, '.'))
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
@@ -145,7 +146,8 @@ function isSubstantive(cleanText: string, rawText?: string): boolean {
   // Check raw text for markdown structures stripped by cleanTextForProcessing
   if (rawText) {
     const rawTrimmed = rawText.trim();
-    if (/^#{1,6}\s/.test(rawTrimmed)) return false;
+    // Only exclude short headers; long headers might contain claims
+    if (/^#{1,6}\s/.test(rawTrimmed) && rawTrimmed.length < 50) return false;
     if (/^\*{2}[^*]+\*{2}$/.test(rawTrimmed)) return false;
     if (/^__[^_]+__$/.test(rawTrimmed)) return false;
   }
@@ -279,12 +281,20 @@ function splitContentBlocks(content: string): ContentBlock[] {
     if (/^\s*(?:[-*\u2022]\s+|\d+\.\s+)/.test(line)) {
       // Collect contiguous list lines
       const items: string[] = [];
+      const originalLines: string[] = [];
       while (i < lines.length && /^\s*(?:[-*\u2022]\s+|\d+\.\s+)/.test(lines[i])) {
+        originalLines.push(lines[i]);
         const stripped = lines[i].replace(/^\s*(?:[-*\u2022]\s+|\d+\.\s+)/, '').trim();
         if (stripped.length > 0) items.push(stripped);
         i++;
       }
-      if (items.length > 0) blocks.push({ type: 'list', items });
+      if (items.length > 0) {
+        blocks.push({
+          type: 'list',
+          items,
+          _raw: originalLines.join('\n'), // Store raw list for fullParagraph context
+        } as any);
+      }
     } else {
       // Collect non-list lines into a prose chunk
       const proseLines: string[] = [];
@@ -417,7 +427,7 @@ export function extractShadowStatements(
                 confidence,
                 signals,
                 location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
-                fullParagraph: rawItem,
+                fullParagraph: (block as any)._raw || rawItem,
               });
 
               if (statements.length >= CANDIDATE_LIMIT) {

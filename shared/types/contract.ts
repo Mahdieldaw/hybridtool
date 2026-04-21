@@ -41,17 +41,17 @@ export interface MapperClaim {
 
 export type MapperEdge =
   | {
-      from: string;
-      to: string;
-      type: 'conflicts';
-      question?: string | null;
-    }
+    from: string;
+    to: string;
+    type: 'conflicts';
+    question?: string | null;
+  }
   | {
-      from: string;
-      to: string;
-      type: 'prerequisite';
-      question?: string | null;
-    };
+    from: string;
+    to: string;
+    type: 'prerequisite';
+    question?: string | null;
+  };
 
 export interface UnifiedMapperOutput {
   claims: MapperClaim[];
@@ -663,7 +663,7 @@ export interface StatementClassificationResult {
     unclaimedCount: number;
     mixedParagraphCount: number;
     fullyUnclaimedParagraphCount: number;
-    fullyCoveredParagraphCount: number;
+    fullyCount: number;
     unclaimedGroupCount: number;
   };
   meta: { processingTimeMs: number };
@@ -693,6 +693,7 @@ export interface MapperArtifact {
 
   preSemantic?: PreSemanticInterpretation | null;
   structuralValidation?: any | null;
+  conflictValidation?: ValidatedConflict[] | null;
 
   // Blast Surface — provenance-derived damage assessment (instrumentation, runs alongside old filter)
   blastSurface?: BlastSurfaceResult | null;

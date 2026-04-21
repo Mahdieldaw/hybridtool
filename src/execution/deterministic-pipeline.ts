@@ -20,6 +20,7 @@ import type {
   Edge,
   BasinInversionResult,
   StructuralAnalysis,
+  ValidatedConflict,
 } from '../../shared/types';
 import type { GeometricSubstrate, SubstrateInterpretation, PeripheryResult, MeasuredRegion } from '../geometry';
 import type { ShadowStatement, ShadowParagraph } from '../shadow';
@@ -79,6 +80,7 @@ interface DerivedFields {
   claimDensityResult: ClaimDensityResult | null;
   provenanceRefinement: ProvenanceRefinementResult | null;
   statementClassification: StatementClassificationResult | null;
+  conflictValidation: ValidatedConflict[] | null;
 }
 
 
@@ -133,6 +135,7 @@ export async function computeDerivedFields({
     claimDensityResult: null,
     provenanceRefinement: null,
     statementClassification: null,
+    conflictValidation: null,
   };
 
   // ── Group A: Independent steps (no cross-dependencies) ─────────────
@@ -235,6 +238,7 @@ export async function computeDerivedFields({
       result.passageRoutingResult = provenanceOutput.passageRoutingResult;
       result.provenanceRefinement = provenanceOutput.provenanceRefinement;
       result.statementClassification = provenanceOutput.statementClassification;
+      result.conflictValidation = provenanceOutput.validatedConflicts;
       result.statementOwnership = provenanceOutput.claimProvenance.ownershipMap;
       result.claimProvenanceExclusivity = provenanceOutput.claimProvenance.exclusivityMap;
 
@@ -374,6 +378,7 @@ export async function assembleMapperArtifact({
     claimDensityResult,
     provenanceRefinement,
     statementClassification,
+    conflictValidation,
   } = derivedObj;
 
   // Build CorpusTree and CorpusIndex.
@@ -410,6 +415,7 @@ export async function assembleMapperArtifact({
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
     ...(provenanceRefinement ? { provenanceRefinement } : {}),
     ...(statementClassification ? { statementClassification } : {}),
+    ...(conflictValidation ? { conflictValidation } : {}),
   };
 }
 
@@ -731,6 +737,7 @@ export async function executeFullArtifactPipeline({
   paragraphSemanticDensity = undefined,
   claimSemanticDensity = undefined,
   querySemanticDensity = undefined,
+  embeddingModelId,
 }: {
   mappingText?: string | null;
   parsedMappingResult?: Record<string, unknown> | null;
@@ -753,6 +760,7 @@ export async function executeFullArtifactPipeline({
   paragraphSemanticDensity?: unknown;
   claimSemanticDensity?: unknown;
   querySemanticDensity?: unknown;
+  embeddingModelId?: string;
 }): Promise<Record<string, unknown>> {
   const t0 = Date.now();
 
@@ -898,6 +906,7 @@ export async function executeFullArtifactPipeline({
       totalModelCount: modelCount,
       periphery: peripheryForMeasure,
       precomputedClaimEmbeddings: claimEmbeddings ?? undefined,
+      embeddingModelId,
     });
 
     enrichedClaims = measure.enrichedClaims;
@@ -1095,6 +1104,7 @@ export async function buildArtifactForProvider({
   queryText = '',
   modelCount = 1,
   turn = undefined,
+  embeddingModelId,
 }: {
   mappingText: string;
   shadowStatements?: ShadowStatement[] | null;
@@ -1109,6 +1119,7 @@ export async function buildArtifactForProvider({
   queryText?: string;
   modelCount?: number;
   turn?: number | undefined;
+  embeddingModelId?: string;
 }): Promise<Record<string, unknown>> {
   return executeFullArtifactPipeline({
     mappingText,
@@ -1124,6 +1135,7 @@ export async function buildArtifactForProvider({
     queryText,
     modelCount,
     turn,
+    embeddingModelId,
   });
 }
 

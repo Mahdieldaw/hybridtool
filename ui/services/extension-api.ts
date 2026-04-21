@@ -251,16 +251,32 @@ class ExtensionAPI {
   }
 
   getHistorySession(sessionId: string): Promise<HistorySessionSummary> {
+    let embeddingModelId = undefined;
+    try {
+      const val = localStorage.getItem('htos_embedding_model');
+      if (val) embeddingModelId = JSON.parse(val);
+    } catch (e) {
+      console.warn('[API] Failed to parse embedding model from localStorage:', e);
+    }
+
     return this.queryBackend<HistorySessionSummary>({
       type: GET_HISTORY_SESSION,
-      payload: { sessionId },
+      payload: { sessionId, embeddingModelId },
     });
   }
 
   getSession(sessionId: string): Promise<any> {
+    let embeddingModelId = undefined;
+    try {
+      const val = localStorage.getItem('htos_embedding_model');
+      if (val) embeddingModelId = JSON.parse(val);
+    } catch (e) {
+      console.warn('[API] Failed to parse embedding model from localStorage:', e);
+    }
+
     return this.queryBackend<any>({
       type: GET_HISTORY_SESSION,
-      payload: { sessionId },
+      payload: { sessionId, embeddingModelId },
     });
   }
 

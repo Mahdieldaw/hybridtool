@@ -102,7 +102,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
         paraCount: data.paraCount,
         passageCount: data.passageCount,
         hasPassage: data.hasPassage,
-        kind: data.hasPassage ? 'passages' : 'scattered',
+        kind: data.hasPassage ? 'passages' : 'dispersed',
       }));
   }, [selectedProfile, artifact]);
 
@@ -431,7 +431,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                       key: 'kind',
                       header: 'Type',
                       title:
-                        'Whether this model has contiguous passages (length >= 2) or only scattered paragraphs',
+                        'Whether this model has contiguous passages (length >= 2) or only dispersed paragraphs',
                       sortValue: (r: any) => (r.hasPassage ? 1 : 0),
                       cell: (r: any) => (
                         <span

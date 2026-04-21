@@ -66,7 +66,7 @@ export function buildPassageIndex(
   claimDensity: ClaimDensityResult,
   passageRouting: PassageRoutingResult,
   statementClassification: StatementClassificationResult,
-  corpus: CorpusTree | { paragraphs: any[] },
+  corpus: CorpusTree,
   claims: Claim[],
   citationSourceOrder: Record<string | number, string>,
   continuityMap: Map<string, SourceContinuityEntry>
@@ -75,17 +75,9 @@ export function buildPassageIndex(
 
   // Build paragraph lookup: (modelIndex, paragraphOrdinal) → { _fullParagraph, statements }
   const paragraphLookup = new Map<string, { _fullParagraph?: string; statements?: any[] }>();
-  if ('models' in corpus) {
-    // CorpusTree path
-    for (const model of corpus.models) {
-      for (const para of model.paragraphs) {
-        paragraphLookup.set(`${para.modelIndex}:${para.paragraphOrdinal}`, para);
-      }
-    }
-  } else {
-    // Legacy flat-array path (should not occur in production)
-    for (const p of corpus.paragraphs) {
-      paragraphLookup.set(`${p.modelIndex}:${p.paragraphIndex}`, p);
+  for (const model of corpus.models) {
+    for (const para of model.paragraphs) {
+      paragraphLookup.set(`${para.modelIndex}:${para.paragraphOrdinal}`, para);
     }
   }
 

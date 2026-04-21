@@ -326,7 +326,7 @@ export const DecisionMapSheet = React.memo(() => {
       e.preventDefault();
       e.stopPropagation();
       const min = 0.25;
-      const max = 0.9;
+      const max = 0.98;
       resizeRef.current = {
         active: true,
         startY: e.clientY,
@@ -594,6 +594,7 @@ export const DecisionMapSheet = React.memo(() => {
     Math.max(260, Math.round(window.innerHeight * sheetHeightRatio))
   );
   useEffect(() => {
+    setSheetHeightPx(Math.max(260, Math.round(window.innerHeight * sheetHeightRatio)));
     const handleResize = () =>
       setSheetHeightPx(Math.max(260, Math.round(window.innerHeight * sheetHeightRatio)));
     window.addEventListener('resize', handleResize);

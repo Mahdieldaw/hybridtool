@@ -24,6 +24,7 @@ import type {
 import type { MeasuredRegion, PeripheryResult } from '../geometry';
 import { cosineSimilarity } from '../clustering/distance';
 import { generateTextEmbeddings } from '../clustering/embeddings';
+import { getConfigForModel } from '../clustering/config';
 
 export interface ClaimExclusivity {
   exclusiveIds: string[];
@@ -41,6 +42,7 @@ export interface MeasurePhaseInput {
   totalModelCount: number;
   periphery: PeripheryResult;
   precomputedClaimEmbeddings?: Map<string, Float32Array>;
+  embeddingModelId?: string;
 }
 
 export interface MeasurePhaseOutput {
@@ -97,7 +99,8 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
   if (precomputedClaimEmbeddings && precomputedClaimEmbeddings.size > 0) {
     claimEmbeddings = precomputedClaimEmbeddings;
   } else {
-    const raw = await generateTextEmbeddings(claims.map((c) => `${c.label}. ${c.text || ''}`));
+    const config = getConfigForModel(input.embeddingModelId || 'bge-base-en-v1.5');
+    const raw = await generateTextEmbeddings(claims.map((c) => `${c.label}. ${c.text || ''}`), config);
     claimEmbeddings = new Map<string, Float32Array>();
     for (let i = 0; i < claims.length; i++) {
       const emb = raw.embeddings.get(String(i));

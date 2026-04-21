@@ -34,18 +34,18 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
       query: pipelineQuery,
       preSemantic: pipeline?.preSemantic
         ? {
-            ...pipeline.preSemantic,
-            peripheralNodeIds: Array.from(pipeline.preSemantic.peripheralNodeIds ?? []),
-            regions: (
-              pipeline.preSemantic.regions ||
-              pipeline.preSemantic.regionization?.regions ||
-              []
-            ).map((r: any) => ({
-              id: r.id,
-              kind: r.kind,
-              nodeIds: r.nodeIds,
-            })),
-          }
+          ...pipeline.preSemantic,
+          peripheralNodeIds: Array.from(pipeline.preSemantic.peripheralNodeIds ?? []),
+          regions: (
+            pipeline.preSemantic.regions ||
+            pipeline.preSemantic.regionization?.regions ||
+            []
+          ).map((r: any) => ({
+            id: r.id,
+            kind: r.kind,
+            nodeIds: r.nodeIds,
+          })),
+        }
         : undefined,
       diagnostics: mapper?.diagnostics ?? mapper?.structuralValidation ?? undefined,
       structuralValidation: mapper?.structuralValidation ?? undefined,
@@ -76,6 +76,7 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
     'narrative',
     // → geometry
     'diagnostics',
+    'conflictValidation',
     'structuralValidation',
     'convergence',
     'alignment',
@@ -103,6 +104,10 @@ export function buildCognitiveArtifact(mapper?: any, pipeline?: any): any | null
         (result as any)[key] = value;
       }
     }
+  }
+
+  if (mapper?.conflictValidation) {
+    result.conflictValidation = mapper.conflictValidation;
   }
 
   return result;

@@ -1273,7 +1273,10 @@ async function handleUnifiedMessage(
 
       case 'GET_HISTORY_SESSION': {
         (async () => {
-          const sessionId = (message.sessionId as string | undefined) || (message.payload as { sessionId?: string } | undefined)?.sessionId;
+          const payload = (message.payload || {}) as { sessionId?: string; embeddingModelId?: string };
+          const sessionId = (message.sessionId as string | undefined) || payload.sessionId;
+          const embeddingModelId = (message.embeddingModelId as string | undefined) || payload.embeddingModelId;
+
           if (!sessionId) throw new Error('Missing sessionId');
 
           const smAdapter = (sm as unknown as {
@@ -1441,7 +1444,7 @@ async function handleUnifiedMessage(
             Object.keys((latestRound?.mappingResponses as Record<string, unknown> | undefined) ?? {})[0] ||
             null;
           if (latestRound?.aiTurnId && latestMapper) {
-            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm).catch(() => {});
+            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm, embeddingModelId).catch(() => {});
           }
         })().catch((e) => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
@@ -1919,6 +1922,7 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
       citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
       queryText,
       modelCount,
+      embeddingModelId: resolvedModelId,
     }) as Record<string, unknown>;
 
     const buildResult = buildResultRaw as unknown as BuildArtifactResult;
@@ -2005,7 +2009,7 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
           mapperArtifact.claimDensity as ClaimDensityResult,
           mapperArtifact.passageRouting as PassageRoutingResult,
           mapperArtifact.statementClassification as StatementClassificationResult,
-          (mapperArtifact.corpus as { paragraphs: unknown[] } | undefined) ?? { paragraphs: [] },
+          (mapperArtifact.corpus as any) ?? { models: [] },
           enrichedClaims,
           (mapperArtifact.citationSourceOrder as Record<string, string>) || {},
           continuityMap
@@ -2054,7 +2058,7 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
             mapperArtifact.claimDensity as ClaimDensityResult,
             mapperArtifact.passageRouting as PassageRoutingResult,
             mapperArtifact.statementClassification as StatementClassificationResult,
-            (mapperArtifact.corpus as { paragraphs: unknown[] } | undefined) ?? { paragraphs: [] },
+            (mapperArtifact.corpus as any) ?? { models: [] },
             enrichedClaims,
             (mapperArtifact.citationSourceOrder as Record<string, string>) || {},
             continuityMap
