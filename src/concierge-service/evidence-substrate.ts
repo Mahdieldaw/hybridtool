@@ -12,17 +12,11 @@ import type {
   EditorialAST,
   EditorialThread,
   CognitiveArtifact,
+  EvidenceSubstrateLookupCache,
 } from '../../shared/types';
 import type { IndexedPassage, IndexedUnclaimedGroup } from './editorial-mapper';
 
-// ─────────────────────────────────────────────────────────────────────────
-// Lookup cache (built once from passage index, reused by substrate builder)
-// ─────────────────────────────────────────────────────────────────────────
-
-export interface EvidenceSubstrateLookupCache {
-  passages: Map<string, { text: string; modelName: string; claimLabel: string }>;
-  unclaimed: Map<string, { text: string; claimLabel: string }>;
-}
+export type { EvidenceSubstrateLookupCache };
 
 export function buildLookupCacheFromIndex(
   passages: IndexedPassage[],
@@ -141,7 +135,6 @@ function buildResolver(
     }
 
     const modelName =
-      citationSourceOrder[modelIndex + 1] ||
       citationSourceOrder[modelIndex] ||
       `model-${modelIndex}`;
 

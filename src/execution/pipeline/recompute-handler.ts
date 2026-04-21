@@ -258,7 +258,7 @@ export async function handleRecompute(payload, options) {
       try {
         const { buildEvidenceSubstrate } =
           await import('../../../concierge-service/evidence-substrate.js');
-        const cso = mappingArtifact?.meta?.citationSourceOrder || {};
+        const cso = mappingArtifact?.citationSourceOrder || {};
         const evidenceSubstrate = buildEvidenceSubstrate(mappingArtifact, latestMappingText, cso);
 
         if (evidenceSubstrate) {

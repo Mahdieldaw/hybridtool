@@ -171,7 +171,11 @@ async function handleStartup(reason: string): Promise<void> {
   await initializeGlobalServices();
 }
 
-chrome.runtime.onStartup.addListener(() => handleStartup('startup'));
+chrome.runtime.onStartup.addListener(() => {
+  handleStartup('startup').catch((err) =>
+    console.error('[onStartup] handleStartup failed:', err)
+  );
+});
 
 chrome.runtime.onInstalled.addListener((details) => {
   handleStartup(`installed: ${details.reason}`).catch((err) =>

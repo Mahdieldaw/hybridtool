@@ -107,10 +107,17 @@ export interface CognitiveArtifact {
     edges: Edge[];
     narrative?: string;
   };
+  citationSourceOrder?: Record<number, string>;
+  _editorialLookupCache?: EvidenceSubstrateLookupCache;
   meta?: {
     modelCount?: number;
     query?: string;
     turn?: number;
     timestamp?: string;
   };
+}
+
+export interface EvidenceSubstrateLookupCache {
+  passages: Map<string, { text: string; modelName: string; claimLabel: string }>;
+  unclaimed: Map<string, { text: string; claimLabel: string }>;
 }

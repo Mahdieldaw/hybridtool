@@ -101,7 +101,8 @@ export async function runPreflight(
       .filter((pid) => {
         const status = authStatus[pid.toLowerCase()];
         const notExplicitlyFalse = status !== false;
-        return notExplicitlyFalse && availableLower.includes(pid.toLowerCase());
+        const noConstraint = availableLower.length === 0 || availableLower.includes(pid.toLowerCase());
+        return notExplicitlyFalse && noConstraint;
       })
       .slice(0, 3) as string[];
   }

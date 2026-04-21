@@ -212,6 +212,12 @@ export class DNRUtils {
         finalOp.toUpperCase() as keyof typeof chrome.declarativeNetRequest.HeaderOperation
       ];
 
+    if (finalOp !== 'remove' && (headerValue === undefined || headerValue === null)) {
+      const err = new Error(`DNR: headerValue is required for operation "${finalOp}" on header "${headerName}"`);
+      console.error(err.message);
+      throw err;
+    }
+
     const rule: DNRRule = {
       id: finalRuleId,
       priority: 1,
@@ -221,7 +227,7 @@ export class DNRUtils {
           {
             header: headerName,
             operation: headerOperation,
-            ...(headerOperation !== 'remove' && { value: headerValue }),
+            ...(finalOp !== 'remove' && { value: headerValue as string }),
           },
         ],
       },

@@ -123,7 +123,6 @@ export function buildPassageIndex(
 
       const continuity = continuityMap.get(passageKey);
       const modelName =
-        citationSourceOrder[passageEntry.modelIndex + 1] ||
         citationSourceOrder[passageEntry.modelIndex] ||
         `model-${passageEntry.modelIndex}`;
 
