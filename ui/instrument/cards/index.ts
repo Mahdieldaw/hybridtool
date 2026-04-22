@@ -8,3 +8,4 @@ export * from './ClaimStatementsCard';
 export * from './PassageOwnershipCard';
 export * from './StatementClassificationCard';
 export * from './PeripheralNodeCard';
+export * from './CongruenceCard';

@@ -265,7 +265,7 @@ function splitTablesAndProse(
   return segments;
 }
 
-type ContentBlock = { type: 'list'; items: string[] } | { type: 'prose'; content: string };
+type ContentBlock = { type: 'list'; items: string[]; _raw?: string } | { type: 'prose'; content: string };
 
 /**
  * Split content into list blocks and prose blocks.
@@ -292,8 +292,8 @@ function splitContentBlocks(content: string): ContentBlock[] {
         blocks.push({
           type: 'list',
           items,
-          _raw: originalLines.join('\n'), // Store raw list for fullParagraph context
-        } as any);
+          _raw: originalLines.join('\n'),
+        });
       }
     } else {
       // Collect non-list lines into a prose chunk
@@ -427,7 +427,7 @@ export function extractShadowStatements(
                 confidence,
                 signals,
                 location: { paragraphIndex: pIdx, sentenceIndex: sIdx },
-                fullParagraph: (block as any)._raw || rawItem,
+                fullParagraph: block._raw || rawItem,
               });
 
               if (statements.length >= CANDIDATE_LIMIT) {

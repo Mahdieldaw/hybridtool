@@ -1,7 +1,10 @@
 // @ts-nocheck
-import { ArtifactProcessor } from '../../../shared/artifact-processor';
-import { getErrorMessage } from '../../errors/handler';
-import { executeGenericSingleStep } from '../utils/llm-runner.js';
+import { ArtifactProcessor } from '../../../shared/artifact-processor.js';
+import { getErrorMessage } from '../../errors/handler.ts';
+import { executeGenericSingleStep } from '../utils/llm-runner.ts';
+import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/concierge-service.ts';
+import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.ts';
+import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.ts';
 
 // Exported for use by recompute-handler
 export async function runSingularityLLM(step, context, options) {
@@ -14,16 +17,7 @@ export async function runSingularityLLM(step, context, options) {
     throw new Error('Singularity mode requires a mapping artifact.');
   }
 
-  let ConciergeService;
-  let handoffV2Enabled = false;
-  try {
-    const module = await import('../../../concierge-service/concierge-service.js');
-    ConciergeService = module.ConciergeService;
-    handoffV2Enabled = module.HANDOFF_V2_ENABLED === true;
-  } catch (e) {
-    console.warn('[SingularityPhase] Failed to import ConciergeService:', e);
-    ConciergeService = null;
-  }
+  let handoffV2Enabled = HANDOFF_V2_ENABLED === true;
 
   let singularityPrompt;
 
@@ -207,21 +201,6 @@ export async function executeSingularityPhase(
       let singularityStep = null;
       try {
         // Guarded dynamic import for resilience during partial deploys
-        let ConciergeModule;
-        try {
-          ConciergeModule = await import('../../../concierge-service/concierge-service.js');
-        } catch (err) {
-          console.error(
-            '[SingularityPhase] Critical error: ConciergeService module could not be loaded',
-            err
-          );
-        }
-        const ConciergeService = ConciergeModule?.ConciergeService;
-
-        // Handoff V2 feature flag — when false, every turn uses plain buildConciergePrompt
-        const handoffV2Enabled = ConciergeModule?.HANDOFF_V2_ENABLED === true;
-
-        // ══════════════════════════════════════════════════════════════════
         // Determine if fresh instance needed
         // ══════════════════════════════════════════════════════════════════
         const lastProvider = conciergeState?.lastSingularityProviderId;
@@ -285,8 +264,6 @@ export async function executeSingularityPhase(
             // Build evidence substrate: editorial threads + mapping response
             let evidenceSubstrate = '';
             try {
-              const { buildEvidenceSubstrate } =
-                await import('../../../concierge-service/evidence-substrate.js');
               const cso = mappingArtifact?.citationSourceOrder || {};
               const lookupCache = mappingArtifact?._editorialLookupCache;
               evidenceSubstrate = buildEvidenceSubstrate(
@@ -314,12 +291,12 @@ export async function executeSingularityPhase(
             conciergePromptSeed =
               handoffV2Enabled && conciergeState?.commitPending && conciergeState?.pendingHandoff
                 ? {
-                    ...conciergePromptSeedBase,
-                    priorContext: {
-                      handoff: conciergeState.pendingHandoff,
-                      committed: conciergeState.pendingHandoff?.commit || null,
-                    },
-                  }
+                  ...conciergePromptSeedBase,
+                  priorContext: {
+                    handoff: conciergeState.pendingHandoff,
+                    committed: conciergeState.pendingHandoff?.commit || null,
+                  },
+                }
                 : conciergePromptSeedBase;
 
             if (conciergePromptSeed.priorContext) {
@@ -432,8 +409,6 @@ export async function executeSingularityPhase(
 
             if (handoffV2Enabled && turnInCurrentInstance >= 2) {
               try {
-                const { parseHandoffResponse, hasHandoffContent } =
-                  await import('../../../../shared/parsing-utils.js');
                 const parsed = parseHandoffResponse(singularityResult?.text || '');
 
                 if (parsed.handoff && hasHandoffContent(parsed.handoff)) {

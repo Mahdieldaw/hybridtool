@@ -22,11 +22,24 @@ import type {
   StructuralAnalysis,
   ValidatedConflict,
 } from '../../shared/types';
-import type { GeometricSubstrate, SubstrateInterpretation, PeripheryResult, MeasuredRegion } from '../geometry';
-import type { ShadowStatement, ShadowParagraph } from '../shadow';
-import type { EmbeddingConfig } from '../clustering';
+import type { GeometricSubstrate, SubstrateInterpretation, PeripheryResult, MeasuredRegion } from '../geometry/index.js';
+import type { ShadowStatement, ShadowParagraph } from '../shadow/index.js';
+import type { EmbeddingConfig } from '../clustering/index.js';
+import * as clustering from '../clustering/index.js';
 import type { QueryRelevanceResult } from '../geometry/annotate';
 import type { ClaimExclusivity } from '../provenance/measure';
+
+import { computeQueryRelevance, enrichStatementsWithGeometry } from '../geometry/annotate.js';
+import { buildProvenancePipeline } from '../provenance/engine.js';
+import { analyzeGlobalStructure } from '../provenance/structure.js';
+import { buildCorpusTree } from '../../shared/corpus-utils.js';
+import { parseSemanticMapperOutput } from '../provenance/semantic-mapper.js';
+import { extractShadowStatements, projectParagraphs } from '../shadow/index.js';
+import { buildGeometricSubstrate } from '../geometry/measure.js';
+import { buildPreSemanticInterpretation } from '../geometry/interpret.js';
+import { measureProvenance } from '../provenance/measure.js';
+import { buildCognitiveArtifact } from '../../shared/cognitive-artifact.js';
+import { packEmbeddingMap } from '../persistence/embedding-codec.js';
 
 function getErrorMessage(err: unknown): string {
   if (!err) return 'Unknown error';
@@ -147,7 +160,6 @@ export async function computeDerivedFields({
       } else {
         try {
           if (queryEmbedding && substrate) {
-            const { computeQueryRelevance } = await import('../geometry/annotate');
             result.queryRelevance = computeQueryRelevance({
               queryEmbedding,
               statements: shadowStatements,
@@ -201,8 +213,6 @@ export async function computeDerivedFields({
   // passage-routing, provenance-refinement, statement-classification.
   try {
     if (enrichedClaims.length > 0) {
-      const { buildProvenancePipeline } = await import('../provenance/engine');
-
       const statementTextsMap = new Map();
       for (const stmt of shadowStatements) {
         statementTextsMap.set(stmt.id, stmt.text ?? '');
@@ -268,9 +278,7 @@ export async function computeDerivedFields({
   // ── Structural analysis (reads claims + edges only — independent) ─────
   try {
     if (enrichedClaims.length > 0) {
-      const { analyzeGlobalStructure: computeStructuralAnalysis } =
-        await import('../provenance/structure');
-      result.cachedStructuralAnalysis = computeStructuralAnalysis({
+      result.cachedStructuralAnalysis = analyzeGlobalStructure({
         claims: (enrichedClaims as EnrichedClaim[]),
         edges: (parsedEdges as Edge[]),
         modelCount,
@@ -385,7 +393,6 @@ export async function assembleMapperArtifact({
   // Indices are in-memory only; NEVER serialized. Re-derived on artifact rebuild.
   let corpus = null;
   try {
-    const { buildCorpusTree } = await import('../../shared/corpus-utils');
     corpus = buildCorpusTree(shadowStatements, shadowParagraphs);
   } catch (err) {
     console.warn('[assembleMapperArtifact] Failed to build CorpusTree (non-fatal):', err);
@@ -496,7 +503,6 @@ export async function computePreSurveyPipeline({
     if (!mappingText) {
       throw new Error('Either mappingText or parsedMappingResult is required');
     }
-    const { parseSemanticMapperOutput } = await import('../provenance/semantic-mapper');
     const parseResult = parseSemanticMapperOutput(mappingText);
     if (!parseResult?.success || !parseResult?.output) {
       throw new Error('Failed to parse mapping response text into claims/edges');
@@ -522,7 +528,6 @@ export async function computePreSurveyPipeline({
     if (!Array.isArray(batchSources) || batchSources.length === 0) {
       throw new Error('No shadow statements and no batch sources provided for reconstruction');
     }
-    const { extractShadowStatements, projectParagraphs } = await import('../shadow');
     const shadowResult = extractShadowStatements(batchSources);
     const paragraphResult = projectParagraphs(shadowResult.statements);
     shadowStatements = shadowResult.statements;
@@ -534,7 +539,6 @@ export async function computePreSurveyPipeline({
   }
 
   if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-    const { projectParagraphs } = await import('../shadow');
     shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
   }
 
@@ -557,9 +561,6 @@ export async function computePreSurveyPipeline({
     regions = preSemantic?.regions ?? [];
   } else {
     // Regen path — build geometry from scratch
-    const { buildGeometricSubstrate } = await import('../geometry/measure');
-    const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
-
     const geoMeta = (geoRecord && typeof geoRecord === 'object' && 'meta' in geoRecord) ? (geoRecord as Record<string, unknown>).meta : null;
     const embeddingBackend = (geoMeta && typeof geoMeta === 'object' && 'embeddingBackend' in geoMeta) ? (geoMeta as Record<string, unknown>).embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm' : 'wasm';
     substrate = buildGeometricSubstrate(
@@ -580,8 +581,7 @@ export async function computePreSurveyPipeline({
     queryRelevance = null;
     try {
       if (queryEmbedding) {
-        const { computeQueryRelevance: _computeQR } = await import('../geometry/annotate');
-        queryRelevance = _computeQR({
+        queryRelevance = computeQueryRelevance({
           queryEmbedding,
           statements: shadowStatements,
           statementEmbeddings,
@@ -598,7 +598,6 @@ export async function computePreSurveyPipeline({
   }
 
   try {
-    const { enrichStatementsWithGeometry } = await import('../geometry/annotate');
     enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, preSemantic);
   } catch (err) {
     console.warn(
@@ -630,7 +629,6 @@ export async function computePreSurveyPipeline({
   try {
     const peripheryForMeasure = resolvePeriphery(preSemantic);
 
-    const { measureProvenance } = await import('../provenance/measure');
     const measure = await measureProvenance({
       mapperClaims: mapperClaimsForProvenance,
       shadowStatements,
@@ -775,7 +773,6 @@ export async function executeFullArtifactPipeline({
     if (!mappingText) {
       throw new Error('Either mappingText or parsedMappingResult is required');
     }
-    const { parseSemanticMapperOutput } = await import('../provenance/semantic-mapper');
     const parseResult = parseSemanticMapperOutput(mappingText);
     if (!parseResult?.success || !parseResult?.output) {
       throw new Error('Failed to parse mapping response text into claims/edges');
@@ -801,7 +798,6 @@ export async function executeFullArtifactPipeline({
     if (!Array.isArray(batchSources) || batchSources.length === 0) {
       throw new Error('No shadow statements and no batch sources provided for reconstruction');
     }
-    const { extractShadowStatements, projectParagraphs } = await import('../shadow');
     const shadowResult = extractShadowStatements(batchSources);
     const paragraphResult = projectParagraphs(shadowResult.statements);
     shadowStatements = shadowResult.statements;
@@ -813,7 +809,6 @@ export async function executeFullArtifactPipeline({
   }
 
   if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-    const { projectParagraphs } = await import('../shadow');
     shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
   }
 
@@ -833,9 +828,6 @@ export async function executeFullArtifactPipeline({
     queryRelevance = preBuiltQueryRelevance;
     regions = preSemantic?.regions ?? [];
   } else {
-    const { buildGeometricSubstrate } = await import('../geometry/measure');
-    const { buildPreSemanticInterpretation } = await import('../geometry/interpret');
-
     const geoMeta = (geoRecord && typeof geoRecord === 'object' && 'meta' in geoRecord) ? (geoRecord as Record<string, unknown>).meta : null;
     const embeddingBackend = (geoMeta && typeof geoMeta === 'object' && 'embeddingBackend' in geoMeta) ? (geoMeta as Record<string, unknown>).embeddingBackend === 'webgpu' ? 'webgpu' : 'wasm' : 'wasm';
     substrate = buildGeometricSubstrate(
@@ -854,8 +846,7 @@ export async function executeFullArtifactPipeline({
     queryRelevance = null;
     try {
       if (queryEmbedding) {
-        const { computeQueryRelevance: _computeQR } = await import('../geometry/annotate');
-        queryRelevance = _computeQR({
+        queryRelevance = computeQueryRelevance({
           queryEmbedding,
           statements: shadowStatements,
           statementEmbeddings,
@@ -872,7 +863,6 @@ export async function executeFullArtifactPipeline({
   }
 
   try {
-    const { enrichStatementsWithGeometry } = await import('../geometry/annotate');
     enrichStatementsWithGeometry(shadowStatements, shadowParagraphs, substrate, preSemantic);
   } catch (err) {
     console.warn(
@@ -895,7 +885,6 @@ export async function executeFullArtifactPipeline({
   try {
     const peripheryForMeasure = resolvePeriphery(preSemantic);
 
-    const { measureProvenance } = await import('../provenance/measure');
     const measure = await measureProvenance({
       mapperClaims: mapperClaimsForProvenance,
       shadowStatements,
@@ -952,8 +941,6 @@ export async function executeFullArtifactPipeline({
   }
 
   // ── 9. Build cognitive artifact ────────────────────────────────
-  const { buildCognitiveArtifact } = await import('../../shared/cognitive-artifact');
-
   const substrateGraph = buildSubstrateGraph({ substrate, regions });
 
   const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
@@ -1054,9 +1041,7 @@ export async function assembleFromPreSurvey(
     (mapperArtifact as Record<string, unknown>).preSemantic = preSemantic || null;
   }
 
-  // ── 14. Build cognitive artifact ──────────────────────────────────
-  const { buildCognitiveArtifact } = await import('../../shared/cognitive-artifact');
-
+  // Build cognitive artifact
   const substrateGraph = buildSubstrateGraph({ substrate, regions });
 
   const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
@@ -1161,22 +1146,6 @@ export async function computeProbeGeometry({
     };
   }
 
-  const [
-    { extractShadowStatements, projectParagraphs },
-    clustering,
-    { buildGeometricSubstrate },
-    { buildPreSemanticInterpretation },
-    { packEmbeddingMap },
-  ] = await Promise.all([
-    import('../shadow'),
-    import('../clustering'),
-    import('../geometry/measure'),
-    import('../geometry/interpret'),
-    import('../persistence/embedding-codec'),
-  ]);
-
-  const { DEFAULT_CONFIG, generateStatementEmbeddings, generateEmbeddings } = clustering;
-  const config = embeddingConfig || DEFAULT_CONFIG;
   const shadowResult = extractShadowStatements([{ modelIndex, content: text }]);
   const shadowParagraphResult = projectParagraphs(shadowResult.statements);
   const rawStatements = shadowResult.statements || [];
@@ -1204,6 +1173,9 @@ export async function computeProbeGeometry({
       preSemantic: null,
     };
   }
+
+  const { DEFAULT_CONFIG, generateStatementEmbeddings, generateEmbeddings } = clustering;
+  const config = embeddingConfig || DEFAULT_CONFIG;
 
   const [statementResult, paragraphResult] = await Promise.all([
     generateStatementEmbeddings(statements, config),

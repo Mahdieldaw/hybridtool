@@ -3,6 +3,7 @@ import { runPreflight, createAuthErrorMessage } from '../execution/preflight-val
 import { authManager } from '../providers/auth-manager.js';
 import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging.js';
 import { getArtifactParagraphs } from '../../shared/corpus-utils.js';
+import { computeProbeGeometry } from '../execution/deterministic-pipeline.js';
 import type { PrimitiveWorkflowRequest, ResolvedContext } from '../../shared/types/contract.js';
 import type { ProbeCorpusHit } from '../../shared/types/turns.js';
 import type { SessionManager } from '../persistence/session-manager.js';
@@ -140,6 +141,8 @@ export class ConnectionHandler {
   private _activeRecomputes: Set<string>;
   private _probePersistenceQueues: Map<string, Promise<unknown>>;
 
+  private static activeConnections = new Set<ConnectionHandler>();
+
   constructor(port: chrome.runtime.Port, servicesOrProvider: Services | (() => Promise<Services>)) {
     this.port = port;
     this.services = null;
@@ -156,6 +159,7 @@ export class ConnectionHandler {
     this.backendInitPromise = null;
     this._activeRecomputes = new Set();
     this._probePersistenceQueues = new Map();
+    ConnectionHandler.activeConnections.add(this);
   }
 
   async init(): Promise<void> {
@@ -901,13 +905,10 @@ export class ConnectionHandler {
                 text = String((outcome?.value as { text?: unknown })?.text ?? '').trim();
               }
 
-              const { computeProbeGeometry } = await import(
-                '../execution/deterministic-pipeline.js'
-              );
-              const geometryResult = (await computeProbeGeometry({
-                modelIndex,
-                content: text,
-              })) as ProbeGeometryResult;
+                const geometryResult = (await computeProbeGeometry({
+                  modelIndex,
+                  content: text,
+                })) as ProbeGeometryResult;
 
               const now = Date.now();
               await this._enqueueProbePersistence(aiTurnId, () =>
@@ -1362,7 +1363,18 @@ export class ConnectionHandler {
     }
   }
 
+  static broadcast(message: any): void {
+    for (const connection of ConnectionHandler.activeConnections) {
+      try {
+        connection.port?.postMessage(message);
+      } catch (e) {
+        console.warn('[ConnectionHandler] Broadcast failed for a port:', e);
+      }
+    }
+  }
+
   private _cleanup(): void {
+    ConnectionHandler.activeConnections.delete(this);
     console.log('[ConnectionHandler] Cleaning up connection');
 
     if (this.messageHandler) {

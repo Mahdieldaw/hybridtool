@@ -20,6 +20,7 @@ import {
   isSplitOpenAtom,
   hasAutoOpenedPaneAtom,
   providerArtifactFamily,
+  embeddingModelIdAtom,
 } from '../../state';
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from '../../state';
 import { StreamingBuffer } from '../../utils/streaming-buffer';
@@ -900,6 +901,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
             singularityOutput,
             pipelineStatus,
             sessionId: msgSessionId,
+            embeddingModelId,
           } = message as any;
           const artifactRaw = mapping?.artifact;
           const artifact = normalizeArtifactCandidate(artifactRaw) || artifactRaw;
@@ -912,6 +914,21 @@ export function usePortMessageHandler(enabled: boolean = true) {
               activeAiTurnIdRef.current === aiTurnId
             ) {
               setCurrentSessionId(msgSessionId);
+            }
+          }
+
+          // Guard: only write if this artifact matches current embedding model preference
+          if (embeddingModelId) {
+            const currentModelId = jotaiStore.get(embeddingModelIdAtom);
+            if (embeddingModelId !== currentModelId) {
+              console.log(
+                '[Port] MAPPER_ARTIFACT_READY: Ignoring stale artifact modelId mismatch',
+                {
+                  received: embeddingModelId,
+                  current: currentModelId,
+                }
+              );
+              return;
             }
           }
 

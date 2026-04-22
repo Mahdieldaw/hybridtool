@@ -22,6 +22,7 @@ import {
   StatementClassificationCard,
   PeripheralNodeCard,
   SubstrateSnapshotCard,
+  CongruenceCard,
 } from './cards';
 import { useInstrumentState } from '../hooks/instrument/useInstrumentState';
 import type { PipelineLayer } from '../hooks/instrument/useInstrumentState';
@@ -1199,6 +1200,11 @@ export const DecisionMapSheet = React.memo(() => {
                                     ),
                                   },
                                   {
+                                    id: 'congruence',
+                                    label: 'Congruence (Triangulation)',
+                                    content: <CongruenceCard artifact={mappingArtifactWithCitations} />,
+                                  },
+                                  {
                                     id: 'blast-radius',
                                     label: 'Blast Radius',
                                     content: (
@@ -1437,6 +1443,11 @@ export const DecisionMapSheet = React.memo(() => {
                                           artifact={mappingArtifactWithCitations}
                                         />
                                       ),
+                                    },
+                                    {
+                                      id: 'congruence',
+                                      label: 'Congruence (Triangulation)',
+                                      content: <CongruenceCard artifact={mappingArtifactWithCitations} />,
                                     },
                                     {
                                       id: 'blast-radius',

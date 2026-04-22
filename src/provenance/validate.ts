@@ -110,13 +110,14 @@ function computeTriangleResidual(
   claimIdB: string,
   claimEmbeddings: Map<string, Float32Array>,
   queryEmbedding: Float32Array
-): { residual: number; simAQ: number; simBQ: number } | null {
+): { residual: number; simAQ: number; simBQ: number; simAB: number } | null {
   const embA = claimEmbeddings.get(claimIdA);
   const embB = claimEmbeddings.get(claimIdB);
   if (!embA || !embB) return null;
   const simAQ = cosineSimilarity(embA, queryEmbedding);
   const simBQ = cosineSimilarity(embB, queryEmbedding);
-  return { residual: simAQ * simBQ - cosineSimilarity(embA, embB), simAQ, simBQ };
+  const simAB = cosineSimilarity(embA, embB);
+  return { residual: simAQ * simBQ - simAB, simAQ, simBQ, simAB };
 }
 
 // ── Provenance helpers ────────────────────────────────────────────────────────
@@ -431,7 +432,7 @@ export function validateEdgesAndAllegiance(input: ValidateInput): ValidateOutput
     crossPoolProx: number | null;
     failReason: string | null;
     mapperLabeledConflict: boolean;
-    triangleResult: { residual: number; simAQ: number; simBQ: number } | null;
+    triangleResult: { residual: number; simAQ: number; simBQ: number; simAB: number } | null;
   };
 
   const pairResults: PairResult[] = [];
@@ -504,7 +505,9 @@ export function validateEdgesAndAllegiance(input: ValidateInput): ValidateOutput
       // NEW SYSTEM: Triangulation
       // Dynamic threshold: residual must be greater than the corpus mean
       validated = pr.triangleResult.residual > muResidual;
-      if (!validated) {
+      if (validated) {
+        failReason = null;
+      } else {
         failReason = `triangle residual ${pr.triangleResult.residual.toFixed(3)} <= mu ${muResidual.toFixed(3)}`;
       }
     } else if (pr.crossPoolProx !== null) {
@@ -514,11 +517,14 @@ export function validateEdgesAndAllegiance(input: ValidateInput): ValidateOutput
       } else {
         // Must be GREATER than mean: proves they are arguing about the exact same localized topic
         validated = pr.crossPoolProx > muProximity;
-        if (!validated) {
+        if (validated) {
+          failReason = null;
+        } else {
           failReason = `cross-pool prox ${pr.crossPoolProx.toFixed(3)} <= mu ${muProximity.toFixed(3)}`;
         }
       }
     }
+
 
     validatedConflicts.push({
       edgeFrom: pr.aId,
@@ -531,6 +537,7 @@ export function validateEdgesAndAllegiance(input: ValidateInput): ValidateOutput
       validated,
       failReason: failReason ?? null,
       triangleResidual: pr.triangleResult?.residual ?? null,
+      centroidSim: pr.triangleResult?.simAB ?? null,
       muTriangle: muResidual,
       querySimPair: pr.triangleResult ? [pr.triangleResult.simAQ, pr.triangleResult.simBQ] : null,
     });

@@ -88,9 +88,9 @@ export function formatProviderResponseForMd(
 ): string {
   const text =
     response &&
-    typeof response === 'object' &&
-    typeof (response as any).text === 'string' &&
-    (response as any).text.trim().length > 0
+      typeof response === 'object' &&
+      typeof (response as any).text === 'string' &&
+      (response as any).text.trim().length > 0
       ? String((response as any).text)
       : '*Empty response*';
   return `**${providerName}**:\n\n${text}\n\n`;
@@ -318,7 +318,7 @@ export function formatSingularityResponse(
   if (!text) return '';
   const providerName = output?.providerId
     ? LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === String(output.providerId))?.name ||
-      String(output.providerId)
+    String(output.providerId)
     : 'Singularity';
   return `**${providerName} (Singularity)**:\n\n${text}\n`;
 }

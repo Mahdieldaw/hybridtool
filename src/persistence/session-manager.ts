@@ -15,7 +15,7 @@ import type {
 } from '../../shared/types';
 import type { ProviderResponseRecord, SessionRecord, JsonSafeOpts } from './types';
 
-type LoggerLike = { error: (...args: unknown[]) => void };
+type LoggerLike = { error: (...args: unknown[]) => void; info?: (...args: unknown[]) => void };
 
 const getSessionLogger = (): LoggerLike => {
   try {
@@ -32,7 +32,10 @@ const getSessionLogger = (): LoggerLike => {
   } catch (err) {
     console.error('[SessionManager] Error retrieving global logger:', err);
   }
-  return console;
+  return {
+    error: console.error,
+    info: console.info || console.log,
+  };
 };
 
 const VALID_PROVIDER_STATUSES = [
@@ -1628,6 +1631,11 @@ export class SessionManager {
     }
   ): Promise<void> {
     try {
+      if (getSessionLogger().info) {
+        getSessionLogger().info!(`[SessionManager] Persisting embeddings for turn: ${aiTurnId}`);
+      } else {
+        console.log(`[SessionManager] Persisting embeddings for turn: ${aiTurnId}`);
+      }
       const adapter = this._requireAdapter();
       const now = Date.now();
       await adapter.putBinary('embeddings', {
@@ -1638,7 +1646,8 @@ export class SessionManager {
         updatedAt: now,
       });
     } catch (err) {
-      getSessionLogger().error('[SessionManager] persistEmbeddings failed', err);
+      getSessionLogger().error(`[SessionManager] persistEmbeddings FAILED for turn ${aiTurnId}`, err);
+      throw err;
     }
   }
 

@@ -50,9 +50,9 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
     const profile = selectedClaimId
       ? (artifact?.claimDensity?.profiles ?? {})[selectedClaimId]
       : null;
-    const covMap = new Map<string, number>(); // "modelIndex:paragraphIndex" → coverage
+    const covMap = new Map<string, number>(); // "modelIndex:paragraphOrdinal" → coverage
     for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
-      const key = `${entry.modelIndex}:${entry.paragraphIndex}`;
+      const key = `${entry.modelIndex}:${getParaIdx(entry)}`;
       covMap.set(key, entry.coverage ?? 0);
     }
     const passages = safeArr<any>(profile?.passages);
@@ -127,7 +127,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       const profile = (artifact?.claimDensity?.profiles ?? {})[claimId];
       const covMap = new Map<string, number>();
       for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
-        covMap.set(`${entry.modelIndex}:${entry.paragraphIndex}`, entry.coverage ?? 0);
+        covMap.set(`${entry.modelIndex}:${getParaIdx(entry)}`, entry.coverage ?? 0);
       }
       const passages = safeArr<any>(profile?.passages);
       const inPass = (mi: number, po: number) =>

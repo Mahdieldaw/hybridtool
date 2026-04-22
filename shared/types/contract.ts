@@ -346,6 +346,8 @@ export interface ValidatedConflict {
    *  Positive = claims diverge more than query relevance predicts = conflict signal.
    *  Null when claimEmbeddings or queryEmbedding unavailable. */
   triangleResidual?: number | null;
+  /** Direct centroid similarity: sim(A, B). Used in triangulation residual. */
+  centroidSim?: number | null;
   /** Mean of all finite triangle residuals in this validation run. */
   muTriangle?: number | null;
   /** [sim(A,Q), sim(B,Q)] — query similarities for instrumentation. */
@@ -663,7 +665,7 @@ export interface StatementClassificationResult {
     unclaimedCount: number;
     mixedParagraphCount: number;
     fullyUnclaimedParagraphCount: number;
-    fullyCount: number;
+    fullyCoveredParagraphCount: number;
     unclaimedGroupCount: number;
   };
   meta: { processingTimeMs: number };

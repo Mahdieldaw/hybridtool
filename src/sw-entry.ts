@@ -32,9 +32,25 @@ import { authManager } from './providers/auth-manager.js';
 
 // Persistence Layer Imports
 import { SessionManager } from './persistence/session-manager.js';
-import { initializePersistenceLayer } from './persistence/index';
+import { initializePersistenceLayer } from './persistence/index.js';
 import { errorHandler, getErrorMessage } from './errors/handler.js';
 import { persistenceMonitor } from './persistence/persistence-monitor.js';
+import { unpackEmbeddingMap, packEmbeddingMap } from './persistence/embedding-codec.js';
+import {
+  generateTextEmbeddings,
+  structuredTruncate,
+  generateStatementEmbeddings,
+  generateEmbeddings,
+  stripInlineMarkdown,
+} from './clustering/index.js';
+import { getConfigForModel } from './clustering/config.js';
+import { searchCorpus } from './clustering/corpus-search.js';
+import { canonicalCitationOrder, buildCitationSourceOrder } from '../shared/provider-config.js';
+import { extractShadowStatements, projectParagraphs } from './shadow/index.js';
+import { buildArtifactForProvider } from './execution/deterministic-pipeline.js';
+import { buildSourceContinuityMap } from './provenance/surface.js';
+import { parseEditorialOutput, buildPassageIndex, buildEditorialPrompt } from './concierge-service/editorial-mapper.js';
+
 
 // Global Services Registry
 import { ServiceRegistry } from './system/service-registry.js';
@@ -376,7 +392,7 @@ class FaultTolerantOrchestrator {
 
       this.executeParallelFanout(prompt, [providerId], {
         ...options,
-        onPartial: options.onPartial ?? (() => {}),
+        onPartial: options.onPartial ?? (() => { }),
         onError: (error) => {
           clearTimeout(timeoutId);
           reject(error);
@@ -440,8 +456,8 @@ class FaultTolerantOrchestrator {
   executeParallelFanout(prompt: string, providers: string[], options: ExecuteParallelFanoutOptions = {}): void {
     const {
       sessionId = `req-${Date.now()}`,
-      onPartial = () => {},
-      onAllComplete = () => {},
+      onPartial = () => { },
+      onAllComplete = () => { },
       useThinking = false,
       providerContexts = {},
       providerMeta = {},
@@ -467,8 +483,8 @@ class FaultTolerantOrchestrator {
           abortControllers.set(providerId, abortController);
 
           const adapter = providerRegistry?.getAdapter(providerId) as {
-            ask?: (prompt: string, ctx: unknown, sessionId: string, onChunk: (chunk: unknown) => void, signal: AbortSignal) => Promise<{ text?: string; ok?: boolean; errorCode?: string; meta?: Record<string, unknown>; [key: string]: unknown }>;
-            sendPrompt?: (req: unknown, onChunk: (chunk: unknown) => void, signal: AbortSignal) => Promise<{ text?: string; ok?: boolean; [key: string]: unknown }>;
+            ask?: (prompt: string, ctx: unknown, sessionId: string, onChunk: (chunk: unknown) => void, signal: AbortSignal) => Promise<{ text?: string; ok?: boolean; errorCode?: string; meta?: Record<string, unknown>;[key: string]: unknown }>;
+            sendPrompt?: (req: unknown, onChunk: (chunk: unknown) => void, signal: AbortSignal) => Promise<{ text?: string; ok?: boolean;[key: string]: unknown }>;
             controller?: { geminiSession?: { sharedState?: Record<string, unknown> } };
           } | undefined;
 
@@ -516,7 +532,7 @@ class FaultTolerantOrchestrator {
               };
             }
 
-            let result: { text?: string; ok?: boolean; errorCode?: string; meta?: Record<string, unknown>; [key: string]: unknown };
+            let result: { text?: string; ok?: boolean; errorCode?: string; meta?: Record<string, unknown>;[key: string]: unknown };
             if (typeof adapter.ask === 'function') {
               result = await adapter.ask(
                 request.originalPrompt,
@@ -908,7 +924,7 @@ async function handleUnifiedMessage(
             sendResponse({ success: false, error: 'Missing aiTurnId or providerId' });
             return;
           }
-          const result = await doRegenerateEmbeddings(aiTurnId, providerId, sm, embeddingModelId);
+          const result = await doRegenerateEmbeddings(aiTurnId, providerId, sm, embeddingModelId, { broadcast: false });
           sendResponse(result);
         })().catch((e) => {
           console.error('[Regenerate] Failed:', e);
@@ -1024,13 +1040,8 @@ async function handleUnifiedMessage(
             sendResponse({ success: false, error: 'Missing aiTurnId or queryText' });
             return;
           }
-
           const geoRecord = await sm.loadEmbeddings(aiTurnId) as Record<string, unknown> | null;
-          const { unpackEmbeddingMap } = await import('./persistence/embedding-codec.js');
-          const { generateTextEmbeddings, structuredTruncate } = await import('./clustering/index.js');
-          const { getConfigForModel } = await import('./clustering/config.js');
-          const { searchCorpus } = await import('./clustering/corpus-search.js');
-
+          // CORPUS_SEARCH logic
           const adapter = (sm as unknown as { adapter: { get: (store: string, id: string) => Promise<unknown> } }).adapter;
           const turnRaw = await adapter.get('turns', aiTurnId) as Record<string, unknown> | null;
           const corpusTree = (turnRaw?.mapping as Record<string, unknown> | undefined)?.artifact
@@ -1087,7 +1098,6 @@ async function handleUnifiedMessage(
               );
 
               if (seenBatchProviders.size > 0) {
-                const { canonicalCitationOrder } = await import('../shared/provider-config.js');
                 const canonicalOrder = canonicalCitationOrder(Array.from(seenBatchProviders.keys()));
                 const batchSources = canonicalOrder
                   .map((pid, i) => {
@@ -1097,7 +1107,6 @@ async function handleUnifiedMessage(
                   .filter((s) => s.content);
 
                 if (batchSources.length > 0) {
-                  const { extractShadowStatements, projectParagraphs } = await import('./shadow/index.js');
                   const shadowResult = extractShadowStatements(batchSources);
                   const shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs || [];
                   for (const p of shadowParagraphs) {
@@ -1217,7 +1226,7 @@ async function handleUnifiedMessage(
             return;
           }
 
-          const hits = (searchCorpus(queryEmbedding, paragraphEmbeddings, paragraphMeta, 50) as unknown) as Array<{ paragraphId: string; [key: string]: unknown }>;
+          const hits = (searchCorpus(queryEmbedding, paragraphEmbeddings, paragraphMeta, 50) as unknown) as Array<{ paragraphId: string;[key: string]: unknown }>;
 
           // Enrich hits with paragraph text
           const results = hits.map((h) => {
@@ -1350,10 +1359,10 @@ async function handleUnifiedMessage(
 
             const defaultPrimary =
               nextTurn &&
-              nextTurn.type === 'ai' &&
-              nextTurn.userTurnId === user.id &&
-              !(nextTurn.meta as AiTurn['meta'])?.isHistoricalRerun &&
-              nextTurn.sequence !== -1
+                nextTurn.type === 'ai' &&
+                nextTurn.userTurnId === user.id &&
+                !(nextTurn.meta as AiTurn['meta'])?.isHistoricalRerun &&
+                nextTurn.sequence !== -1
                 ? nextTurn
                 : allAi.find((t) => !(t.meta as AiTurn['meta'])?.isHistoricalRerun && t.sequence !== -1) || allAi[0];
             primaryAi = defaultPrimary;
@@ -1444,7 +1453,7 @@ async function handleUnifiedMessage(
             Object.keys((latestRound?.mappingResponses as Record<string, unknown> | undefined) ?? {})[0] ||
             null;
           if (latestRound?.aiTurnId && latestMapper) {
-            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm, embeddingModelId).catch(() => {});
+            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm, embeddingModelId, { broadcast: true }).catch(() => { });
           }
         })().catch((e) => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
@@ -1624,7 +1633,13 @@ const regenInflight = new Map<string, Promise<RegenerateResult>>();
  * Returns { success: true, data: { artifact, claimCount, edgeCount } }
  * or { success: false, error: string }.
  */
-function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: SessionManager, requestedModelId?: string): Promise<RegenerateResult> {
+function doRegenerateEmbeddings(
+  aiTurnId: string,
+  providerId: string,
+  sm: SessionManager,
+  requestedModelId?: string,
+  options: { broadcast: boolean } = { broadcast: true }
+): Promise<RegenerateResult> {
   const resolvedModelId = requestedModelId || 'bge-base-en-v1.5';
   const cacheKey = `${aiTurnId}::${String(providerId || '')
     .trim()
@@ -1649,16 +1664,6 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
     if (!turnRaw) return { success: false, error: 'Turn not found' };
 
     // ── Minimal imports (geometry I/O + codec only) ──
-    const {
-      generateStatementEmbeddings,
-      generateEmbeddings,
-      generateTextEmbeddings,
-      stripInlineMarkdown,
-      structuredTruncate,
-    } = await import('./clustering/index.js');
-    const { getConfigForModel } = await import('./clustering/config.js');
-    const { packEmbeddingMap, unpackEmbeddingMap } =
-      await import('./persistence/embedding-codec.js');
     const embeddingConfig = getConfigForModel(resolvedModelId);
     const dims = embeddingConfig.embeddingDimensions;
 
@@ -1738,7 +1743,6 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
         if (!seenBatchProviders.has(pid)) seenBatchProviders.set(pid, r);
       }
 
-      const { canonicalCitationOrder } = await import('../shared/provider-config.js');
       const canonicalOrder = canonicalCitationOrder(Array.from(seenBatchProviders.keys()));
 
       batchSources = canonicalOrder
@@ -1765,7 +1769,6 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
     // ── B.1 Always re-extract shadow from batch (ground truth for current code) ──
     // Never trust stored shadow statements — extraction rules may have changed.
     if (batchSources.length > 0) {
-      const { extractShadowStatements, projectParagraphs } = await import('./shadow/index.js');
       const shadowResult = extractShadowStatements(batchSources);
       shadowStatements = shadowResult.statements;
       shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
@@ -1777,7 +1780,6 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
       return { success: false, error: 'No shadow statements for embedding generation' };
     }
     if (!Array.isArray(shadowParagraphs) || shadowParagraphs.length === 0) {
-      const { projectParagraphs } = await import('./shadow/index.js');
       shadowParagraphs = projectParagraphs(shadowStatements).paragraphs;
     }
 
@@ -1857,9 +1859,9 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
       const packedParagraphs = packEmbeddingMap(paraResult.embeddings, dims);
       const queryBuffer = queryEmbedding
         ? queryEmbedding.buffer.slice(
-            queryEmbedding.byteOffset,
-            queryEmbedding.byteOffset + queryEmbedding.byteLength
-          )
+          queryEmbedding.byteOffset,
+          queryEmbedding.byteOffset + queryEmbedding.byteLength
+        )
         : null;
 
       await sm.persistEmbeddings(aiTurnId, {
@@ -1902,10 +1904,9 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
     // ══════════════════════════════════════════════════════════════
     // SINGLE SOURCE OF TRUTH: buildArtifactForProvider()
     // ══════════════════════════════════════════════════════════════
-    const { buildArtifactForProvider } = await import('./execution/deterministic-pipeline.js');
-    const { canonicalCitationOrder: regenCanon, buildCitationSourceOrder: regenBuildCSO } =
-      await import('../shared/provider-config.js');
-    const regenCanonicalOrder = regenCanon(Array.from(uniqueBatchProviders));
+    // Load cached claim embeddings
+
+    const regenCanonicalOrder = canonicalCitationOrder(Array.from(uniqueBatchProviders));
 
     const buildResultRaw = await buildArtifactForProvider({
       mappingText,
@@ -1919,7 +1920,7 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
       queryEmbedding,
       geoRecord: geoRecord as Record<string, unknown>,
       claimEmbeddings: null, // always regenerate for now
-      citationSourceOrder: regenBuildCSO(regenCanonicalOrder),
+      citationSourceOrder: buildCitationSourceOrder(regenCanonicalOrder),
       queryText,
       modelCount,
       embeddingModelId: resolvedModelId,
@@ -1962,8 +1963,7 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
     }
 
     console.log(
-      `[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${
-        claimEmbeddings?.size || 0
+      `[Regenerate] Embeddings ready: ${statementEmbeddings.size} stmts, ${paragraphEmbeddings.size} paras, ${claimEmbeddings?.size || 0
       } claims`
     );
 
@@ -1972,10 +1972,9 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
       `[Regenerate] Artifact diagnostics:`,
       `corpus.models=${(cognitiveArtifact?.corpus as { models?: unknown[] } | undefined)?.models?.length ?? 'missing'}`,
       `claimProvenance=${cognitiveArtifact?.claimProvenance ? 'present' : 'missing'}`,
-      `basinInversion=${
-        (cognitiveArtifact?.geometry as { basinInversion?: { status?: string } } | undefined)?.basinInversion
-          ? (cognitiveArtifact.geometry as { basinInversion: { status?: string } }).basinInversion.status
-          : 'missing'
+      `basinInversion=${(cognitiveArtifact?.geometry as { basinInversion?: { status?: string } } | undefined)?.basinInversion
+        ? (cognitiveArtifact.geometry as { basinInversion: { status?: string } }).basinInversion.status
+        : 'missing'
       }`,
       `blastSurface=${cognitiveArtifact?.blastSurface ? 'present' : 'missing'}`
     );
@@ -2000,10 +1999,6 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
         mapperArtifact.passageRouting &&
         mapperArtifact.statementClassification
       ) {
-        const { buildPassageIndex, parseEditorialOutput } =
-          await import('./concierge-service/editorial-mapper.js');
-        const { buildSourceContinuityMap } = await import('./provenance/surface.js');
-
         const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity as ClaimDensityResult);
         const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
           mapperArtifact.claimDensity as ClaimDensityResult,
@@ -2049,10 +2044,6 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
       try {
         const orchestrator = services.get('orchestrator') as FaultTolerantOrchestrator | undefined;
         if (orchestrator) {
-          const { buildSourceContinuityMap } = await import('./provenance/surface.js');
-          const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-            await import('./concierge-service/editorial-mapper.js');
-
           const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity as ClaimDensityResult);
           const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
             mapperArtifact.claimDensity as ClaimDensityResult,
@@ -2116,7 +2107,7 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
               sessionId: `regen-editorial-${aiTurnId}`,
               useThinking: false,
               providerContexts: editorialProviderContexts,
-              onPartial: () => {},
+              onPartial: () => { },
               onAllComplete: async (results) => {
                 const result = results?.get?.(providerId) as { text?: string; meta?: unknown } | undefined;
                 if (result?.text) res({ text: result.text, meta: result.meta });
@@ -2171,6 +2162,16 @@ function doRegenerateEmbeddings(aiTurnId: string, providerId: string, sm: Sessio
           (editorialGenErr as { message?: string })?.message || editorialGenErr
         );
       }
+    }
+
+    if (options.broadcast) {
+      ConnectionHandler.broadcast({
+        type: 'MAPPER_ARTIFACT_READY',
+        aiTurnId,
+        providerId,
+        mapping: { artifact: cognitiveArtifact },
+        embeddingModelId: resolvedModelId,
+      });
     }
 
     return {

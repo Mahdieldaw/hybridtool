@@ -1,10 +1,18 @@
 // @ts-nocheck
-import { DEFAULT_THREAD } from '../../../shared/messaging';
-import { ArtifactProcessor } from '../../../shared/artifact-processor';
-import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { runWithProviderHealth } from '../../providers/health/provider-health-gate';
-import { getErrorMessage } from '../../errors/handler';
+import { DEFAULT_THREAD } from '../../../shared/messaging.js';
+import { ArtifactProcessor } from '../../../shared/artifact-processor.js';
+import { PROVIDER_LIMITS } from '../../../shared/provider-limits.js';
+import { runWithProviderHealth } from '../../providers/health/provider-health-gate.js';
+import { getErrorMessage } from '../../errors/handler.js';
 import { buildGeometryAsync } from '../utils/geometry-runner.js';
+import { canonicalCitationOrder, buildCitationSourceOrder } from '../../../shared/provider-config.js';
+import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
+import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from '../../provenance/semantic-mapper.js';
+import { executeFullArtifactPipeline } from '../deterministic-pipeline.js';
+import { getCanonicalStatementsForClaim } from '../../../shared/corpus-utils.js';
+import { buildSourceContinuityMap } from '../../provenance/surface.js';
+import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
+import { buildLookupCacheFromIndex } from '../../concierge-service/evidence-substrate.js';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -48,13 +56,13 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
       const records = await sessionManager.adapter.getResponsesByTurnId(historicalTurnId);
       const candidates = Array.isArray(records)
         ? records.filter(
-            (r) =>
-              r &&
-              r.providerId === pid &&
-              r.responseType === historicalResponseType &&
-              r.meta &&
-              typeof r.meta === 'object'
-          )
+          (r) =>
+            r &&
+            r.providerId === pid &&
+            r.responseType === historicalResponseType &&
+            r.meta &&
+            typeof r.meta === 'object'
+        )
         : [];
       candidates.sort((a, b) => {
         const ai = a.responseIndex ?? 0;
@@ -68,7 +76,7 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
       if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
         return { [pid]: { meta, continueThread: true } };
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   try {
@@ -80,7 +88,7 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
     if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
       return { [pid]: { meta, continueThread: true } };
     }
-  } catch (_) {}
+  } catch (_) { }
 
   return undefined;
 }
@@ -118,8 +126,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
   }
 
   wdbg(
-    `[executeMappingPhase] Running mapping with ${
-      sourceData.length
+    `[executeMappingPhase] Running mapping with ${sourceData.length
     } sources: ${sourceData.map((s) => s.providerId).join(', ')} `
   );
 
@@ -127,7 +134,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
   // Providers are sorted by the fixed CANONICAL_PROVIDER_ORDER; unknown
   // providers are appended alphabetically.  Missing providers simply don't
   // appear — remaining providers shift up in modelIndex but never reorder.
-  const { canonicalCitationOrder } = await import('../../../shared/provider-config');
   const citationOrder = canonicalCitationOrder(sourceData.map((s) => s.providerId));
 
   const indexedSourceData = sourceData.map((s) => {
@@ -144,16 +150,16 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
     };
   });
 
+  // Sort by modelIndex to ensure shadow statement IDs (s_0, s_1, etc.) are generated
+  // in a deterministic, canonical order, matching what sw-entry.ts expects on reload.
+  indexedSourceData.sort((a, b) => a.modelIndex - b.modelIndex);
+
   // ══════════════════════════════════════════════════════════════════════
   // NEW PIPELINE: Shadow -> Semantic -> Editorial
   // ══════════════════════════════════════════════════════════════════════
 
   // 1. Import new modules dynamically
   // Import shadow module once at function scope so callbacks can use its exports without awaiting
-  const shadowModule = await import('../../shadow');
-  const { extractShadowStatements } = shadowModule;
-  const { buildSemanticMapperPrompt, parseSemanticMapperOutput } =
-    await import('../../provenance/semantic-mapper');
   // claimAssembly import removed — computePreSurveyPipeline handles it internally
 
   const nowMs = () =>
@@ -181,12 +187,11 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
     `[executeMappingPhase] Extracted ${shadowResult.statements.length} shadow statements.`
   );
 
-  const { projectParagraphs } = shadowModule;
   const paragraphResult = projectParagraphs(shadowResult.statements);
   console.log(
     `[executeMappingPhase] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
-      `(${paragraphResult.meta.contestedCount} contested, ` +
-      `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`
+    `(${paragraphResult.meta.contestedCount} contested, ` +
+    `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`
   );
 
   // ════════════════════════════════════════════════════════════════════════
@@ -315,9 +320,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
 
                 try {
                   // ── UNIFIED ARTIFACT PIPELINE (single-pass) ──────────────────
-                  const { executeFullArtifactPipeline } =
-                    await import('../deterministic-pipeline.js');
-
                   const pipelineResult = await executeFullArtifactPipeline({
                     parsedMappingResult: {
                       ...parseResult.output,
@@ -372,9 +374,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     try {
                       const embMap = statementEmbeddingResult?.embeddings;
                       if (embMap && mapperArtifact.index) {
-                        const { getCanonicalStatementsForClaim } =
-                          await import('../../../shared/corpus-utils');
-
                         for (const c of mapperArtifact.claims ?? []) {
                           const sids = getCanonicalStatementsForClaim(mapperArtifact.index, c.id);
                           const vecs = [];
@@ -420,17 +419,10 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   // ── EDITORIAL MODEL CALL (executeMappingPhase-only) ──────────────
                   if (mapperArtifact && preSurvey?.derived) {
                     try {
-                      const { buildSourceContinuityMap } =
-                        await import('../../provenance/surface');
-                      const { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } =
-                        await import('../../concierge-service/editorial-mapper');
-
                       const continuityMap = buildSourceContinuityMap(
                         preSurvey.derived.claimDensityResult
                       );
-                      const { buildCitationSourceOrder: bCSO } =
-                        await import('../../../shared/provider-config');
-                      const editorialCitationSourceOrder = bCSO(citationOrder);
+                      const editorialCitationSourceOrder = buildCitationSourceOrder(citationOrder);
                       const { passages: indexedPassages, unclaimed: indexedUnclaimed } =
                         buildPassageIndex(
                           preSurvey.derived.claimDensityResult,
@@ -446,8 +438,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       // attach to cognitiveArtifact so singularity-phase can reuse it
                       // without rebuilding all maps from the artifact.
                       try {
-                        const { buildLookupCacheFromIndex } =
-                          await import('../../concierge-service/evidence-substrate');
                         const editorialLookupCache = buildLookupCacheFromIndex(
                           indexedPassages,
                           indexedUnclaimed
@@ -506,13 +496,13 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                                 useThinking: false,
                                 providerContexts: semanticContinuationMeta
                                   ? {
-                                      [payload.mappingProvider]: {
-                                        meta: semanticContinuationMeta,
-                                        continueThread: true,
-                                      },
-                                    }
+                                    [payload.mappingProvider]: {
+                                      meta: semanticContinuationMeta,
+                                      continueThread: true,
+                                    },
+                                  }
                                   : mappingProviderContexts,
-                                onPartial: () => {},
+                                onPartial: () => { },
                                 onAllComplete: async (results, errors) => {
                                   const result = results?.get?.(payload.mappingProvider);
                                   const err = errors?.get?.(payload.mappingProvider);
@@ -637,8 +627,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               return;
             }
 
-            const { buildCitationSourceOrder } =
-              await import('../../../shared/provider-config');
             const citationSourceOrder = buildCitationSourceOrder(citationOrder);
 
             if (cognitiveArtifact && typeof cognitiveArtifact === 'object') {
@@ -649,7 +637,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               try {
                 const meta = finalResult?.meta;
                 if (meta && typeof meta === 'object') return { ...meta };
-              } catch (_) {}
+              } catch (_) { }
               return {};
             })();
 
@@ -665,7 +653,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               if (finalResultWithMeta?.meta) {
                 workflowContexts[payload.mappingProvider] = providerThreadMeta;
               }
-            } catch (_) {}
+            } catch (_) { }
 
             // Persist semantic mapper's thread position for the next extend turn.
             // If survey mapper runs it will overwrite this with the more recent cursor.

@@ -92,7 +92,7 @@ export function resolveProviderId(
 
   // Handle both string and numeric keys for transparency
   const raw = (citationSourceOrder as any)[modelIndex];
-  if (!raw) {
+  if (raw === undefined) {
     // If direct lookup fails and modelIndex is a number, try finding the inverted match
     // in case the source order is { "gemini": 1 }
     const entries = Object.entries(citationSourceOrder);

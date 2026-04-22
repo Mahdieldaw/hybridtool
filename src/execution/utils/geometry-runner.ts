@@ -1,6 +1,21 @@
 // @ts-nocheck
-import { DEFAULT_CONFIG } from '../../clustering';
-import { getErrorMessage } from '../../errors/handler';
+import {
+  DEFAULT_CONFIG,
+  generateEmbeddings,
+  generateTextEmbeddings,
+  generateStatementEmbeddings,
+  stripInlineMarkdown,
+  structuredTruncate,
+  getEmbeddingStatus,
+} from '../../clustering/index.js';
+import { getErrorMessage } from '../../errors/handler.js';
+import {
+  buildGeometricSubstrate,
+  isDegenerate,
+  buildPreSemanticInterpretation,
+  computeQueryRelevance,
+} from '../../geometry/index.js';
+import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
 
 /**
  * Build geometry async pipeline, processing embeddings and substrate.
@@ -62,19 +77,6 @@ export async function buildGeometryAsync(
       geometryDiagnostics.embeddingBackendFailure = true;
       geometryDiagnostics.stages.offscreen = { status: 'failed', error: getErrorMessage(err) };
     });
-
-    const clusteringModule = await import('../../clustering/index.js');
-    const {
-      generateEmbeddings,
-      generateTextEmbeddings,
-      generateStatementEmbeddings,
-      stripInlineMarkdown,
-      structuredTruncate,
-      getEmbeddingStatus,
-    } = clusteringModule;
-    const { buildGeometricSubstrate, isDegenerate } = await import('../../../geometry/index.js');
-    const { buildPreSemanticInterpretation } = await import('../../../geometry/interpret.js');
-    const { computeQueryRelevance } = await import('../../../geometry/annotate.js');
 
     /** @type {"none" | "webgpu" | "wasm"} */
     let embeddingBackend = 'none';
@@ -360,7 +362,6 @@ export async function buildGeometryAsync(
 
     try {
       if (options.sessionManager && context.canonicalAiTurnId) {
-        const { packEmbeddingMap } = await import('../../../persistence/embedding-codec.js');
         const stmtDim = results.statementEmbeddingResult?.embeddings?.values?.().next?.()
           .value?.length;
         const paraDim = results.geometryParagraphEmbeddings?.values?.().next?.().value?.length;
@@ -391,8 +392,8 @@ export async function buildGeometryAsync(
               : null;
 
         if (packedStatements || packedParagraphs || queryBuffer) {
-          options.sessionManager
-            .persistEmbeddings(context.canonicalAiTurnId, {
+          try {
+            await options.sessionManager.persistEmbeddings(context.canonicalAiTurnId, {
               ...(packedStatements ? { statementEmbeddings: packedStatements.buffer } : {}),
               ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
               ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
@@ -417,10 +418,11 @@ export async function buildGeometryAsync(
                 embeddingVersion: 2,
                 timestamp: Date.now(),
               },
-            })
-            .catch((err) =>
-              console.warn('[buildGeometryAsync] Embedding persistence failed (non-blocking):', err)
-            );
+            });
+          } catch (err) {
+            console.error('[buildGeometryAsync] Embedding persistence FAILED:', err);
+            throw err; // Surface the error
+          }
         }
       }
     } catch (err) {

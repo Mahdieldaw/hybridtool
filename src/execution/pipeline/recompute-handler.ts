@@ -1,7 +1,18 @@
 // @ts-nocheck
-import { DEFAULT_THREAD } from '../../../shared/messaging';
+import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { extractUserMessage } from '../io/context-resolver.js';
 import { runSingularityLLM } from './singularity-phase.js';
+import { buildArtifactForProvider } from '../deterministic-pipeline.js';
+import { unpackEmbeddingMap } from '../../persistence/embedding-codec.js';
+import {
+  canonicalCitationOrder,
+  buildCitationSourceOrder,
+} from '../../../shared/provider-config.js';
+import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
+import { parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
+import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
+import { ConciergeService } from '../../concierge-service/concierge-service.js';
+import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings.js';
 
 /**
  * Handles recompute requests (formerly handleContinueRequest from CognitivePipelineHandler)
@@ -34,7 +45,7 @@ export async function handleRecompute(payload, options) {
           aiTurnId,
           error: 'Session mismatch for continuation request',
         });
-      } catch (_) {}
+      } catch (_) { }
       return;
     }
 
@@ -97,9 +108,6 @@ export async function handleRecompute(payload, options) {
       // Phase 2 rebuild (preferred path — uses the ONE code path)
       if (!mappingArtifact && latestMappingText) {
         try {
-          const { buildArtifactForProvider } = await import('../deterministic-pipeline.js');
-          const { unpackEmbeddingMap } = await import('../../../persistence/embedding-codec.js');
-
           const geoRecord = await sessionManager.loadEmbeddings(aiTurnId);
           if (geoRecord?.statementEmbeddings && geoRecord?.paragraphEmbeddings && geoRecord?.meta) {
             const dims = geoRecord.meta.dimensions;
@@ -119,8 +127,6 @@ export async function handleRecompute(payload, options) {
                 : null;
 
             // Canonical provider ordering for deterministic statement IDs
-            const { canonicalCitationOrder } =
-              await import('../../../../shared/provider-config.js');
             const normalizeProvId = (pid) =>
               String(pid || '')
                 .trim()
@@ -153,8 +159,6 @@ export async function handleRecompute(payload, options) {
             let shadowStatements = null;
             let shadowParagraphs = null;
             try {
-              const { extractShadowStatements, projectParagraphs } =
-                await import('../../../shadow/index.js');
               const shadowResult = extractShadowStatements(batchSources);
               shadowStatements = shadowResult.statements;
               shadowParagraphs = projectParagraphs(shadowResult.statements).paragraphs;
@@ -165,8 +169,6 @@ export async function handleRecompute(payload, options) {
               );
             }
 
-            const { buildCitationSourceOrder: buildCSO } =
-              await import('../../../../shared/provider-config.js');
             const buildResult = await buildArtifactForProvider({
               mappingText: latestMappingText,
               shadowStatements,
@@ -176,7 +178,7 @@ export async function handleRecompute(payload, options) {
               paragraphEmbeddings,
               queryEmbedding,
               geoRecord,
-              citationSourceOrder: buildCSO(canonicalOrder),
+              citationSourceOrder: buildCitationSourceOrder(canonicalOrder),
               queryText: originalPrompt,
               modelCount,
             });
@@ -208,8 +210,6 @@ export async function handleRecompute(payload, options) {
           )?.[0];
         if (editorialResponse?.text) {
           try {
-            const { parseEditorialOutput } =
-              await import('../../../concierge-service/editorial-mapper.js');
             // Collect valid passage/unclaimed keys from the artifact
             const validPassageKeys = new Set();
             const densityProfiles = mappingArtifact?.claimDensity?.profiles ?? {};
@@ -256,14 +256,10 @@ export async function handleRecompute(payload, options) {
       // Build evidence substrate from artifact (editorial threads + mapping response)
       let conciergePrompt = null;
       try {
-        const { buildEvidenceSubstrate } =
-          await import('../../../concierge-service/evidence-substrate.js');
         const cso = mappingArtifact?.citationSourceOrder || {};
         const evidenceSubstrate = buildEvidenceSubstrate(mappingArtifact, latestMappingText, cso);
 
         if (evidenceSubstrate) {
-          const ConciergeModule = await import('../../../concierge-service/concierge-service.js');
-          const ConciergeService = ConciergeModule?.ConciergeService;
           if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
             conciergePrompt = ConciergeService.buildConciergePrompt(originalPrompt, {
               evidenceSubstrate,
@@ -313,21 +309,21 @@ export async function handleRecompute(payload, options) {
 
       const singularityOutput = result?.text
         ? {
-            text: result.text,
-            providerId: effectiveProviderId,
-            timestamp: result?.timestamp || Date.now(),
-            leakageDetected: result?.leakageDetected,
-            leakageViolations: result?.leakageViolations,
-            pipeline: result?.pipeline || null,
-          }
+          text: result.text,
+          providerId: effectiveProviderId,
+          timestamp: result?.timestamp || Date.now(),
+          leakageDetected: result?.leakageDetected,
+          leakageViolations: result?.leakageViolations,
+          pipeline: result?.pipeline || null,
+        }
         : null;
 
       const singularityPhase = singularityOutput?.text
         ? {
-            prompt: context.singularityPromptUsed || originalPrompt || '',
-            output: singularityOutput.text,
-            timestamp: singularityOutput.timestamp,
-          }
+          prompt: context.singularityPromptUsed || originalPrompt || '',
+          output: singularityOutput.text,
+          timestamp: singularityOutput.timestamp,
+        }
         : undefined;
 
       try {
@@ -407,22 +403,22 @@ export async function handleRecompute(payload, options) {
       const batchPhase =
         Object.keys(buckets.batchResponses || {}).length > 0
           ? {
-              responses: Object.fromEntries(
-                Object.entries(buckets.batchResponses).map(([pid, arr]) => {
-                  const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
-                  return [
-                    pid,
-                    {
-                      text: last?.text || '',
-                      modelIndex: last?.meta?.modelIndex ?? 0,
-                      status: last?.status || 'completed',
-                      meta: last?.meta,
-                    },
-                  ];
-                })
-              ),
-              timestamp: Date.now(),
-            }
+            responses: Object.fromEntries(
+              Object.entries(buckets.batchResponses).map(([pid, arr]) => {
+                const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
+                return [
+                  pid,
+                  {
+                    text: last?.text || '',
+                    modelIndex: last?.meta?.modelIndex ?? 0,
+                    status: last?.status || 'completed',
+                    meta: last?.meta,
+                  },
+                ];
+              })
+            ),
+            timestamp: Date.now(),
+          }
           : undefined;
       // Tier 3: artifact is ephemeral — do NOT persist mapping.artifact to turn.
       try {
@@ -444,19 +440,19 @@ export async function handleRecompute(payload, options) {
         turn: {
           user: userTurn
             ? {
-                id: userTurn.id,
-                type: 'user',
-                text: userTurn.text || userTurn.content || '',
-                createdAt: userTurn.createdAt || Date.now(),
-                sessionId: effectiveSessionId,
-              }
+              id: userTurn.id,
+              type: 'user',
+              text: userTurn.text || userTurn.content || '',
+              createdAt: userTurn.createdAt || Date.now(),
+              sessionId: effectiveSessionId,
+            }
             : {
-                id: userTurnId || 'unknown',
-                type: 'user',
-                text: originalPrompt || '',
-                createdAt: Date.now(),
-                sessionId: effectiveSessionId,
-              },
+              id: userTurnId || 'unknown',
+              type: 'user',
+              text: originalPrompt || '',
+              createdAt: Date.now(),
+              sessionId: effectiveSessionId,
+            },
           ai: {
             id: aiTurnId,
             type: 'ai',
@@ -475,8 +471,6 @@ export async function handleRecompute(payload, options) {
       const finalStatus = finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus;
       if (finalStatus === 'complete') {
         try {
-          const { cleanupPendingEmbeddingsBuffers } =
-            await import('../../../clustering/embeddings.js');
           await cleanupPendingEmbeddingsBuffers();
         } catch (e) {
           console.warn('[RecomputeHandler] Failed to cleanup embeddings buffers:', e);
