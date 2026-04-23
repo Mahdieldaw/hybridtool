@@ -95,6 +95,40 @@ const MAPPER_EDGE_COLORS: Record<string, string> = {
   dependency: 'rgba(96,165,250,0.6)',
 };
 
+const LANDSCAPE_COLORS: Record<string, { fill: string; stroke: string; label: string }> = {
+  northStar: {
+    fill: 'rgba(251, 230, 160, 0.85)', // warm pale gold
+    stroke: 'rgba(251, 200, 80, 0.95)',
+    label: 'North Star',
+  },
+  eastStar: {
+    fill: 'rgba(147, 197, 253, 0.75)', // cool blue
+    stroke: 'rgba(96, 165, 250, 0.90)',
+    label: 'East Star',
+  },
+  mechanism: {
+    fill: 'rgba(110, 231, 183, 0.60)', // muted teal-green
+    stroke: 'rgba(52, 211, 153, 0.80)',
+    label: 'Mechanism',
+  },
+  floor: {
+    fill: 'rgba(148, 163, 184, 0.35)', // slate, visually recessive
+    stroke: 'rgba(148, 163, 184, 0.55)',
+    label: 'Floor',
+  },
+};
+
+const LANDSCAPE_FALLBACK = {
+  fill: 'rgba(245, 158, 11, 0.60)', // original amber, for claims with no position
+  stroke: 'rgba(245, 158, 11, 0.85)',
+  label: 'Unknown',
+};
+
+// Base radius and weight scale for footprint circles
+const FOOTPRINT_BASE_R = 18;
+const FOOTPRINT_WEIGHT_SCALE = 28;
+const FOOTPRINT_MIN_R = 8;
+
 // Risk vector colors for blast surface overlay
 const RISK_COLORS = {
   deletion: '#ef4444', // Type 2: exclusive non-orphan (will be REMOVED)
@@ -299,6 +333,11 @@ export function ParagraphSpaceView({
   const [isMapLegendOpen, setIsMapLegendOpen] = useState(false);
   const [isRiskLegendOpen, setIsRiskLegendOpen] = useState(false);
 
+  // Landscape Position Toggles
+  const [enabledLandscapePositions, setEnabledLandscapePositions] = useState<Set<string>>(
+    () => new Set([...Object.keys(LANDSCAPE_COLORS), 'unknown'])
+  );
+
   const modelIndexCounts = useMemo(() => {
     const m = new Map<number, number>();
     for (const n of nodes) {
@@ -340,7 +379,7 @@ export function ParagraphSpaceView({
     const m = new Map<string, ParagraphData>();
     if (!Array.isArray(paragraphs)) return m;
     for (const p of paragraphs) {
-      if (p?.id) m.set(p.id, p);
+      if (p?.paragraphId) m.set(p.paragraphId, p);
     }
     return m;
   }, [paragraphs]);
@@ -403,6 +442,71 @@ export function ParagraphSpaceView({
     const span = bounds.maxY - bounds.minY;
     return (y: number) => margin + ((bounds.maxY - y) / (span || 1)) * (H - margin * 2);
   }, [bounds]);
+
+  const claimFootprints = useMemo(() => {
+    if (!claimCentroids || !nodes.length) return [];
+
+    return claimCentroids
+      .filter((c) => c.hasPosition && c.paraCanonicalFractions.size > 0)
+      .map((c) => {
+        const colorStyle = c.landscapePosition
+          ? (LANDSCAPE_COLORS[c.landscapePosition] ?? LANDSCAPE_FALLBACK)
+          : LANDSCAPE_FALLBACK;
+
+        // Weighted centroid for label anchor
+        let wSumX = 0,
+          wSumY = 0,
+          wTotal = 0;
+
+        const circles: Array<{ cx: number; cy: number; r: number }> = [];
+
+        for (const n of nodes) {
+          const pid = String((n as any)?.paragraphId ?? '').trim();
+          if (!pid) continue;
+          const fraction = c.paraCanonicalFractions.get(pid);
+          if (fraction === undefined || fraction <= 0) continue;
+
+          const cx = toX(Number(n.x));
+          const cy = toY(Number(n.y));
+          if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+
+          const r = Math.max(FOOTPRINT_MIN_R, FOOTPRINT_BASE_R + fraction * FOOTPRINT_WEIGHT_SCALE);
+          circles.push({ cx, cy, r });
+
+          wSumX += cx * fraction;
+          wSumY += cy * fraction;
+          wTotal += fraction;
+        }
+
+        if (circles.length === 0) return null;
+
+        const labelX = wTotal > 0 ? wSumX / wTotal : circles[0].cx;
+        const labelY = wTotal > 0 ? wSumY / wTotal : circles[0].cy;
+
+        const isVisible = enabledLandscapePositions.has(c.landscapePosition || 'unknown');
+
+        return {
+          claimId: c.claimId,
+          label: c.label ?? c.claimId,
+          circles,
+          labelX,
+          labelY,
+          colorStyle,
+          landscapePosition: c.landscapePosition,
+          isVisible,
+        };
+      })
+      .filter(Boolean) as Array<{
+        claimId: string;
+        label: string;
+        circles: Array<{ cx: number; cy: number; r: number }>;
+        labelX: number;
+        labelY: number;
+        colorStyle: { fill: string; stroke: string; label: string };
+        landscapePosition?: string;
+        isVisible: boolean;
+      }>;
+  }, [claimCentroids, nodes, toX, toY, enabledLandscapePositions]);
 
   // Source paragraph IDs for the selected claim
   const selectedClaimSourceIds = useMemo(() => {
@@ -716,6 +820,7 @@ export function ParagraphSpaceView({
   }
 
   const hasSelection = !!selectedClaimId && !!selectedClaimSourceIds;
+  const showDiamondFallback = showClaimDiamonds && claimFootprints.length === 0;
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
@@ -867,6 +972,50 @@ export function ParagraphSpaceView({
             )}
           </div>
         )}
+
+        {/* Landscape position legend (Horizontal & Togglable) */}
+        <div
+          className={`absolute right-[calc(4rem+300px)] bg-black/50 border border-white/10 rounded-lg p-3 backdrop-blur-md shadow-lg z-20 pointer-events-auto flex flex-col gap-2 transition-all ${selectedParagraphId && paragraphDataMap.has(selectedParagraphId) ? 'bottom-[196px]' : 'bottom-4'}`}
+        >
+          <span className="text-[9px] uppercase font-bold text-text-muted tracking-wider">
+            Landscape Position
+          </span>
+          <div className="flex items-center gap-3">
+            {[
+              ...Object.entries(LANDSCAPE_COLORS),
+              ['unknown', LANDSCAPE_FALLBACK] as const,
+            ].map(([pos, style]) => {
+              const active = enabledLandscapePositions.has(pos);
+              return (
+                <button
+                  key={pos}
+                  type="button"
+                  className={`flex items-center gap-1.5 transition-opacity ${active ? 'opacity-100' : 'opacity-40'}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEnabledLandscapePositions((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(pos)) next.delete(pos);
+                      else next.add(pos);
+                      return next;
+                    });
+                  }}
+                >
+                  <span
+                    className="w-3 h-3 rounded-sm inline-block border"
+                    style={{
+                      backgroundColor: style.fill,
+                      borderColor: style.stroke,
+                    }}
+                  />
+                  <span className="text-[10px] text-text-secondary whitespace-nowrap">
+                    {style.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {colorParagraphsByModel && (
           <div className="absolute top-4 right-4 bg-black/40 border border-white/10 rounded-lg p-3 backdrop-blur-sm shadow-sm z-20 pointer-events-auto min-w-[220px] max-w-[300px] flex flex-col transition-all">
@@ -1056,6 +1205,17 @@ export function ParagraphSpaceView({
         >
           {/* ClipPaths for measuring-cylinder partial fill on source nodes */}
           <defs>
+            <filter id="metaball-merge" x="-40%" y="-40%" width="180%" height="180%" colorInterpolationFilters="sRGB">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
+              <feColorMatrix
+                in="blur"
+                mode="matrix"
+                values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+                result="merged"
+              />
+              <feComposite in="SourceGraphic" in2="merged" operator="atop" />
+            </filter>
+
             {Array.from(sourceNodeClipMap.entries()).map(([id, d]) => (
               <clipPath key={id} id={`cpara-${id.replace(/[^a-zA-Z0-9-]/g, '_')}`}>
                 <circle cx={d.x} cy={d.y} r={d.r} />
@@ -1180,6 +1340,82 @@ export function ParagraphSpaceView({
               );
             })}
 
+          {/* ── Claim footprints (reading mode default) ── */}
+          {claimFootprints.map((fp) => {
+            const isSel = fp.claimId === selectedClaimId;
+            const isHov = fp.claimId === hoveredClaimId;
+            const isOtherSelected = !!selectedClaimId && !isSel;
+
+            const groupOpacity = !fp.isVisible
+              ? 0.05
+              : isOtherSelected
+                ? 0.12
+                : isSel
+                  ? 1.0
+                  : isHov
+                    ? 0.88
+                    : 0.62;
+            const strokeWidth = isSel ? 1.5 : isHov ? 1.0 : 0.5;
+
+            return (
+              <g
+                key={`footprint-${fp.claimId}`}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setHoveredClaimId(fp.claimId)}
+                onMouseLeave={() => setHoveredClaimId(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClaimClick?.(isSel ? null : fp.claimId);
+                }}
+              >
+                {/* Metaball blob group — filter merges overlapping circles */}
+                <g filter="url(#metaball-merge)" opacity={groupOpacity}>
+                  {fp.circles.map((circle, i) => (
+                    <circle
+                      key={i}
+                      cx={circle.cx}
+                      cy={circle.cy}
+                      r={circle.r}
+                      fill={fp.colorStyle.fill}
+                      stroke={fp.colorStyle.stroke}
+                      strokeWidth={strokeWidth}
+                    />
+                  ))}
+                </g>
+
+                {/* Label — always visible, dims with group */}
+                {fp.isVisible && (
+                  <text
+                    x={fp.labelX}
+                    y={fp.labelY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#ffffff"
+                    fontSize={isSel ? 12 : isHov ? 11 : 10}
+                    fontWeight={isSel ? 700 : 500}
+                    opacity={isOtherSelected ? 0.2 : isSel ? 1.0 : isHov ? 0.9 : 0.75}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {fp.label}
+                  </text>
+                )}
+
+                {/* Selection ring at weighted centroid */}
+                {fp.isVisible && (isSel || isHov) && (
+                  <circle
+                    cx={fp.labelX}
+                    cy={fp.labelY}
+                    r={isSel ? 6 : 4}
+                    fill="none"
+                    stroke={isSel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)'}
+                    strokeWidth={isSel ? 2 : 1}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+              </g>
+            );
+          })}
+
           {/* Paragraph nodes */}
           {nodes.map((n: any) => {
             const id = String(n?.paragraphId ?? '').trim();
@@ -1229,16 +1465,19 @@ export function ParagraphSpaceView({
               modelLegend.length === 0 ||
               (enabledModelIndices.size > 0 && enabledModelIndices.has(nodeModelIndex));
 
+            const footprintDimmed = (!!selectedClaimId || !!hoveredClaimId) && !isSource && !isHovered;
+            const baseNodeOpacity = footprintDimmed ? 0.15 : 0.45;
+
             const baseOpacity =
               hasSelection && highlightSourceParagraphs
                 ? isSource
                   ? 1
-                  : 0.55
+                  : baseNodeOpacity
                 : isHovSource || isHovered
                   ? 1
                   : isHovSibling
                     ? 0.95
-                    : 0.85;
+                    : baseNodeOpacity;
             const forceVisible =
               isSource || isParaSelected || isExternalHighlight || isHovSource || isHovSibling;
             const nodeOpacity =
@@ -1362,7 +1601,7 @@ export function ParagraphSpaceView({
           })}
 
           {/* Claim diamonds / risk donut glyphs */}
-          {showClaimDiamonds &&
+          {showDiamondFallback &&
             scaledCentroids.map((c) => {
               const cx = c.sx,
                 cy = c.sy;

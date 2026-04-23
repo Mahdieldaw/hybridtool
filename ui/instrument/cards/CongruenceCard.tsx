@@ -13,8 +13,14 @@ export function CongruenceCard({
 }: {
   artifact: any;
 }) {
-  const validatedConflicts = safeArr(artifact?.conflictValidation);
-  const claims = safeArr(artifact?.semantic?.claims ?? artifact?.claims);
+  const validatedConflicts = useMemo(() => safeArr(artifact?.conflictValidation), [
+    artifact?.conflictValidation,
+  ]);
+
+  const claims = useMemo(
+    () => safeArr(artifact?.semantic?.claims ?? artifact?.claims),
+    [artifact?.semantic?.claims, artifact?.claims]
+  );
 
   const claimLabelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -63,13 +69,13 @@ export function CongruenceCard({
   return (
     <div className="space-y-6">
       {/* SECTION 1: TRIANGULATION */}
-      <CardSection 
+      <CardSection
         title="Semantic Triangulation (Residuals)"
         badge={muTriangle != null ? { text: `μ_τ = ${fmt(muTriangle, 3)}` } : undefined}
       >
         <div className="text-[10px] text-text-muted mb-2 leading-relaxed">
           Measuring the divergence between claims A and B relative to their shared relevance to the query (Q).
-          <br/>
+          <br />
           <span className="font-mono text-brand-400">τ = (simAQ * simBQ) - simAB</span>. Validated if <span className="font-mono">τ &gt; μ_τ</span>.
         </div>
         <SortableTable
@@ -89,7 +95,7 @@ export function CongruenceCard({
               header: 'Status',
               sortValue: (r) => (r.status ? 1 : 0),
               cell: (r) => (
-                <span 
+                <span
                   className={clsx(
                     'font-bold text-[12px]',
                     r.status ? 'text-emerald-400' : 'text-rose-400/50'
@@ -140,7 +146,7 @@ export function CongruenceCard({
       </CardSection>
 
       {/* SECTION 2: PROXIMITY */}
-      <CardSection 
+      <CardSection
         title="Geometric Proximity (Cross-Pool)"
         badge={muPairwise != null ? { text: `μ_π = ${fmt(muPairwise, 3)}` } : undefined}
       >

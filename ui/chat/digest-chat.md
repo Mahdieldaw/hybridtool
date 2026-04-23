@@ -6,7 +6,7 @@
 
 `@ui/chat` is the **primary conversation surface and turn orchestration layer** — an interactive interface for managing user-AI dialog flows, displaying turn messages, and coordinating provider output rendering. It orchestrates the display of user inputs, AI responses, streaming state, and cognitive artifacts through a **virtualized turn list** with memoized message rendering, lazy-loaded decision maps, and responsive layout handling.
 
-The layer is organized into seven semantic domains:
+The layer is organized into nine semantic domains:
 
 1. **ChatView.tsx** — Main conversation container with virtualized turn list and layout management
 2. **MessageRow.tsx** — Turn dispatcher routing user/AI turn types to appropriate blocks
@@ -16,6 +16,7 @@ The layer is organized into seven semantic domains:
 6. **CouncilOrbs.tsx** — Provider selection orbs with streaming progress indicators and role management
 7. **SingularityOutputView.tsx** — Singularity response display with provider selection and copy utilities
 8. **WelcomeScreen.tsx** — Initial conversation entry point with session initialization
+9. **CouncilOrbsVertical.tsx** — Vertical orb stack for narrow layouts and multi-column UI
 
 ---
 
@@ -76,7 +77,7 @@ Turn dispatcher routing user/AI messages to type-appropriate rendering blocks.
 - **Type Routing** — Renders UserTurnBlock for user type, AiTurnBlock for ai type
 - **Atom Lookup** — Uses selectAtom to isolate per-turn subscriptions
 - **Active Turn Styling** — Applies active-turn CSS class when turn is selected in split pane
-- **DOM Anchoring** — Assigns turn-* ID and data attributes for JavaScript targeting
+- **DOM Anchoring** — Assigns turn-\* ID and data attributes for JavaScript targeting
 - **Memoization** — Wrapped in React.memo to prevent re-renders from parent list changes
 
 **Atom Dependencies:**

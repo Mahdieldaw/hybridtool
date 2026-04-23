@@ -1627,6 +1627,7 @@ export class SessionManager {
         hasParagraphs?: boolean;
         hasQuery?: boolean;
         timestamp: number;
+        embeddingVersion?: number;
       };
     }
   ): Promise<void> {

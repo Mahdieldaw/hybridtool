@@ -254,7 +254,13 @@ class ExtensionAPI {
     let embeddingModelId = undefined;
     try {
       const val = localStorage.getItem('htos_embedding_model');
-      if (val) embeddingModelId = JSON.parse(val);
+      if (val) {
+        try {
+          embeddingModelId = JSON.parse(val);
+        } catch {
+          embeddingModelId = val;
+        }
+      }
     } catch (e) {
       console.warn('[API] Failed to parse embedding model from localStorage:', e);
     }
@@ -269,7 +275,13 @@ class ExtensionAPI {
     let embeddingModelId = undefined;
     try {
       const val = localStorage.getItem('htos_embedding_model');
-      if (val) embeddingModelId = JSON.parse(val);
+      if (val) {
+        try {
+          embeddingModelId = JSON.parse(val);
+        } catch {
+          embeddingModelId = val;
+        }
+      }
     } catch (e) {
       console.warn('[API] Failed to parse embedding model from localStorage:', e);
     }

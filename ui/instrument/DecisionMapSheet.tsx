@@ -573,7 +573,8 @@ export const DecisionMapSheet = React.memo(() => {
     (mappingArtifact as any)?.semantic?.claims || null,
     (mappingArtifact as any)?.geometry?.substrate || null,
     (mappingArtifact as any)?.mixedProvenance || null,
-    (mappingArtifact as any)?.index ?? null
+    (mappingArtifact as any)?.index ?? null,
+    (mappingArtifact as any)?.passageRouting ?? null
   );
 
   const semanticEdges = useMemo(

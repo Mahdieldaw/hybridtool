@@ -1075,6 +1075,7 @@ export interface InitializeRequest {
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
+  embeddingModelId?: string;
 }
 
 /**
@@ -1092,6 +1093,7 @@ export interface ExtendRequest {
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string;
+  embeddingModelId?: string;
 }
 
 /**

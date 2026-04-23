@@ -5,15 +5,10 @@ node_modules/
 /dist
 
 # Build analysis
-bundle-analysis*
-bundlenew*.txt
-bundleold*.txt
-stats.html
+*.md
 
 # Data and large files
 digest*txt
-dm-mono-main/
-old ui/
 
 # Assets (Root level only, source assets in ui/assets/ are tracked)
 *.svg
@@ -35,41 +30,24 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-promptmeth/
-
+docs/
 # Documentation
 scripts/
-docs/
 *.txt
 *.d.ts
 *.test.ts
 .*test.ts
 src/core/V31Verification.ts
-docs/*
 jest.config.js
-oldaiturnblock.tsx
-oldsynthesisbubble.tsx
 ui/fonts/
 /scripts/*
 src/shadow/test.ts
 ui/chat/SingularityOutputView.providerSelect.test.tsx
 package-lock.json
-coderabbit
-Grok-Api-js/*
-comparison/*
 index.css
 ui/styles/index.css
-north star plan.md
-instrumenting carrier.xml
-singularity arch v2.md
-singularity pipeline overviewv2.md
-blast_surface_v2_spec.md
 ui/styles
 cleanup/
-docs/
-canon docs/
-
-# Markdown files
 
 
 # Model files
@@ -82,7 +60,5 @@ oi.js
 *.test.ts
 *.spec.js
 *.spec.ts
-
-scratch/
-
+.txt
 ui/hooks/reading/useCorpusSearch.test.tsx

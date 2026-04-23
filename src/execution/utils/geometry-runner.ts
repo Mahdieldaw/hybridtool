@@ -29,7 +29,8 @@ export async function buildGeometryAsync(
   context,
   options,
   geometryDiagnostics,
-  nowMs
+  nowMs,
+  embeddingConfig = DEFAULT_CONFIG
 ) {
   const startedAtMs = nowMs();
   const results = {
@@ -105,19 +106,19 @@ export async function buildGeometryAsync(
       try {
         await offscreenReadyPromise;
         console.log(
-          `[buildGeometryAsync] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${DEFAULT_CONFIG?.modelId || 'unknown'}`
+          `[buildGeometryAsync] Query embedding: queryText length=${queryTextForEmbedding.length}, model=${embeddingConfig?.modelId || 'unknown'}`
         );
         const queryEmbeddingBatch = await generateTextEmbeddings(
           [queryTextForEmbedding],
-          DEFAULT_CONFIG
+          embeddingConfig
         );
         results.queryEmbedding = queryEmbeddingBatch.embeddings.get('0') || null;
         if (
           results.queryEmbedding &&
-          results.queryEmbedding.length !== DEFAULT_CONFIG.embeddingDimensions
+          results.queryEmbedding.length !== embeddingConfig.embeddingDimensions
         ) {
           throw new Error(
-            `[buildGeometryAsync] Query embedding dimension mismatch: expected ${DEFAULT_CONFIG.embeddingDimensions}, got ${results.queryEmbedding.length}`
+            `[buildGeometryAsync] Query embedding dimension mismatch: expected ${embeddingConfig.embeddingDimensions}, got ${results.queryEmbedding.length}`
           );
         }
         geometryDiagnostics.stages.queryEmbedding = {
@@ -140,7 +141,7 @@ export async function buildGeometryAsync(
         const paragraphEmbeddingResult = await generateEmbeddings(
           paragraphResult.paragraphs,
           shadowResult.statements,
-          DEFAULT_CONFIG
+          embeddingConfig
         );
         results.embeddingResult = paragraphEmbeddingResult;
         results.geometryParagraphEmbeddings = paragraphEmbeddingResult.embeddings;
@@ -173,7 +174,7 @@ export async function buildGeometryAsync(
         await offscreenReadyPromise;
         results.statementEmbeddingResult = await generateStatementEmbeddings(
           shadowResult.statements,
-          DEFAULT_CONFIG
+          embeddingConfig
         );
         geometryDiagnostics.stages.statementEmbeddings = {
           status: 'ok',
@@ -373,7 +374,7 @@ export async function buildGeometryAsync(
               ? paraDim
               : Number.isFinite(stmtDim) && stmtDim > 0
                 ? stmtDim
-                : DEFAULT_CONFIG.embeddingDimensions;
+                : embeddingConfig.embeddingDimensions;
 
         const packedStatements = results.statementEmbeddingResult?.embeddings
           ? packEmbeddingMap(results.statementEmbeddingResult.embeddings, dims)
@@ -398,7 +399,7 @@ export async function buildGeometryAsync(
               ...(packedParagraphs ? { paragraphEmbeddings: packedParagraphs.buffer } : {}),
               ...(queryBuffer ? { queryEmbedding: queryBuffer } : {}),
               meta: {
-                embeddingModelId: DEFAULT_CONFIG.modelId,
+                embeddingModelId: embeddingConfig.modelId,
                 dimensions: dims,
                 hasStatements: Boolean(packedStatements),
                 hasParagraphs: Boolean(packedParagraphs),

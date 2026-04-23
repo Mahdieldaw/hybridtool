@@ -74,7 +74,7 @@ const DEFAULTS: InstrumentState = {
   expandedRefSections: [],
   scope: 'claim',
   showMutualEdges: true,
-  showClaimDiamonds: true,
+  showClaimDiamonds: false,
   showMapperEdges: false,
   showRegionHulls: true,
   showBasinRects: false,

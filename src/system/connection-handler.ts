@@ -21,8 +21,19 @@ interface FanoutOptions {
   providerContexts?: Record<string, unknown>;
   providerMeta?: Record<string, unknown>;
   onPartial?: (providerId: string, chunk: unknown) => void;
-  onProviderComplete?: (providerId: string, outcome: { status: 'fulfilled' | 'rejected'; value?: unknown; reason?: unknown; providerResponse?: unknown }) => void;
-  onAllComplete?: (results: Map<string, unknown>, errors: Map<string, unknown>) => void | Promise<void>;
+  onProviderComplete?: (
+    providerId: string,
+    outcome: {
+      status: 'fulfilled' | 'rejected';
+      value?: unknown;
+      reason?: unknown;
+      providerResponse?: unknown;
+    }
+  ) => void;
+  onAllComplete?: (
+    results: Map<string, unknown>,
+    errors: Map<string, unknown>
+  ) => void | Promise<void>;
   onError?: (error: unknown) => void;
 }
 
@@ -159,7 +170,6 @@ export class ConnectionHandler {
     this.backendInitPromise = null;
     this._activeRecomputes = new Set();
     this._probePersistenceQueues = new Map();
-    ConnectionHandler.activeConnections.add(this);
   }
 
   async init(): Promise<void> {
@@ -169,6 +179,7 @@ export class ConnectionHandler {
     this.messageHandler = this._createMessageHandler();
     this.port.onMessage.addListener(this.messageHandler);
     this.port.onDisconnect.addListener(() => this._cleanup());
+    ConnectionHandler.activeConnections.add(this);
 
     this.isInitialized = true;
     console.log('[ConnectionHandler] Initialized for port:', this.port.name);
@@ -547,10 +558,7 @@ export class ConnectionHandler {
     return updatedTurn;
   }
 
-  private async _enqueueProbePersistence<T>(
-    aiTurnId: string,
-    task: () => Promise<T>
-  ): Promise<T> {
+  private async _enqueueProbePersistence<T>(aiTurnId: string, task: () => Promise<T>): Promise<T> {
     const previous = this._probePersistenceQueues.get(aiTurnId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(task);
     this._probePersistenceQueues.set(aiTurnId, current);
@@ -566,7 +574,11 @@ export class ConnectionHandler {
   private async _nextProbeModelIndices(
     aiTurnId: string,
     providerIds: string[]
-  ): Promise<{ indices: Map<string, number>; turn: Record<string, unknown> | undefined; responses: Array<Record<string, unknown>> }> {
+  ): Promise<{
+    indices: Map<string, number>;
+    turn: Record<string, unknown> | undefined;
+    responses: Array<Record<string, unknown>>;
+  }> {
     const adapter = this.services?.sessionManager?.adapter;
     if (!adapter) {
       const indices = new Map<string, number>();
@@ -871,7 +883,8 @@ export class ConnectionHandler {
         providerContexts,
         onPartial: (providerId: string, chunk: unknown) => {
           const modelIndex = indices.get(providerId) ?? 0;
-          const rawText = typeof chunk === 'string' ? chunk : (chunk as { text?: string })?.text ?? '';
+          const rawText =
+            typeof chunk === 'string' ? chunk : ((chunk as { text?: string })?.text ?? '');
           const previousText = probeAccumulated.get(providerId) ?? '';
           const isFullReplacement =
             rawText.length >= previousText.length && rawText.startsWith(previousText);
@@ -896,7 +909,10 @@ export class ConnectionHandler {
             // port closed
           }
         },
-        onProviderComplete: (providerId: string, outcome: { status: 'fulfilled' | 'rejected'; value?: unknown }) => {
+        onProviderComplete: (
+          providerId: string,
+          outcome: { status: 'fulfilled' | 'rejected'; value?: unknown }
+        ) => {
           const modelIndex = indices.get(providerId) ?? 0;
           void (async () => {
             try {
@@ -905,10 +921,10 @@ export class ConnectionHandler {
                 text = String((outcome?.value as { text?: unknown })?.text ?? '').trim();
               }
 
-                const geometryResult = (await computeProbeGeometry({
-                  modelIndex,
-                  content: text,
-                })) as ProbeGeometryResult;
+              const geometryResult = (await computeProbeGeometry({
+                modelIndex,
+                content: text,
+              })) as ProbeGeometryResult;
 
               const now = Date.now();
               await this._enqueueProbePersistence(aiTurnId, () =>
@@ -1109,7 +1125,8 @@ export class ConnectionHandler {
             sessionId: executeRequest?.sessionId ?? 'unknown',
             stepId: 'validate-primitive',
             status: 'failed',
-            error: 'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.',
+            error:
+              'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.',
             isRecompute: executeRequest?.type === 'recompute',
             sourceTurnId: executeRequest?.sourceTurnId,
           });
@@ -1194,7 +1211,7 @@ export class ConnectionHandler {
         Array.isArray(firstPromptStep?.payload?.['providers']) &&
         (firstPromptStep.payload['providers'] as unknown[]).length > 0
           ? (firstPromptStep.payload['providers'] as string[])
-          : executeRequest.providers ?? [];
+          : (executeRequest.providers ?? []);
 
       const createsNewTurn = executeRequest.type !== 'recompute' && hasBatch;
       if (createsNewTurn) {

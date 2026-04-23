@@ -13,6 +13,7 @@ import { getCanonicalStatementsForClaim } from '../../../shared/corpus-utils.js'
 import { buildSourceContinuityMap } from '../../provenance/surface.js';
 import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
 import { buildLookupCacheFromIndex } from '../../concierge-service/evidence-substrate.js';
+import { getConfigForModel } from '../../clustering/index.js';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -124,10 +125,8 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
   if (sourceData.length < 2) {
     throw new Error(`Mapping requires at least 2 valid sources, but found ${sourceData.length}.`);
   }
-
   wdbg(
-    `[executeMappingPhase] Running mapping with ${sourceData.length
-    } sources: ${sourceData.map((s) => s.providerId).join(', ')} `
+    `[executeMappingPhase] Running mapping with ${sourceData.length} sources: ${sourceData.map((s) => s.providerId).join(', ')}`
   );
 
   // Canonical provider ordering: deterministic regardless of arrival order.
@@ -197,6 +196,8 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
   // ════════════════════════════════════════════════════════════════════════
   // 2.6 GEOMETRY (async, may fail gracefully)
   // ════════════════════════════════════════════════════════════════════════
+  const embeddingConfig = getConfigForModel(payload.embeddingModelId || 'bge-base-en-v1.5');
+
   const geometryResults = await buildGeometryAsync(
     paragraphResult,
     shadowResult,
@@ -205,7 +206,8 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
     context,
     options,
     geometryDiagnostics,
-    nowMs
+    nowMs,
+    embeddingConfig
   );
 
   const {

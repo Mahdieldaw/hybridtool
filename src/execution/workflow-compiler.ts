@@ -168,6 +168,7 @@ export class WorkflowCompiler {
         previousAnalysis: context.previousAnalysis || null,
         providerMeta: request.providerMeta || {},
         useThinking: !!request.useThinking,
+        embeddingModelId: request.embeddingModelId,
       },
     };
   }
@@ -193,6 +194,7 @@ export class WorkflowCompiler {
           originalPrompt: context.sourceUserMessage,
           useThinking: !!request.useThinking,
           attemptNumber: 1,
+          embeddingModelId: request.embeddingModelId,
         },
       };
     }
@@ -210,6 +212,7 @@ export class WorkflowCompiler {
         originalPrompt: request.userMessage,
         useThinking: !!request.useThinking && mapper === 'chatgpt',
         attemptNumber: 1,
+        embeddingModelId: request.embeddingModelId,
       },
     };
   }

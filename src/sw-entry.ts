@@ -1876,6 +1876,7 @@ function doRegenerateEmbeddings(
           paragraphCount: packedParagraphs.index.length,
           statementIndex: packedStatements.index,
           paragraphIndex: packedParagraphs.index,
+          embeddingVersion: 2,
           timestamp: Date.now(),
         },
       });
