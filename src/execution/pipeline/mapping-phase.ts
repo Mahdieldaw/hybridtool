@@ -8,7 +8,7 @@ import { buildGeometryAsync } from '../utils/geometry-runner.js';
 import { canonicalCitationOrder, buildCitationSourceOrder } from '../../../shared/provider-config.js';
 import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
 import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from '../../provenance/semantic-mapper.js';
-import { executeFullArtifactPipeline } from '../deterministic-pipeline.js';
+import { executeArtifactPipeline } from '../deterministic-pipeline.js';
 import { getCanonicalStatementsForClaim } from '../../../shared/corpus-utils.js';
 import { buildSourceContinuityMap } from '../../provenance/surface.js';
 import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
@@ -159,7 +159,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
 
   // 1. Import new modules dynamically
   // Import shadow module once at function scope so callbacks can use its exports without awaiting
-  // claimAssembly import removed — computePreSurveyPipeline handles it internally
 
   const nowMs = () =>
     typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -322,7 +321,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
 
                 try {
                   // ── UNIFIED ARTIFACT PIPELINE (single-pass) ──────────────────
-                  const pipelineResult = await executeFullArtifactPipeline({
+                  const pipelineResult = await executeArtifactPipeline({
                     parsedMappingResult: {
                       ...parseResult.output,
                       narrative: parseResult.narrative || '',
@@ -352,7 +351,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   mapperArtifact = pipelineResult.mapperArtifact;
                   cognitiveArtifact = pipelineResult.cognitiveArtifact;
                   const enrichedClaims = pipelineResult.enrichedClaims;
-                  const preSurvey = pipelineResult;
 
                   const semanticContinuationMeta = (() => {
                     try {
@@ -412,24 +410,24 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       console.error('[executeMappingPhase] sourceCoherence stamp failed', err);
                     }
 
-                    const mapperArtifact_claimProvenance = preSurvey.derived.claimProvenance;
+                    const mapperArtifact_claimProvenance = pipelineResult.claimProvenance;
                     if (mapperArtifact_claimProvenance) {
                       mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
                     }
                   }
 
                   // ── EDITORIAL MODEL CALL (executeMappingPhase-only) ──────────────
-                  if (mapperArtifact && preSurvey?.derived) {
+                  if (mapperArtifact && pipelineResult?.claimDensityResult) {
                     try {
                       const continuityMap = buildSourceContinuityMap(
-                        preSurvey.derived.claimDensityResult
+                        pipelineResult.claimDensityResult
                       );
                       const editorialCitationSourceOrder = buildCitationSourceOrder(citationOrder);
                       const { passages: indexedPassages, unclaimed: indexedUnclaimed } =
                         buildPassageIndex(
-                          preSurvey.derived.claimDensityResult,
-                          preSurvey.derived.passageRoutingResult,
-                          preSurvey.derived.statementClassification,
+                          pipelineResult.claimDensityResult,
+                          pipelineResult.passageRoutingResult,
+                          pipelineResult.statementClassification,
                           mapperArtifact?.corpus ?? { models: [] },
                           enrichedClaims,
                           editorialCitationSourceOrder,
@@ -470,7 +468,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                           passageCount: indexedPassages.length,
                           claimCount: enrichedClaims.length,
                           conflictCount:
-                            preSurvey.derived.passageRoutingResult?.routing?.conflictClusters
+                            pipelineResult.passageRoutingResult?.routing?.conflictClusters
                               ?.length ?? 0,
                           concentrationSpread: {
                             min: concentrations.length ? Math.min(...concentrations) : 0,
@@ -483,7 +481,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                         }
                       );
 
-                      // Fire LLM call (same pattern as survey mapper)
                       const editorialResult = await runWithProviderHealth(
                         healthTracker,
                         payload.mappingProvider,
@@ -588,7 +585,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   );
                 } catch (err) {
                   console.error(
-                    '[executeMappingPhase] Pre-survey pipeline failed (recoverable via regenerate-embeddings):',
+                    '[executeMappingPhase] Artifact pipeline failed (recoverable via regenerate-embeddings):',
                     getErrorMessage(err)
                   );
                   // Don't throw — let the turn complete with raw text.
@@ -658,7 +655,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
             } catch (_) { }
 
             // Persist semantic mapper's thread position for the next extend turn.
-            // If survey mapper runs it will overwrite this with the more recent cursor.
             try {
               if (providerThreadMeta && Object.keys(providerThreadMeta).length > 0) {
                 await options.persistenceCoordinator.persistProviderContexts(

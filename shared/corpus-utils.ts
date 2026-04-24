@@ -43,8 +43,6 @@ export function deriveArtifactIndex(artifact: any): CorpusIndex | null {
   const mixedProvenance =
     artifact.mixedProvenance ??
     artifact.mixedProvenanceResult ??
-    artifact.derived?.mixedProvenance ??
-    artifact.derived?.mixedProvenanceResult ??
     null;
   const claimStatementIds: Record<string, string[]> = {};
   for (const [id, entry] of Object.entries(mixedProvenance?.perClaim ?? {})) {

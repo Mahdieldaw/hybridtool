@@ -273,47 +273,9 @@ export async function openDatabase(): Promise<IDBDatabase> {
         }
       }
 
-      // Migration to v10: Move survey gates from artifacts (L3) to provider responses (L2)
+      // Migration to v10: Update schema version in metadata
       if (oldVersion < 10) {
         try {
-          const turnsStore = transaction.objectStore('turns');
-          const responsesStore = transaction.objectStore('provider_responses');
-
-          // We need to iterate all turns to find those with survey gates in their artifacts
-          const cursorRequest = turnsStore.openCursor();
-          cursorRequest.onsuccess = (e) => {
-            const cursor = (e.target as IDBRequest).result as IDBCursorWithValue;
-            if (cursor) {
-              const turn = cursor.value;
-              const artifact = turn?.mapping?.artifact;
-              const surveyGates = artifact?.surveyGates;
-              const surveyRationale = artifact?.surveyRationale;
-
-              if (Array.isArray(surveyGates) && surveyGates.length > 0) {
-                const mapperProviderId = turn.meta?.mapper;
-                if (mapperProviderId) {
-                  const aiTurnId = turn.id;
-                  // Use compound key index to find the exact mapping response
-                  const index = responsesStore.index('byCompoundKey');
-                  const getRequest = index.get([aiTurnId, mapperProviderId, 'mapping', 0]);
-
-                  getRequest.onsuccess = (ev) => {
-                    const response = (ev.target as IDBRequest).result;
-                    if (response) {
-                      response.surveyGates = surveyGates;
-                      if (surveyRationale) response.surveyRationale = surveyRationale;
-                      responsesStore.put(response);
-                      console.log(
-                        `[Migration v10] Moved survey gates for turn ${aiTurnId} (provider: ${mapperProviderId})`
-                      );
-                    }
-                  };
-                }
-              }
-              cursor.continue();
-            }
-          };
-
           const metadataStore = transaction.objectStore('metadata');
           const now = Date.now();
           const rec: MetadataRecord = {
@@ -324,9 +286,9 @@ export async function openDatabase(): Promise<IDBDatabase> {
             updatedAt: now,
           };
           metadataStore.put(rec);
-          console.log('Completed v10 migration setup (data move will proceed via cursor)');
+          console.log('Completed v10 migration: Schema version updated in metadata');
         } catch (e) {
-          console.warn('Failed to initiate v10 migration:', e);
+          console.warn('Failed to complete v10 migration:', e);
         }
       }
     };

@@ -103,7 +103,7 @@ export const DecisionMapSheet = React.memo(() => {
       instrumentActions.selectClaim(null);
       setSheetHeightRatio(0.95);
     }
-  }, [openState?.turnId]);
+  }, [openState, instrumentActions]);
 
   // ── Evidence console state ─────────────────────────────────────
   const [extraColumns, setExtraColumns] = useState<ColumnDef[]>([]);
@@ -154,7 +154,7 @@ export const DecisionMapSheet = React.memo(() => {
     if (!viewMap.has(selectedView)) {
       instrumentActions.setSelectedView(views[0].id);
     }
-  }, [tableMode]);
+  }, [tableMode, selectedView, instrumentActions]);
 
   // Reset column visibility when view or table mode changes
   useEffect(() => {
@@ -176,7 +176,7 @@ export const DecisionMapSheet = React.memo(() => {
       setIsCardsCollapsed(false);
       setVerticalSplitPct(60);
     }
-  }, [openState?.turnId]);
+  }, [openState]);
 
   // ── Split divider drag handlers ──
   const handleSplitPointerDown = useCallback((e: React.PointerEvent) => {

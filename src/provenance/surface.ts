@@ -585,7 +585,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     conflictClusters,
     loadBearingClaims,
     passthrough: enrichedClaims.map((c) => String(c.id)).filter((id) => !routedSet.has(id)),
-    skipSurvey: conflictClusters.length === 0 && loadBearingClaims.length === 0,
     routedClaimIds,
     diagnostics: {
       concentrationDistribution: Object.values(claimProfiles).map((p) => p.concentrationRatio),
@@ -725,8 +724,8 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const cascadeFragilitySigma =
       fragValues.length > 0
         ? Math.sqrt(
-            fragValues.reduce((s, v) => s + (v - cascadeFragilityMu) ** 2, 0) / fragValues.length
-          )
+          fragValues.reduce((s, v) => s + (v - cascadeFragilityMu) ** 2, 0) / fragValues.length
+        )
         : 0;
 
     let count2a = 0,

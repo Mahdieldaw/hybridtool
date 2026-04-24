@@ -1,7 +1,7 @@
 /**
  * Canonical provider ordering for deterministic statement IDs.
  * This fixed order is used everywhere: shadow extraction, mapper,
- * survey mapper, synthesis, UI citations, and REGENERATE paths.
+ * synthesis, UI citations, and REGENERATE paths.
  *
  * When a subset of providers participates in a run, filter this
  * array to those present — relative order never changes, only

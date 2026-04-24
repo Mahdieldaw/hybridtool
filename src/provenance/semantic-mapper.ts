@@ -5,7 +5,6 @@
 // v5: Cross-read reframe. Mapper reads responses *together*, not through them.
 //     Claims are relational (convergence / tension / singular voice), not positional.
 //     Narrative-first output order. Echo filtering via identity, not rules.
-//     Question generation is handled by the Survey Mapper (surveyMapper.ts).
 // ===========================================================================
 
 import type { UnifiedMapperOutput } from '../../shared/types';

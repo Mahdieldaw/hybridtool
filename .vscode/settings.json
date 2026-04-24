@@ -11,5 +11,9 @@
     "**/coverage": true,
     "**/*.log": true,
     "**/*.lock": true
+  },
+  "sonarlint.connectedMode.project": {
+    "connectionId": "mahdieldaw",
+    "projectKey": "Mahdieldaw_hybridtool"
   }
 }

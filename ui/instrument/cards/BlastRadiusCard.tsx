@@ -847,7 +847,6 @@ export function BlastRadiusCard({
   selectedEntity: SelectedEntity;
 }) {
   const br = artifact?.blastRadiusFilter ?? null;
-  const axes: any[] = useMemo(() => (Array.isArray(br?.axes) ? br.axes : []), [br]);
   // --- Carrier detection data (absorbed from CarrierDetectionCard) ---
   const substrateSummary = artifact?.substrateSummary ?? null;
   const sc = artifact?.statementClassification ?? null;
@@ -875,7 +874,6 @@ export function BlastRadiusCard({
     (artifact?.blastSurface &&
       Array.isArray(artifact?.blastSurface?.scores) &&
       artifact.blastSurface.scores.length > 0) ||
-    axes.length > 0 ||
     fateTotal > 0;
 
   if (!hasAny) {
@@ -1026,24 +1024,6 @@ export function BlastRadiusCard({
               </div>
             );
           })()}
-        </CardSection>
-      )}
-
-      {/* §9 Survey Axes */}
-      {axes.length > 0 && (
-        <CardSection title={`Survey Axes (${axes.length})`}>
-          <div className="space-y-1">
-            {axes.map((axis: any, i: number) => (
-              <div
-                key={axis.id ?? i}
-                className="flex items-center gap-3 py-1 border-b border-white/5 text-xs"
-              >
-                <span className="font-mono text-text-muted text-[10px]">{axis.id}</span>
-                <span className="text-text-secondary truncate flex-1">{axis.representativeClaimId}</span>
-                <span className="font-mono text-text-muted">{fmt(axis.maxBlastRadius, 3)}</span>
-              </div>
-            ))}
-          </div>
         </CardSection>
       )}
 

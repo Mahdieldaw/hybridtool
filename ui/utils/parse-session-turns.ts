@@ -57,7 +57,6 @@ export function parseSessionTurns(fullSession: any): {
             : round.completedAt || round.createdAt || Date.now();
         const updatedAt = typeof resp?.updatedAt === 'number' ? resp.updatedAt : createdAt;
         // Tier 3: artifacts are ephemeral — not in the history payload.
-        // Survey gates are now on the provider response (Tier 2).
         return {
           providerId: (resp?.providerId as ProviderKey) || (providerId as ProviderKey),
           text: typeof resp?.text === 'string' ? resp.text : '',

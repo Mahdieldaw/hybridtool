@@ -163,9 +163,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
           </div>
           {prRouting && (
             <div className="text-xs text-text-muted">
-              {prRouting.skipSurvey
-                ? 'skipSurvey=true — no structural tension detected'
-                : `${prRouting.conflictClusters?.length ?? 0} conflict cluster(s), ${prRouting.loadBearingClaims?.length ?? 0} passage-routed claim(s)`}
+              {prRouting.conflictClusters?.length ?? 0} conflict cluster(s), {prRouting.loadBearingClaims?.length ?? 0} passage-routed claim(s)
             </div>
           )}
         </div>

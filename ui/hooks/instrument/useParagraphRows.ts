@@ -74,8 +74,6 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
     const mixedProvenance =
       a?.mixedProvenance ??
       a?.mixedProvenanceResult ??
-      a?.derived?.mixedProvenance ??
-      a?.derived?.mixedProvenanceResult ??
       null;
     const perClaim = mixedProvenance?.perClaim ?? {};
     const merged: any[] = Array.isArray(perClaim[selectedClaimId]?.mergedParagraphs)

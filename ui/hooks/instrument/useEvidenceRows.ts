@@ -237,10 +237,8 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const mixedProvenance =
       a?.mixedProvenance ??
       a?.mixedProvenanceResult ??
-      a?.derived?.mixedProvenance ??
-      a?.derived?.mixedProvenanceResult ??
       null;
-    const claimProvenance = a?.claimProvenance ?? a?.derived?.claimProvenance ?? null;
+    const claimProvenance = a?.claimProvenance ?? null;
     const directTopIds = new Set<string>();
     const idx = a?.index ?? null;
     const sourceIds = idx

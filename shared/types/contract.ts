@@ -585,12 +585,10 @@ export interface PassageClaimRouting {
     claimIds: string[];
     edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
   }>;
-  /** Load-bearing claims routed for survey — no ceiling cap */
+  /** Load-bearing claims (concentration ≥ μ+σ OR MAXLEN ≥ 2) — no ceiling cap */
   loadBearingClaims: PassageRoutedClaim[];
-  /** Claims that pass through without survey questions */
+  /** Claims not included in routedClaimIds (neither conflict nor load-bearing) */
   passthrough: string[];
-  /** If true, skip the survey mapper entirely */
-  skipSurvey: boolean;
   /** All routed claim IDs (conflicts + load-bearing) */
   routedClaimIds: string[];
   diagnostics: {
