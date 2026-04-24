@@ -12,7 +12,7 @@ type HealthCheckResult = {
   retryAfterMs?: number;
 };
 
-type HealthTrackerLike = {
+export type HealthTrackerLike = {
   shouldAttempt?: (providerId: string) => HealthCheckResult;
   recordSuccess?: (providerId: string) => void;
   recordFailure?: (providerId: string, error: unknown) => void;

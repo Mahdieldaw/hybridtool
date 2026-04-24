@@ -392,10 +392,11 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  // ── Block 1: Passage Routing (Model Concentration) ────────────────────────
+  // ── Block 1: Passage Routing (5-Phase Bottom-Up Algorithm) ────────────────────────
 
   const claimProfiles: Record<string, PassageClaimProfile> = {};
 
+  // Build base profiles for all claims (instrumentationfields + placeholders for routing fields)
   for (const claim of enrichedClaims) {
     const id = String(claim.id);
     const profile = profiles[id];
@@ -409,6 +410,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     if (!profile) {
       claimProfiles[id] = {
         claimId: id,
+        landscapePosition: 'floor',
+        isMinority: false,
+        routingMeasurements: null,
         totalMAJ: 0,
         dominantModel: null,
         dominantMAJ: 0,
@@ -416,8 +420,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         densityRatio: 0,
         maxPassageLength: 0,
         meanCoverageInLongestRun: 0,
-        landscapePosition: 'floor',
-        isLoadBearing: false,
         structuralContributors: [],
         incidentalMentions: [],
         ...(queryDistance !== undefined ? { queryDistance } : {}),
@@ -463,6 +465,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     claimProfiles[id] = {
       claimId: id,
+      landscapePosition: 'floor',
+      isMinority: false,
+      routingMeasurements: null,
       totalMAJ,
       dominantModel,
       dominantMAJ,
@@ -470,43 +475,285 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       densityRatio: dominantMAJ > 0 ? maxPassageLengthOfDominant / dominantMAJ : 0,
       maxPassageLength: profile.maxPassageLength,
       meanCoverageInLongestRun: profile.meanCoverageInLongestRun,
-      landscapePosition: 'floor',
-      isLoadBearing: false,
       structuralContributors,
       incidentalMentions,
       ...(queryDistance !== undefined ? { queryDistance } : {}),
     };
   }
 
-  // Compute concentration threshold and assign landscape positions
-  const preconditionPass = Object.values(claimProfiles).filter((p) => p.totalMAJ >= 1);
+  // ── 5-Phase Routing Algorithm ──
+
+  // Phase 0: Precondition filtering and activeMajParagraphIds computation
+  interface CandidateProfile extends PassageClaimProfile {
+    activeMajParagraphIds: string[];
+  }
+  const candidates: CandidateProfile[] = [];
+
+  for (const p of Object.values(claimProfiles)) {
+    const profile = profiles[p.claimId];
+    if (!profile) {
+      p.landscapePosition = 'floor';
+      p.routingMeasurements = null;
+      continue;
+    }
+
+    // Get majority paragraph IDs, filtered by periphery if needed
+    let activeMajIds = profile.majorityParagraphIds || [];
+    if (filterPeripheral) {
+      activeMajIds = activeMajIds.filter((pid) => !periphery.peripheralNodeIds.has(pid));
+    }
+
+    if (activeMajIds.length === 0) {
+      p.landscapePosition = 'floor';
+      p.routingMeasurements = null;
+      continue;
+    }
+
+    candidates.push({
+      ...(p as any),
+      activeMajParagraphIds: activeMajIds,
+    });
+  }
+
+  // Assign floor status to non-candidates
+  const candidateIds = new Set(candidates.map((c) => c.claimId));
+  for (const [id, p] of Object.entries(claimProfiles)) {
+    if (!candidateIds.has(id)) {
+      p.landscapePosition = 'floor';
+      p.routingMeasurements = null;
+    }
+  }
+
+  if (candidates.length === 0) {
+    // All claims are floor
+    let floorCount = 0;
+    for (const p of Object.values(claimProfiles)) {
+      if (p.landscapePosition === 'floor') floorCount++;
+    }
+
+    const passageRoutingResult: PassageRoutingResult = {
+      claimProfiles,
+      gate: {
+        muConcentration: 0,
+        sigmaConcentration: 0,
+        concentrationThreshold: 0,
+        preconditionPassCount: 0,
+        loadBearingCount: 0,
+      },
+      routing: {
+        conflictClusters: [],
+        loadBearingClaims: [],
+        passthrough: enrichedClaims.map((c) => String(c.id)),
+        routedClaimIds: [],
+        diagnostics: {
+          concentrationDistribution: [],
+          densityRatioDistribution: [],
+          totalClaims: enrichedClaims.length,
+          floorCount,
+          corpusMode: periphery.corpusMode,
+          peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
+          peripheralRatio: periphery.peripheralRatio,
+          largestBasinRatio: periphery.largestBasinRatio,
+        },
+      },
+      meta: { processingTimeMs: performance.now() - t0 },
+    };
+
+    return {
+      passageRoutingResult,
+      blastSurfaceResult: (() => {
+        const twinMap = computeTwinMap(enrichedClaims, canonicalSets, statementEmbeddings);
+        return {
+          scores: enrichedClaims.map((claim) => ({
+            claimId: String(claim.id),
+            claimLabel: (claim as any).label ?? String(claim.id),
+            layerC: { canonicalCount: 0, nonExclusiveCount: 0, exclusiveNonOrphanCount: 0, exclusiveOrphanCount: 0 },
+          })),
+          twinMap,
+          meta: { totalCorpusStatements, processingTimeMs: performance.now() - t0 },
+        };
+      })(),
+    };
+  }
+
+  // Phase 1: Minority classification (cumulative coverage sort)
+  candidates.sort((a, b) => a.activeMajParagraphIds.length - b.activeMajParagraphIds.length);
+  const totalCorpusParagraphs = new Set(
+    candidates.flatMap((c) => c.activeMajParagraphIds)
+  ).size;
+  let cumulative = 0;
+  for (const c of candidates) {
+    const thisCoverageCount = c.activeMajParagraphIds.length;
+    c.isMinority = cumulative + thisCoverageCount < totalCorpusParagraphs * 0.5;
+    cumulative += thisCoverageCount;
+  }
+
+  // Phase 2: Minority ranking
+  const paragraphToMajClaims = new Map<string, Set<string>>();
+  for (const c of candidates) {
+    for (const pid of c.activeMajParagraphIds) {
+      if (!paragraphToMajClaims.has(pid)) {
+        paragraphToMajClaims.set(pid, new Set());
+      }
+      paragraphToMajClaims.get(pid)!.add(c.claimId);
+    }
+  }
+
+  interface MinorityCandidate extends CandidateProfile {
+    contestedDominance: number;
+    exclusivityRatio: number;
+  }
+  const minorityPool: MinorityCandidate[] = [];
+  for (const c of candidates) {
+    if (!c.isMinority) continue;
+
+    const contested = c.activeMajParagraphIds.filter((pid) => {
+      return (paragraphToMajClaims.get(pid)?.size ?? 0) > 1;
+    }).length;
+    const contestedDominance =
+      c.activeMajParagraphIds.length > 0 ? contested / c.activeMajParagraphIds.length : 0;
+
+    const totalStatements = canonicalSets.get(c.claimId)?.size ?? 0;
+    const exclusiveStatements = exclusiveIds.get(c.claimId)?.length ?? 0;
+    const exclusivityRatio = totalStatements > 0 ? exclusiveStatements / totalStatements : 0;
+
+    minorityPool.push({
+      ...(c as any),
+      contestedDominance,
+      exclusivityRatio,
+    });
+  }
+
+  // Sort minority pool: contestedDominance DESC, tiebreak exclusivityRatio DESC
+  minorityPool.sort((a, b) => {
+    const cDiff = b.contestedDominance - a.contestedDominance;
+    return cDiff !== 0 ? cDiff : b.exclusivityRatio - a.exclusivityRatio;
+  });
+
+  // Phase 3: Minority peeling
+  const assignedSet = new Set<string>();
+  for (let i = 0; i < minorityPool.length; i++) {
+    const c = minorityPool[i];
+    const novelIds = c.activeMajParagraphIds.filter((pid) => !assignedSet.has(pid));
+    c.landscapePosition = i === 0 ? 'leadMinority' : 'mechanism';
+
+    const claimNoveltyRatio =
+      c.activeMajParagraphIds.length > 0 ? novelIds.length / c.activeMajParagraphIds.length : 0;
+    const corpusNoveltyRatio =
+      totalCorpusParagraphs - assignedSet.size > 0
+        ? novelIds.length / (totalCorpusParagraphs - assignedSet.size)
+        : 0;
+
+    c.routingMeasurements = {
+      contestedDominance: c.contestedDominance,
+      exclusivityRatio: c.exclusivityRatio,
+      claimNoveltyRatio,
+      corpusNoveltyRatio,
+      novelParagraphCount: novelIds.length,
+    };
+
+    for (const pid of c.activeMajParagraphIds) {
+      assignedSet.add(pid);
+    }
+  }
+
+  // Phase 4: Majority iterative assignment
+  const majorityPool = candidates
+    .filter((c) => !c.isMinority && c.activeMajParagraphIds.length > 0)
+    .sort((a, b) => a.activeMajParagraphIds.length - b.activeMajParagraphIds.length);
+
+  let northStarCandidate: CandidateProfile | null = null;
+  if (majorityPool.length > 0) {
+    northStarCandidate = majorityPool.pop()!;
+  }
+
+  // Assign remaining majority claims
+  for (let i = 0; i < majorityPool.length; i++) {
+    const c = majorityPool[i];
+    const nsIds = northStarCandidate?.activeMajParagraphIds ?? [];
+    const currentNSNovel = nsIds.filter((pid) => !assignedSet.has(pid)).length;
+    const projectedNSNovel = nsIds.filter(
+      (pid) => !assignedSet.has(pid) && !c.activeMajParagraphIds.includes(pid)
+    ).length;
+    const delta = currentNSNovel - projectedNSNovel;
+    const candidateContribution = c.activeMajParagraphIds.filter(
+      (pid) => !assignedSet.has(pid)
+    ).length;
+
+    if (delta > candidateContribution) {
+      // Break: remaining candidates go to floor
+      for (let j = i; j < majorityPool.length; j++) {
+        const remaining = majorityPool[j];
+        remaining.landscapePosition = 'floor';
+        remaining.isMinority = false;
+        remaining.routingMeasurements = null;
+      }
+      break;
+    }
+
+    c.landscapePosition = 'mechanism';
+    const novelCount = candidateContribution;
+    c.routingMeasurements = {
+      contestedDominance: 0, // majority claims don't have contested dominance
+      exclusivityRatio: exclusiveIds.get(c.claimId)?.length ?? 0 / (canonicalSets.get(c.claimId)?.size ?? 1),
+      claimNoveltyRatio: c.activeMajParagraphIds.length > 0 ? novelCount / c.activeMajParagraphIds.length : 0,
+      corpusNoveltyRatio:
+        totalCorpusParagraphs - assignedSet.size > 0
+          ? novelCount / (totalCorpusParagraphs - assignedSet.size)
+          : 0,
+      novelParagraphCount: novelCount,
+    };
+
+    for (const pid of c.activeMajParagraphIds) {
+      assignedSet.add(pid);
+    }
+  }
+
+  // Phase 5: Assign northStar
+  if (northStarCandidate) {
+    northStarCandidate.landscapePosition = 'northStar';
+    const nsNovel = northStarCandidate.activeMajParagraphIds.filter(
+      (pid) => !assignedSet.has(pid)
+    ).length;
+    const nsTotal = northStarCandidate.activeMajParagraphIds.length;
+    northStarCandidate.routingMeasurements = {
+      contestedDominance: 0,
+      exclusivityRatio:
+        (exclusiveIds.get(northStarCandidate.claimId)?.length ?? 0) /
+        (canonicalSets.get(northStarCandidate.claimId)?.size ?? 1),
+      claimNoveltyRatio: nsTotal > 0 ? nsNovel / nsTotal : 0,
+      corpusNoveltyRatio:
+        totalCorpusParagraphs - assignedSet.size > 0
+          ? nsNovel / (totalCorpusParagraphs - assignedSet.size)
+          : 0,
+      novelParagraphCount: nsNovel,
+    };
+
+    for (const pid of northStarCandidate.activeMajParagraphIds) {
+      assignedSet.add(pid);
+    }
+  }
+
+  // Update claimProfiles with routing results from candidates
+  for (const c of candidates) {
+    const id = c.claimId;
+    if (claimProfiles[id]) {
+      claimProfiles[id].landscapePosition = c.landscapePosition;
+      claimProfiles[id].isMinority = c.isMinority;
+      claimProfiles[id].routingMeasurements = c.routingMeasurements;
+    }
+  }
+
+  // Instrumentation: compute concentration threshold for gate diagnostics
+  const preconditionPass = candidates;
   const concentrationValues = preconditionPass.map((p) => p.concentrationRatio);
   const muConcentration = mean(concentrationValues);
   const sigmaConcentration = sigma(concentrationValues, muConcentration);
   const concentrationThreshold = muConcentration + sigmaConcentration;
 
-  let loadBearingCount = 0,
-    floorCount = 0;
+  let loadBearingCount = 0;
   for (const p of Object.values(claimProfiles)) {
-    if (p.totalMAJ < 1) {
-      p.landscapePosition = 'floor';
-      p.isLoadBearing = false;
-      floorCount++;
-      continue;
-    }
-    const passesGateA = p.concentrationRatio >= concentrationThreshold;
-    const passesGateB = p.maxPassageLength >= 2;
-    p.landscapePosition =
-      passesGateA && passesGateB
-        ? 'northStar'
-        : passesGateA
-          ? 'eastStar'
-          : passesGateB
-            ? 'mechanism'
-            : 'floor';
-    p.isLoadBearing = passesGateA || passesGateB;
-    if (p.isLoadBearing) loadBearingCount++;
-    else floorCount++;
+    if (p.landscapePosition !== 'floor') loadBearingCount++;
   }
 
   // Conflict clusters
@@ -554,13 +801,20 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  // Routing assembly
+  // Routing assembly — landscape position is the single source of truth (floor = passthrough)
   const claimMap = new Map<string, EnrichedClaim>();
   for (const c of enrichedClaims) claimMap.set(String(c.id), c);
 
+  // Define priority order for sorting (not for routing — routing is determined by landscapePosition)
+  const priorityOrder: Record<string, number> = { northStar: 0, leadMinority: 1, mechanism: 2, floor: 3 };
+
   const loadBearingClaims: PassageRoutedClaim[] = Object.values(claimProfiles)
-    .filter((p) => p.isLoadBearing && !claimsInRoutedConflict.has(p.claimId))
-    .sort((a, b) => b.concentrationRatio - a.concentrationRatio)
+    .filter((p) => p.landscapePosition !== 'floor' && !claimsInRoutedConflict.has(p.claimId))
+    .sort((a, b) => {
+      const priorityDiff = (priorityOrder[a.landscapePosition] ?? 99) - (priorityOrder[b.landscapePosition] ?? 99);
+      if (priorityDiff !== 0) return priorityDiff;
+      return b.concentrationRatio - a.concentrationRatio;
+    })
     .map((p) => {
       const c = claimMap.get(p.claimId);
       return {
@@ -580,17 +834,21 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   const routedClaimIds = [...claimsInRoutedConflict, ...loadBearingClaims.map((c) => c.claimId)];
   const routedSet = new Set(routedClaimIds);
+  // Passthrough is exactly the floor claims (not routed in conflict, not load-bearing)
+  const passthroughClaims = enrichedClaims
+    .map((c) => String(c.id))
+    .filter((id) => claimProfiles[id]?.landscapePosition === 'floor' && !routedSet.has(id));
 
   const routing: PassageClaimRouting = {
     conflictClusters,
     loadBearingClaims,
-    passthrough: enrichedClaims.map((c) => String(c.id)).filter((id) => !routedSet.has(id)),
+    passthrough: passthroughClaims,
     routedClaimIds,
     diagnostics: {
       concentrationDistribution: Object.values(claimProfiles).map((p) => p.concentrationRatio),
       densityRatioDistribution: Object.values(claimProfiles).map((p) => p.densityRatio),
       totalClaims: enrichedClaims.length,
-      floorCount,
+      floorCount: Object.values(claimProfiles).filter((p) => p.landscapePosition === 'floor').length,
       corpusMode: periphery.corpusMode,
       peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
       peripheralRatio: periphery.peripheralRatio,

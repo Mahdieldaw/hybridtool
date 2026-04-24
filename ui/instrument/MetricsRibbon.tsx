@@ -82,10 +82,10 @@ function computeDualSignals(analysis: StructuralAnalysis, artifact?: MapperArtif
   if (passageRouting) {
     const profiles = Object.values(passageRouting.claimProfiles) as PassageClaimProfile[];
     passageBacked = profiles.filter(
-      (p) => p.landscapePosition === 'northStar' || p.landscapePosition === 'mechanism'
+      (p) => p.landscapePosition === 'northStar' || p.landscapePosition === 'leadMinority' || p.landscapePosition === 'mechanism'
     ).length;
     passageWeak = profiles.filter(
-      (p) => p.landscapePosition === 'eastStar' || p.landscapePosition === 'floor'
+      (p) => p.landscapePosition === 'floor'
     ).length;
   }
 

@@ -846,7 +846,6 @@ export function BlastRadiusCard({
   artifact: any;
   selectedEntity: SelectedEntity;
 }) {
-  const br = artifact?.blastRadiusFilter ?? null;
   // --- Carrier detection data (absorbed from CarrierDetectionCard) ---
   const substrateSummary = artifact?.substrateSummary ?? null;
   const sc = artifact?.statementClassification ?? null;

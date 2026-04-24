@@ -6,7 +6,6 @@ export interface ParagraphHighlight {
   state: 'passage' | 'dispersed' | 'none';
   landscapePosition: LandscapePosition;
   claimId: string;
-  isLoadBearing: boolean;
 }
 
 /**
@@ -39,7 +38,6 @@ export function usePassageHighlight(
       const profile = densityProfiles[focusedClaimId];
       const routingProfile = routingProfiles[focusedClaimId];
       const pos: LandscapePosition = routingProfile?.landscapePosition ?? 'floor';
-      const isLoadBearing: boolean = routingProfile?.isLoadBearing ?? false;
 
       // Mark passage-interior paragraphs
       const passageIds = new Set<string>();
@@ -56,7 +54,6 @@ export function usePassageHighlight(
               state: 'passage',
               landscapePosition: pos,
               claimId: focusedClaimId,
-              isLoadBearing,
             });
           }
         }
@@ -75,7 +72,6 @@ export function usePassageHighlight(
             state: 'dispersed',
             landscapePosition: pos,
             claimId: focusedClaimId,
-            isLoadBearing,
           });
         }
       }
@@ -92,7 +88,10 @@ export function usePassageHighlight(
       const allClaimIds = Object.keys(densityProfiles);
       // Sort by landscape tier ascending (northStar = 0 wins)
       const sorted = allClaimIds
-        .filter((id) => routingProfiles[id]?.isLoadBearing === true)
+        .filter((id) => {
+          const pos = routingProfiles[id]?.landscapePosition;
+          return pos && pos !== 'floor';
+        })
         .sort((a, b) => {
           const pa: LandscapePosition = routingProfiles[a]?.landscapePosition ?? 'floor';
           const pb: LandscapePosition = routingProfiles[b]?.landscapePosition ?? 'floor';
@@ -102,7 +101,6 @@ export function usePassageHighlight(
       for (const claimId of sorted) {
         const profile = densityProfiles[claimId];
         const pos: LandscapePosition = routingProfiles[claimId]?.landscapePosition ?? 'floor';
-        const isLoadBearing = true;
         const passages: any[] = Array.isArray(profile?.passages) ? profile.passages : [];
         for (const passage of passages) {
           const mi: number = passage.modelIndex ?? 0;
@@ -112,7 +110,7 @@ export function usePassageHighlight(
             const paraId = paraIdByCoord.get(`${mi}:${pi}`);
             if (paraId && !map.has(paraId)) {
               // First writer wins (sorted by priority, so lower tier wins = northStar first)
-              map.set(paraId, { state: 'passage', landscapePosition: pos, claimId, isLoadBearing });
+              map.set(paraId, { state: 'passage', landscapePosition: pos, claimId });
             }
           }
         }

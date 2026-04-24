@@ -38,7 +38,6 @@ export interface IndexedPassage {
   densityRatio: number;
   meanCoverageInLongestRun: number;
   landscapePosition: LandscapePosition;
-  isLoadBearing: boolean;
   isSoleSource: boolean;
   conflictClusterIndex: number | null;
   continuity: { prev: string | null; next: string | null };
@@ -131,7 +130,6 @@ export function buildPassageIndex(
         densityRatio: claimProfile.densityRatio,
         meanCoverageInLongestRun: claimProfile.meanCoverageInLongestRun ?? 0,
         landscapePosition: claimProfile.landscapePosition,
-        isLoadBearing: claimProfile.isLoadBearing,
         isSoleSource: (claimProfile.structuralContributors?.length ?? 0) === 1,
         conflictClusterIndex: claimToClusterIndex.get(claimId) ?? null,
         continuity: {
@@ -191,10 +189,10 @@ export function buildPassageIndex(
 // -------------------------------------------------------------------------
 
 const LANDSCAPE_LABELS: Record<LandscapePosition, string> = {
-  northStar: 'North Star (high concentration + high density)',
-  eastStar: 'East Star (high concentration only)',
-  mechanism: 'Mechanism (high density only)',
-  floor: 'Floor (neither gate passed)',
+  northStar: 'North Star (largest majority coverage)',
+  leadMinority: 'Lead Minority (first minority claim)',
+  mechanism: 'Mechanism (secondary claim)',
+  floor: 'Floor (non-routed)',
 };
 
 const ROLE_DESCRIPTIONS = `anchor: the primary passage — establishes the thread's main claim
@@ -212,7 +210,7 @@ export function buildEditorialPrompt(
     claimCount: number;
     conflictCount: number;
     concentrationSpread: { min: number; max: number; mean: number };
-    landscapeComposition: { northStar: number; mechanism: number; eastStar: number; floor: number };
+    landscapeComposition: { northStar: number; leadMinority: number; mechanism: number; floor: number };
   }
 ): string {
   const sections: string[] = [];
@@ -235,7 +233,7 @@ ${userQuery}`);
 - ${corpusShape.passageCount} passages across ${corpusShape.claimCount} claims
 - ${corpusShape.conflictCount} conflict cluster(s)
 - Concentration spread: min=${corpusShape.concentrationSpread.min.toFixed(2)}, max=${corpusShape.concentrationSpread.max.toFixed(2)}, mean=${corpusShape.concentrationSpread.mean.toFixed(2)}
-- Landscape: ${corpusShape.landscapeComposition.northStar} northStar, ${corpusShape.landscapeComposition.mechanism} mechanism, ${corpusShape.landscapeComposition.eastStar} eastStar, ${corpusShape.landscapeComposition.floor} floor`);
+- Landscape: ${corpusShape.landscapeComposition.northStar} northStar, ${corpusShape.landscapeComposition.leadMinority} leadMinority, ${corpusShape.landscapeComposition.mechanism} mechanism, ${corpusShape.landscapeComposition.floor} floor`);
 
   // -- Passages --
   const passageLines = passages.map((p) => {
@@ -255,8 +253,7 @@ ${userQuery}`);
 - Model: ${p.modelName} (index ${p.modelIndex})
 - Claim: "${p.claimLabel}" (${p.claimId})
 - Landscape: ${LANDSCAPE_LABELS[p.landscapePosition]}
-- Concentration: ${p.concentrationRatio.toFixed(3)}, Density: ${p.densityRatio.toFixed(3)}, μRunCovg: ${p.meanCoverageInLongestRun.toFixed(3)}
-- Load-bearing: ${p.isLoadBearing}${sole}${conflict}${extent}${contStr}
+- Concentration: ${p.concentrationRatio.toFixed(3)}, Density: ${p.densityRatio.toFixed(3)}, μRunCovg: ${p.meanCoverageInLongestRun.toFixed(3)}${sole}${conflict}${extent}${contStr}
 
 ${p.text}`;
   });

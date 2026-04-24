@@ -156,9 +156,9 @@ export function parseSemanticMapperOutput(
   const warnings = result.warnings ? [...result.warnings] : [];
   let narrative = hasAnyTags
     ? normalizedText
-        .replace(mapTagPattern, '')
-        .replace(narrativeTagPattern, (_m, content) => String(content || '').trim())
-        .trim()
+      .replace(mapTagPattern, '')
+      .replace(narrativeTagPattern, (_m, content) => String(content || '').trim())
+      .trim()
     : '';
 
   if (!output) {

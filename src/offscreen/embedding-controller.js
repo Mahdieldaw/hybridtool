@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * EMBEDDING CONTROLLER - OFFSCREEN DOCUMENT (Worker Broker)
  *
@@ -194,7 +193,7 @@ async function cleanupEmbeddingsBuffersTTL(opts = {}) {
           try {
             cursor.delete();
             deleted++;
-          } catch (_) {}
+          } catch (_) { }
         }
         cursor.continue();
       };
@@ -203,14 +202,14 @@ async function cleanupEmbeddingsBuffersTTL(opts = {}) {
   } finally {
     try {
       db.close();
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 
 function startEmbeddingsBuffersCleanupLoop() {
   if (embeddingsBuffersCleanupIntervalId != null) return;
   embeddingsBuffersCleanupIntervalId = setInterval(() => {
-    cleanupEmbeddingsBuffersTTL().catch(() => {});
+    cleanupEmbeddingsBuffersTTL().catch(() => { });
   }, EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS);
 }
 
@@ -219,7 +218,7 @@ async function putEmbeddingsBuffer(buffer) {
   const now = Date.now();
   if (now - lastEmbeddingsBuffersCleanupAt > EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS) {
     lastEmbeddingsBuffersCleanupAt = now;
-    cleanupEmbeddingsBuffersTTL().catch(() => {});
+    cleanupEmbeddingsBuffersTTL().catch(() => { });
   }
 
   const db = await openEmbeddingsDb();
@@ -238,7 +237,7 @@ async function putEmbeddingsBuffer(buffer) {
   } finally {
     try {
       db.close();
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 

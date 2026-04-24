@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * EMBEDDING WEB WORKER
  *
@@ -138,7 +137,7 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
   if (inFlightLoad) {
     try {
       await inFlightLoad;
-    } catch {}
+    } catch { }
     if (modelCache.has(modelId)) {
       return modelCache.get(modelId);
     }
@@ -239,23 +238,23 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
 
       const pipelineOptions = isBgeBase
         ? {
-            dtype: null,
-            config: bgeConfig,
+          dtype: null,
+          config: bgeConfig,
+          local_files_only: true,
+          subfolder: 'onnx',
+        }
+        : isMiniLM
+          ? {
+            dtype: 'q4f16',
+            config: miniLMConfig,
             local_files_only: true,
             subfolder: 'onnx',
           }
-        : isMiniLM
-          ? {
-              dtype: 'q4f16',
-              config: miniLMConfig,
-              local_files_only: true,
-              subfolder: 'onnx',
-            }
           : {
-              dtype: 'q4f16',
-              local_files_only: true,
-              subfolder: 'onnx',
-            };
+            dtype: 'q4f16',
+            local_files_only: true,
+            subfolder: 'onnx',
+          };
 
       const optsForDevice = (device) => {
         const base = { ...pipelineOptions, device };

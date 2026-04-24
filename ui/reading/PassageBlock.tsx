@@ -18,8 +18,8 @@ const ROLE_LABELS: Record<string, string> = {
 
 const BORDER_COLORS: Record<LandscapePosition, string> = {
   northStar: 'border-l-amber-400',
+  leadMinority: 'border-l-indigo-400',
   mechanism: 'border-l-blue-400',
-  eastStar: 'border-l-violet-400',
   floor: 'border-l-white/25',
 };
 

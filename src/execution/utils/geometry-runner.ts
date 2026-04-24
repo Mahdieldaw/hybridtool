@@ -8,6 +8,7 @@ import {
   structuredTruncate,
   getEmbeddingStatus,
 } from '../../clustering/index.js';
+import type { EmbeddingConfig, EmbeddingResult, StatementEmbeddingResult } from '../../clustering/embeddings.js';
 import { getErrorMessage } from '../../errors/handler.js';
 import {
   buildGeometricSubstrate,
@@ -15,25 +16,114 @@ import {
   buildPreSemanticInterpretation,
   computeQueryRelevance,
 } from '../../geometry/index.js';
+import type { GeometricSubstrate, DegenerateSubstrate, SubstrateInterpretation } from '../../geometry/types.js';
+import type { QueryRelevanceResult } from '../../geometry/annotate.js';
 import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
+import type { ShadowParagraph } from '../../shadow/shadow-paragraph-projector.js';
+import type { ShadowStatement } from '../../shadow/shadow-extractor.js';
+
+// ─── Local shape types inferred from usage ───────────────────────────────────
+
+interface ParagraphResult {
+  paragraphs: ShadowParagraph[];
+}
+
+interface ShadowResult {
+  statements: ShadowStatement[];
+}
+
+interface IndexedSourceData {
+  // Unused in current implementation — placeholder for future use
+  [key: string]: unknown;
+}
+
+interface GeometryContext {
+  sessionId?: string;
+  canonicalAiTurnId?: string;
+  userMessage?: string;
+}
+
+interface GeometryPayload {
+  originalPrompt?: string;
+  providerContexts?: Record<string, unknown>;
+  useThinking?: boolean;
+}
+
+interface GeometryOptions {
+  sessionManager?: {
+    persistEmbeddings: (
+      aiTurnId: string,
+      data: {
+        statementEmbeddings?: ArrayBuffer;
+        paragraphEmbeddings?: ArrayBuffer;
+        queryEmbedding?: ArrayBuffer;
+        meta: {
+          embeddingModelId: string;
+          dimensions: number;
+          hasStatements: boolean;
+          hasParagraphs: boolean;
+          hasQuery: boolean;
+          statementCount?: number;
+          statementIndex?: string[];
+          paragraphCount?: number;
+          paragraphIndex?: string[];
+          embeddingVersion: number;
+          timestamp: number;
+        };
+      }
+    ) => Promise<void>;
+  };
+}
+
+interface GeometryDiagnostics {
+  embeddingBackendFailure?: boolean;
+  stages: Record<string, unknown>;
+}
+
+// ─── Result shape ─────────────────────────────────────────────────────────────
+
+interface GeometryAsyncResults {
+  embeddingResult: EmbeddingResult | null;
+  statementEmbeddingResult: StatementEmbeddingResult | null;
+  geometryParagraphEmbeddings: Map<string, Float32Array> | null;
+  queryEmbedding: Float32Array | null;
+  queryRelevance: QueryRelevanceResult | null;
+  substrateSummary: {
+    meta: {
+      embeddingSuccess: boolean;
+      embeddingBackend: string;
+      nodeCount: number;
+      mutualRankEdgeCount: number;
+      buildTimeMs: number;
+    };
+    nodes: {
+      contestedCount: number;
+      avgIsolationScore: number;
+    };
+  } | null;
+  substrateDegenerate: boolean | null;
+  substrateDegenerateReason: string | null;
+  preSemanticInterpretation: SubstrateInterpretation | null;
+  substrate: GeometricSubstrate | DegenerateSubstrate | null;
+}
 
 /**
  * Build geometry async pipeline, processing embeddings and substrate.
  * Returns an object with all computed geometry results; mutates geometryDiagnostics.
  */
 export async function buildGeometryAsync(
-  paragraphResult,
-  shadowResult,
-  indexedSourceData,
-  payload,
-  context,
-  options,
-  geometryDiagnostics,
-  nowMs,
-  embeddingConfig = DEFAULT_CONFIG
-) {
+  paragraphResult: ParagraphResult,
+  shadowResult: ShadowResult,
+  _indexedSourceData: IndexedSourceData,
+  payload: GeometryPayload,
+  context: GeometryContext,
+  options: GeometryOptions,
+  geometryDiagnostics: GeometryDiagnostics,
+  nowMs: () => number,
+  embeddingConfig: EmbeddingConfig = DEFAULT_CONFIG
+): Promise<GeometryAsyncResults> {
   const startedAtMs = nowMs();
-  const results = {
+  const results: GeometryAsyncResults = {
     embeddingResult: null,
     statementEmbeddingResult: null,
     geometryParagraphEmbeddings: null,
@@ -79,14 +169,13 @@ export async function buildGeometryAsync(
       geometryDiagnostics.stages.offscreen = { status: 'failed', error: getErrorMessage(err) };
     });
 
-    /** @type {"none" | "webgpu" | "wasm"} */
-    let embeddingBackend = 'none';
+    let embeddingBackend: 'none' | 'webgpu' | 'wasm' = 'none';
     try {
       const status = await getEmbeddingStatus();
       if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
         embeddingBackend = status.backend;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     const rawQuery =
       (payload && typeof payload.originalPrompt === 'string' && payload.originalPrompt) ||
@@ -96,9 +185,9 @@ export async function buildGeometryAsync(
     const truncatedQuery = structuredTruncate(cleanedQuery, 1740);
     const queryTextForEmbedding =
       truncatedQuery &&
-      !truncatedQuery
-        .toLowerCase()
-        .startsWith('represent this sentence for searching relevant passages:')
+        !truncatedQuery
+          .toLowerCase()
+          .startsWith('represent this sentence for searching relevant passages:')
         ? `Represent this sentence for searching relevant passages: ${truncatedQuery}`
         : truncatedQuery;
 
@@ -112,7 +201,7 @@ export async function buildGeometryAsync(
           [queryTextForEmbedding],
           embeddingConfig
         );
-        results.queryEmbedding = queryEmbeddingBatch.embeddings.get('0') || null;
+        results.queryEmbedding = queryEmbeddingBatch.embeddings.get('0') ?? null;
         if (
           results.queryEmbedding &&
           results.queryEmbedding.length !== embeddingConfig.embeddingDimensions
@@ -242,7 +331,7 @@ export async function buildGeometryAsync(
         ? results.substrate &&
           typeof results.substrate === 'object' &&
           'degenerateReason' in results.substrate
-          ? String(results.substrate.degenerateReason)
+          ? String((results.substrate as DegenerateSubstrate).degenerateReason)
           : 'unknown'
         : null;
     } catch (err) {
@@ -255,32 +344,29 @@ export async function buildGeometryAsync(
     }
 
     try {
-      const nodeCount = Array.isArray(results.substrate.nodes) ? results.substrate.nodes.length : 0;
-      const contestedCount = Array.isArray(results.substrate.nodes)
-        ? results.substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
+      const substrate = results.substrate;
+      const nodeCount = Array.isArray(substrate.nodes) ? substrate.nodes.length : 0;
+      const contestedCount = Array.isArray(substrate.nodes)
+        ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
         : 0;
       const avgIsolationScore =
-        Array.isArray(results.substrate.nodes) && nodeCount > 0
-          ? results.substrate.nodes.reduce(
-              (acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0),
-              0
-            ) / nodeCount
+        Array.isArray(substrate.nodes) && nodeCount > 0
+          ? substrate.nodes.reduce(
+            (acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0),
+            0
+          ) / nodeCount
           : 0;
-      const mutualRankEdgeCount = results.substrate.mutualRankGraph?.edges?.length ?? 0;
+      const mutualRankEdgeCount = substrate.mutualRankGraph?.edges?.length ?? 0;
 
       results.substrateSummary = {
         meta: {
-          embeddingSuccess: !!results.substrate?.meta?.embeddingSuccess,
-          embeddingBackend: results.substrate?.meta?.embeddingBackend || 'none',
+          embeddingSuccess: !!substrate?.meta?.embeddingSuccess,
+          embeddingBackend: substrate?.meta?.embeddingBackend || 'none',
           nodeCount:
-            typeof results.substrate?.meta?.nodeCount === 'number'
-              ? results.substrate.meta.nodeCount
-              : nodeCount,
+            typeof substrate?.meta?.nodeCount === 'number' ? substrate.meta.nodeCount : nodeCount,
           mutualRankEdgeCount,
           buildTimeMs:
-            typeof results.substrate?.meta?.buildTimeMs === 'number'
-              ? results.substrate.meta.buildTimeMs
-              : 0,
+            typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
         },
         nodes: {
           contestedCount,
@@ -293,12 +379,12 @@ export async function buildGeometryAsync(
 
     if (isDegenerate(results.substrate)) {
       console.warn(
-        `[buildGeometryAsync] Degenerate substrate: ${results.substrate.degenerateReason}`
+        `[buildGeometryAsync] Degenerate substrate: ${(results.substrate as DegenerateSubstrate).degenerateReason}`
       );
     } else {
       console.log(
         `[buildGeometryAsync] Substrate: ${results.substrate.meta.nodeCount} nodes, ` +
-          `${results.substrate.mutualRankGraph?.edges?.length ?? 0} mutual recognition edges`
+        `${results.substrate.mutualRankGraph?.edges?.length ?? 0} mutual recognition edges`
       );
     }
 
@@ -328,8 +414,8 @@ export async function buildGeometryAsync(
         results.queryRelevance = computeQueryRelevance({
           queryEmbedding: results.queryEmbedding,
           statements: shadowResult.statements,
-          statementEmbeddings: results.statementEmbeddingResult?.embeddings || null,
-          paragraphEmbeddings: results.geometryParagraphEmbeddings || null,
+          statementEmbeddings: results.statementEmbeddingResult?.embeddings ?? null,
+          paragraphEmbeddings: results.geometryParagraphEmbeddings ?? null,
           paragraphs: paragraphResult.paragraphs,
         });
         const qrCount = results.queryRelevance?.statementScores?.size ?? 0;
@@ -363,17 +449,17 @@ export async function buildGeometryAsync(
 
     try {
       if (options.sessionManager && context.canonicalAiTurnId) {
-        const stmtDim = results.statementEmbeddingResult?.embeddings?.values?.().next?.()
-          .value?.length;
+        const stmtDim = results.statementEmbeddingResult?.embeddings?.values?.().next?.().value
+          ?.length;
         const paraDim = results.geometryParagraphEmbeddings?.values?.().next?.().value?.length;
         const queryDim = results.queryEmbedding?.length;
         const dims =
-          Number.isFinite(queryDim) && queryDim > 0
-            ? queryDim
-            : Number.isFinite(paraDim) && paraDim > 0
-              ? paraDim
-              : Number.isFinite(stmtDim) && stmtDim > 0
-                ? stmtDim
+          Number.isFinite(queryDim) && (queryDim ?? 0) > 0
+            ? queryDim!
+            : Number.isFinite(paraDim) && (paraDim ?? 0) > 0
+              ? paraDim!
+              : Number.isFinite(stmtDim) && (stmtDim ?? 0) > 0
+                ? stmtDim!
                 : embeddingConfig.embeddingDimensions;
 
         const packedStatements = results.statementEmbeddingResult?.embeddings
@@ -385,11 +471,11 @@ export async function buildGeometryAsync(
         const queryBuffer =
           results.queryEmbedding instanceof Float32Array
             ? results.queryEmbedding.buffer.slice(
-                results.queryEmbedding.byteOffset,
-                results.queryEmbedding.byteOffset + results.queryEmbedding.byteLength
-              )
+              results.queryEmbedding.byteOffset,
+              results.queryEmbedding.byteOffset + results.queryEmbedding.byteLength
+            )
             : results.queryEmbedding
-              ? new Float32Array(results.queryEmbedding).buffer
+              ? new Float32Array(results.queryEmbedding as Float32Array).buffer
               : null;
 
         if (packedStatements || packedParagraphs || queryBuffer) {
@@ -406,15 +492,15 @@ export async function buildGeometryAsync(
                 hasQuery: Boolean(queryBuffer),
                 ...(packedStatements
                   ? {
-                      statementCount: packedStatements.index.length,
-                      statementIndex: packedStatements.index,
-                    }
+                    statementCount: packedStatements.index.length,
+                    statementIndex: packedStatements.index,
+                  }
                   : {}),
                 ...(packedParagraphs
                   ? {
-                      paragraphCount: packedParagraphs.index.length,
-                      paragraphIndex: packedParagraphs.index,
-                    }
+                    paragraphCount: packedParagraphs.index.length,
+                    paragraphIndex: packedParagraphs.index,
+                  }
                   : {}),
                 embeddingVersion: 2,
                 timestamp: Date.now(),
@@ -422,7 +508,7 @@ export async function buildGeometryAsync(
             });
           } catch (err) {
             console.error('[buildGeometryAsync] Embedding persistence FAILED:', err);
-            throw err; // Surface the error
+            throw err;
           }
         }
       }

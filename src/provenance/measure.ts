@@ -416,12 +416,14 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       }
     }
 
+    const majParas = paragraphCoverage.filter((pc) => pc.coverage > 0.5);
     densityProfiles[claim.id] = {
       claimId: claim.id,
       paragraphCount: paragraphCoverage.length,
       passageCount: passages.length,
       maxPassageLength,
-      majorityParagraphCount: paragraphCoverage.filter((pc) => pc.coverage > 0.5).length,
+      majorityParagraphCount: majParas.length,
+      majorityParagraphIds: majParas.map((pc) => pc.paragraphId),
       meanCoverageInLongestRun,
       modelSpread: byModel.size,
       modelsWithPassages: new Set(passages.filter((p) => p.length >= 2).map((p) => p.modelIndex))

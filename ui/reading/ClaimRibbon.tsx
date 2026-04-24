@@ -12,7 +12,6 @@ interface ClaimChip {
   id: string;
   label: string;
   landscapePosition: LandscapePosition;
-  isLoadBearing: boolean;
   concentrationRatio: number;
   passageCount: number;
 }
@@ -42,7 +41,6 @@ export const ClaimRibbon: React.FC<ClaimRibbonProps> = ({
           id,
           label,
           landscapePosition: pos,
-          isLoadBearing: rp?.isLoadBearing ?? false,
           concentrationRatio: rp?.concentrationRatio ?? 0,
           passageCount: densityProfiles[id]?.passages?.length ?? 0,
         };
@@ -82,8 +80,8 @@ export const ClaimRibbon: React.FC<ClaimRibbonProps> = ({
               className={clsx(
                 'w-1.5 h-1.5 rounded-full shrink-0',
                 chip.landscapePosition === 'northStar' && 'bg-amber-400',
+                chip.landscapePosition === 'leadMinority' && 'bg-indigo-400',
                 chip.landscapePosition === 'mechanism' && 'bg-blue-400',
-                chip.landscapePosition === 'eastStar' && 'bg-violet-400',
                 chip.landscapePosition === 'floor' && 'bg-white/30'
               )}
             />

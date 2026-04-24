@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ArtifactProcessor } from '../../../shared/artifact-processor.js';
 import { getErrorMessage } from '../../errors/handler.ts';
 import { executeGenericSingleStep } from '../utils/llm-runner.ts';

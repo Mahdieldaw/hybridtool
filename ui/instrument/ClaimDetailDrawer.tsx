@@ -118,7 +118,7 @@ export function ClaimDetailDrawer({
 
   // Blast radius score for this claim
   const blastScore = useMemo(() => {
-    const scores: any[] = artifact?.blastRadiusFilter?.scores ?? [];
+    const scores: any[] = artifact?.blastSurface?.scores ?? [];
     return scores.find((s: any) => s.claimId === claim.id) || null;
   }, [claim.id, artifact]);
 

@@ -122,7 +122,7 @@ export function SubstrateSnapshotCard({
   // ── Semantic shape ──
   const { landscapeCounts, mapperRan, validationRate } = useMemo(() => {
     const claimProfiles = artifact?.passageRouting?.claimProfiles ?? {};
-    const counts = { northStar: 0, eastStar: 0, mechanism: 0, floor: 0 };
+    const counts = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
     for (const [, profile] of Object.entries(claimProfiles) as Array<[string, any]>) {
       const pos = profile?.landscapePosition;
       if (pos && pos in counts) counts[pos as keyof typeof counts]++;
@@ -318,7 +318,7 @@ export function SubstrateSnapshotCard({
               )}
             </div>
             <div>
-              {(['northStar', 'eastStar', 'mechanism', 'floor'] as const)
+              {(['northStar', 'leadMinority', 'mechanism', 'floor'] as const)
                 .filter((k) => landscapeCounts[k] > 0)
                 .map((k) => (
                   <StatRow

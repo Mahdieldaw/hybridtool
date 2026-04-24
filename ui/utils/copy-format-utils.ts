@@ -682,7 +682,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       }
 
       // Landscape distribution
-      const landscapeCounts = { northStar: 0, eastStar: 0, mechanism: 0, floor: 0 };
+      const landscapeCounts = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
       for (const [, profile] of Object.entries(claimProfiles) as Array<[string, any]>) {
         const pos = profile?.landscapePosition;
         if (pos && pos in landscapeCounts) landscapeCounts[pos as keyof typeof landscapeCounts]++;
@@ -911,7 +911,6 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
         return out;
       };
       return ser({
-        blastRadiusFilter: expandStmtRefs(artifact?.blastRadiusFilter),
         blastSurface: expandStmtRefs(artifact?.blastSurface),
         substrateSummary: artifact?.substrateSummary ?? null,
       });

@@ -43,6 +43,7 @@ export interface ConciergePromptOptions {
   /** Prior context for fresh spawns after COMMIT or batch re-invoke */
   priorContext?: PriorContext;
   evidenceSubstrate?: string;
+  isFirstTurn?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

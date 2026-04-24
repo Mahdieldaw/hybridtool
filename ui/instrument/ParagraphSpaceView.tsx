@@ -101,10 +101,10 @@ const LANDSCAPE_COLORS: Record<string, { fill: string; stroke: string; label: st
     stroke: 'rgba(251, 200, 80, 0.95)',
     label: 'North Star',
   },
-  eastStar: {
+  leadMinority: {
     fill: 'rgba(147, 197, 253, 0.75)', // cool blue
     stroke: 'rgba(96, 165, 250, 0.90)',
-    label: 'East Star',
+    label: 'Lead Minority',
   },
   mechanism: {
     fill: 'rgba(110, 231, 183, 0.60)', // muted teal-green

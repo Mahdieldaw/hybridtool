@@ -27,7 +27,7 @@ export function CrossSignalComparePanel({
         : null) ?? {},
     [claimProvenance]
   );
-  const blastScores = useMemo(() => safeArr<any>(artifact?.blastRadiusFilter?.scores), [artifact]);
+  const blastScores = useMemo(() => safeArr<any>(artifact?.blastSurface?.scores), [artifact]);
   const blastByClaimId = useMemo(
     () => new Map(blastScores.map((s) => [String(s.claimId ?? s.id ?? ''), s])),
     [blastScores]

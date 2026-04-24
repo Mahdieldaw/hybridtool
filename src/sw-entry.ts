@@ -2060,7 +2060,7 @@ function doRegenerateEmbeddings(
           const validUnclaimedKeys = new Set(idxUnclaimed.map((u: { groupKey: string }) => u.groupKey));
 
           const concentrations = idxPassages.map((p: { concentrationRatio: number }) => p.concentrationRatio);
-          const landscapeComp: { northStar: number; mechanism: number; eastStar: number; floor: number } = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
+          const landscapeComp: { northStar: number; leadMinority: number; mechanism: number; floor: number } = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
           idxPassages.forEach((p: { landscapePosition: string }) => {
             landscapeComp[p.landscapePosition as keyof typeof landscapeComp]++;
           });

@@ -15,7 +15,6 @@ export interface ResolvedPassage {
   concentrationRatio: number;
   densityRatio: number;
   landscapePosition: LandscapePosition;
-  isLoadBearing: boolean;
   conflictClusterIndex: number | null;
 }
 
@@ -159,7 +158,6 @@ export function usePassageResolver(
         concentrationRatio: rp?.concentrationRatio ?? 0,
         densityRatio: rp?.densityRatio ?? 0,
         landscapePosition: rp?.landscapePosition ?? 'floor',
-        isLoadBearing: rp?.isLoadBearing ?? false,
         conflictClusterIndex: claimToClusterIndex.get(claimId) ?? null,
       };
     };

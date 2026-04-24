@@ -321,7 +321,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     sortable: true,
     groupable: true,
     description:
-      'Landscape position of nearest claim for unclaimed statements (northStar/eastStar/mechanism/floor)',
+      'Landscape position of nearest claim for unclaimed statements (northStar/leadMinority/mechanism/floor)',
     source: 'built-in',
     category: 'metadata',
   },

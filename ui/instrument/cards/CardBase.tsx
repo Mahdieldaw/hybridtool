@@ -82,14 +82,14 @@ export function safeObj(v: any): Record<string, any> {
 
 export const LANDSCAPE_COLORS: Record<string, string> = {
   northStar: 'text-yellow-400',
-  eastStar: 'text-blue-400',
+  leadMinority: 'text-blue-400',
   mechanism: 'text-green-400',
   floor: 'text-text-muted',
 };
 
 export const LANDSCAPE_LABELS: Record<string, string> = {
   northStar: 'North Star',
-  eastStar: 'East Star',
+  leadMinority: 'Lead Minority',
   mechanism: 'Mechanism',
   floor: 'Floor',
 };

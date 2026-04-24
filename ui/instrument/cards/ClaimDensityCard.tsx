@@ -118,14 +118,13 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
         typeof p.meanCoverageInLongestRun === 'number' ? p.meanCoverageInLongestRun : 0,
       totalMAJ: p.totalMAJ ?? 0,
       maxPassageLength: p.maxPassageLength ?? 0,
-      loadBearing: !!p.isLoadBearing,
       structContrib: p.structuralContributors?.length ?? 0,
       queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
     }));
   }, [prClaimProfiles, claimLabelById]);
 
   const positionCounts = useMemo(() => {
-    const counts: Record<string, number> = { northStar: 0, eastStar: 0, mechanism: 0, floor: 0 };
+    const counts: Record<string, number> = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
     for (const r of prRows) counts[r.position] = (counts[r.position] ?? 0) + 1;
     return counts;
   }, [prRows]);
@@ -140,22 +139,25 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       {/* §1-2 Gate Diagnostics + Landscape Summary */}
       {hasRouting && (
         <div className="space-y-3">
-          <div className="flex flex-wrap gap-3 text-xs text-text-muted">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
+            <span className="uppercase tracking-wide text-[10px] text-text-muted/70" title="These concentration statistics are retained for observation only; they no longer drive routing decisions (see bottom-up passage routing).">
+              Instrumentation only ·
+            </span>
             <span title="Mean concentration ratio across all claim profiles. Higher means passages are tightly focused on single claims.">
               μ(conc)={prGate?.muConcentration?.toFixed(3) ?? '–'}
             </span>
             <span title="Standard deviation of concentration ratios. Low σ means uniform concentration across claims.">
               σ(conc)={prGate?.sigmaConcentration?.toFixed(3) ?? '–'}
             </span>
-            <span title="Concentration threshold used to classify claims as load-bearing (μ − 1σ, floored at 0.5).">
+            <span title="Legacy concentration threshold (μ + σ). No longer used for routing.">
               threshold={prGate?.concentrationThreshold?.toFixed(3) ?? '–'}
             </span>
-            <span title="Number of claims that passed the precondition filter before load-bearing classification.">
+            <span title="Number of claims that passed the MAJ ≥ 1 precondition filter.">
               precondition pass={prGate?.preconditionPassCount ?? 0}
             </span>
           </div>
           <div className="flex gap-4 text-xs">
-            {(['northStar', 'eastStar', 'mechanism', 'floor'] as const).map((pos) => (
+            {(['northStar', 'leadMinority', 'mechanism', 'floor'] as const).map((pos) => (
               <span key={pos} className={LANDSCAPE_COLORS[pos]}>
                 {LANDSCAPE_LABELS[pos]}: {positionCounts[pos] ?? 0}
               </span>
@@ -540,18 +542,6 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                   'Query distance: 1 - cosine similarity between claim centroid and user query. Lower = more relevant.',
                 cell: (r: any) => fmt(r.queryDistance, 3),
                 sortValue: (r: any) => r.queryDistance,
-              },
-              {
-                key: 'loadBearing',
-                header: 'LB',
-                title:
-                  'Load-bearing: whether this claim passed the concentration threshold and preconditions to be routed through the passage layer.',
-                cell: (r: any) => (
-                  <span className={r.loadBearing ? 'text-green-400' : 'text-text-muted'}>
-                    {r.loadBearing ? 'Y' : '–'}
-                  </span>
-                ),
-                sortValue: (r: any) => (r.loadBearing ? 1 : 0),
               },
             ]}
             rows={prRows}

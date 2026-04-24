@@ -1,23 +1,78 @@
-// @ts-nocheck
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 import { runWithProviderHealth } from '../../providers/health/provider-health-gate';
 import { isProviderAuthError, errorHandler } from '../../errors/handler';
 import { authManager } from '../../providers/auth-manager';
+import type { WorkflowStep, WorkflowContext, ProviderOutput } from '../../../shared/types';
+import type { ProviderKey } from '../../../shared/types/provider';
+import type { HealthTrackerLike } from '../../providers/health/provider-health-gate';
+
+// ─── Local option/interface shapes inferred from usage ───────────────────────
+
+interface LLMRunnerOptions {
+  streamingManager: {
+    dispatchPartialDelta: (
+      sessionId: string,
+      stepId: string,
+      providerId: string,
+      text: string,
+      stepType: string,
+      isFinal?: boolean
+    ) => void;
+    getRecoveredText: (sessionId: string, stepId: string, providerId: string) => string | null;
+  };
+  persistenceCoordinator: {
+    persistProviderContexts: (
+      sessionId: string,
+      outputs: Record<string, ProviderOutput>,
+      contextRole?: string
+    ) => Promise<void>;
+  };
+  sessionManager?: {
+    getProviderContexts?: (
+      sessionId: string,
+      threadId: string,
+      opts?: { contextRole?: string }
+    ) => Promise<Record<string, { meta?: Record<string, unknown> }> | null>;
+  };
+  orchestrator: {
+    executeParallelFanout: (
+      prompt: string,
+      providerIds: string[],
+      opts: {
+        sessionId: string;
+        useThinking: boolean;
+        providerContexts: Record<string, unknown> | undefined;
+        onError: (err: unknown) => void;
+        onPartial: (id: string, chunk: { text: string }) => void;
+        onAllComplete: (
+          results: Map<string, ProviderOutput & { softError?: { message: string } }>,
+          errors: Map<string, unknown>
+        ) => Promise<void>;
+      }
+    ) => void;
+    registry?: {
+      get?: (key: string) => { listProviders?: () => string[] } | undefined;
+    };
+  };
+  healthTracker: HealthTrackerLike | undefined;
+  contextRole?: string;
+  useThinking?: boolean;
+}
 
 /**
  * Generic single-step LLM execution with partial recovery, parse, context persistence,
  * health tracking, and auth fallback. Extracted from singularity-phase.ts.
  */
 export async function executeGenericSingleStep(
-  step,
-  context,
-  providerId,
-  prompt,
-  stepType,
-  options,
-  parseOutputFn
-) {
+  step: WorkflowStep,
+  context: WorkflowContext,
+  providerId: ProviderKey,
+  prompt: string,
+  stepType: string,
+  options: LLMRunnerOptions,
+  parseOutputFn: (text: string) => Record<string, unknown> | null
+): Promise<ProviderOutput | undefined> {
   const { streamingManager, persistenceCoordinator, sessionManager, orchestrator, healthTracker } =
     options;
   const { payload } = step;
@@ -35,18 +90,20 @@ export async function executeGenericSingleStep(
     );
   }
 
-  const resolveProviderContextsForPid = async (pid) => {
+  const resolveProviderContextsForPid = async (
+    pid: string
+  ): Promise<Record<string, unknown> | undefined> => {
     const role = options.contextRole;
     const effectivePid = role ? `${pid}:${role}` : pid;
-    const explicit = payload?.providerContexts;
+    const explicit = payload?.providerContexts as Record<string, unknown> | undefined;
 
     // If we have an explicit context for the scoped ID, use it
     if (explicit && typeof explicit === 'object' && explicit[effectivePid]) {
       const entry = explicit[effectivePid];
-      const meta = entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
+      const meta = entry && typeof entry === 'object' && 'meta' in entry ? (entry as Record<string, unknown>).meta : entry;
       const continueThread =
         entry && typeof entry === 'object' && 'continueThread' in entry
-          ? entry.continueThread
+          ? (entry as Record<string, unknown>).continueThread
           : true;
       return { [pid]: { meta, continueThread } };
     }
@@ -54,10 +111,10 @@ export async function executeGenericSingleStep(
     // Fallback: check for the raw pid (legacy or default)
     if (explicit && typeof explicit === 'object' && explicit[pid]) {
       const entry = explicit[pid];
-      const meta = entry && typeof entry === 'object' && 'meta' in entry ? entry.meta : entry;
+      const meta = entry && typeof entry === 'object' && 'meta' in entry ? (entry as Record<string, unknown>).meta : entry;
       const continueThread =
         entry && typeof entry === 'object' && 'continueThread' in entry
-          ? entry.continueThread
+          ? (entry as Record<string, unknown>).continueThread
           : true;
       return { [pid]: { meta, continueThread } };
     }
@@ -82,19 +139,19 @@ export async function executeGenericSingleStep(
     return undefined;
   };
 
-  const runRequest = async (pid) => {
+  const runRequest = async (pid: string): Promise<ProviderOutput> => {
     const providerContexts = await resolveProviderContextsForPid(pid);
 
     return new Promise((resolve, reject) => {
       orchestrator.executeParallelFanout(prompt, [pid], {
         sessionId: context.sessionId,
-        useThinking: options.useThinking || payload?.useThinking || false,
+        useThinking: options.useThinking || (payload?.useThinking as boolean) || false,
         providerContexts,
-        onError: (err) => {
+        onError: (err: unknown) => {
           console.warn(`[LLMRunner] ${stepType} fanout error for ${pid}:`, err);
           reject(err);
         },
-        onPartial: (id, chunk) => {
+        onPartial: (id: string, chunk: { text: string }) => {
           streamingManager.dispatchPartialDelta(
             context.sessionId,
             step.stepId,
@@ -103,7 +160,10 @@ export async function executeGenericSingleStep(
             stepType
           );
         },
-        onAllComplete: async (results, errors) => {
+        onAllComplete: async (
+          results: Map<string, ProviderOutput & { softError?: { message: string } }>,
+          errors: Map<string, unknown>
+        ) => {
           try {
             let finalResult = results.get(pid);
             const providerError = errors?.get?.(pid);
@@ -118,9 +178,13 @@ export async function executeGenericSingleStep(
               if (recovered && recovered.trim().length > 0) {
                 finalResult = finalResult || { providerId: pid, meta: {} };
                 finalResult.text = recovered;
-                finalResult.softError = finalResult.softError || {
-                  message: providerError?.message || String(providerError),
-                };
+                (finalResult as ProviderOutput & { softError?: { message: string } }).softError =
+                  (finalResult as ProviderOutput & { softError?: { message: string } }).softError || {
+                    message:
+                      providerError && typeof providerError === 'object' && 'message' in providerError
+                        ? String((providerError as { message: unknown }).message)
+                        : String(providerError),
+                  };
               } else {
                 reject(providerError);
                 return;
@@ -129,13 +193,13 @@ export async function executeGenericSingleStep(
 
             if (finalResult?.text) {
               // 3. Parse Output
-              let outputData = null;
+              let outputData: Record<string, unknown> | null = null;
               try {
                 outputData = parseOutputFn(finalResult.text);
                 if (outputData && typeof outputData === 'object') {
-                  outputData.providerId = pid;
-                  if (outputData.pipeline && typeof outputData.pipeline === 'object') {
-                    outputData.pipeline.providerId = pid;
+                  outputData['providerId'] = pid;
+                  if (outputData['pipeline'] && typeof outputData['pipeline'] === 'object') {
+                    (outputData['pipeline'] as Record<string, unknown>)['providerId'] = pid;
                   }
                 }
               } catch (parseErr) {
@@ -146,26 +210,26 @@ export async function executeGenericSingleStep(
               const canonicalText =
                 (outputData &&
                   typeof outputData === 'object' &&
-                  (outputData.text || outputData.cleanedText)) ||
+                  (outputData['text'] || outputData['cleanedText'])) ||
                 finalResult.text;
 
               streamingManager.dispatchPartialDelta(
                 context.sessionId,
                 step.stepId,
                 pid,
-                canonicalText,
+                canonicalText as string,
                 stepType,
                 true
               );
 
-              // 4. Persist Context — await so context is in IndexedDB before resolve
+              // 4. Persist Context
               await persistenceCoordinator.persistProviderContexts(
                 context.sessionId,
-                {
-                  [pid]: finalResult,
-                },
+                { [pid]: finalResult },
                 options.contextRole
               );
+
+              const softError = (finalResult as ProviderOutput & { softError?: { message: string } }).softError;
 
               resolve({
                 providerId: pid,
@@ -175,9 +239,8 @@ export async function executeGenericSingleStep(
                   ...finalResult.meta,
                   ...(outputData ? { [`${stepType.toLowerCase()}Output`]: outputData } : {}),
                 },
-                output: outputData, // Standardize output access
-                ...(finalResult.softError ? { softError: finalResult.softError } : {}),
-              });
+                ...(softError ? { softError } : {}),
+              } as ProviderOutput);
             } else {
               reject(new Error(`Empty response from ${stepType} provider`));
             }
@@ -189,7 +252,7 @@ export async function executeGenericSingleStep(
     });
   };
 
-  const wrappedRunRequest = (pid) =>
+  const wrappedRunRequest = (pid: string): Promise<ProviderOutput | undefined> =>
     runWithProviderHealth(healthTracker, pid, stepType, () => runRequest(pid));
 
   // 5. Auth Fallback Wrapper
@@ -213,12 +276,12 @@ export async function executeGenericSingleStep(
           const fallbackProvider =
             typeof fallbackResolution === 'string'
               ? fallbackResolution
-              : fallbackResolution?.fallbackProvider;
+              : (fallbackResolution as Record<string, unknown>)?.['fallbackProvider'];
           if (fallbackProvider) {
             console.log(
               `[LLMRunner] Executing ${stepType} with fallback provider: ${fallbackProvider}`
             );
-            return await wrappedRunRequest(fallbackProvider);
+            return await wrappedRunRequest(fallbackProvider as string);
           }
         } catch (fallbackError) {
           console.warn(`[LLMRunner] Fallback failed: `, fallbackError);

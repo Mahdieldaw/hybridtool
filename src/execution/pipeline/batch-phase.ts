@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 import { classifyError } from '../../errors/classifier';
@@ -7,12 +6,38 @@ import { buildReactiveBridge } from '../utils/reactive-bridge';
 import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
 import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
 
+import { ArtifactProcessor } from '../../../shared/artifact-processor';
+import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
+import { classifyError } from '../../errors/classifier';
+import { logRetryEvent } from '../../errors/retry';
+import { buildReactiveBridge } from '../utils/reactive-bridge';
+import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
+import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
+import type { 
+  WorkflowStep, 
+  WorkflowContext, 
+  ProviderKey, 
+  ProviderStatus 
+} from '../../../shared/types';
+
+interface BatchPhaseOptions {
+  streamingManager: any;
+  orchestrator: any;
+  healthTracker: any;
+  persistenceCoordinator: any;
+  [key: string]: any;
+}
+
 const WORKFLOW_DEBUG = false;
-const wdbg = (...args) => {
+const wdbg = (...args: any[]) => {
   if (WORKFLOW_DEBUG) console.log(...args);
 };
 
-export async function executeBatchPhase(step, context, options) {
+export async function executeBatchPhase(
+  step: WorkflowStep, 
+  context: WorkflowContext, 
+  options: BatchPhaseOptions
+) {
   const { streamingManager, orchestrator, healthTracker } = options;
   const artifactProcessor = new ArtifactProcessor();
   const { prompt, providers, useThinking, providerContexts, previousContext } = step.payload;
@@ -27,7 +52,7 @@ export async function executeBatchPhase(step, context, options) {
       if (bridge) {
         bridgeContext = bridge.context;
         console.log(
-          `[StepExecutor] Injected reactive bridge context: ${bridge.matched.map((m) => m.label).join(', ')}`
+          `[StepExecutor] Injected reactive bridge context: ${bridge.matched.map((m: any) => m.label).join(', ')}`
         );
       }
     } catch (err) {
@@ -43,10 +68,10 @@ export async function executeBatchPhase(step, context, options) {
     enhancedPrompt = PROMPT_TEMPLATES.withBridgeOnly(prompt, bridgeContext);
   }
 
-  const providerStatuses = [];
-  const activeProviders = [];
+  const providerStatuses: ProviderStatus[] = [];
+  const activeProviders: ProviderKey[] = [];
   try {
-    for (const pid of providers) {
+    for (const pid of (providers as ProviderKey[])) {
       const check = healthTracker?.shouldAttempt?.(pid) || { allowed: true };
       if (!check.allowed) {
         providerStatuses.push({
@@ -74,14 +99,14 @@ export async function executeBatchPhase(step, context, options) {
       completedCount: 0,
       totalCount: providers.length,
     });
-  } catch (_) {}
+  } catch (_) { }
 
   const promptLength = enhancedPrompt.length;
-  const allowedProviders = [];
-  const skippedProviders = [];
+  const allowedProviders: ProviderKey[] = [];
+  const skippedProviders: ProviderKey[] = [];
   try {
     for (const pid of activeProviders) {
-      const limits = PROVIDER_LIMITS[pid];
+      const limits = PROVIDER_LIMITS[pid as keyof typeof PROVIDER_LIMITS];
       if (limits && promptLength > limits.maxInputChars) {
         skippedProviders.push(pid);
       } else {
@@ -112,7 +137,7 @@ export async function executeBatchPhase(step, context, options) {
               },
             });
           }
-        } catch (_) {}
+        } catch (_) { }
       });
       try {
         streamingManager.port.postMessage({
@@ -124,7 +149,7 @@ export async function executeBatchPhase(step, context, options) {
           completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
           totalCount: providerStatuses.length,
         });
-      } catch (_) {}
+      } catch (_) { }
     }
     if (allowedProviders.length === 0) {
       throw new Error(
@@ -136,13 +161,13 @@ export async function executeBatchPhase(step, context, options) {
   }
 
   return new Promise((resolve, reject) => {
-    const completedProviders = new Set();
+    const completedProviders = new Set<ProviderKey>();
     orchestrator.executeParallelFanout(enhancedPrompt, allowedProviders, {
       sessionId: context.sessionId,
       useThinking,
       providerContexts,
       providerMeta: step?.payload?.providerMeta,
-      onPartial: (providerId, chunk) => {
+      onPartial: (providerId: ProviderKey, chunk: any) => {
         streamingManager.dispatchPartialDelta(
           context.sessionId,
           step.stepId,
@@ -165,9 +190,9 @@ export async function executeBatchPhase(step, context, options) {
               totalCount: providers.length,
             });
           }
-        } catch (_) {}
+        } catch (_) { }
       },
-      onProviderComplete: (providerId, resultWrapper) => {
+      onProviderComplete: (providerId: ProviderKey, resultWrapper: any) => {
         const entry = providerStatuses.find((s) => s.providerId === providerId);
 
         if (resultWrapper && resultWrapper.status === 'rejected') {
@@ -182,12 +207,12 @@ export async function executeBatchPhase(step, context, options) {
                 stage: 'batch',
                 attempt: 1,
                 max: 1,
-                errorType: classified?.type || 'unknown',
+                errorType: (classified?.type || 'unknown') as any,
                 elapsedMs: 0,
                 delayMs: classified?.retryAfterMs || 0,
               });
             }
-          } catch (_) {}
+          } catch (_) { }
 
           if (entry) {
             entry.status = 'failed';
@@ -216,7 +241,7 @@ export async function executeBatchPhase(step, context, options) {
             completedProviders.add(providerId);
             healthTracker?.recordSuccess?.(providerId);
           }
-        } catch (_) {}
+        } catch (_) { }
 
         if (entry) {
           entry.status = 'completed';
@@ -233,10 +258,10 @@ export async function executeBatchPhase(step, context, options) {
               completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
               totalCount: providers.length,
             });
-          } catch (_) {}
+          } catch (_) { }
         }
       },
-      onError: (error) => {
+      onError: (error: any) => {
         try {
           streamingManager.port.postMessage({
             type: 'WORKFLOW_STEP_UPDATE',
@@ -245,10 +270,10 @@ export async function executeBatchPhase(step, context, options) {
             status: 'failed',
             error: error?.message || String(error),
           });
-        } catch (_) {}
+        } catch (_) { }
       },
-      onAllComplete: async (results, errors) => {
-        const batchUpdates = {};
+      onAllComplete: async (results: Map<ProviderKey, any>, errors: Map<ProviderKey, any>) => {
+        const batchUpdates: Record<string, any> = {};
         results.forEach((result, providerId) => {
           batchUpdates[providerId] = result;
         });
@@ -269,14 +294,14 @@ export async function executeBatchPhase(step, context, options) {
           reject(
             new Error(
               `[BatchPhase] Failed to persist provider contexts for session ${context.sessionId} ` +
-                `(providers: ${providerSummary}): ${err instanceof Error ? err.message : String(err)}`
+              `(providers: ${providerSummary}): ${err instanceof Error ? err.message : String(err)}`
             )
           );
           return;
         }
 
-        const formattedResults = {};
-        const authErrors = [];
+        const formattedResults: Record<string, any> = {};
+        const authErrors: any[] = [];
 
         results.forEach((result, providerId) => {
           const processed = artifactProcessor.process(result.text || '');
@@ -299,7 +324,7 @@ export async function executeBatchPhase(step, context, options) {
               entry.progress = 100;
               if (entry.error) delete entry.error;
             }
-          } catch (_) {}
+          } catch (_) { }
         });
 
         errors.forEach((error, providerId) => {
@@ -330,7 +355,7 @@ export async function executeBatchPhase(step, context, options) {
                 stage: 'batch',
                 attempt: 1,
                 max: 1,
-                errorType: classified?.type || 'unknown',
+                errorType: (classified?.type || 'unknown') as any,
                 elapsedMs: 0,
                 delayMs: classified?.retryAfterMs || 0,
               });
@@ -347,7 +372,7 @@ export async function executeBatchPhase(step, context, options) {
               formattedResults[providerId].meta.errorMessage = classified?.message;
               formattedResults[providerId].meta.requiresReauth = classified?.requiresReauth;
             }
-          } catch (_) {}
+          } catch (_) { }
         });
 
         const hasAnyValidResults = Object.values(formattedResults).some(
@@ -361,11 +386,11 @@ export async function executeBatchPhase(step, context, options) {
             !formattedResults[p.providerId]
           ) {
             formattedResults[p.providerId] = {
-              providerId: p.providerId,
+              providerId: p.providerId as ProviderKey,
               text: '',
               status: p.status === 'skipped' ? 'skipped' : 'failed', // Map to valid status
               meta: {
-                error: p.error?.message || p.skippedReason || 'Skipped or failed',
+                error: (p.error as any)?.message || p.skippedReason || 'Skipped or failed',
                 skipped: p.status === 'skipped',
                 reason: p.skippedReason,
               },
@@ -423,7 +448,7 @@ export async function executeBatchPhase(step, context, options) {
               mappingCompleted: false,
             });
           }
-        } catch (_) {}
+        } catch (_) { }
 
         resolve({
           results: formattedResults,

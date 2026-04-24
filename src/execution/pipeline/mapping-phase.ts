@@ -409,13 +409,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     } catch (err) {
                       console.error('[executeMappingPhase] sourceCoherence stamp failed', err);
                     }
-
-                    const mapperArtifact_claimProvenance = pipelineResult.claimProvenance;
-                    if (mapperArtifact_claimProvenance) {
-                      mapperArtifact.claimProvenance = mapperArtifact_claimProvenance;
-                    }
                   }
-
                   // ── EDITORIAL MODEL CALL (executeMappingPhase-only) ──────────────
                   if (mapperArtifact && pipelineResult?.claimDensityResult) {
                     try {
@@ -455,7 +449,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
 
                       // Build corpus shape summary
                       const concentrations = indexedPassages.map((p) => p.concentrationRatio);
-                      const landscapeComp = { northStar: 0, mechanism: 0, eastStar: 0, floor: 0 };
+                      const landscapeComp = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
                       indexedPassages.forEach((p) => {
                         landscapeComp[p.landscapePosition]++;
                       });

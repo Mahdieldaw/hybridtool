@@ -387,6 +387,8 @@ export interface ClaimDensityProfile {
   maxPassageLength: number;
   /** Paragraphs where coverage > 0.5 */
   majorityParagraphCount: number;
+  /** Paragraph IDs where coverage > 0.5 */
+  majorityParagraphIds: string[];
   /** Mean coverage across paragraphs in the longest contiguous majority-support run */
   meanCoverageInLongestRun: number;
   /** Distinct models containing this claim */
@@ -535,10 +537,31 @@ export interface ProvenanceRefinementResult {
 
 // ── Passage routing (evidence-concentration-based routing) ──────────────
 
-export type LandscapePosition = 'northStar' | 'eastStar' | 'mechanism' | 'floor';
+export type LandscapePosition = 'northStar' | 'leadMinority' | 'mechanism' | 'floor';
+
+export interface RoutingMeasurements {
+  /** Fraction of this claim's majority paragraphs where ≥1 other claim also holds majority ownership */
+  contestedDominance: number;
+  /** Fraction of this claim's canonical statements that appear in no other claim */
+  exclusivityRatio: number;
+  /** Novel majority paragraphs / this claim's majority paragraph count */
+  claimNoveltyRatio: number;
+  /** Novel majority paragraphs / remaining corpus majority paragraphs */
+  corpusNoveltyRatio: number;
+  /** Count of novel majority paragraphs assigned to this claim */
+  novelParagraphCount: number;
+}
 
 export interface PassageClaimProfile {
   claimId: string;
+  /** Landscape position assigned by 5-phase routing algorithm */
+  landscapePosition: LandscapePosition;
+  /** True if this claim is classified as minority (lower cumulative coverage) */
+  isMinority: boolean;
+  /** Routing measurements (contestedDominance, exclusivityRatio, novelty ratios) — null if floor */
+  routingMeasurements: RoutingMeasurements | null;
+
+  /** Instrumentation only — not consumed by routing */
   /** Sum of majority paragraphs across all structural contributors */
   totalMAJ: number;
   /** Model index of the structural contributor with the most MAJ paragraphs */
@@ -553,10 +576,6 @@ export interface PassageClaimProfile {
   maxPassageLength: number;
   /** Mean coverage across paragraphs in the longest contiguous majority run */
   meanCoverageInLongestRun: number;
-  /** Two-axis landscape position */
-  landscapePosition: LandscapePosition;
-  /** Passes at least one gate (concentration outlier OR MAXLEN ≥ 2) */
-  isLoadBearing: boolean;
   /** Model indices contributing ≥ 1 majority paragraph */
   structuralContributors: number[];
   /** Model indices contributing only minority statements */
@@ -611,6 +630,7 @@ export interface PassageClaimRouting {
 
 export interface PassageRoutingResult {
   claimProfiles: Record<string, PassageClaimProfile>;
+  /** Instrumentation only — not consumed by routing */
   gate: {
     muConcentration: number;
     sigmaConcentration: number;
