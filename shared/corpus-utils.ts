@@ -256,10 +256,9 @@ export function getStatementCoordinates(index: CorpusIndex, statementId: string)
   return index.statementIndex.get(statementId);
 }
 
-// ── Artifact shadow compatibility ────────────────────────────────────────────
+// ── Artifact corpus resolution ───────────────────────────────────────────────
 
 export function getArtifactStatements(artifact: any): any[] {
-  if (artifact?.shadow?.statements?.length > 0) return artifact.shadow.statements;
   const out: any[] = [];
   for (const model of artifact?.corpus?.models ?? []) {
     for (const para of model.paragraphs ?? []) {
@@ -272,7 +271,6 @@ export function getArtifactStatements(artifact: any): any[] {
 }
 
 export function getArtifactParagraphs(artifact: any): any[] {
-  if (artifact?.shadow?.paragraphs?.length > 0) return artifact.shadow.paragraphs;
   const out: any[] = [];
   for (const model of artifact?.corpus?.models ?? []) {
     for (const para of model.paragraphs ?? []) out.push(para);

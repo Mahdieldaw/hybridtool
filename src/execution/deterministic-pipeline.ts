@@ -678,7 +678,6 @@ export async function executeArtifactPipeline({
 
   const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
     shadow: { extraction: { statements: shadowStatements } },
-    paragraphProjection: { paragraphs: shadowParagraphs },
     substrate: { graph: substrateGraph },
     preSemantic: preSemantic || null,
     ...(queryRelevance ? { query: { relevance: queryRelevance } } : {}),

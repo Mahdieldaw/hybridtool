@@ -154,8 +154,11 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
 
   if (!analysis || !dual) return null;
 
-  const substrate = artifact?.substrate;
-  const paragraphProjection = artifact?.paragraphProjection;
+  const substrate = artifact?.substrateSummary;
+  const corpus = (artifact as any)?.corpus;
+  const totalParagraphs = corpus?.models?.flatMap((m: any) => m.paragraphs).length || 0;
+  const contestedCount =
+    corpus?.models?.flatMap((m: any) => m.paragraphs).filter((p: any) => p.contested).length || 0;
 
   const hasAnyGeo =
     dual.geoConflicts !== null ||
@@ -215,10 +218,10 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
               </ul>
             </div>
           )}
-          {paragraphProjection && (
+          {corpus && (
             <div>
-              <span className="text-text-secondary">Paragraphs:</span>{' '}
-              {paragraphProjection.totalParagraphs} ({paragraphProjection.contestedCount} contested)
+              <span className="text-text-secondary">Paragraphs:</span> {totalParagraphs} (
+              {contestedCount} contested)
             </div>
           )}
           {substrate && (

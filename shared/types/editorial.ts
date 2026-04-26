@@ -89,6 +89,7 @@ export interface EditorialAST {
 }
 
 export interface CognitiveArtifact {
+  substrateSummary?: any;
   shadow: {
     statements: PipelineShadowStatement[];
     paragraphs: PipelineShadowParagraph[];

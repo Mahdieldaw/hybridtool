@@ -368,8 +368,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   })();
 
                   // ── POST-ASSEMBLY MUTATIONS (executeMappingPhase-only) ────────────
-                  if (paragraphResult?.meta)
-                    mapperArtifact.paragraphProjection = paragraphResult.meta;
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
 
                   void (async () => {

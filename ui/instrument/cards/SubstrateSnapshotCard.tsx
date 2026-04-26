@@ -72,7 +72,7 @@ export function SubstrateSnapshotCard({
           ? 'warn'
           : 'fail';
 
-  const edgeSaturation = sub?.health?.edgeSaturation ?? 0;
+  const edgeSaturation = artifact?.substrateSummary?.health?.edgeSaturation ?? 0;
   const participatingNodes = nodes.filter((n: any) => (n?.mutualRankDegree ?? 0) > 0).length;
   const participationRate = nodes.length > 0 ? participatingNodes / nodes.length : null;
   const mutualGate =

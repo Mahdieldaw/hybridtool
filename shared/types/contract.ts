@@ -746,8 +746,9 @@ export interface MapperArtifact {
   // Blast Surface — provenance-derived damage assessment (instrumentation, runs alongside old filter)
   blastSurface?: BlastSurfaceResult | null;
 
-  paragraphProjection?: ParagraphProjectionMeta;
   substrate?: any;
+  substrateSummary?: any;
+  corpus?: any;
   // Editorial AST lives on CognitiveArtifact (set post-build in StepExecutor / rebuild path).
   // Persisted as a responseType:"editorial" provider response; re-parsed on artifact rebuild.
 }
