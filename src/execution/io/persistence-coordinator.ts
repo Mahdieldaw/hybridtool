@@ -83,16 +83,13 @@ export class PersistenceCoordinator {
           const providerId = result?.providerId || (step?.payload?.mappingProvider as string);
           if (!providerId) return;
           let persistedArtifact = result?.mapping?.artifact;
-          // Strip derived/runtime-only fields before persisting.
-          // - geometry: pure L1 math on embeddings, rebuilt on regen
-          // - index: runtime Maps, can't survive structuredClone; rebuilt via deriveArtifactIndex
-          // - substrateSummary / substrate: L1 math on embeddings, rebuilt on regen
-          // - corpus: rebuilt from batch responses via shadow extraction on regen
-          // - semantic.{claims,edges,narrative}: re-parsed from mapping response text on regen
           if (persistedArtifact && typeof persistedArtifact === 'object') {
-            const { geometry, index, substrateSummary, substrate, corpus, semantic, ...rest } =
-              persistedArtifact as any;
-            persistedArtifact = rest;
+            const statementOwnership = (persistedArtifact as any)?.claimProvenance?.statementOwnership;
+            if (statementOwnership && typeof statementOwnership === 'object' && Object.keys(statementOwnership).length > 0) {
+              persistedArtifact = { claimProvenance: { statementOwnership } };
+            } else {
+              persistedArtifact = undefined;
+            }
           }
           out.mappingOutputs![providerId] = {
             providerId,

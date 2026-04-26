@@ -14,6 +14,7 @@ import { buildSourceContinuityMap } from '../../provenance/surface.js';
 import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
 import { buildLookupCacheFromIndex } from '../../concierge-service/evidence-substrate.js';
 import { getConfigForModel } from '../../clustering/index.js';
+import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -309,19 +310,19 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
 
               if (parseResult.success && parseResult.output) {
-                // Converge: await geometry now that mapper has finished
-                const geometryResults = await geometryPromise;
-                const {
-                  embeddingResult,
-                  statementEmbeddingResult,
-                  queryEmbedding,
-                  queryRelevance,
-                  substrateSummary,
-                  preSemanticInterpretation,
-                  substrate,
-                } = geometryResults;
-
                 try {
+                  // Converge: await geometry now that mapper has finished
+                  const geometryResults = await geometryPromise;
+                  const {
+                    embeddingResult,
+                    statementEmbeddingResult,
+                    queryEmbedding,
+                    queryRelevance,
+                    substrateSummary,
+                    preSemanticInterpretation,
+                    substrate,
+                  } = geometryResults;
+
                   // ── UNIFIED ARTIFACT PIPELINE (single-pass) ──────────────────
                   const pipelineResult = await executeArtifactPipeline({
                     parsedMappingResult: {
@@ -370,6 +371,30 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   if (paragraphResult?.meta)
                     mapperArtifact.paragraphProjection = paragraphResult.meta;
                   if (substrateSummary) mapperArtifact.substrate = substrateSummary;
+
+                  void (async () => {
+                    try {
+                      if (pipelineResult.claimEmbeddings && pipelineResult.claimEmbeddings.size > 0 && options.sessionManager?.persistClaimEmbeddings && context.canonicalAiTurnId && payload.mappingProvider) {
+                        const dims = pipelineResult.claimEmbeddings.values().next().value?.length ?? embeddingConfig.embeddingDimensions;
+                        const packedClaims = packEmbeddingMap(pipelineResult.claimEmbeddings, dims);
+                        await options.sessionManager.persistClaimEmbeddings(
+                          context.canonicalAiTurnId,
+                          payload.mappingProvider,
+                          {
+                            claimEmbeddings: packedClaims.buffer,
+                            meta: {
+                              dimensions: dims,
+                              claimCount: packedClaims.index.length,
+                              claimIndex: packedClaims.index,
+                              timestamp: Date.now(),
+                            },
+                          }
+                        );
+                      }
+                    } catch (err) {
+                      console.warn('[executeMappingPhase] Claim embedding persistence (non-blocking):', err?.message || err);
+                    }
+                  })();
 
                   // Stamp sourceCoherence per claim (pairwise cosine similarity of source statement embeddings)
                   if (mapperArtifact) {

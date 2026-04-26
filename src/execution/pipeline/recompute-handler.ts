@@ -126,6 +126,23 @@ export async function handleRecompute(payload, options) {
                 ? new Float32Array(geoRecord.queryEmbedding)
                 : null;
 
+            let claimEmbeddings = null;
+            const mappingProviderId = mappingResponses?.[0]?.providerId;
+            if (mappingProviderId) {
+              try {
+                const claimEmbeddingsRecord = await sessionManager.loadClaimEmbeddings(aiTurnId, mappingProviderId);
+                if (claimEmbeddingsRecord && claimEmbeddingsRecord.claimEmbeddings && claimEmbeddingsRecord.meta?.claimIndex && claimEmbeddingsRecord.meta?.dimensions) {
+                  claimEmbeddings = unpackEmbeddingMap(
+                    claimEmbeddingsRecord.claimEmbeddings,
+                    claimEmbeddingsRecord.meta.claimIndex,
+                    claimEmbeddingsRecord.meta.dimensions
+                  );
+                }
+              } catch (claimErr) {
+                console.warn('[RecomputeHandler] Failed to load claim embeddings (fallback to regenerate):', claimErr?.message || claimErr);
+              }
+            }
+
             // Canonical provider ordering for deterministic statement IDs
             const normalizeProvId = (pid) =>
               String(pid || '')
@@ -178,6 +195,7 @@ export async function handleRecompute(payload, options) {
               paragraphEmbeddings,
               queryEmbedding,
               geoRecord,
+              claimEmbeddings,
               citationSourceOrder: buildCitationSourceOrder(canonicalOrder),
               queryText: originalPrompt,
               modelCount,

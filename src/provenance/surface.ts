@@ -753,7 +753,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       sustainedMassCohort = 'balanced';
     }
 
-    console.log(`[Cohort Calc] Claim ${c.claimId}: MAXLEN=${MAXLEN} (norm=${normMAXLEN.toFixed(3)}), MAJ=${MAJ} (norm=${normMAJ.toFixed(3)}), sustainedMass=${sustainedMass.toFixed(3)} -> ${sustainedMassCohort}`);
 
     // Compute corrected contestedDominance for this candidate
     // Numerator (dominatedCount): MAJ paragraphs of C where another claim is present
