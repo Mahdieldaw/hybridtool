@@ -19,7 +19,6 @@ export interface Claim {
     | 'speculative';
   role?: 'anchor' | 'branch' | 'challenger' | 'supplement';
   quote?: string;
-  support_count?: number;
   sourceCoherence?: number;
 }
 

@@ -351,6 +351,9 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     // Density profiling using shared stmtToParagraphId + paragraphById
     const paraStmtCounts = new Map<string, number>();
     for (const sid of canonicalStatementIds) {
+      const stmtObj = statementsById.get(sid);
+      if (stmtObj?.isTableCell) continue;
+
       const pid = stmtToParagraphId.get(sid);
       if (pid) paraStmtCounts.set(pid, (paraStmtCounts.get(pid) ?? 0) + 1);
     }
@@ -472,7 +475,6 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       label: claim.label,
       text: claim.text,
       supporters,
-      support_count: supporters.length,
       type: 'assertive' as const,
       role: 'supplement' as const,
       sourceRegionIds: Array.from(matchedRegionIds).sort(),

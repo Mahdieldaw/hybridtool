@@ -1,12 +1,24 @@
 import { ArtifactProcessor } from '../../../shared/artifact-processor.js';
-import { getErrorMessage } from '../../errors/handler.ts';
-import { executeGenericSingleStep } from '../utils/llm-runner.ts';
-import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/concierge-service.ts';
-import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.ts';
-import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.ts';
+import { getErrorMessage } from '../../errors/handler.js';
+import { executeGenericSingleStep } from '../utils/llm-runner.js';
+import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/concierge-service.js';
+import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
+import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.js';
+import type { 
+  WorkflowStep, 
+  WorkflowContext, 
+  ProviderKey, 
+  ProviderOutput 
+} from '../../../shared/types';
+
+const handoffV2Enabled = !!HANDOFF_V2_ENABLED;
 
 // Exported for use by recompute-handler
-export async function runSingularityLLM(step, context, options) {
+export async function runSingularityLLM(
+  step: WorkflowStep, 
+  context: WorkflowContext, 
+  options: any
+): Promise<any> {
   const payload = step.payload;
 
   // Resolve the cognitive artifact from payload
@@ -16,9 +28,7 @@ export async function runSingularityLLM(step, context, options) {
     throw new Error('Singularity mode requires a mapping artifact.');
   }
 
-  let handoffV2Enabled = HANDOFF_V2_ENABLED === true;
-
-  let singularityPrompt;
+  let singularityPrompt: string | undefined;
 
   if (!ConciergeService) {
     throw new Error('ConciergeService is not available. Cannot execute Singularity step.');
@@ -46,7 +56,7 @@ export async function runSingularityLLM(step, context, options) {
 
   const artifactProcessor = new ArtifactProcessor();
 
-  const parseSingularityOutput = (text) => {
+  const parseSingularityOutput = (text: string) => {
     const rawText = String(text || '');
 
     let cleanedText = rawText;
@@ -97,7 +107,7 @@ export async function runSingularityLLM(step, context, options) {
   // surface the actual concierge prompt in the UI / debug panel.
   // NOTE: This is the one load-bearing side effect - required by turn-emitter
   if (context && typeof context === 'object') {
-    context.singularityPromptUsed = singularityPrompt;
+    (context as any).singularityPromptUsed = singularityPrompt;
   }
 
   return executeGenericSingleStep(
@@ -115,15 +125,15 @@ export async function runSingularityLLM(step, context, options) {
  * Executes the singularity phase (formerly orchestrateSingularityPhase from CognitivePipelineHandler)
  */
 export async function executeSingularityPhase(
-  request,
-  context,
-  stepResults,
-  resolvedContext,
-  currentUserMessage,
-  options
+  request: any,
+  context: WorkflowContext,
+  stepResults: Map<string, any>,
+  _resolvedContext: any,
+  currentUserMessage: string,
+  options: any
 ) {
   try {
-    const { streamingManager, persistenceCoordinator, sessionManager, port } = options;
+    const { streamingManager, sessionManager, port } = options;
     const mappingEntry = Array.from(stepResults.entries()).find(
       ([_, v]) => v.status === 'completed' && v.result?.mapping?.artifact
     );
@@ -134,12 +144,12 @@ export async function executeSingularityPhase(
       ? mappingStepId.slice('mapping-'.length).replace(/-\d+$/, '')
       : null;
 
-    const userMessageForSingularity = context?.userMessage || currentUserMessage || '';
+    const userMessageForSingularity = (context as any)?.userMessage || currentUserMessage || '';
 
     // Resolve the cognitive artifact from step results or context
     const mappingArtifact =
       mappingResult?.mapping?.artifact ||
-      context?.mappingArtifact ||
+      (context as any)?.mappingArtifact ||
       request?.payload?.mapping?.artifact ||
       null;
 
@@ -151,15 +161,15 @@ export async function executeSingularityPhase(
     }
 
     // Store cognitive artifact on context
-    context.mappingArtifact = mappingArtifact;
+    (context as any).mappingArtifact = mappingArtifact;
 
     // Execute Singularity step
-    let singularityOutput = null;
-    let singularityProviderId = null;
+    let singularityOutput: any = null;
+    let singularityProviderId: string | null = null;
 
     // Determine Singularity provider from request or context
     singularityProviderId =
-      request?.singularity || context?.singularityProvider || context?.meta?.singularity;
+      request?.singularity || (context as any)?.singularityProvider || (context as any)?.meta?.singularity;
     if (
       singularityProviderId === 'singularity' ||
       typeof singularityProviderId !== 'string' ||
@@ -181,7 +191,7 @@ export async function executeSingularityPhase(
     }
 
     if (options && streamingManager && !singularityDisabled) {
-      let conciergeState = null;
+      let conciergeState: any = null;
       try {
         conciergeState = await sessionManager.getConciergePhaseState(context.sessionId);
       } catch (e) {
@@ -197,7 +207,7 @@ export async function executeSingularityPhase(
       console.log(
         `[SingularityPhase] Orchestrating singularity for Turn = ${context.canonicalAiTurnId}, Provider = ${singularityProviderId}`
       );
-      let singularityStep = null;
+      let singularityStep: any = null;
       try {
         // Guarded dynamic import for resilience during partial deploys
         // Determine if fresh instance needed
@@ -247,9 +257,9 @@ export async function executeSingularityPhase(
         // ══════════════════════════════════════════════════════════════════
         // Build concierge prompt (handoff V2 turn variants gated by flag)
         // ══════════════════════════════════════════════════════════════════
-        let conciergePrompt = null;
+        let conciergePrompt: string | null = null;
         let conciergePromptType = 'standard';
-        let conciergePromptSeed = null;
+        let conciergePromptSeed: any = null;
 
         try {
           if (!ConciergeService) {
@@ -362,7 +372,7 @@ export async function executeSingularityPhase(
         // ══════════════════════════════════════════════════════════════════
         // Provider context: continueThread based on fresh instance need
         // ══════════════════════════════════════════════════════════════════
-        let providerContexts = undefined;
+        let providerContexts: any = undefined;
 
         if (needsFreshInstance && singularityProviderId) {
           // Fresh spawn: get new chatId/cursor from provider
@@ -396,19 +406,19 @@ export async function executeSingularityPhase(
 
         if (singularityResult) {
           try {
-            singularityProviderId = singularityResult?.providerId || singularityProviderId;
+            singularityProviderId = (singularityResult as any)?.providerId || singularityProviderId;
 
             // ══════════════════════════════════════════════════════════════════
             // HANDOFF V2: Parse handoff from response (Turn 2+)
             // Only active when HANDOFF_V2_ENABLED flag is true
             // ══════════════════════════════════════════════════════════════════
-            let parsedHandoff = null;
+            let parsedHandoff: any = null;
             let commitPending = false;
-            let userFacingText = singularityResult?.text || '';
+            let userFacingText = (singularityResult as any)?.text || '';
 
             if (handoffV2Enabled && turnInCurrentInstance >= 2) {
               try {
-                const parsed = parseHandoffResponse(singularityResult?.text || '');
+                const parsed = parseHandoffResponse((singularityResult as any)?.text || '');
 
                 if (parsed.handoff && hasHandoffContent(parsed.handoff)) {
                   parsedHandoff = parsed.handoff;
@@ -445,18 +455,18 @@ export async function executeSingularityPhase(
 
             await sessionManager.setConciergePhaseState(context.sessionId, next);
 
-            const effectiveProviderId = singularityResult?.providerId || singularityProviderId;
+            const effectiveProviderId = (singularityResult as any)?.providerId || singularityProviderId;
             singularityOutput = {
               text: userFacingText, // Use handoff-stripped text
               prompt: conciergePrompt || null, // Actual concierge prompt for debug
               providerId: effectiveProviderId,
               timestamp: Date.now(),
-              leakageDetected: singularityResult?.output?.leakageDetected || false,
-              leakageViolations: singularityResult?.output?.leakageViolations || [],
-              pipeline: singularityResult?.output?.pipeline || null,
+              leakageDetected: (singularityResult as any)?.output?.leakageDetected || false,
+              leakageViolations: (singularityResult as any)?.output?.leakageViolations || [],
+              pipeline: (singularityResult as any)?.output?.pipeline || null,
             };
 
-            context.singularityData = singularityOutput;
+            (context as any).singularityData = singularityOutput;
 
             try {
               // ══════════════════════════════════════════════════════════════════
@@ -469,11 +479,11 @@ export async function executeSingularityPhase(
                 'singularity',
                 0,
                 {
-                  ...(singularityResult.output || {}),
+                  ...((singularityResult as any).output || {}),
                   text: userFacingText, // Persist handoff-stripped text
                   status: 'completed',
                   meta: {
-                    ...(singularityResult.output?.meta || {}),
+                    ...((singularityResult as any).output?.meta || {}),
                     singularityOutput,
                     frozenSingularityPromptType: conciergePromptType,
                     frozenSingularityPromptSeed: conciergePromptSeed,

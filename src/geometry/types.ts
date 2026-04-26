@@ -109,7 +109,7 @@ export interface Layout2D {
 export interface SubstrateHealth {
   isolationRatio: number; // fraction of nodes with zero mutual recognition edges
   edgeCount: number; // total edges in mutual recognition graph
-  density: number; // edgeCount / maxPossibleEdges
+  edgeSaturation: number; // edgeCount / maxPossibleEdges
   discriminationRange: number; // p90 - p10 from pairwise field
   nodeCount: number;
 }
@@ -182,7 +182,7 @@ export interface PipelineGateResult {
     isDegenerate: boolean;
     isolationRatio: number;
     edgeCount: number;
-    density: number;
+    edgeSaturation: number;
     discriminationRange: number;
     nodeCount: number;
   };

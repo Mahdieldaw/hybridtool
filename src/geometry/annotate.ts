@@ -86,7 +86,17 @@ export function enrichStatementsWithGeometry(
 
     const node = paragraphToNode.get(paragraphId);
     if (!node) {
-      failures.push({ statementId: stmt.id, reason: 'no_node' });
+      if (stmt.isTableCell) {
+        stmt.geometricCoordinates = {
+          paragraphId,
+          regionId: null,
+          basinId: null,
+          isolationScore: 1,
+        };
+        enrichedCount++;
+      } else {
+        failures.push({ statementId: stmt.id, reason: 'no_node' });
+      }
       continue;
     }
 

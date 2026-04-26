@@ -144,7 +144,7 @@ export function ClaimDetailDrawer({
     return {
       exclusiveCount: entry.exclusiveIds?.length ?? 0,
       sharedCount: entry.sharedIds?.length ?? 0,
-      exclusivityRatio: entry.exclusivityRatio ?? null,
+      exclusivityMass: entry.exclusivityRatio ?? null,
     };
   }, [claim.id, artifact]);
 
@@ -312,7 +312,7 @@ export function ClaimDetailDrawer({
                   <>
                     <div className="text-text-muted">Exclusivity</div>
                     <div className="text-text-primary text-right">
-                      {fmt(provenanceData.exclusivityRatio)}
+                      {fmt(provenanceData.exclusivityMass)}
                     </div>
                     <div className="text-text-muted">Exclusive / shared</div>
                     <div className="text-text-primary text-right">

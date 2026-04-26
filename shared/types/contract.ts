@@ -76,7 +76,6 @@ export interface ConflictClaim {
   id: string;
   label: string;
   text: string;
-  supportCount: number;
   supportRatio: number;
   role: any;
   isHighSupport: boolean;
@@ -128,7 +127,6 @@ export interface LinkedClaim {
   label: string;
   text: string;
   supporters: number[];
-  support_count: number;
   // Placeholder types for artifact compatibility (SA engine sets real values)
   type: Claim['type'];
   role: Claim['role'];
@@ -539,17 +537,32 @@ export interface ProvenanceRefinementResult {
 
 export type LandscapePosition = 'northStar' | 'leadMinority' | 'mechanism' | 'floor';
 
+export type SustainedMassCohort = 'passage-heavy' | 'balanced' | 'maj-breadth';
+
+export interface MajorityGateSnapshot {
+  delta: number;
+  currentNSNovel: number;
+  projectedNSNovel: number;
+  candidateContribution: number;
+}
+
 export interface RoutingMeasurements {
-  /** Fraction of this claim's majority paragraphs where ≥1 other claim also holds majority ownership */
+  /** dominatedParagraphCount(C) / |paragraphs C touches that any other claim also touches| */
   contestedDominance: number;
-  /** Fraction of this claim's canonical statements that appear in no other claim */
-  exclusivityRatio: number;
+  /** Σ_pid (claim's exclusive statements in pid / total statements in pid) over all paragraphs C touches */
+  exclusivityMass: number;
+  /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normMAJ) */
+  sustainedMassCohort: SustainedMassCohort;
+  /** Distinct models with ≥1 paragraph for this claim (used as tiebreaker) */
+  modelSpread: number;
   /** Novel majority paragraphs / this claim's majority paragraph count */
   claimNoveltyRatio: number;
-  /** Novel majority paragraphs / remaining corpus majority paragraphs */
+  /** Novel majority paragraphs / remaining unassigned corpus paragraphs */
   corpusNoveltyRatio: number;
-  /** Count of novel majority paragraphs assigned to this claim */
+  /** Count of novel majority paragraphs assigned at decision time */
   novelParagraphCount: number;
+  /** Populated for majority-phase claims (mechanism + northStar). Null for minority claims. */
+  majorityGateSnapshot: MajorityGateSnapshot | null;
 }
 
 export interface PassageClaimProfile {
@@ -558,8 +571,23 @@ export interface PassageClaimProfile {
   landscapePosition: LandscapePosition;
   /** True if this claim is classified as minority (lower cumulative coverage) */
   isMinority: boolean;
-  /** Routing measurements (contestedDominance, exclusivityRatio, novelty ratios) — null if floor */
+  /** Routing measurements (contestedDominance, exclusivityMass, novelty ratios, gate snapshot) — null if floor */
   routingMeasurements: RoutingMeasurements | null;
+
+  /** MAJ paragraphs C wins where ≥1 other claim has any presence (≠ MAJ). */
+  dominatedParagraphCount: number;
+  /** Block-level exclusivity aggregate (sum, not mean). */
+  exclusivityMass: number;
+  /** sqrt(normMAXLEN × normMAJ) — percentile rank within current run. */
+  sustainedMass: number;
+  /** Cohort derived from sustainedMass. */
+  sustainedMassCohort: SustainedMassCohort;
+  /** Distinct models contributing ≥1 paragraph (mirrors ClaimDensityProfile.modelSpread). */
+  modelSpread: number;
+  /** Distinct models with passage length ≥2 (mirrors ClaimDensityProfile.modelsWithPassages). */
+  modelsWithPassages: number;
+  /** Reserved — concordance matrix output. Always null this iteration. */
+  isLoadBearing: boolean | null;
 
   /** Instrumentation only — not consumed by routing */
   /** Sum of majority paragraphs across all structural contributors */
@@ -850,12 +878,12 @@ export interface PipelineGateResult {
   verdict: any;
   confidence: number;
   evidence: string[];
-  measurements?: {
+  measurements: {
     isDegenerate: boolean;
-    largestComponentRatio: number;
-    largestComponentModelDiversityRatio: number;
     isolationRatio: number;
-    maxComponentSize: number;
+    edgeCount: number;
+    edgeDensity: number;
+    discriminationRange: number;
     nodeCount: number;
   };
 }

@@ -314,8 +314,19 @@ export async function buildGeometryAsync(
       return results;
     }
 
+    const tableCellIds = new Set<string>();
+    if (shadowResult?.statements) {
+      for (const s of shadowResult.statements) {
+        if (s.isTableCell) tableCellIds.add(s.id);
+      }
+    }
+
+    const proseParagraphs = paragraphResult.paragraphs.filter((p) =>
+      p.statementIds.some((sid) => !tableCellIds.has(sid))
+    );
+
     results.substrate = buildGeometricSubstrate(
-      paragraphResult.paragraphs,
+      proseParagraphs,
       results.geometryParagraphEmbeddings,
       embeddingBackend
     );

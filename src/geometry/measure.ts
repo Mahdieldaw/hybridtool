@@ -332,7 +332,7 @@ function deriveHealth(
   return {
     isolationRatio: n > 0 ? isolatedCount / n : 1,
     edgeCount,
-    density: maxPossibleEdges > 0 ? edgeCount / maxPossibleEdges : 0,
+    edgeSaturation: maxPossibleEdges > 0 ? edgeCount / maxPossibleEdges : 0,
     discriminationRange: pairwiseField.stats.discriminationRange,
     nodeCount: n,
   };
@@ -407,7 +407,7 @@ function buildDegenerateSubstrate(
     nodes,
     pairwiseField,
     mutualRankGraph,
-    health: { isolationRatio: 1, edgeCount: 0, density: 0, discriminationRange: 0, nodeCount: n },
+    health: { isolationRatio: 1, edgeCount: 0, edgeSaturation: 0, discriminationRange: 0, nodeCount: n },
     meta: {
       embeddingSuccess: reason !== 'embedding_failure',
       embeddingBackend,

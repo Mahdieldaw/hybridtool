@@ -59,6 +59,7 @@ export function GeometryCard({
   const substrate = artifact?.geometry?.substrate ?? null;
   const nodes: any[] = useMemo(() => substrate?.nodes ?? [], [substrate]);
   const mutualEdges: any[] = useMemo(() => substrate?.mutualEdges ?? [], [substrate]);
+  const edgeSaturation = substrate?.health?.edgeSaturation ?? 0;
   const status: string = basin?.status ?? 'unknown';
   const basinCount = basin?.basinCount ?? 0;
 
@@ -242,13 +243,14 @@ export function GeometryCard({
         <CardSection
           title="Mutual Recognition"
           badge={{
-            text: `${fmtInt(mutualEdges.length)} edges`,
+            text: `${fmtInt(mutualEdges.length)} edges (${fmt(edgeSaturation * 100, 1)}%)`,
             color: participationRate != null && participationRate > 0.05 ? '#34d399' : '#f87171',
           }}
         >
           <div className="grid grid-cols-2 gap-x-4">
             <div>
               <StatRow {...statRowProps("Mutual Edges", fmtInt(mutualEdges.length))} />
+              <StatRow {...statRowProps("Edge Saturation", `${fmt(edgeSaturation * 100, 1)}%`)} />
               <StatRow
                 {...statRowProps(
                   "Participating",

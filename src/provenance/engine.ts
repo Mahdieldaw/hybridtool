@@ -117,6 +117,53 @@ export async function buildProvenancePipeline(
   // Use the input enrichedClaims (already-enriched with table cells etc.) for downstream phases.
   const claimsForDownstream = enrichedClaims;
 
+  // ── FILTER TABLE CELLS FOR DOWNSTREAM ROUTING/BLAST ──────────────────
+  // Passage routing and scoring operate strictly on prose. Table cells stay attached
+  // to their owning claims via `enrichedClaims` (consumed by the editorial mapper /
+  // synthesizer downstream) but are stripped from the structures the L1 surface
+  // pipeline consumes (statements, paragraphs, ownership, exclusivity).
+  const safeStatementIds = new Set<string>();
+  const measurementSafeStatements = [];
+  for (const s of shadowStatements) {
+    if (!s.isTableCell) {
+      measurementSafeStatements.push(s);
+      safeStatementIds.add(s.id);
+    }
+  }
+
+  const measurementSafeParagraphs = [];
+  for (const p of shadowParagraphs) {
+    const proseStatementIds = p.statementIds.filter(sid => safeStatementIds.has(sid));
+    if (proseStatementIds.length === 0) continue; // pure table-cell paragraph — drop
+    measurementSafeParagraphs.push({ ...p, statementIds: proseStatementIds });
+  }
+
+  const filterIdsToProse = (ids: Iterable<string>): string[] => {
+    const out: string[] = [];
+    for (const sid of ids) if (safeStatementIds.has(sid)) out.push(sid);
+    return out;
+  };
+
+  const safeOwnershipMap = new Map<string, Set<string>>();
+  for (const [sid, claims] of measure.ownershipMap.entries()) {
+    if (safeStatementIds.has(sid)) safeOwnershipMap.set(sid, claims);
+  }
+
+  const safeCanonicalSets = new Map<string, Set<string>>();
+  for (const [claimId, set] of measure.canonicalSets.entries()) {
+    safeCanonicalSets.set(claimId, new Set(filterIdsToProse(set)));
+  }
+
+  const safeExclusiveIds = new Map<string, string[]>();
+  for (const [claimId, ids] of measure.exclusiveIds.entries()) {
+    safeExclusiveIds.set(claimId, filterIdsToProse(ids));
+  }
+
+  const safeCanonicalStatementIds = new Map<string, string[]>();
+  for (const [claimId, ids] of measure.canonicalStatementIds.entries()) {
+    safeCanonicalStatementIds.set(claimId, filterIdsToProse(ids));
+  }
+
   // ── Phase 2: Validate ────────────────────────────────────────────────
   const validate = validateEdgesAndAllegiance({
     enrichedClaims: claimsForDownstream,
@@ -124,10 +171,10 @@ export async function buildProvenancePipeline(
     statementEmbeddings,
     claimEmbeddings: measure.claimEmbeddings,
     queryEmbedding,
-    ownershipMap: measure.ownershipMap,
-    canonicalSets: measure.canonicalSets,
-    shadowStatements,
-    shadowParagraphs,
+    ownershipMap: safeOwnershipMap,
+    canonicalSets: safeCanonicalSets,
+    shadowStatements: measurementSafeStatements,
+    shadowParagraphs: measurementSafeParagraphs,
     claimDensityResult: measure.claimDensity,
   });
 
@@ -143,8 +190,9 @@ export async function buildProvenancePipeline(
     statementEmbeddings: statementEmbeddings ?? new Map(),
     statementTexts,
     totalCorpusStatements,
-    canonicalSets: measure.canonicalSets,
-    exclusiveIds: measure.exclusiveIds,
+    canonicalSets: safeCanonicalSets,
+    exclusiveIds: safeExclusiveIds,
+    shadowParagraphs: measurementSafeParagraphs,
   });
 
   // ── Phase 4: Structure ───────────────────────────────────────────────
@@ -156,16 +204,16 @@ export async function buildProvenancePipeline(
 
   // ── Phase 5: Classify ────────────────────────────────────────────────
   const statementClassification = computeStatementClassification({
-    shadowStatements,
-    shadowParagraphs,
+    shadowStatements: measurementSafeStatements,
+    shadowParagraphs: measurementSafeParagraphs,
     enrichedClaims: claimsForDownstream,
     claimDensityResult: measure.claimDensity,
     passageRoutingResult: surface.passageRoutingResult,
     paragraphEmbeddings,
     claimEmbeddings: measure.claimEmbeddings,
     queryRelevanceScores,
-    ownershipMap: measure.ownershipMap,
-    canonicalStatementIds: measure.canonicalStatementIds,
+    ownershipMap: safeOwnershipMap,
+    canonicalStatementIds: safeCanonicalStatementIds,
   });
 
   return {

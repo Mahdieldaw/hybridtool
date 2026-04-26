@@ -26,6 +26,7 @@ import type {
   MixedDirectionProbe,
 } from '../../shared/types';
 import type { PeripheryResult } from '../geometry';
+import type { ShadowParagraph } from '../shadow';
 import { cosineSimilarity } from '../clustering/distance';
 import nlp from 'compromise';
 
@@ -42,6 +43,7 @@ export interface SurfaceInput {
   totalCorpusStatements: number;
   canonicalSets: Map<string, Set<string>>;
   exclusiveIds: Map<string, string[]>;
+  shadowParagraphs: ShadowParagraph[]; // needed for exclusivityMass computation
 }
 
 export interface SurfaceOutput {
@@ -70,6 +72,21 @@ function sigma(nums: number[], mu: number): number {
 
 function clamp01(v: number): number {
   return v <= 0 ? 0 : v >= 1 ? 1 : v;
+}
+
+// Rank-average percentile against a pre-sorted ascending array.
+// Caller is responsible for sorting once and reusing across calls — the helper
+// trusts the contract and never copies or re-sorts. Walks forward to find the
+// upper bound of equal values (avoids the in-place reverse() bug).
+function percentileFromSortedAsc(val: number, sortedAsc: number[]): number {
+  const n = sortedAsc.length;
+  if (n <= 1) return 0;
+  const firstIdx = sortedAsc.findIndex((v) => v === val);
+  if (firstIdx === -1) return 0;
+  let lastIdx = firstIdx;
+  while (lastIdx + 1 < n && sortedAsc[lastIdx + 1] === val) lastIdx++;
+  const rankAvg = (firstIdx + lastIdx) / 2;
+  return rankAvg / (n - 1);
 }
 
 function findHostClaim(
@@ -376,6 +393,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     totalCorpusStatements,
     canonicalSets,
     exclusiveIds,
+    shadowParagraphs,
   } = input;
 
   const profiles = claimDensityResult.profiles;
@@ -396,7 +414,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   const claimProfiles: Record<string, PassageClaimProfile> = {};
 
-  // Build base profiles for all claims (instrumentationfields + placeholders for routing fields)
+  // Block A: Build base profiles for all claims (instrumentation fields + placeholders for routing fields)
   for (const claim of enrichedClaims) {
     const id = String(claim.id);
     const profile = profiles[id];
@@ -413,6 +431,13 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         landscapePosition: 'floor',
         isMinority: false,
         routingMeasurements: null,
+        dominatedParagraphCount: 0,
+        exclusivityMass: 0,
+        sustainedMass: 0,
+        sustainedMassCohort: 'balanced',
+        modelSpread: 0,
+        modelsWithPassages: 0,
+        isLoadBearing: null,
         totalMAJ: 0,
         dominantModel: null,
         dominantMAJ: 0,
@@ -468,6 +493,13 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       landscapePosition: 'floor',
       isMinority: false,
       routingMeasurements: null,
+      dominatedParagraphCount: 0,
+      exclusivityMass: 0,
+      sustainedMass: 0,
+      sustainedMassCohort: 'balanced',
+      modelSpread: profile.modelSpread,
+      modelsWithPassages: profile.modelsWithPassages,
+      isLoadBearing: null,
       totalMAJ,
       dominantModel,
       dominantMAJ,
@@ -576,19 +608,39 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     };
   }
 
-  // Phase 1: Minority classification (cumulative coverage sort)
-  candidates.sort((a, b) => a.activeMajParagraphIds.length - b.activeMajParagraphIds.length);
-  const totalCorpusParagraphs = new Set(
-    candidates.flatMap((c) => c.activeMajParagraphIds)
-  ).size;
-  let cumulative = 0;
+  // ── Block C: Pre-phase compute over candidates
+
+  // Compute totalModels: distinct model indices observed across all candidates
+  const totalModels = new Set<number>();
   for (const c of candidates) {
-    const thisCoverageCount = c.activeMajParagraphIds.length;
-    c.isMinority = cumulative + thisCoverageCount < totalCorpusParagraphs * 0.5;
-    cumulative += thisCoverageCount;
+    const profile = profiles[c.claimId];
+    if (!profile) continue;
+    const activeCoverage = filterPeripheral
+      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
+      : profile.paragraphCoverage;
+    for (const entry of activeCoverage) {
+      totalModels.add(entry.modelIndex);
+    }
+  }
+  const totalModelsCount = totalModels.size;
+
+  // Compute paragraphToAllClaims: any presence (not just MAJ)
+  const paragraphToAllClaims = new Map<string, Set<string>>();
+  for (const c of candidates) {
+    const profile = profiles[c.claimId];
+    if (!profile) continue;
+    const activeCoverage = filterPeripheral
+      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
+      : profile.paragraphCoverage;
+    for (const entry of activeCoverage) {
+      if (!paragraphToAllClaims.has(entry.paragraphId)) {
+        paragraphToAllClaims.set(entry.paragraphId, new Set());
+      }
+      paragraphToAllClaims.get(entry.paragraphId)!.add(c.claimId);
+    }
   }
 
-  // Phase 2: Minority ranking
+  // Compute paragraphToMajClaims: MAJ paragraphs only (coverage > 0.5)
   const paragraphToMajClaims = new Map<string, Set<string>>();
   for (const c of candidates) {
     for (const pid of c.activeMajParagraphIds) {
@@ -599,41 +651,216 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  interface MinorityCandidate extends CandidateProfile {
-    contestedDominance: number;
-    exclusivityRatio: number;
+  // Compute totalCorpusParagraphs: the total deduplicated paragraph pool across all candidates
+  const totalCorpusParagraphs = new Set(
+    candidates.flatMap((c) => {
+      const profile = profiles[c.claimId];
+      if (!profile) return [];
+      const activeCoverage = filterPeripheral
+        ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
+        : profile.paragraphCoverage;
+      return activeCoverage.map((pc) => pc.paragraphId);
+    })
+  ).size;
+
+  // Compute maxSupporterCount from enrichedClaims
+  let maxSupporterCount = 0;
+  const supportersById = new Map<string, any[]>();
+  for (const claim of enrichedClaims) {
+    const id = String(claim.id);
+    const supporters = Array.isArray((claim as any).supporters) ? (claim as any).supporters : [];
+    supportersById.set(id, supporters);
+    if (supporters.length > maxSupporterCount) {
+      maxSupporterCount = supporters.length;
+    }
   }
-  const minorityPool: MinorityCandidate[] = [];
+
+  // Extended candidate interface with computed fields
+  interface ExtendedCandidate extends CandidateProfile {
+    contestedDominance: number;
+    exclusivityMass: number;
+    sustainedMass: number;
+    sustainedMassCohort: 'passage-heavy' | 'balanced' | 'maj-breadth';
+    allParagraphIds: Set<string>;
+    supporters: any[];
+  }
+
+  // Per-candidate static field computation
+  const extendedCandidates: ExtendedCandidate[] = [];
+
+  // Hoisted: O(1) lookup of statementId set per paragraph (replaces O(n) .find per statement)
+  const paragraphStatementSets = new Map<string, Set<string>>();
+  for (const para of shadowParagraphs) {
+    paragraphStatementSets.set(para.id, new Set(para.statementIds));
+  }
+
+  // Hoisted: percentile inputs sorted once, ascending. Used for normMAXLEN / normMAJ.
+  const sortedMaxLen = candidates
+    .map((c2) => profiles[c2.claimId]?.maxPassageLength ?? 0)
+    .sort((a, b) => a - b);
+  const sortedMaj = candidates
+    .map((c2) => c2.activeMajParagraphIds.length)
+    .sort((a, b) => a - b);
+
   for (const c of candidates) {
-    if (!c.isMinority) continue;
+    const profile = profiles[c.claimId];
+    if (!profile) continue;
 
-    const contested = c.activeMajParagraphIds.filter((pid) => {
-      return (paragraphToMajClaims.get(pid)?.size ?? 0) > 1;
-    }).length;
-    const contestedDominance =
-      c.activeMajParagraphIds.length > 0 ? contested / c.activeMajParagraphIds.length : 0;
+    // dominatedParagraphCount: MAJ paragraphs where ≥1 other claim has ANY presence
+    let dominatedCount = 0;
+    for (const pid of c.activeMajParagraphIds) {
+      const claimsInPara = paragraphToAllClaims.get(pid) ?? new Set();
+      if (claimsInPara.size > 1) dominatedCount++;
+    }
 
-    const totalStatements = canonicalSets.get(c.claimId)?.size ?? 0;
-    const exclusiveStatements = exclusiveIds.get(c.claimId)?.length ?? 0;
-    const exclusivityRatio = totalStatements > 0 ? exclusiveStatements / totalStatements : 0;
+    // exclusivityMass: sum of per-paragraph exclusive ratios
+    // Numerator is exclusiveClaimStatements (not all claim statements).
+    // Denominator is totalStatements in the paragraph.
+    const activeCoverage = filterPeripheral
+      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
+      : profile.paragraphCoverage;
 
-    minorityPool.push({
+    const claimExclusiveIds = exclusiveIds.get(c.claimId) ?? [];
+    let exclusivityMass = 0;
+    const allParaSet = new Set<string>();
+    for (const entry of activeCoverage) {
+      allParaSet.add(entry.paragraphId);
+      const stmtSet = paragraphStatementSets.get(entry.paragraphId);
+      let exclusiveCount = 0;
+      if (stmtSet) {
+        for (const sid of claimExclusiveIds) {
+          if (stmtSet.has(sid)) exclusiveCount++;
+        }
+      }
+      exclusivityMass += entry.totalStatements > 0 ? exclusiveCount / entry.totalStatements : 0;
+    }
+
+    // sustainedMass cohort computation: percentile ranks for MAXLEN and MAJ
+    const MAXLEN = profile.maxPassageLength;
+    const MAJ = c.activeMajParagraphIds.length;
+
+    const normMAXLEN = percentileFromSortedAsc(MAXLEN, sortedMaxLen);
+    const normMAJ = percentileFromSortedAsc(MAJ, sortedMaj);
+    const sustainedMass = Math.sqrt(normMAXLEN * normMAJ);
+
+    // Cohort assignment based on thresholds
+    let sustainedMassCohort: 'passage-heavy' | 'balanced' | 'maj-breadth';
+    if (normMAXLEN >= 2 / 3 && normMAJ < 1 / 3) {
+      sustainedMassCohort = 'passage-heavy';
+    } else if (normMAJ >= 2 / 3 && normMAXLEN < 1 / 3) {
+      sustainedMassCohort = 'maj-breadth';
+    } else {
+      sustainedMassCohort = 'balanced';
+    }
+
+    console.log(`[Cohort Calc] Claim ${c.claimId}: MAXLEN=${MAXLEN} (norm=${normMAXLEN.toFixed(3)}), MAJ=${MAJ} (norm=${normMAJ.toFixed(3)}), sustainedMass=${sustainedMass.toFixed(3)} -> ${sustainedMassCohort}`);
+
+    // Compute corrected contestedDominance for this candidate
+    // Numerator (dominatedCount): MAJ paragraphs of C where another claim is present
+    // Denominator (contestedTouchedCount): ALL paragraphs C touches where another claim is present
+    let contestedTouchedCount = 0;
+    for (const pid of allParaSet) {
+      const allClaimsInPara = paragraphToAllClaims.get(pid) ?? new Set();
+      if (allClaimsInPara.size > 1) contestedTouchedCount++;
+    }
+    const contestedDominance = contestedTouchedCount > 0 ? dominatedCount / contestedTouchedCount : 0;
+
+    // Build extended candidate
+    const extCand: ExtendedCandidate = {
       ...(c as any),
       contestedDominance,
-      exclusivityRatio,
+      exclusivityMass,
+      sustainedMass,
+      sustainedMassCohort,
+      allParagraphIds: allParaSet,
+      supporters: supportersById.get(c.claimId) ?? [],
+    };
+
+    extendedCandidates.push(extCand);
+
+    // Persist static fields on claimProfiles
+    claimProfiles[c.claimId].dominatedParagraphCount = dominatedCount;
+    claimProfiles[c.claimId].exclusivityMass = exclusivityMass;
+    claimProfiles[c.claimId].sustainedMass = sustainedMass;
+    claimProfiles[c.claimId].sustainedMassCohort = sustainedMassCohort;
+  }
+
+  // ── Block D: Phase 1 — Minority classification
+  for (const c of extendedCandidates) {
+    c.isMinority = c.supporters.length < maxSupporterCount / 2;
+  }
+
+  // ── Block E: Phase 2 — Minority ranking
+
+  const minorityPool: ExtendedCandidate[] = extendedCandidates.filter((c) => c.isMinority);
+
+  // Stage 1: Group by cohort
+  const byCohort = new Map<string, ExtendedCandidate[]>();
+  for (const cohort of ['maj-breadth', 'balanced', 'passage-heavy']) {
+    byCohort.set(cohort, minorityPool.filter((c) => c.sustainedMassCohort === cohort));
+  }
+
+  // Stage 2: Within each cohort, seed-sort by MAXLEN DESC, then MAJ DESC
+  for (const cohortClaims of byCohort.values()) {
+    cohortClaims.sort((a, b) => {
+      const maxLenDiff = (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
+      if (maxLenDiff !== 0) return maxLenDiff;
+      return b.activeMajParagraphIds.length - a.activeMajParagraphIds.length;
     });
   }
 
-  // Sort minority pool: contestedDominance DESC, tiebreak exclusivityRatio DESC
-  minorityPool.sort((a, b) => {
-    const cDiff = b.contestedDominance - a.contestedDominance;
-    return cDiff !== 0 ? cDiff : b.exclusivityRatio - a.exclusivityRatio;
-  });
+  // Stage 3 & 4: Apply 2×2 competition and modelSpread tiebreaker
+  const sortedMinorityPool: ExtendedCandidate[] = [];
+  const cohortOrder = ['maj-breadth', 'balanced', 'passage-heavy'];
 
-  // Phase 3: Minority peeling
+  // Precompute priority bucket per minority claim once. Sort percentile inputs once
+  // (O(m log m)) and reuse the sorted arrays across all m percentile lookups (O(m log m)
+  // total via findIndex, vs the previous O(m² log m) when each comparator call re-sorted).
+  const sortedContested = minorityPool.map((c) => c.contestedDominance).sort((a, b) => a - b);
+  const sortedExclusivity = minorityPool.map((c) => c.exclusivityMass).sort((a, b) => a - b);
+  const bucketByClaim = new Map<string, number>();
+  for (const c of minorityPool) {
+    const contestedPerc = percentileFromSortedAsc(c.contestedDominance, sortedContested);
+    const exclusivityPerc = percentileFromSortedAsc(c.exclusivityMass, sortedExclusivity);
+    const highC = contestedPerc >= 0.5;
+    const highE = exclusivityPerc >= 0.5;
+    const bucket = highC && highE ? 1 : !highC && highE ? 2 : highC && !highE ? 3 : 4;
+    bucketByClaim.set(c.claimId, bucket);
+  }
+
+  for (const cohortName of cohortOrder) {
+    const cohortClaims = byCohort.get(cohortName) ?? [];
+
+    const survivingClaims = cohortClaims.filter((c) => bucketByClaim.get(c.claimId) !== 4);
+    const flooredClaims = cohortClaims.filter((c) => bucketByClaim.get(c.claimId) === 4);
+
+    for (const c of flooredClaims) {
+      c.landscapePosition = 'floor';
+      c.routingMeasurements = null;
+    }
+
+    // Sort by priority bucket -> contestedDominance DESC -> exclusivityMass DESC -> supporters.length DESC
+    survivingClaims.sort((a, b) => {
+      const bucketA = bucketByClaim.get(a.claimId) ?? 4;
+      const bucketB = bucketByClaim.get(b.claimId) ?? 4;
+      if (bucketA !== bucketB) return bucketA - bucketB;
+
+      const contDiff = b.contestedDominance - a.contestedDominance;
+      if (contDiff !== 0) return contDiff;
+
+      const exclDiff = b.exclusivityMass - a.exclusivityMass;
+      if (exclDiff !== 0) return exclDiff;
+
+      return b.supporters.length - a.supporters.length;
+    });
+
+    sortedMinorityPool.push(...survivingClaims);
+  }
+
+  // ── Block F: Phase 3 — Minority peeling
   const assignedSet = new Set<string>();
-  for (let i = 0; i < minorityPool.length; i++) {
-    const c = minorityPool[i];
+  for (let i = 0; i < sortedMinorityPool.length; i++) {
+    const c = sortedMinorityPool[i];
     const novelIds = c.activeMajParagraphIds.filter((pid) => !assignedSet.has(pid));
     c.landscapePosition = i === 0 ? 'leadMinority' : 'mechanism';
 
@@ -646,10 +873,13 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     c.routingMeasurements = {
       contestedDominance: c.contestedDominance,
-      exclusivityRatio: c.exclusivityRatio,
+      exclusivityMass: c.exclusivityMass,
+      sustainedMassCohort: c.sustainedMassCohort,
+      modelSpread: c.modelSpread,
       claimNoveltyRatio,
       corpusNoveltyRatio,
       novelParagraphCount: novelIds.length,
+      majorityGateSnapshot: null,
     };
 
     for (const pid of c.activeMajParagraphIds) {
@@ -657,19 +887,49 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  // Phase 4: Majority iterative assignment
-  const majorityPool = candidates
-    .filter((c) => !c.isMinority && c.activeMajParagraphIds.length > 0)
-    .sort((a, b) => a.activeMajParagraphIds.length - b.activeMajParagraphIds.length);
+  // ── Block G: Phase 4 — Majority mechanism assignment
 
-  let northStarCandidate: CandidateProfile | null = null;
+  const majorityPool = extendedCandidates
+    .filter((c) => !c.isMinority && c.activeMajParagraphIds.length > 0);
+
+  // Extract NorthStar before cohort sorting: largest by sustainedMass overall
+  let northStarCandidate: ExtendedCandidate | null = null;
   if (majorityPool.length > 0) {
-    northStarCandidate = majorityPool.pop()!;
+    let maxMass = -1;
+    let nsIndex = -1;
+    for (let i = 0; i < majorityPool.length; i++) {
+      if (majorityPool[i].sustainedMass > maxMass) {
+        maxMass = majorityPool[i].sustainedMass;
+        nsIndex = i;
+      }
+    }
+    northStarCandidate = majorityPool.splice(nsIndex, 1)[0];
   }
 
-  // Assign remaining majority claims
-  for (let i = 0; i < majorityPool.length; i++) {
-    const c = majorityPool[i];
+  // Sort remaining majority candidates by cohort (maj-breadth → balanced → passage-heavy)
+  const sortedMajorityPool: ExtendedCandidate[] = [];
+  const majorityCohortOrder = ['maj-breadth', 'balanced', 'passage-heavy'];
+
+  for (const cohortName of majorityCohortOrder) {
+    const cohortClaims = majorityPool.filter((c) => c.sustainedMassCohort === cohortName);
+
+    // Inside cohorts, tiebreakers: inverted supporter count (ASC), exclusivity (DESC)
+    cohortClaims.sort((a, b) => {
+      if (a.supporters.length !== b.supporters.length) return a.supporters.length - b.supporters.length;
+      if (b.exclusivityMass !== a.exclusivityMass) return b.exclusivityMass - a.exclusivityMass;
+
+      const maxLenDiff = (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
+      if (maxLenDiff !== 0) return maxLenDiff;
+
+      return b.activeMajParagraphIds.length - a.activeMajParagraphIds.length;
+    });
+
+    sortedMajorityPool.push(...cohortClaims);
+  }
+
+  // Iterate remaining majority candidates
+  for (let i = 0; i < sortedMajorityPool.length; i++) {
+    const c = sortedMajorityPool[i];
     const nsIds = northStarCandidate?.activeMajParagraphIds ?? [];
     const currentNSNovel = nsIds.filter((pid) => !assignedSet.has(pid)).length;
     const projectedNSNovel = nsIds.filter(
@@ -680,28 +940,41 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       (pid) => !assignedSet.has(pid)
     ).length;
 
+    if (candidateContribution === 0) {
+      c.landscapePosition = 'floor';
+      c.routingMeasurements = null;
+      continue;
+    }
+
     if (delta > candidateContribution) {
-      // Break: remaining candidates go to floor
-      for (let j = i; j < majorityPool.length; j++) {
-        const remaining = majorityPool[j];
+      // Floor remaining candidates
+      for (let j = i; j < sortedMajorityPool.length; j++) {
+        const remaining = sortedMajorityPool[j];
         remaining.landscapePosition = 'floor';
-        remaining.isMinority = false;
         remaining.routingMeasurements = null;
       }
       break;
     }
 
     c.landscapePosition = 'mechanism';
-    const novelCount = candidateContribution;
+
+    // Compute corrected contestedDominance for majority claim
+    // (We computed this statically earlier, but if it needs re-evaluation at routing time...
+    // Wait, contestedDominance is static. The previous code was re-computing it wrongly here.)
+    const majorityContested = c.contestedDominance;
+
     c.routingMeasurements = {
-      contestedDominance: 0, // majority claims don't have contested dominance
-      exclusivityRatio: exclusiveIds.get(c.claimId)?.length ?? 0 / (canonicalSets.get(c.claimId)?.size ?? 1),
-      claimNoveltyRatio: c.activeMajParagraphIds.length > 0 ? novelCount / c.activeMajParagraphIds.length : 0,
+      contestedDominance: majorityContested,
+      exclusivityMass: c.exclusivityMass,
+      sustainedMassCohort: c.sustainedMassCohort,
+      modelSpread: c.modelSpread,
+      claimNoveltyRatio: c.activeMajParagraphIds.length > 0 ? candidateContribution / c.activeMajParagraphIds.length : 0,
       corpusNoveltyRatio:
         totalCorpusParagraphs - assignedSet.size > 0
-          ? novelCount / (totalCorpusParagraphs - assignedSet.size)
+          ? candidateContribution / (totalCorpusParagraphs - assignedSet.size)
           : 0,
-      novelParagraphCount: novelCount,
+      novelParagraphCount: candidateContribution,
+      majorityGateSnapshot: { delta, currentNSNovel, projectedNSNovel, candidateContribution },
     };
 
     for (const pid of c.activeMajParagraphIds) {
@@ -709,24 +982,30 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  // Phase 5: Assign northStar
+  // ── Block H: Phase 5 — NorthStar
   if (northStarCandidate) {
     northStarCandidate.landscapePosition = 'northStar';
     const nsNovel = northStarCandidate.activeMajParagraphIds.filter(
       (pid) => !assignedSet.has(pid)
     ).length;
     const nsTotal = northStarCandidate.activeMajParagraphIds.length;
+
+    // Compute corrected contestedDominance for northStar
+    // (This was also statically computed earlier)
+    const nsContested = northStarCandidate.contestedDominance;
+
     northStarCandidate.routingMeasurements = {
-      contestedDominance: 0,
-      exclusivityRatio:
-        (exclusiveIds.get(northStarCandidate.claimId)?.length ?? 0) /
-        (canonicalSets.get(northStarCandidate.claimId)?.size ?? 1),
+      contestedDominance: nsContested,
+      exclusivityMass: northStarCandidate.exclusivityMass,
+      sustainedMassCohort: northStarCandidate.sustainedMassCohort,
+      modelSpread: northStarCandidate.modelSpread,
       claimNoveltyRatio: nsTotal > 0 ? nsNovel / nsTotal : 0,
       corpusNoveltyRatio:
         totalCorpusParagraphs - assignedSet.size > 0
           ? nsNovel / (totalCorpusParagraphs - assignedSet.size)
           : 0,
       novelParagraphCount: nsNovel,
+      majorityGateSnapshot: null,
     };
 
     for (const pid of northStarCandidate.activeMajParagraphIds) {
@@ -734,8 +1013,16 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  // Update claimProfiles with routing results from candidates
-  for (const c of candidates) {
+  // ── Block I: Phase 6 — Floor (defensive sweep)
+  for (const c of extendedCandidates) {
+    if (!c.landscapePosition || c.landscapePosition === 'floor') {
+      c.landscapePosition = 'floor';
+      c.routingMeasurements = null;
+    }
+  }
+
+  // Update claimProfiles with routing results from extended candidates
+  for (const c of extendedCandidates) {
     const id = c.claimId;
     if (claimProfiles[id]) {
       claimProfiles[id].landscapePosition = c.landscapePosition;

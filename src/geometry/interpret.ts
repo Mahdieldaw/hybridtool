@@ -69,13 +69,13 @@ function formatPct(value: number): string {
 // ----- Step 1: Gate evaluation ---------------------------------
 
 function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
-  const { isolationRatio, edgeCount, density, discriminationRange, nodeCount } = substrate.health;
+  const { isolationRatio, edgeCount, edgeSaturation, discriminationRange, nodeCount } = substrate.health;
 
   const measurements: PipelineGateResult['measurements'] = {
     isDegenerate: isDegenerate(substrate),
     isolationRatio,
     edgeCount,
-    density,
+    edgeSaturation,
     discriminationRange,
     nodeCount,
   };
@@ -93,7 +93,7 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
     `mutual_recognition_edges=${edgeCount}`,
     `discrimination_range=${discriminationRange.toFixed(3)}`,
     `isolation_ratio=${formatPct(isolationRatio)}`,
-    `density=${density.toFixed(4)}`,
+    `edge_saturation=${edgeSaturation.toFixed(4)}`,
   ];
 
   if (edgeCount === 0 || discriminationRange < DISCRIMINATION_MIN_RANGE) {
@@ -127,7 +127,7 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
 
   const proceedConfidence = clamp01(
     GATE_CONFIDENCE_BASELINE +
-      GATE_DENSITY_WEIGHT * clamp01(density / GATE_DENSITY_SATURATION) +
+      GATE_DENSITY_WEIGHT * clamp01(edgeSaturation / GATE_DENSITY_SATURATION) +
       GATE_CONNECTIVITY_WEIGHT * clamp01((1 - isolationRatio) / GATE_CONNECTIVITY_SATURATION)
   );
 

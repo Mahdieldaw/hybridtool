@@ -193,11 +193,14 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
   );
 
   // ════════════════════════════════════════════════════════════════════════
-  // 2.6 GEOMETRY (async, may fail gracefully)
+  // 2.6 GEOMETRY (fired immediately, not awaited — runs parallel with mapper LLM)
+  // Embeddings take the longest; start them now so they can complete while the
+  // mapper is running. geometryPromise is awaited inside onAllComplete before
+  // executeArtifactPipeline, which is the true convergence point.
   // ════════════════════════════════════════════════════════════════════════
   const embeddingConfig = getConfigForModel(payload.embeddingModelId || 'bge-base-en-v1.5');
 
-  const geometryResults = await buildGeometryAsync(
+  const geometryPromise = buildGeometryAsync(
     paragraphResult,
     shadowResult,
     indexedSourceData,
@@ -208,16 +211,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
     nowMs,
     embeddingConfig
   );
-
-  const {
-    embeddingResult,
-    statementEmbeddingResult,
-    queryEmbedding,
-    queryRelevance,
-    substrateSummary,
-    preSemanticInterpretation,
-    substrate,
-  } = geometryResults;
 
   // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
   const orderedModelIndices = (() => {
@@ -316,8 +309,17 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
 
               if (parseResult.success && parseResult.output) {
-                // Wait for geometry — assembly needs embeddings, regions, substrate
-                // (geometry is already done, but kept here for consistency)
+                // Converge: await geometry now that mapper has finished
+                const geometryResults = await geometryPromise;
+                const {
+                  embeddingResult,
+                  statementEmbeddingResult,
+                  queryEmbedding,
+                  queryRelevance,
+                  substrateSummary,
+                  preSemanticInterpretation,
+                  substrate,
+                } = geometryResults;
 
                 try {
                   // ── UNIFIED ARTIFACT PIPELINE (single-pass) ──────────────────

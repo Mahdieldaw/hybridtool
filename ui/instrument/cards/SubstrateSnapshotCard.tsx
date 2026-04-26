@@ -72,6 +72,7 @@ export function SubstrateSnapshotCard({
           ? 'warn'
           : 'fail';
 
+  const edgeSaturation = substrate?.health?.edgeSaturation ?? 0;
   const participatingNodes = nodes.filter((n: any) => (n?.mutualRankDegree ?? 0) > 0).length;
   const participationRate = nodes.length > 0 ? participatingNodes / nodes.length : null;
   const mutualGate =
@@ -266,7 +267,7 @@ export function SubstrateSnapshotCard({
             gate={mutualGate}
             detail={
               participationRate != null
-                ? `${fmtPct(participationRate)} (${fmtInt(participatingNodes)}/${fmtInt(nodes.length)} nodes, ${fmtInt(mutualEdges.length)} edges)`
+                ? `${fmtPct(participationRate)} (${fmtInt(participatingNodes)}/${fmtInt(nodes.length)} nodes, ${fmtInt(mutualEdges.length)} edges, ${fmtPct(edgeSaturation)})`
                 : '—'
             }
             title="Fraction of nodes with at least one mutual-rank edge. ≥5% = pass"

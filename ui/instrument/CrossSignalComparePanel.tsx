@@ -9,7 +9,7 @@ interface CrossSignalComparePanelProps {
 
 // Default axes vary by selected layer
 const layerDefaults: Record<string, [string, string]> = {
-  'competitive-provenance': ['provenanceBulk', 'exclusivityRatio'],
+  'competitive-provenance': ['provenanceBulk', 'exclusivityMass'],
   'blast-radius': ['provenanceBulk', 'blastRadius'],
   'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
 };
@@ -55,22 +55,20 @@ export function CrossSignalComparePanel({
       },
       {
         key: 'supportCount',
-        label: 'Support Count (legacy)',
+        label: 'Support Count',
         get: (c) =>
-          typeof c?.support_count === 'number' && Number.isFinite(c.support_count)
-            ? c.support_count
-            : Array.isArray(c?.supporters)
-              ? c.supporters.length
-              : null,
+          Array.isArray(c?.supporters)
+            ? c.supporters.length
+            : null,
       },
       {
-        key: 'exclusivityRatio',
+        key: 'exclusivityMass',
         label: 'Exclusivity %',
         get: (c) => {
           const id = String(c?.id ?? '');
           const ex = exclusivityObj?.[id];
-          return typeof ex?.exclusivityRatio === 'number' && Number.isFinite(ex.exclusivityRatio)
-            ? ex.exclusivityRatio * 100
+          return typeof ex?.exclusivityMass === 'number' && Number.isFinite(ex.exclusivityMass)
+            ? ex.exclusivityMass * 100
             : null;
         },
       },

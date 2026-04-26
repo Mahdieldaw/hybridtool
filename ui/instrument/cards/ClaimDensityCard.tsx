@@ -38,6 +38,16 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
     return m;
   }, [artifact]);
 
+  const supportersById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of safeArr<any>(artifact?.semantic?.claims ?? artifact?.claims)) {
+      const id = String(c?.id ?? '').trim();
+      if (!id) continue;
+      m.set(id, Array.isArray(c?.supporters) ? c.supporters.length : 0);
+    }
+    return m;
+  }, [artifact]);
+
   const rows = useMemo(() => {
     return Object.values(profiles).map((p: any) => ({
       id: String(p.claimId ?? ''),
@@ -108,20 +118,36 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
 
   // --- Passage routing rows & position counts ---
   const prRows = useMemo(() => {
-    return Object.values(prClaimProfiles).map((p: any) => ({
-      id: String(p.claimId ?? ''),
-      label: claimLabelById.get(String(p.claimId ?? '')) ?? String(p.claimId ?? ''),
-      position: String(p.landscapePosition ?? 'floor'),
-      concentration: typeof p.concentrationRatio === 'number' ? p.concentrationRatio : 0,
-      density: typeof p.densityRatio === 'number' ? p.densityRatio : 0,
-      meanCoverageInLongestRun:
-        typeof p.meanCoverageInLongestRun === 'number' ? p.meanCoverageInLongestRun : 0,
-      totalMAJ: p.totalMAJ ?? 0,
-      maxPassageLength: p.maxPassageLength ?? 0,
-      structContrib: p.structuralContributors?.length ?? 0,
-      queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
-    }));
-  }, [prClaimProfiles, claimLabelById]);
+    return Object.values(prClaimProfiles).map((p: any) => {
+      const rm = p.routingMeasurements ?? null;
+      const gate = rm?.majorityGateSnapshot ?? null;
+      return {
+        id: String(p.claimId ?? ''),
+        label: claimLabelById.get(String(p.claimId ?? '')) ?? String(p.claimId ?? ''),
+        position: String(p.landscapePosition ?? 'floor'),
+        concentration: typeof p.concentrationRatio === 'number' ? p.concentrationRatio : 0,
+        density: typeof p.densityRatio === 'number' ? p.densityRatio : 0,
+        meanCoverageInLongestRun:
+          typeof p.meanCoverageInLongestRun === 'number' ? p.meanCoverageInLongestRun : 0,
+        totalMAJ: p.totalMAJ ?? 0,
+        maxPassageLength: p.maxPassageLength ?? 0,
+        structContrib: p.structuralContributors?.length ?? 0,
+        supporterCount: supportersById.get(String(p.claimId ?? '')) ?? 0,
+        queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
+        sustainedMassCohort: String(p.sustainedMassCohort ?? rm?.sustainedMassCohort ?? '–'),
+        contestedDominance: rm?.contestedDominance ?? null,
+        dominatedParagraphCount: p.dominatedParagraphCount ?? 0,
+        exclusivityMass: p.exclusivityMass ?? 0,
+        novelParagraphCount: rm?.novelParagraphCount ?? null,
+        claimNoveltyRatio: rm?.claimNoveltyRatio ?? null,
+        corpusNoveltyRatio: rm?.corpusNoveltyRatio ?? null,
+        gateDelta: gate ? gate.delta : null,
+        gateCurrentNS: gate ? gate.currentNSNovel : null,
+        gateProjectedNS: gate ? gate.projectedNSNovel : null,
+        gateContribution: gate ? gate.candidateContribution : null,
+      };
+    });
+  }, [prClaimProfiles, claimLabelById, supportersById]);
 
   const positionCounts = useMemo(() => {
     const counts: Record<string, number> = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
@@ -534,6 +560,111 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                   'Structural contributors: number of models that provide at least one majority paragraph for this claim.',
                 cell: (r: any) => r.structContrib,
                 sortValue: (r: any) => r.structContrib,
+              },
+              {
+                key: 'supporterCount',
+                header: 'Sup#',
+                title:
+                  'Supporters: number of models that explicitly supported this claim during the LLM mapping phase.',
+                cell: (r: any) => r.supporterCount,
+                sortValue: (r: any) => r.supporterCount,
+              },
+              {
+                key: 'sustainedMassCohort',
+                header: 'cohort',
+                title:
+                  'Sustained-mass cohort: maj-breadth (broad MAJ coverage), passage-heavy (long contiguous passages), or balanced. Drives Phase-2 minority ranking.',
+                cell: (r: any) => (
+                  <span className="font-mono text-text-muted">{r.sustainedMassCohort}</span>
+                ),
+                sortValue: (r: any) => r.sustainedMassCohort,
+              },
+              {
+                key: 'contestedDominance',
+                header: 'CD%',
+                title:
+                  'Contested Dominance: Ratio of dominated paragraphs to total contested paragraphs the claim touches.',
+                cell: (r: any) =>
+                  r.contestedDominance == null ? <span className="text-text-muted">–</span> : <span>{(r.contestedDominance * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.contestedDominance ?? -1,
+              },
+              {
+                key: 'dominatedParagraphCount',
+                header: 'DOM#',
+                title:
+                  'Dominated Paragraph Count: How many contested paragraphs this claim dominates.',
+                cell: (r: any) =>
+                  r.dominatedParagraphCount == null ? <span className="text-text-muted">–</span> : r.dominatedParagraphCount,
+                sortValue: (r: any) => r.dominatedParagraphCount ?? -1,
+              },
+              {
+                key: 'exclusivityMass',
+                header: 'EM',
+                title:
+                  'Exclusivity Mass: Summed block-level exclusivity weight across all paragraphs.',
+                cell: (r: any) =>
+                  r.exclusivityMass == null ? <span className="text-text-muted">–</span> : fmt(r.exclusivityMass, 2),
+                sortValue: (r: any) => r.exclusivityMass ?? -1,
+              },
+              {
+                key: 'novelParagraphCount',
+                header: 'nov#',
+                title:
+                  'Novel Paragraph Count: how many MAJ paragraphs were unassigned when this claim was routed',
+                cell: (r: any) =>
+                  r.novelParagraphCount == null ? <span className="text-text-muted">–</span> : r.novelParagraphCount,
+                sortValue: (r: any) => r.novelParagraphCount ?? -1,
+              },
+              {
+                key: 'claimNoveltyRatio',
+                header: 'cNov%',
+                title:
+                  'Claim Novelty Ratio: novel MAJ / total MAJ for this claim',
+                cell: (r: any) =>
+                  r.claimNoveltyRatio == null ? <span className="text-text-muted">–</span> : <span>{(r.claimNoveltyRatio * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.claimNoveltyRatio ?? -1,
+              },
+              {
+                key: 'corpusNoveltyRatio',
+                header: 'bNov%',
+                title:
+                  'Corpus Novelty Ratio: novel MAJ / unassigned corpus (the "board") at decision time',
+                cell: (r: any) =>
+                  r.corpusNoveltyRatio == null ? <span className="text-text-muted">–</span> : <span>{(r.corpusNoveltyRatio * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.corpusNoveltyRatio ?? -1,
+              },
+              {
+                key: 'gateDelta',
+                header: 'Δ',
+                title:
+                  'Majority gate delta: currentNSNovel − projectedNSNovel. Candidate is floored when Δ exceeds its own contribution.',
+                cell: (r: any) =>
+                  r.gateDelta == null ? <span className="text-text-muted">–</span> : fmtInt(r.gateDelta),
+                sortValue: (r: any) => r.gateDelta ?? -1,
+              },
+              {
+                key: 'gateCurrentNS',
+                header: 'NS_now',
+                title: 'Majority gate: novel north-star paragraphs remaining at this candidate’s decision point.',
+                cell: (r: any) =>
+                  r.gateCurrentNS == null ? <span className="text-text-muted">–</span> : fmtInt(r.gateCurrentNS),
+                sortValue: (r: any) => r.gateCurrentNS ?? -1,
+              },
+              {
+                key: 'gateProjectedNS',
+                header: 'NS_proj',
+                title: 'Majority gate: north-star paragraphs that would still be novel after this candidate is added.',
+                cell: (r: any) =>
+                  r.gateProjectedNS == null ? <span className="text-text-muted">–</span> : fmtInt(r.gateProjectedNS),
+                sortValue: (r: any) => r.gateProjectedNS ?? -1,
+              },
+              {
+                key: 'gateContribution',
+                header: 'contrib',
+                title: 'Majority gate: novel paragraphs this candidate contributes at decision time.',
+                cell: (r: any) =>
+                  r.gateContribution == null ? <span className="text-text-muted">–</span> : fmtInt(r.gateContribution),
+                sortValue: (r: any) => r.gateContribution ?? -1,
               },
               {
                 key: 'queryDistance',
