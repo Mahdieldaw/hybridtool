@@ -21,7 +21,9 @@ export function safeLazy<T extends React.ComponentType<any>>(
         try {
           // Reset counter on success so next failure in same session can still reload
           sessionStorage.removeItem(RELOAD_COUNTER_KEY);
-        } catch (e) {}
+        } catch (e) {
+          console.error('[ui/utils/safe-lazy] failed:', e);
+        }
         return module;
       } catch (error: any) {
         const errorName = error?.name || '';

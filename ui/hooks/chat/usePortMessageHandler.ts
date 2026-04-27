@@ -83,7 +83,8 @@ function normalizeArtifactCandidate(input: unknown): any | null {
     try {
       const parsed = JSON.parse(raw);
       artifact = parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
+    } catch (err) {
+      console.error('[ui/hooks/chat/usePortMessageHandler] JSON parse failed:', err);
       return null;
     }
   }

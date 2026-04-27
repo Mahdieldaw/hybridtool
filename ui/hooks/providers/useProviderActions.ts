@@ -6,6 +6,7 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { activeRecomputeStateAtom, activeProviderTargetAtom, turnsMapAtom } from '../../state';
 import api from '../../services/extension-api';
 import type { AiTurn, ProviderKey, PrimitiveWorkflowRequest } from '../../../shared/types';
+import { logInfraError } from '../../../src/errors';
 
 /**
  * Hook providing provider-level actions: retry, branch continuation, and targeting.
@@ -33,8 +34,8 @@ export function useProviderActions(sessionId: string | undefined, aiTurnId: stri
       // Set recompute state to show branching indicator (or loading state for others)
       try {
         setActiveRecomputeState({ aiTurnId, stepType: stepType as any, providerId });
-      } catch (_) {
-        /* non-fatal */
+      } catch (err) {
+        logInfraError('useProviderActions/handleRetry/setRecomputeState', err);
       }
 
       // Get original user message for retry
@@ -42,7 +43,8 @@ export function useProviderActions(sessionId: string | undefined, aiTurnId: stri
         try {
           const u = turnsMap.get(aiTurn.userTurnId) as any;
           return u && u.type === 'user' && typeof u.text === 'string' ? u.text : undefined;
-        } catch {
+        } catch (err) {
+          logInfraError('useProviderActions/handleRetry/getUserMessage', err);
           return undefined;
         }
       })();
@@ -63,7 +65,9 @@ export function useProviderActions(sessionId: string | undefined, aiTurnId: stri
         console.error('[useProviderActions] Retry failed:', error);
         try {
           setActiveRecomputeState(null);
-        } catch {}
+        } catch (err) {
+          logInfraError('useProviderActions/handleRetry/clearRecomputeState', err);
+        }
       }
     },
     [sessionId, aiTurn, aiTurnId, setActiveRecomputeState, turnsMap]
@@ -81,8 +85,8 @@ export function useProviderActions(sessionId: string | undefined, aiTurnId: stri
 
       try {
         setActiveRecomputeState({ aiTurnId, stepType: 'batch' as any, providerId });
-      } catch (_) {
-        /* non-fatal */
+      } catch (err) {
+        logInfraError('useProviderActions/handleBranchContinue/setRecomputeState', err);
       }
 
       const primitive: PrimitiveWorkflowRequest = {
@@ -101,7 +105,9 @@ export function useProviderActions(sessionId: string | undefined, aiTurnId: stri
         console.error('[useProviderActions] Branch failed:', error);
         try {
           setActiveRecomputeState(null);
-        } catch {}
+        } catch (err) {
+          logInfraError('useProviderActions/handleBranchContinue/clearRecomputeState', err);
+        }
       }
     },
     [sessionId, aiTurn, aiTurnId, setActiveRecomputeState]

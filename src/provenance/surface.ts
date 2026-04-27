@@ -29,6 +29,7 @@ import type { PeripheryResult } from '../geometry';
 import type { ShadowParagraph } from '../shadow';
 import { cosineSimilarity } from '../clustering/distance';
 import nlp from 'compromise';
+import { logInfraError } from '../errors';
 
 export interface SurfaceInput {
   enrichedClaims: EnrichedClaim[];
@@ -121,7 +122,8 @@ export function computeNounSurvivalRatio(text: string): number {
     doc.remove('#QuestionWord');
     const skeleton = doc.text('normal').replace(/\s+/g, ' ').trim();
     return skeleton.split(/\s+/).filter((w) => w.length > 0).length / words.length;
-  } catch {
+  } catch (err) {
+    logInfraError('provenance/surface/computeNounSurvivalRatio', err);
     return 0;
   }
 }

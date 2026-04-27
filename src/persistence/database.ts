@@ -204,7 +204,9 @@ export async function openDatabase(): Promise<IDBDatabase> {
             updatedAt: now,
           };
           metadataStore.put(rec);
-        } catch (_) {}
+        } catch (err) {
+          console.error('[persistence/database/openDatabase] failed to update schema version (v6):', err);
+        }
       }
 
       // Migration to v7: Add context_bridges store

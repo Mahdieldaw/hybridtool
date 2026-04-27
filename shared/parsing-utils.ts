@@ -280,11 +280,13 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
         try {
           const parsed2 = JSON.parse(parsed);
           if (parsed2 && typeof parsed2 === 'object') return { ok: true, value: parsed2 };
-        } catch {
+        } catch (err) {
+          console.error('[parsing-utils/extractJsonObject] double-parse failed:', err);
           return { ok: false, value: null };
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('[parsing-utils/extractJsonObject] initial parse failed:', err);
       return { ok: false, value: null };
     }
     return { ok: false, value: null };
@@ -384,11 +386,17 @@ export function extractJsonFromContent(content: string | null): any | null {
   if (firstBrace !== -1 && lastBrace > firstBrace) {
     try {
       return JSON.parse(jsonText.substring(firstBrace, lastBrace + 1));
-    } catch {}
+    } catch (err) {
+      console.error(
+        '[parsing-utils/extractJsonFromContent] failed to parse extracted brace content:',
+        err
+      );
+    }
   }
   try {
     return JSON.parse(jsonText);
-  } catch {
+  } catch (err) {
+    console.error('[parsing-utils/extractJsonFromContent] failed to parse fallback jsonText:', err);
     return null;
   }
 }

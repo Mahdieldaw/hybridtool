@@ -2,6 +2,7 @@ import React, { useCallback, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { containsMath } from '../utils/math-utils';
+import { logInfraError } from '../../src/errors';
 
 // --- 1. HELPER: Language Extractor ---
 const ListContext = React.createContext(false);
@@ -95,7 +96,10 @@ const PreBlock = ({ children }: any) => {
         await navigator.clipboard.writeText(codeText);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
-      } catch {}
+      } catch (err) {
+        // Clipboard write can be denied by browser permissions — expected condition
+        console.warn('[MarkdownDisplay/handleCopy] clipboard.writeText failed:', err);
+      }
     },
     [codeText]
   );
@@ -113,9 +117,9 @@ const PreBlock = ({ children }: any) => {
         URL.revokeObjectURL(url);
         try {
           document.body.removeChild(a);
-        } catch {}
+        } catch (err) { logInfraError('MarkdownDisplay/handleDownload/removeChild', err); }
       }, 0);
-    } catch {}
+    } catch (err) { logInfraError('MarkdownDisplay/handleDownload', err); }
   }, [codeText, language]);
 
   return (

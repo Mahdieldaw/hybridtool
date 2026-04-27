@@ -45,7 +45,9 @@ export async function handleRecompute(payload, options) {
           aiTurnId,
           error: 'Session mismatch for continuation request',
         });
-      } catch (_) { }
+      } catch (err) {
+        console.error('[recompute-handler/handleRecompute] Failed to post CONTINUATION_ERROR to port:', err);
+      }
       return;
     }
 

@@ -104,7 +104,9 @@ function probeWasmThreadingConfig() {
         numThreads = Math.max(1, Math.min(4, Math.floor(hc || 1)));
         proxy = false;
         mode = 'sharedarraybuffer';
-      } catch (_) {
+      } catch (err) {
+        // SharedArrayBuffer capability check can throw in restricted contexts
+        console.warn('[embedding-worker/detectWasmThreading] SAB config failed, falling back to single-thread:', err);
         numThreads = 1;
         proxy = false;
         mode = 'single';
@@ -114,7 +116,9 @@ function probeWasmThreadingConfig() {
       proxy = false;
       mode = 'single';
     }
-  } catch (_) {
+  } catch (err) {
+    // Feature detection can throw in worker environments without these APIs
+    console.warn('[embedding-worker/detectWasmThreading] Feature detection failed, falling back to single-thread:', err);
     numThreads = 1;
     proxy = false;
     mode = 'single';
@@ -137,7 +141,7 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
   if (inFlightLoad) {
     try {
       await inFlightLoad;
-    } catch { }
+    } catch (err) { console.error('[embedding-worker/ensureModel/inFlightLoad]', err); }
     if (modelCache.has(modelId)) {
       return modelCache.get(modelId);
     }
@@ -272,7 +276,9 @@ async function ensureModel(modelId = 'bge-base-en-v1.5') {
       let webgpuSupported = false;
       try {
         webgpuSupported = !!(await env.backends?.onnx?.webgpu?.isSupported?.());
-      } catch (_) {
+      } catch (err) {
+        // WebGPU feature detection can throw in environments without GPU support
+        console.warn('[embedding-worker/loadModel/webgpu-check] WebGPU detection failed:', err);
         webgpuSupported = false;
       }
 

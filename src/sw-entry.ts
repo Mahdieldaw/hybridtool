@@ -34,6 +34,7 @@ import { authManager } from './providers/auth-manager.js';
 import { SessionManager } from './persistence/session-manager.js';
 import { initializePersistenceLayer } from './persistence/index.js';
 import { errorHandler, getErrorMessage } from './errors/handler.js';
+import { logInfraError } from './errors/infra-logger.js';
 import { persistenceMonitor } from './persistence/persistence-monitor.js';
 import { unpackEmbeddingMap, packEmbeddingMap } from './persistence/embedding-codec.js';
 import {
@@ -1453,7 +1454,7 @@ async function handleUnifiedMessage(
             Object.keys((latestRound?.mappingResponses as Record<string, unknown> | undefined) ?? {})[0] ||
             null;
           if (latestRound?.aiTurnId && latestMapper) {
-            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm, embeddingModelId, { broadcast: true }).catch(() => { });
+            doRegenerateEmbeddings(latestRound.aiTurnId as string, latestMapper, sm, embeddingModelId, { broadcast: true }).catch((err) => { logInfraError('sw-entry/doRegenerateEmbeddings-fire-forget', err); });
           }
         })().catch((e) => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
@@ -1688,7 +1689,8 @@ function doRegenerateEmbeddings(
           .filter(([n, pid]) => Number.isFinite(n) && n > 0 && pid);
         entries.sort((a, b) => a[0] - b[0]);
         return entries.map(([, pid]) => normalizeProvId(pid));
-      } catch {
+      } catch (err) {
+        logInfraError('sw-entry/readCitationOrderFromMeta', err);
         return [];
       }
     };

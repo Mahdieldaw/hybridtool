@@ -193,7 +193,7 @@ async function cleanupEmbeddingsBuffersTTL(opts = {}) {
           try {
             cursor.delete();
             deleted++;
-          } catch (_) { }
+          } catch (err) { console.error('[embedding-controller/cleanupEmbeddingsBuffersTTL/cursor-delete]', err); }
         }
         cursor.continue();
       };
@@ -202,14 +202,14 @@ async function cleanupEmbeddingsBuffersTTL(opts = {}) {
   } finally {
     try {
       db.close();
-    } catch (_) { }
+    } catch (err) { console.error('[embedding-controller/cleanupEmbeddingsBuffersTTL/db-close]', err); }
   }
 }
 
 function startEmbeddingsBuffersCleanupLoop() {
   if (embeddingsBuffersCleanupIntervalId != null) return;
   embeddingsBuffersCleanupIntervalId = setInterval(() => {
-    cleanupEmbeddingsBuffersTTL().catch(() => { });
+    cleanupEmbeddingsBuffersTTL().catch((err) => { console.error('[embedding-controller/startEmbeddingsBuffersCleanupLoop]', err); });
   }, EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS);
 }
 
@@ -218,7 +218,7 @@ async function putEmbeddingsBuffer(buffer) {
   const now = Date.now();
   if (now - lastEmbeddingsBuffersCleanupAt > EMBEDDINGS_BUFFERS_CLEANUP_INTERVAL_MS) {
     lastEmbeddingsBuffersCleanupAt = now;
-    cleanupEmbeddingsBuffersTTL().catch(() => { });
+    cleanupEmbeddingsBuffersTTL().catch((err) => { console.error('[embedding-controller/putEmbeddingsBuffer/cleanup]', err); });
   }
 
   const db = await openEmbeddingsDb();
@@ -237,7 +237,7 @@ async function putEmbeddingsBuffer(buffer) {
   } finally {
     try {
       db.close();
-    } catch (_) { }
+    } catch (err) { console.error('[embedding-controller/putEmbeddingsBuffer/db-close]', err); }
   }
 }
 

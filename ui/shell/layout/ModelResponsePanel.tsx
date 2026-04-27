@@ -33,6 +33,7 @@ import clsx from 'clsx';
 import { safeLazy } from '../../utils/safe-lazy';
 import { PipelineErrorBanner } from '../chrome/PipelineErrorBanner';
 import type { EditorialAST } from '../../../shared/types';
+import { logInfraError } from '../../../src/errors';
 
 // Lazy load ArtifactOverlay - only shown when user clicks artifact badge
 const ArtifactOverlay = safeLazy(() =>
@@ -193,7 +194,8 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         if (parsed && typeof parsed === 'object') {
           return `\n\n\`\`\`json\n${trimmed}\n\`\`\`\n`;
         }
-      } catch {
+      } catch (err) {
+        logInfraError('ModelResponsePanel/formatAsMarkdown/JSON-parse', err);
         return `\n\n\`\`\`json\n${trimmed}\n\`\`\`\n`;
       }
 

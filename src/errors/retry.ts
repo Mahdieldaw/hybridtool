@@ -200,8 +200,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       resolve();
     }, ms);
     const onAbort = () => {
-      clearTimeout(timer);
       cleanup();
+      clearTimeout(timer);
       reject(new DOMException('Aborted', 'AbortError'));
     };
     const cleanup = () => {

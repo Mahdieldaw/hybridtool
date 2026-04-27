@@ -78,7 +78,9 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
       if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
         return { [pid]: { meta, continueThread: true } };
       }
-    } catch (_) { }
+    } catch (err) {
+      console.error('[mapping-phase/resolveProviderContextsForMapping] Historical response lookup failed:', err);
+    }
   }
 
   try {
@@ -90,7 +92,9 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
     if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
       return { [pid]: { meta, continueThread: true } };
     }
-  } catch (_) { }
+  } catch (err) {
+    console.error('[mapping-phase/resolveProviderContextsForMapping] getProviderContexts failed:', err);
+  }
 
   return undefined;
 }
@@ -655,7 +659,9 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               try {
                 const meta = finalResult?.meta;
                 if (meta && typeof meta === 'object') return { ...meta };
-              } catch (_) { }
+              } catch (err) {
+                console.error('[mapping-phase/executeMappingPhase] Failed to read providerThreadMeta:', err);
+              }
               return {};
             })();
 
@@ -671,7 +677,9 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
               if (finalResultWithMeta?.meta) {
                 workflowContexts[payload.mappingProvider] = providerThreadMeta;
               }
-            } catch (_) { }
+            } catch (err) {
+              console.error('[mapping-phase/executeMappingPhase] Failed to cache workflowContexts for mapping provider:', err);
+            }
 
             // Persist semantic mapper's thread position for the next extend turn.
             try {

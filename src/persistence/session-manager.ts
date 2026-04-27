@@ -219,7 +219,8 @@ export class SessionManager {
       try {
         if (_stack.has(value)) return '[Circular]';
         _stack.add(value);
-      } catch (_) {
+      } catch (err) {
+        console.error('[persistence/session-manager/_toJsonSafe] circular reference check failed:', err);
         return String(value);
       }
       const arr: unknown[] = [];
@@ -229,7 +230,9 @@ export class SessionManager {
       }
       try {
         _stack.delete(value);
-      } catch (_) {}
+      } catch (err) {
+        console.error('[persistence/session-manager/_toJsonSafe] failed to delete from stack:', err);
+      }
       return arr;
     }
 
@@ -238,7 +241,8 @@ export class SessionManager {
       try {
         if (_stack.has(obj)) return '[Circular]';
         _stack.add(obj);
-      } catch (_) {
+      } catch (err) {
+        console.error('[persistence/session-manager/_toJsonSafe] circular reference check failed for object:', err);
         return String(value);
       }
 
@@ -251,13 +255,16 @@ export class SessionManager {
       }
       try {
         _stack.delete(obj);
-      } catch (_) {}
+      } catch (err) {
+        console.error('[persistence/session-manager/_toJsonSafe] failed to delete object from stack:', err);
+      }
       return out;
     }
 
     try {
       return String(value);
-    } catch (_) {
+    } catch (err) {
+      console.error('[persistence/session-manager/_toJsonSafe] failed to stringify value:', err);
       return undefined;
     }
   }

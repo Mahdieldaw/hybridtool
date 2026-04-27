@@ -47,10 +47,14 @@ class ExtensionAPI {
   private disconnectAll() {
     try {
       this.portHealthManager?.disconnect();
-    } catch {}
+    } catch (e) {
+      console.error('[ui/services/extension-api] failed:', e);
+    }
     try {
       this.port?.disconnect();
-    } catch {}
+    } catch (e) {
+      console.error('[ui/services/extension-api] failed:', e);
+    }
     this.port = null;
   }
 

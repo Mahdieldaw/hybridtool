@@ -4,6 +4,7 @@
  */
 
 import type { EvidenceRow } from '../hooks/instrument/useEvidenceRows';
+import { logInfraError } from '../../src/errors';
 
 // ============================================================================
 // TOKENIZER
@@ -458,7 +459,9 @@ export function compileExpression(
     const tokens = tokenize(expression);
     const parser = new Parser(tokens);
     parser.parse(dummyEnv);
-  } catch {
+  } catch (err) {
+    // Invalid expression — expected during compile-time validation
+    console.warn('[expression-engine/compileExpression] Expression validation failed:', err);
     return null;
   }
 
@@ -477,7 +480,8 @@ export function compileExpression(
         }
         const parser = new Parser(cachedTokens);
         return parser.parse(env);
-      } catch {
+      } catch (err) {
+        logInfraError('expression-engine/evaluate/parse', err);
         return null;
       }
     },

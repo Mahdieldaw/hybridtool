@@ -356,8 +356,8 @@ export class ConnectionHandler {
           },
         },
       });
-    } catch {
-      // port closed
+    } catch (err) {
+      console.warn('[system/connection-handler/_emitFinalizedFromPersistence] postMessage failed — port may be closed:', err);
     }
   }
 
@@ -521,8 +521,8 @@ export class ConnectionHandler {
           modelIndex: indices.get(providerId) ?? 0,
         })),
       });
-    } catch {
-      // port closed
+    } catch (err) {
+      console.warn('[system/connection-handler/_postProbeSessionStart] postMessage failed — port may be closed:', err);
     }
   }
 
@@ -1375,8 +1375,8 @@ export class ConnectionHandler {
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
       });
-    } catch {
-      // port closed
+    } catch (err) {
+      console.warn('[system/connection-handler/_sendError] postMessage failed — port may be closed:', err);
     }
   }
 

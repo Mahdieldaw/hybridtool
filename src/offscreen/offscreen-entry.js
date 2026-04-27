@@ -27,5 +27,5 @@ if (hasDom && hasChromeRuntime) {
       hasDom,
       hasChromeRuntime,
     });
-  } catch (_) {}
+  } catch (err) { console.error('[offscreen-entry/locus-log]', err); }
 }

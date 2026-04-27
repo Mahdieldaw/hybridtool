@@ -25,6 +25,7 @@ import { useProviderArtifact } from '../hooks/providers/useProviderArtifact';
 import { EditorialPreview } from '../reading/EditorialPreview';
 import { formatFullTurn } from '../utils/copy-format-utils';
 import { getArtifactStatements } from '../../shared/corpus-utils';
+import { logInfraError } from '../../src/errors';
 
 interface CognitiveOutputRendererProps {
   aiTurn: AiTurn;
@@ -142,7 +143,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         edges: mappingArtifact?.semantic?.edges ?? [],
         modelCount: mappingArtifact?.meta?.modelCount,
       });
-    } catch (e) {
+    } catch (err) {
+      logInfraError('TurnOutputRouter/computeStructuralAnalysis', err);
       return undefined;
     }
   }, [mappingArtifact]);

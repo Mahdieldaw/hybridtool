@@ -21,6 +21,7 @@ import type { QueryRelevanceResult } from '../../geometry/annotate.js';
 import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
 import type { ShadowParagraph } from '../../shadow/shadow-paragraph-projector.js';
 import type { ShadowStatement } from '../../shadow/shadow-extractor.js';
+import { logInfraError } from '../../errors';
 
 // ─── Local shape types inferred from usage ───────────────────────────────────
 
@@ -175,7 +176,9 @@ export async function buildGeometryAsync(
       if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
         embeddingBackend = status.backend;
       }
-    } catch (_) { }
+    } catch (err) {
+      console.warn('[geometry-runner/buildGeometryAsync] getEmbeddingStatus failed (non-fatal):', err);
+    }
 
     const rawQuery =
       (payload && typeof payload.originalPrompt === 'string' && payload.originalPrompt) ||
@@ -384,7 +387,8 @@ export async function buildGeometryAsync(
           avgIsolationScore,
         },
       };
-    } catch (_) {
+    } catch (err) {
+      logInfraError('geometry-runner/buildGeometryAsync: substrateSummary build failed', err);
       results.substrateSummary = null;
     }
 
@@ -413,7 +417,8 @@ export async function buildGeometryAsync(
         status: results.preSemanticInterpretation ? 'ok' : 'skipped',
         degenerate: !!results.substrateDegenerate,
       };
-    } catch (_) {
+    } catch (err) {
+      logInfraError('geometry-runner/buildGeometryAsync: buildPreSemanticInterpretation failed', err);
       results.preSemanticInterpretation = null;
       geometryDiagnostics.stages.preSemantic = {
         status: 'failed',
@@ -518,7 +523,7 @@ export async function buildGeometryAsync(
               },
             });
           } catch (err) {
-            console.error('[buildGeometryAsync] Embedding persistence FAILED:', err);
+            logInfraError('buildGeometryAsync: Embedding persistence FAILED', err);
             throw err;
           }
         }

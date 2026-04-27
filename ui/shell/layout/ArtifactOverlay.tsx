@@ -5,6 +5,7 @@ import React, { useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { toastAtom } from '../../state';
 import MarkdownDisplay from '../../shared/MarkdownDisplay';
+import { logInfraError } from '../../../src/errors';
 
 export interface Artifact {
   title: string;
@@ -63,7 +64,7 @@ export const ArtifactOverlay: React.FC<ArtifactOverlayProps> = ({ artifact, onCl
         URL.revokeObjectURL(url);
         try {
           document.body.removeChild(a);
-        } catch { }
+        } catch (err) { logInfraError('ArtifactOverlay/handleDownload/removeChild', err); }
       }, 0);
       setToast({ id: Date.now(), message: 'Download started', type: 'info' });
     } catch (error) {

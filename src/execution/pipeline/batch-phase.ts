@@ -5,6 +5,7 @@ import { logRetryEvent } from '../../errors/retry';
 import { buildReactiveBridge } from '../utils/reactive-bridge';
 import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
 import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
+import { logInfraError } from '../../errors';
 import type { 
   WorkflowStep, 
   WorkflowContext, 
@@ -129,7 +130,9 @@ export async function executeBatchPhase(
               },
             });
           }
-        } catch (_) { }
+        } catch (err) {
+          logInfraError('batch-phase/skippedProviders: status update failed', err);
+        }
       });
       try {
         streamingManager.port.postMessage({
@@ -141,7 +144,9 @@ export async function executeBatchPhase(
           completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
           totalCount: providerStatuses.length,
         });
-      } catch (_) { }
+      } catch (err) {
+        logInfraError('batch-phase/skippedProviders: postMessage failed', err);
+      }
     }
     if (allowedProviders.length === 0) {
       throw new Error(
@@ -182,7 +187,9 @@ export async function executeBatchPhase(
               totalCount: providers.length,
             });
           }
-        } catch (_) { }
+        } catch (err) {
+          console.error('[batch-phase/onPartial] postMessage failed:', err);
+        }
       },
       onProviderComplete: (providerId: ProviderKey, resultWrapper: any) => {
         const entry = providerStatuses.find((s) => s.providerId === providerId);
@@ -204,7 +211,9 @@ export async function executeBatchPhase(
                 delayMs: classified?.retryAfterMs || 0,
               });
             }
-          } catch (_) { }
+          } catch (err) {
+            console.error('[batch-phase/onProviderComplete] health tracker failed:', err);
+          }
 
           if (entry) {
             entry.status = 'failed';
@@ -233,7 +242,9 @@ export async function executeBatchPhase(
             completedProviders.add(providerId);
             healthTracker?.recordSuccess?.(providerId);
           }
-        } catch (_) { }
+        } catch (err) {
+          console.error('[batch-phase/onProviderComplete] health tracker update failed:', err);
+        }
 
         if (entry) {
           entry.status = 'completed';
@@ -250,7 +261,9 @@ export async function executeBatchPhase(
               completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
               totalCount: providers.length,
             });
-          } catch (_) { }
+          } catch (err) {
+            console.error('[batch-phase/onProviderComplete] postMessage failed:', err);
+          }
         }
       },
       onError: (error: any) => {
@@ -262,7 +275,9 @@ export async function executeBatchPhase(
             status: 'failed',
             error: error?.message || String(error),
           });
-        } catch (_) { }
+        } catch (err) {
+          console.error('[batch-phase/onError] postMessage failed:', err);
+        }
       },
       onAllComplete: async (results: Map<ProviderKey, any>, errors: Map<ProviderKey, any>) => {
         const batchUpdates: Record<string, any> = {};
@@ -316,7 +331,9 @@ export async function executeBatchPhase(
               entry.progress = 100;
               if (entry.error) delete entry.error;
             }
-          } catch (_) { }
+          } catch (err) {
+            console.error('[batch-phase/onAllComplete] result processing failed:', err);
+          }
         });
 
         errors.forEach((error, providerId) => {
@@ -364,7 +381,9 @@ export async function executeBatchPhase(
               formattedResults[providerId].meta.errorMessage = classified?.message;
               formattedResults[providerId].meta.requiresReauth = classified?.requiresReauth;
             }
-          } catch (_) { }
+          } catch (err) {
+            console.error('[batch-phase/onAllComplete] error processing failed:', err);
+          }
         });
 
         const hasAnyValidResults = Object.values(formattedResults).some(
@@ -440,7 +459,9 @@ export async function executeBatchPhase(
               mappingCompleted: false,
             });
           }
-        } catch (_) { }
+        } catch (err) {
+          console.error('[batch-phase/onAllComplete] postMessage failed:', err);
+        }
 
         resolve({
           results: formattedResults,

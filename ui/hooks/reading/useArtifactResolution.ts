@@ -10,6 +10,7 @@
 
 import { useMemo, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
+import { logInfraError } from '../../../src/errors';
 import {
   turnAtomFamily,
   mappingProviderAtom,
@@ -37,7 +38,8 @@ function normalizeArtifactCandidate(input: unknown): any | null {
     try {
       const parsed = JSON.parse(raw);
       artifact = parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
+    } catch (err) {
+      logInfraError('useArtifactResolution/resolveArtifact/JSON-parse', err);
       return null;
     }
   }

@@ -9,6 +9,7 @@ import { ContextManager } from './io/context-manager.js';
 import { PersistenceCoordinator } from './io/persistence-coordinator.js';
 import { TurnEmitter } from './io/turn-emitter.js';
 import { classifyError } from '../errors/classifier.js';
+import { logInfraError } from '../errors';
 
 export class WorkflowEngine {
   private orchestrator: any;
@@ -168,7 +169,7 @@ export class WorkflowEngine {
       await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
     } catch (error) {
       const criticalMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
+      logInfraError('WorkflowEngine/execute: Critical workflow execution error', error);
       let finalized = false;
       try {
         await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
@@ -221,16 +222,10 @@ export class WorkflowEngine {
                   break;
                 } catch (retryError) {
                   const isLast = attempt === maxAttempts - 1;
-                  console.error(
-                    `[WorkflowEngine] Failed to mark turn as errored (attempt ${attempt + 1}/${maxAttempts}):`,
-                    retryError
-                  );
+                  logInfraError(`WorkflowEngine/markTurnErroredAttempt: Failed to mark turn as errored (attempt ${attempt + 1}/${maxAttempts})`, retryError);
 
                   if (isLast) {
-                    console.error(
-                      `[WorkflowEngine] CRITICAL: Could not mark turn ${context.canonicalAiTurnId} as errored after ${maxAttempts} attempts. Last error:`,
-                      retryError
-                    );
+                    logInfraError(`WorkflowEngine/markTurnErroredCritical: CRITICAL: Could not mark turn ${context.canonicalAiTurnId} as errored after ${maxAttempts} attempts`, retryError);
                     // We don't throw here to avoid crashing the whole process loop if possible,
                     // but the error state is lost in persistence.
                   }
@@ -238,7 +233,7 @@ export class WorkflowEngine {
               }
             }
           } catch (markError) {
-            console.error('[WorkflowEngine] Failed to mark turn as errored:', markError);
+            logInfraError('WorkflowEngine/markTurnErrored: Failed to mark turn as errored', markError);
           }
         }
       }

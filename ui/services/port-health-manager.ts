@@ -1,3 +1,5 @@
+import { logInfraError } from '../../src/errors';
+
 export class PortHealthManager {
   private port: chrome.runtime.Port | null = null;
   private healthCheckInterval: number | null = null;
@@ -139,7 +141,8 @@ export class PortHealthManager {
         p,
         new Promise<null>((resolve) => window.setTimeout(() => resolve(null), timeoutMs)),
       ])) as T | null;
-    } catch {
+    } catch (err) {
+      logInfraError('port-health-manager/sendWithTimeout', err);
       return null;
     }
   }
@@ -302,7 +305,10 @@ export class PortHealthManager {
     if (this.port) {
       try {
         this.port.disconnect();
-      } catch (e) {}
+      } catch (err) {
+        // Port may already be closed on normal navigation — expected condition
+        console.warn('[port-health-manager/cleanup] port.disconnect failed — port may already be closed:', err);
+      }
       this.port = null;
     }
   }

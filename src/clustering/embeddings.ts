@@ -13,6 +13,7 @@
 import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type { ShadowStatement } from '../shadow/shadow-extractor';
 import { EmbeddingConfig, DEFAULT_CONFIG } from './config';
+import { logInfraError } from '../errors';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EMBEDDING RESULT TYPES
@@ -248,7 +249,9 @@ async function getEmbeddingsBuffer(key: string): Promise<ArrayBuffer> {
   } finally {
     try {
       db.close();
-    } catch (_) {}
+    } catch (err) {
+      logInfraError('clustering/getEmbeddingsBuffer/db-close', err);
+    }
   }
 }
 
@@ -271,7 +274,9 @@ export async function cleanupPendingEmbeddingsBuffers(): Promise<void> {
   } finally {
     try {
       db.close();
-    } catch (_) {}
+    } catch (err) {
+      logInfraError('clustering/cleanupPendingEmbeddingsBuffers/db-close', err);
+    }
   }
 }
 

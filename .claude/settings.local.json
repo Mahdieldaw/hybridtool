@@ -32,6 +32,6 @@
       "Bash(grep -r \"hardcoded\\\\|TODO.*provider\\\\|FIXME.*provider\" /c/Users/Mahdi/Desktop/hybrid/src --include=\"*.ts\" --include=\"*.js\" 2>/dev/null | head -20)"
     ]
   },
-  "prefersReducedMotion": true,
-  "outputStyle": "default"
+  "outputStyle": "default",
+  "prefersReducedMotion": true
 }

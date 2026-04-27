@@ -33,8 +33,8 @@ Thumbs.db
 docs/
 # Documentation
 scripts/
-*.txt
-*.d.ts
+**.spec.ts
+ui/hooks/reading/useCorpusSearch.test.tsx*.d.ts
 *.test.ts
 .*test.ts
 src/core/V31Verification.ts

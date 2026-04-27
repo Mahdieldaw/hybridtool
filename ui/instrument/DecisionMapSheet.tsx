@@ -50,6 +50,7 @@ import { ColumnPicker } from './ColumnPicker';
 // ============================================================================
 
 import { parseSemanticMapperOutput } from '../../shared/parsing-utils';
+import { logInfraError } from '../../src/errors';
 
 import { normalizeProviderId } from '../utils/provider-id-mapper';
 import { useArtifactResolution } from '../hooks/reading/useArtifactResolution';
@@ -393,7 +394,8 @@ export const DecisionMapSheet = React.memo(() => {
     if (narrative && typeof narrative === 'object') {
       try {
         return JSON.stringify(narrative, null, 2);
-      } catch {
+      } catch (err) {
+        logInfraError('DecisionMapSheet/narrativeText/JSON-stringify', err);
         return String(narrative);
       }
     }
@@ -407,7 +409,8 @@ export const DecisionMapSheet = React.memo(() => {
       const parsed = parseSemanticMapperOutput(raw);
       if (parsed?.success && parsed?.output) return parsed;
       return null;
-    } catch {
+    } catch (err) {
+      logInfraError('DecisionMapSheet/parsedSemanticFromText/parse', err);
       return null;
     }
   }, [rawMappingText]);

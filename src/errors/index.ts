@@ -26,6 +26,8 @@ export {
 // without pulling in core/errors. Re-exported here for convenience.
 export { HTOSError, ProviderAuthError, type HTOSErrorCode } from '../../shared/types/provider';
 
+export { logInfraError } from './infra-logger';
+
 // Retry: policy, telemetry, orchestration (consolidated)
 export {
   getPolicy,
