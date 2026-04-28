@@ -1,0 +1,1878 @@
+﻿# Full Measurements Reference â€” Pipeline Edition
+
+Complete specification of all measurements produced by the deterministic pipeline, organized by execution phase. Covers embeddings, geometry, and provenance layers with detailed computation steps and health diagnostics.
+
+**Epistemic tier notation:**
+- `L1` â€” pure math on vectors/graphs, no labeled signals
+- `L2` â€” uses labeled signals (stance, supporter list, tier). Must be read as signal-conditioned, not purely geometric.
+
+---
+
+## Execution Order Index
+
+```
+SHADOW LAYER (embedding corpus finalization)
+  â†“
+
+CLUSTERING LAYER (src/clustering/)
+  â†“
+  â†’ Statement Embeddings
+  â†’ Paragraph Embeddings
+  â†’ Query Embeddings
+  â†’ Similarity Computation
+  â†’ Normalization & Caching
+
+GEOMETRY LAYER (src/geometry/ â€” 4-phase)
+  â†“
+  â†’ Phase 1 (Measure): Pairwise Field, Basin Inversion, Substrate
+  â†’ Phase 2 (Interpret): Gates, Regions, Corpus Mode
+  â†’ Phase 3 (Annotate): Query Relevance
+  â†’ Phase 4 (Engine): Orchestration and output
+
+PROVENANCE LAYER (src/core/provenance/ â€” 5-phase)
+  â†“
+  [Provenance pipeline phases...]
+```
+
+---
+
+## CLUSTERING LAYER
+
+Text-to-vector embedding generation and similarity computation. All embeddings produced here flow downstream to geometry (pairwise field) and provenance (mixed-method assignment). This layer is purely geometric â€” no semantic interpretation yet.
+
+---
+
+## Text Processing Pipeline (Pre-Embedding)
+
+Before statements and paragraphs reach the embedding model, text is preprocessed to handle formatting, truncation, and normalize content.
+
+### Overview
+
+Text processing runs in two parallel streams:
+- **Paragraph path:** Full text preserved (no truncation), inline markdown stripped
+- **Query path:** Structured truncation for long queries, markdown stripped
+
+Both streams feed normalized text to the embedding model. Preprocessing decisions directly impact downstream similarity scores â€” malformed or truncated text produces degraded embeddings.
+
+### Statement Text Normalization
+
+Individual statements undergo light preprocessing before statement-level embedding:
+
+**Inline Markdown Stripping**
+
+Function: `stripInlineMarkdown(text)` â€” removes formatting while preserving semantic content.
+
+| Pattern | Action | Purpose |
+|---|---|---|
+| Backtick code spans `` `code` `` | Strip markers, keep text | Remove code markup; semantics are in the code itself |
+| Bold `**text**` or `__text__` | Strip markers, keep text | Preserve emphasized content without emphasis syntax |
+| Italics `*text*` or `_text_` | Strip markers, keep text | Preserve italicized content |
+| Links `[text](url)` | Keep text only, discard URL | Preserve link label; URL adds noise to embedding |
+| HTML tags `<tag>content</tag>` | Strip tags, keep content | Handle any residual HTML |
+
+**Why it matters:** Embedding models are trained on natural language, not markdown. Raw markdown tokens (`**`, `[`, `]`) are out-of-distribution and distort the semantic vector. Stripping ensures embeddings reflect semantic content, not formatting artifacts.
+
+**Edge cases handled:**
+- Nested markers: `**bold _and italic_**` â†’ "bold and italic"
+- Empty emphasis: `****` or `****` â†’ (discarded)
+- Boundary checks: Prevents splitting on false-positive word-boundary markers
+
+Source code: `src/clustering/embeddings.ts`, `stripInlineMarkdown()` (~50 lines).
+
+---
+
+### Query Text Truncation
+
+Long user queries are intelligently truncated to fit embedding token budget while preserving high-signal content.
+
+**Problem Statement**
+
+Embedding models have fixed context windows (typically 512â€“1024 tokens). A 10,000-token user query exceeds budget. Simply hard-cutting the query loses framing and instructions. Solution: structured truncation that preserves:
+1. High-signal structural content (headers, bullets, directives)
+2. Opening framing (context and scope)
+3. Closing instructions (decision criteria, constraints)
+
+**Algorithm: Structured Truncation**
+
+Function: `structuredTruncate(text, maxChars)` â€” preserves signal within character budget.
+
+**Phase 1: Structural Extraction**
+
+Identify high-signal content by pattern:
+- **Headers** â€” lines starting with `#`, `##`, etc. (scope markers)
+- **Bullets** â€” lines starting with `-`, `*`, or `+` (claims, options)
+- **Numbered lists** â€” lines starting with `1.`, `2.`, etc. (sequences, steps)
+- **Directives** â€” lines containing keywords: "must", "should", "required", "consider", "assume", "note"
+
+Extract these patterns, allocate budget:
+- Structural content: capped at 60% of budget
+- If exceeds, keep head of list (early items are typically higher signal)
+
+**Phase 2: Head/Tail Split**
+
+Remaining budget (40%) split between document head and tail:
+- **Head (20%):** Opening paragraphs (framing, context, scope definition)
+- **Tail (20%):** Closing paragraphs (instructions, decision criteria, constraints)
+
+Extract verbatim from original document (ordered).
+
+**Phase 3: Merge & Deduplicate**
+
+Combine structural + head + tail content:
+1. Sort by original document position (preserve coherence)
+2. De-overlap: if head/tail already contains a structural item, don't double-include
+3. Preserve relative ordering in source
+
+**Phase 4: Final Trim**
+
+If merged length > maxChars:
+- Hard-cut at nearest whitespace boundary (avoid mid-word cuts)
+- Append `[...]` to signal truncation
+
+**Example: Minimal Query Demonstrating Each Principle**
+
+Original (400 chars):
+```
+# Device Approval
+
+We need FDA 510(k) clearance. Here's context: the device is wearable with cloud
+backend. Clinical trial shows 92% specificity. We also need to understand predicate
+selection. Regulatory landscape is evolving. The regulatory landscape matters for
+cost. Budget is tight but can afford one trial. We need FDA 510(k) clearance now.
+
+## Key Questions
+- Does device compare to predicate?
+- What evidence is required for AI component?
+- Timeline to clearance?
+
+Must address competitive positioning. Should be < 18 months. Consider how competitors
+are approaching this. Cost must be minimized. Competitive advantage?
+```
+
+Extracted (truncated to 150 chars, demonstrates principles):
+```
+# Device Approval
+
+We need FDA 510(k) clearance for a wearable cloud-backend device with 92% specificity.
+
+## Key Questions
+- Does device compare to predicate?
+- What evidence is required for AI component?
+- Timeline to clearance?
+
+Must address competitive positioning and be < 18 months. Cost must be minimized.
+Competitive advantage?
+```
+
+**Principles in Action:**
+
+| Principle | Original | Extracted | Notes |
+|---|---|---|---|
+| **Structural extraction** | Headers (#, ##), bullets (- three questions), directives (must, should) | All preserved; marked as load-bearing | Non-structural prose about "regulatory landscape," "budget," "clinical trial" discarded |
+| **Head/Tail split** | Opening: "We need FDA 510(k) clearance. Here's context..." + Closing: "...Cost must be minimized. Competitive advantage?" | Both preserved in extracted | Framing + decision driver at start and end survive |
+| **Deduplication** | "FDA 510(k) clearance" appears twice (line 1 + last line); "regulatory landscape" appears twice | Appears once in extracted | Repeated context merged; first occurrence kept |
+| **Final trim** | 400 â†’ 150 chars | Fits budget | Removed middle prose about budget, trial specifics, competitor narrative flow; kept decision criteria |
+
+**Why it matters:** Even in this tiny example, deduplication removes 5â€“10% redundancy, structural extraction identifies 8 load-bearing items (1 header, 3 bullets, 3 directives), and head/tail split preserves scope and constraints. Embedding the original would waste vectors on repetition; embedding the extracted version keeps signal density high.
+
+Source code: `src/clustering/embeddings.ts`, `structuredTruncate()` (~80 lines).
+
+---
+
+## Embedding Generation (L1)
+
+Three parallel embedding streams produce normalized vector representations for statements, paragraphs, and the query.
+
+### Paragraph Embeddings
+
+**What It Is**
+
+Each paragraph in the shadow corpus (collection of statements, joined by `\n\n`) is encoded into a 768-dimensional vector (default). The embedding model treats the full paragraph text as a single semantic unit.
+
+**Computation Steps**
+
+1. **Text Assembly**
+   - Collect all statements belonging to paragraph P (in document order)
+   - Join statement texts with `\n\n` separator (preserves local coherence)
+   - Apply `stripInlineMarkdown()` to the joined text
+   - Result: normalized paragraph text
+
+2. **Model Inference**
+   - Communicate with Chrome offscreen worker via `chrome.runtime.sendMessage()`
+   - Worker loads embedding model (default: `bge-base-en-v1.5`, 768-dim)
+   - Model encodes text â†’ dense vector
+   - Worker returns embeddings as binary ArrayBuffer or JSON array
+
+3. **Binary Decoding (if applicable)**
+   - If response includes `embeddingsKey`, retrieve ArrayBuffer from IndexedDB
+   - Parse as Float32Array (4 bytes per dimension Ã— 768 = 3,072 bytes per vector)
+   - Validate count matches paragraph count
+   - Validate buffer size sufficient for count Ã— dimensions
+
+4. **Normalization**
+   - Apply L2 normalization to each paragraph embedding in-place
+   - L2 norm: `||v|| = sqrt(v[0]Â² + v[1]Â² + ... + v[767]Â²)`
+   - Divide all elements: `v[i] /= ||v||`
+   - Result: unit vector (magnitude = 1), cosine similarity = dot product
+
+5. **Return**
+   - `EmbeddingResult`:
+     - `embeddings`: Map<paragraphId, Float32Array> (768-dim normalized vectors)
+     - `dimensions`: 768
+     - `timeMs`: wall-clock generation time (includes model load + inference)
+
+**Function Signature**
+
+```typescript
+generateEmbeddings(
+  paragraphs: ShadowParagraph[],
+  shadowStatements: ShadowStatement[],
+  config?: EmbeddingConfig
+): Promise<EmbeddingResult>
+```
+
+**Why It Matters**
+
+Paragraph embeddings anchor all downstream geometry. They are:
+- The source of the pairwise similarity field (geometry substrate)
+- The basis for basin inversion (clustering detection)
+- Used for gate evaluation (do we have enough structure to proceed?)
+
+Poor paragraph embeddings (e.g., uniform vectors, collapsed space) cascade: degenerate similarity field â†’ failed gates â†’ routing broken.
+
+**Health Checks**
+
+| Check | What to measure | Healthy | Concerning |
+|---|---|---|---|
+| **Embedding dimensionality** | All vectors have exactly 768 dimensions | 100% (all match) | Any < 768 (incomplete vectors) |
+| **L2 norm** | Magnitude of each normalized vector | â‰ˆ 1.0 (within 1e-5) | < 0.99 or > 1.01 (normalization failed) |
+| **Batch latency** | Time to embed 100 paragraphs | < 10 sec (GPU) or < 60 sec (WASM) | > 60 sec (indicates model not loaded or inference slow) |
+| **Consistency** | Same paragraph text â†’ same embedding (deterministic inference) | Identical vectors | Different vectors (model is non-deterministic; unsupported) |
+
+---
+
+### Statement Embeddings
+
+**What It Is**
+
+Individual statements are embedded independently, producing statement-level vectors. These flow downstream to mixed-method provenance (claim centroid computation and statement-claim thresholding) and geometry relevance scoring.
+
+**Computation Steps**
+
+1. **Text Preparation**
+   - For each statement, extract text
+   - Apply `stripInlineMarkdown()` (same as paragraph path)
+   - Result: normalized statement text
+
+2. **Batch Inference**
+   - Collect all statement texts, send to offscreen worker
+   - For large statement sets (> 64 statements), inference splits into batches of 64 with yield between batches (prevents blocking)
+   - Worker encodes each statement â†’ 768-dim vector
+   - Return binary or JSON (same as paragraph path)
+
+3. **Decoding & Normalization**
+   - Parse embeddings (binary from IndexedDB or JSON)
+   - Apply L2 normalization per vector
+   - Validate count = statement count
+
+4. **Return**
+   - `StatementEmbeddingResult`:
+     - `embeddings`: Map<statementId, Float32Array>
+     - `dimensions`: 768
+     - `statementCount`: number of statements
+     - `timeMs`: generation time
+
+**Function Signature**
+
+```typescript
+generateStatementEmbeddings(
+  statements: ShadowStatement[],
+  config?: EmbeddingConfig
+): Promise<StatementEmbeddingResult>
+```
+
+**Why It Matters**
+
+Statement embeddings are critical for two pipelines:
+
+1. **Claim Centroid Scoring (Mixed-Method Provenance):** Claim centroids are computed from claim text directly (label + text via `generateTextEmbeddings`). Statement embeddings are then scored against these centroids (cosine similarity) to assign statements to claims. Each claim applies a statement-level threshold (Î¼ global = mean statementâ†’claim similarity across all statements). This threshold acts as a **gate within each paragraph**: not all statements in a paragraph-that-matches-a-claim necessarily get assigned to that claim. Statements must embed with enough discriminative power to differentiate which belong to which claim.
+
+2. **Query Relevance (Geometry Phase 3):** Statement embeddings are scored against the query embedding (cosine similarity) to measure how directly each statement addresses the user's query. This is a secondary signal used for statement ranking/instrumentation.
+
+If statement embeddings collapse (all similar), both provenance gates (statement-level filtering) and query relevance (ranking) become unreliable.
+
+---
+
+### Query Embeddings
+
+**What It Is**
+
+The user's query is encoded as a single 768-dim vector, serving as the reference point for all relevance calculations.
+
+**Computation Steps**
+
+1. **Text Preparation**
+   - Extract query text from input
+   - Apply `structuredTruncate()` (if length > 2,000 chars; 1,000-char budget default)
+   - Apply `stripInlineMarkdown()`
+   - Result: normalized, truncated query text
+
+2. **Single-Vector Inference**
+   - Send truncated query to offscreen worker
+   - Worker encodes query â†’ 768-dim vector
+   - Return binary or JSON
+
+3. **Decoding & Normalization**
+   - Parse embedding (single vector)
+   - Apply L2 normalization
+   - Store as `queryEmbedding`
+
+4. **Return**
+   - `TextEmbeddingResult`:
+     - `embeddings`: Map<"0", Float32Array> (single entry keyed by "0")
+     - `dimensions`: 768
+     - `timeMs`: generation time
+
+**Function Signature**
+
+```typescript
+generateTextEmbeddings(
+  texts: string[],
+  config?: EmbeddingConfig
+): Promise<TextEmbeddingResult>
+```
+
+**Why It Matters**
+
+The query embedding is the north star for relevance. Every statement's relevance score is `cosineSimilarity(statementEmbedding, queryEmbedding)`. If the query embedding is corrupted or poorly normalized, all downstream relevance scores are degraded.
+
+Critical: query truncation must preserve intent. A query truncated to remove all decision criteria becomes meaningless.
+
+---
+
+## Similarity Computation (L1)
+
+After embeddings are generated and normalized, pairwise similarities are computed to produce the geometry substrate.
+
+### Cosine Similarity on Normalized Vectors
+
+**What It Is**
+
+Given two L2-normalized vectors **u** and **v** (both with magnitude = 1):
+
+```
+cosineSimilarity(u, v) = u Â· v = Î£(u[i] Ã— v[i]) for i in [0, 768)
+```
+
+Because vectors are normalized, the dot product **equals** the cosine of the angle between them, in range [0, 1].
+
+**Computation**
+
+```javascript
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dotProduct = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    dotProduct += a[i] * b[i];
+  }
+  return dotProduct;
+}
+```
+
+Time complexity: O(768) per pair = O(N Ã— M Ã— 768) for N paragraph embeddings vs M paragraphs (or N vs M statements for statement-statement similarities).
+
+**Similarity Ranges**
+
+| Range | Meaning | Example |
+|---|---|---|
+| **[0.9, 1.0]** | Nearly identical embeddings | Two paragraphs discussing the exact same topic, possibly paraphrased |
+| **[0.7, 0.9]** | Strong topical alignment | Paragraphs on closely related topics (e.g., device approval + clinical trial design) |
+| **[0.4, 0.7]** | Moderate semantic overlap | Shared domain but different focus (e.g., device approval + regulatory compliance) |
+| **[0.0, 0.4]** | Weak or no topical relation | Unrelated or tangentially related topics |
+
+**Why It Matters**
+
+Cosine similarity drives:
+- **Pairwise field:** The substrate on which basin inversion operates
+- **Mutual recognition graph:** Edges exist when both nodes exceed their local threshold (Î¼+Ïƒ)
+- **Query relevance:** Statement relevance = similarity to query embedding
+- **Mixed-method provenance:** Statement-to-claim competitive scoring
+
+Similarity calibration is critical. If all similarities are high (embedding space collapsed), gates fail. If all similarities are low (embeddings degenerate), no structure is detected.
+
+---
+
+## Embedding Caching & Performance
+
+### IndexedDB Persistence
+
+Embedding vectors are stored in IndexedDB (`htos-embeddings` database, `buffers` object store) to avoid re-computing embeddings on subsequent pipeline runs.
+
+**Operations**
+
+- **`openEmbeddingsDb()`** â€” Opens/creates IndexedDB, timeout 8 seconds
+- **`getEmbeddingsBuffer(key)`** â€” Retrieves ArrayBuffer for key (used when response from offscreen worker includes `embeddingsKey`)
+- **`cleanupPendingEmbeddingsBuffers()`** â€” Deletes pending keys after processing (reclaim storage)
+
+**Why It Matters**
+
+Embedding inference is expensive (5â€“20 seconds for 100+ paragraphs). Caching amortizes cost across multiple runs. On re-run, if embeddings are already cached, the clustering phase returns instantly.
+
+---
+
+## Summary: Embedding Pipeline Architecture
+
+```
+Input (statements, paragraphs, query)
+         â†“
+[Text Processing]
+  - stripInlineMarkdown() for all text
+  - structuredTruncate() for query (if length > 2000 chars)
+         â†“
+[Three Parallel Embedding Streams]
+  - Statement embeddings â†’ StatementÃ—Statement similarities (used in relevance)
+  - Paragraph embeddings â†’ ParagraphÃ—Paragraph similarities (used in pairwise field)
+  - Query embeddings â†’ QueryÃ—Statement similarities (used in relevance scoring)
+         â†“
+[Binary/JSON Decoding]
+  - Rehydrate from IndexedDB (binary) or JSON (fallback)
+  - Validate dimensions and counts
+         â†“
+[L2 Normalization]
+  - Normalize each vector to unit length (magnitude = 1)
+         â†“
+[Similarity Computation]
+  - Compute pairwise cosine similarities (dot product on normalized vectors)
+  - Range [0, 1] for each pair
+         â†“
+[Quality Checks]
+  - Semantic density (Î¼, Ïƒ, outlier rate)
+  - Dimensionality utilization (PCA analysis)
+         â†“
+[Cache Management]
+  - Store embeddings in IndexedDB for re-use
+  - Cleanup pending buffers
+         â†“
+[Output: EmbeddingPhaseResult]
+  - paragraphEmbeddings: Map<paragraphId, Float32Array>
+  - statementEmbeddings: Map<statementId, Float32Array>
+  - queryEmbedding: Float32Array
+  - pairwiseSimilarities: (computed downstream in geometry phase)
+  - health: { semanticDensity, timings, cacheHit }
+```
+
+**Key Integration Points**
+
+- **Downstream to geometry:** Embeddings feed the pairwise field (Measure phase)
+- **Downstream to provenance:** Embeddings feed statement-to-claim similarity (Mixed-Method Measure phase)
+- **Upstream from shadow:** Receives finalized statements + paragraphs
+- **Configuration from config.ts:** Uses `DEFAULT_CONFIG` (768-dim, bge-base-en-v1.5 model)
+
+---
+
+## Performance Baselines
+
+Typical latencies for the clustering phase (all embeddings + caching + quality checks):
+
+| Operation | Input Size | Time (GPU) | Time (WASM) | Notes |
+|---|---|---|---|---|
+| **Paragraph embeddings** | 50 paragraphs | 3â€“5 sec | 30â€“45 sec | Includes model load (~1â€“2 sec first run) |
+| **Statement embeddings** | 200 statements | 2â€“4 sec | 20â€“40 sec | Batched inference |
+| **Query embedding** | Single query | 0.5â€“1 sec | 5â€“10 sec | Usually much faster |
+| **Similarity computation** | 50Ã—50 matrix | < 0.1 sec | < 0.1 sec | O(NÂ² Ã— 768), vectorized |
+| **Semantic density analysis** | 50 paragraphs | < 0.5 sec | < 0.5 sec | Histogram + outlier detection |
+| **Total (first run)** | 50 paragraphs, 200 statements, 1 query | ~10 sec | ~80 sec | Includes model load |
+| **Total (cached)** | Same, embeddings cached | ~0.5 sec | ~0.5 sec | Cache retrieval + similarity computation only |
+
+**Why It Matters**
+
+First run (model load): expensive. Subsequent runs (cached embeddings): nearly free. Pipeline latency is dominated by first embedding run; subsequent runs are dominated by geometry + provenance phases.
+
+---
+
+## GEOMETRY LAYER
+
+Pure geometry and embedding space measurements. These sections describe the geometric substrate, region structure, and query alignment before any semantic interpretation.
+
+---
+
+## Phase 1: Measure (Substrate Architecture)
+
+### Substrate Health & Pairwise Field (L1)
+
+The foundation of the pipeline. The pairwise field tracks cosine similarities across all paragraphs, generating the baseline mathematical distribution.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **discriminationRange (D)** | `P90 - P10` of pairwise similarities | **The key health metric.** `D â‰¥ 0.10` indicates meaningful geometry. `D < 0.05` implies practically no discrimination; embeddings are collapsed or identical. |
+| **density** | `edgeCount / maxPossibleEdges` | Network saturation level. Reflects how dense the resulting mutual graph is. |
+| **isolationRatio** | Fraction of paragraphs with `mutualDegree = 0` | Substrate fragmentation. High ratio means content is highly disconnected. |
+| **mu & sigma** | Mean and standard deviation of all similarities | Distribution parameters used to threshold local boundaries dynamically. |
+
+### Basin Inversion (L1)
+
+Topology analysis of the similarity distribution histogram to find grouping clusters (basins) separated by natural boundaries (valleys/trenches). Designed to verify substrate health and establish exactly where major core topics categorically separate.
+
+#### What It Is
+
+Instead of relying on arbitrary similarity hard-cuts, Basin Inversion performs peak detection on a histogram binning of pairwise similarities:
+1. Detects peaks (basins representing closely-related clusters).
+2. Detects valleys/trenches (inter-peak density minimums) separating major structural groups.
+3. Classifies pairwise stability to determine standard geometry structure.
+
+#### Key Measurements
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **status** | `'ok'` \| `'no_basin_structure'` \| `'insufficient_data'` | Indicates if clear separation exists. Non-ok statuses mean downstream thresholding becomes unreliable. |
+| **T_v (valley threshold)** | Similarity value at deepest valley | The dividing line (trench floor) separating distinct topics. |
+| **valleyDepthSigma** | Depth of valley in standard deviations | Steepness of the trench. Deeper valleys indicate categorical separation between ideas. |
+| **Basin Count** | Distinct peaks found | How many core structural regions naturally appear in the similarity distribution. |
+
+*Note: A healthy space exhibits bimodal traits yielding a natural `T_v`. Degenerate spaces will uniformly bin, triggering gate failures.*
+
+### Mutual Recognition Graph (L1)
+
+The primary topological graph used to construct regions. Eliminates noise by requiring reciprocal agreement for similarity connections.
+
+#### What It Is
+An edge exists only if both paragraphs recognize each other as passing their local threshold (`sim(i,j) > mu_i + sigma_i` and vice versa). Note: Traditional k-nearest-neighbors (k-graph/n-graph) mappings have been explicitly retired in favor of this adaptive, pure mutual-recognition algorithm.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **edgeCount** | Total mutual edges | Raw connectivity. |
+| **mutualRankDegree** | Given node's edge participant count | Centrality indicator. Hubs have high degree; outliers have degree 0. |
+
+---
+
+## Phase 2: Interpret
+
+Converts raw topology into explicit architectural artifacts like Regions and Node Profiles. Uses strict phase discipline (Collect-then-Construct).
+
+### Structural Profiles & Node Alignments (L1)
+
+Evaluates the exact placement of individual paragraphs within their assigned clusters to determine boundary strength. Replaces all legacy single-scalar alignment metrics.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **basinId** | Assigned categorical basin ID | Which topographic core the node unconditionally aligns with. |
+| **intraBasinSimilarity** | Mean similarity to peers in the same basin | Internal cohesion strength for the node. |
+| **interBasinSimilarity** | Mean similarity to nodes outside the basin | External pull. High inter-basin similarity indicates a bridge/boundary node. |
+| **separationDelta** | `intraBasinSimilarity - interBasinSimilarity` | Net geometric alignment. High delta = deep core. Low/negative delta = peripheral or contested node. |
+| **connectivity** | Node's `mutualDegree / maxPossibleEdges` | Normalized network influence. |
+| **gapStrength** | Derived from gap regionalization's `upperBoundary` | Likelihood this node represents a major qualitative jump from its peers. |
+
+### Gate Evaluation & Corpus Mode (L1)
+
+Checks substrate adequacy before proceeding with deeper extraction.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **gateVerdict** | `'proceed'` \| `'skip_geometry'` \| `'insufficient_structure'` | Whether the structure can support downstream semantic operations safely. |
+| **corpusMode** | `'dominant-core'` \| `'parallel-cores'` \| `'no-geometry'` | Classification of corpus focus. `dominant-core` indicates a single massive basin (>50% nodes). |
+| **largestBasinRatio** | Largest basin node count / Total nodes | Defines how concentrated the discussion topic is. |
+| **peripheralRatio** | Fraction of nodes not in a core basin | Indicates volume of tangents, side-topics, or noise. |
+
+---
+
+### Region & Population Metrics (L1)
+
+Evaluates the discrete topographic clusters identified by the substrate interpretation. Because regionalization now strictly uses the "gap" algorithm, regions represent reciprocal-upper neighbor voting rather than density peaks.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **regionCount** | Number of distinct regions | Cluster structure granularity. |
+| **kindCounts** | { gap: count } | Breakdown of region types (basin was deprecated; regions are now exclusively gap). |
+| **internalDensity** | Ratio of internal mutual edges to max possible | How tightly clustered the region is logically. |
+| **isolation** | Average isolationScore of member nodes | How separated this region is from the rest of the corpus. |
+| **modelDiversity** | Distinct models represented in region | Cross-model representation within the region. |
+| **avgInternalSimilarity** | Mean similarity of edges within region | Region cohesion based on edge weights. |
+| **nearestCarrierSimilarity** | Centroid-to-centroid similarity to nearest region | Distance to neighboring semantic clusters. |
+
+## Phase 3: Annotate
+
+Merging geometry structures into statement payloads for downstream execution.
+
+### Query Relevance (L1)
+
+Measures alignment to the user's base search vector.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **querySimilarity** | Cosine similarity [-1, 1] to query vector | Absolute directional alignment. Negative = opposite vector, 0 = orthogonal, 1 = identical directions. (Canonical for pipeline decisions). |
+| **querySimilarityNormalized** | Transformation mapping `(simRaw + 1) / 2` to [0, 1] | Used universally for UI visualization sorting. |
+
+---
+
+## SEMANTIC
+
+Claim assignment, provenance, and routing measurements. These sections describe how the pipeline assigns statements to claims, calculates evidence mass and routing decisions, and structures the final artifact.
+
+---
+
+## Mixed-Method Provenance (L1)
+
+Two-level competitive assignment of evidence to claims. Combines competitive allocation (statements compete across claims) with claim-centric scoring (each claim pulls statements toward itself). Source: `artifact.mixedProvenance`. Computed in the **Measure phase** of the provenance pipeline.
+
+### Design Rationale: Why Two Methods?
+
+The mixed-method system solves a fundamental tradeoff in evidence allocation:
+
+**Competitive allocation** (method 1) prevents cross-claim spillover:
+- Statements are scored against ALL claims in parallel
+- Each statement competes; the claim with highest similarity "wins" the statement
+- Per-paragraph threshold: `Î¼ + Ïƒ` (or `Î¼` for 2-claim cases) where Î¼ is mean similarity across all claims for that paragraph
+- **Strength:** Forces differentiation â€” claims only get statements they clearly "own"
+- **Weakness:** May be too strict. If one claim has a narrow semantic focus, it loses relevant statements to more diffuse claims
+
+**Claim-centric scoring** (method 2) recovers evidence that competitive allocation misses:
+- Each claim is scored independently against the full statement corpus
+- Per-claim threshold: `Î¼ + Ïƒ` where Î¼ is mean similarity of that claim to all paragraphs
+- **Strength:** Each claim gets statements semantically close to it, even if another claim scores higher
+- **Weakness:** May include ambiguous/overlapping evidence; claims can "claim" the same statement
+
+**The merge:** Combine both pools and keep statements that pass either gate. This recovers evidence while flagging overlaps via `bothCount`, `competitiveOnlyCount`, `claimCentricOnlyCount`.
+
+### Competitive Allocation (Method 1)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **Per-paragraph threshold** | `Î¼ + Ïƒ` of similarities across all claims for that paragraph (or `Î¼` when only 2 claims) | Natural cutoff: statements above this beat competing claims in this context. Claim with highest excess above threshold gets the statement. |
+| **competitiveParaSet** | Paragraphs where this claim beat the threshold | Paragraphs this claim "won" in the competition. Forms the raw competitive pool before merge. |
+| **competitiveWeight (w)** | `excess(C,P) / Î£_C excess(C,P)` normalized per paragraph | How much this claim beat other claims in this paragraph (0â€“1). Helps identify when a claim barely won vs decisively won. |
+| **competitiveExcess** | `similarity(claim, paragraph) - threshold` | Raw distance above threshold. Negative = didn't beat the threshold (not included). |
+
+**Worked example (2-claim case):**
+- Paragraph P contains statements from models about A and B
+- Claim-A centroid similarity to P: 0.82
+- Claim-B centroid similarity to P: 0.71
+- Î¼ = (0.82 + 0.71) / 2 = 0.765
+- Threshold = 0.765 (when claims == 2)
+- Claim-A excess: 0.82 - 0.765 = 0.055 âœ“ included
+- Claim-B excess: 0.71 - 0.765 = -0.055 âœ— excluded
+- Result: Claim-A gets P exclusively via competitive allocation
+
+**Guards (failsafes):**
+- Single claim with empty pool: assign ALL paragraphs to avoid total loss
+- All pools empty (degenerate centroids): distribute all paragraphs uniformly
+
+---
+
+### Claim-Centric Scoring (Method 2)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **ccMu** | Mean similarity of this claim to all paragraphs in the corpus | The claim's baseline semantic "temperature." High ccMu = claim has broad relevance; low ccMu = claim is semantically narrow. |
+| **ccSigma** | Standard deviation of similarities (this claim vs all paragraphs) | Spread of the claim's semantic neighborhood. High sigma = claim has both highly relevant and irrelevant paragraphs; low sigma = all paragraphs are equally similar/dissimilar. |
+| **ccThreshold** | `ccMu + ccSigma` | Per-claim acceptance gate. Paragraphs above this are semantically "close" to this claim's meaning space. |
+| **claimCentricParaSet** | Paragraphs above ccThreshold for this claim | Direct semantic neighborhood of this claim, independent of competitive ranking. |
+
+**Why per-claim thresholds matter:**
+- Claims with narrow focus (e.g., "nuclear proliferation policy") have low ccMu, high ccSigma â†’ threshold lands high, pool is small but tight
+- Claims with broad focus (e.g., "geopolitical implications") have high ccMu, low ccSigma â†’ threshold lands lower, pool is larger but looser
+- This variance is a feature: each claim self-calibrates to its semantic niche
+
+**Worked example (same paragraph P from above):**
+- Claim-A: ccMu=0.65, ccSigma=0.12 â†’ ccThreshold=0.77
+- Claim-B: ccMu=0.58, ccSigma=0.18 â†’ ccThreshold=0.76
+- P's similarity to Claim-A: 0.82 > 0.77 âœ“ included
+- P's similarity to Claim-B: 0.71 < 0.76 âœ— excluded
+- Result: Claim-A gets P via claim-centric; Claim-B still doesn't get it
+- BUT: If another paragraph Q had sim(Q, Claim-B)=0.77, Claim-B would get Q via claim-centric even if competitive allocation had rejected it
+
+---
+
+### Mixed-Method Merge
+
+The final `canonicalStatementIds` comes from merging both pools:
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **canonicalStatementIds** | Final statement pool for each claim after mixed-method merge | The authoritative evidence set. All downstream measurements (blast surface, density, pruning) operate on these sets. Must pass `globalSim >= globalMu` filter (below). |
+| **bothCount** | Statements found by BOTH competitive AND claim-centric methods | Robust evidence â€” independently validated by both allocation strategies. These statements are unambiguous anchors. High bothCount = clean claim differentiation. |
+| **competitiveOnlyCount** | Found only by competitive allocation | Statements that won inter-claim competition but weren't claim-centric salient. Lower confidence but still valuable. May indicate competitive threshold was appropriate while claim-centric was stricter. |
+| **claimCentricOnlyCount** | Found only by claim-centric scoring | Statements the claim's semantic gravity pulled in that competitive allocation missed. Higher risk of ambiguity (other claims may also want these). Critical for recovery when competitive is too strict. |
+| **paragraphOrigin** | Tracks whether each paragraph came from 'both' / 'competitive-only' / 'claim-centric-only' | Diagnostic: shows which allocation method contributed each paragraph. Helps identify when one method is carrying most of the load. |
+
+**Algorithm:**
+```
+For each claim:
+  1. Competitive set = paragraphs where claim beat threshold
+  2. Claim-centric set = paragraphs above claim's ccThreshold
+  3. Merged = union of both sets
+  4. For each merged paragraph, track origin (both / comp-only / cc-only)
+  5. Extract all statements from merged paragraphs
+  6. Filter statements by globalSim >= globalMu (see below)
+  7. Result = canonicalStatementIds
+```
+
+---
+
+### Global Similarity Filter (Î¼_global)
+
+After merging both allocation pools, statements are filtered one final time:
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **globalMu** | Mean similarity of this claim to ALL statements in the corpus | Corpus-wide baseline: statements below this are generic relative to this claim's meaning. |
+| **globalSim** | Similarity of individual statement to this claim's embedding | How close this statement sits to the claim semantically. |
+| **keptCount** | Statements passing `globalSim >= globalMu` | Evidence mass that survived all filters. |
+| **removedCount** | Statements below globalMu | Generic noise pruned away. |
+| **coreCount** | keptCount (final effective pool size) | Final evidence pool for this claim. |
+
+**Why a global filter?** Merged paragraphs can contain statements that are:
+- Off-topic (from a different model's output mixed into a merged paragraph)
+- Generic filler (low signal)
+- Noise
+
+The globalMu filter removes these without needing to inspect statement content directly.
+
+**For aggregate health rates summarizing the effectiveness of this two-method approach (recovery rate, expansion rate, removal rate), see the Expanded Measurements section at the end of this document.**
+
+---
+
+### Per-Claim Exclusivity
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **exclusivityRatio** | `exclusiveStatements / totalCanonicalStatements` (fraction of canonical statements unique to this claim) | Claim differentiation score. High (>50%) = claim has a distinct evidence base. Low (<20%) = claim heavily overlaps with others. |
+| **exclusiveStatementCount** | Statements in canonicalStatementIds NOT in any other claim's canonical set | The evidence "only this claim can deliver." These are the claim's irreplaceable contributions. |
+| **sharedStatementCount** | Statements in canonicalStatementIds that also appear in other claims' canonical sets | Ambiguous evidence; multiple claims have legitimate claims on these statements. |
+
+**Why exclusivity matters:**
+- High exclusivity = claim is a distinct semantic node; removing it would leave a gap
+- Low exclusivity = claim is redundant or overlaps heavily; other claims cover similar ground
+- Zero exclusivity = claim's entire pool is shared with other claims (pathological; may indicate poor claim differentiation or claims that should be merged)
+
+**Threshold guidance:**
+- \>50% exclusive: strong differentiation âœ“
+- 30â€“50% exclusive: moderate overlap; likely acceptable if claims have distinct roles
+- <20% exclusive: weak differentiation âš ï¸ consider claim merging or threshold adjustment
+- <5% exclusive: essentially redundant âœ— likely a duplicate claim or poor semantic separation
+
+---
+
+## Claim Density (L1)
+
+Per-claim evidence concentration analysis. Measures how claims distribute across paragraphs and identifies contiguous passage runs. Computed in the **Measure phase** of the provenance pipeline. Foundational for passage routing and pruning decisions.
+
+### Paragraph Coverage (per-paragraph, per-claim)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **totalStatements** | All statements in this paragraph | Paragraph size. How many statements did this model output in this paragraph? |
+| **claimStatements** | Statements assigned to this specific claim (from canonicalStatementIds) | How many of the paragraph's statements belong to this claim. |
+| **coverage** | `claimStatements / totalStatements` (0-1 range) | Claim's ownership fraction. **0.5 is the critical threshold:** coverage â‰¥ 0.5 means this claim "owns" the paragraph (majority paragraph, MAJ). |
+
+**Why 0.5 matters:**
+- Coverage \> 0.5: claim is the dominant voice in this paragraph â†’ **majority paragraph (MAJ)**
+- Coverage = 0.5: tie between claim and other statements
+- Coverage < 0.5: claim is a minority voice â†’ partial evidence, not core
+- Coverage near 0: claim barely mentioned
+
+**Example:** A paragraph contains 8 statements. Claim-X owns 5 of them (5/8 = 0.625 coverage). This counts as a majority paragraph for Claim-X.
+
+---
+
+### Passage Detection and Definition
+
+Passages are the fundamental unit of "sustained treatment." A passage is a **contiguous run of paragraphs within a single model's output where a claim has any coverage** (coverage > 0).
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **passage** | Contiguous sequence of paragraphs P_i, P_{i+1}, ..., P_j from the same model where claim has coverage in each | A coherent narrative segment about this claim. Longer passages indicate deeper treatment. |
+| **startParagraphIndex, endParagraphIndex** | Index bounds of the passage within the model's output | Where the passage sits in sequence. Helps trace back to source. |
+| **length** | Number of paragraphs in the run (j - i + 1) | Passage depth. Length â‰¥ 2 is "sustained" (not a one-off mention). MAXLEN (max across all passages) is routing-critical. |
+| **avgCoverage** | Mean coverage across the passage paragraphs | Passage quality: high average coverage = the passage is dominated by this claim; low average coverage = many other claims share these paragraphs. |
+
+**Why within-model contiguity?**
+- Statements come from model outputs: Model A outputs paragraphs [P1, P2, P3, ...], Model B outputs [Q1, Q2, Q3, ...]
+- Consecutive paragraphs only make sense within one model's narrative flow
+- A passage = a continuous argument by one model about a claim
+
+**Worked example:**
+- Model-A output: [P1, P2, P3, P4, P5]
+- Claim-X has coverage in: P1 (0.8), P2 (0.6), P3 (0.1), P4 (0.0), P5 (0.7)
+- Passages for Claim-X in Model-A:
+  - Passage 1: P1â€“P3 (length 3, avgCoverage = 0.5) â† sustained
+  - Passage 2: P5 (length 1, avgCoverage = 0.7) â† isolated mention
+- Model-A contributes 2 passages to Claim-X
+
+---
+
+### Claim Density Profile (per-claim aggregates)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **paragraphCount** | Distinct paragraphs (across all models) containing this claim | Breadth of claim coverage. High count = claim appears throughout the corpus. Low count = claim is localized. |
+| **passageCount** | Total number of contiguous paragraph runs (all models combined) | Narrative fragmentation. High count = claim is treated in many separate segments (fragmented discussion). Low count = claim gets coherent treatment. |
+| **maxPassageLength** (MAXLEN) | Longest contiguous paragraph run across all models | **The key structural depth metric.** MAXLEN â‰¥ 2 = "sustained treatment" (routing gate). MAXLEN = 1 = all mentions are isolated. |
+| **majorityParagraphCount** (MAJ) | Paragraphs with coverage â‰¥ 0.5 | **The load-bearing count.** Core evidence mass where claim is dominant voice. MAJ â‰¥ 1 is the precondition for all routing decisions. |
+| **modelSpread** | Number of distinct models contributing statements to this claim | Cross-model representation. High spread = claim mentioned by many models. Low spread = claim concentrated in few models. Related to concentrationRatio (see passage routing). |
+| **modelsWithPassages** | Models with at least one passage of length â‰¥ 2 | Models providing "sustained" (not incidental) treatment. If modelsWithPassages < modelSpread, some models only mention the claim in passing. |
+| **totalClaimStatements** | Count of statements in canonicalStatementIds (non-table-cell) | Raw statement mass. Includes both majority and minority statements. |
+| **meanCoverage** | Average coverage across all paragraphs containing this claim | Overall ownership strength. High mean (>0.4) = claim is consistently a major voice. Low mean (<0.2) = claim is typically background. |
+
+**Routing-Critical Thresholds:**
+
+| Threshold | Meaning | Consequence |
+|---|---|---|
+| MAJ â‰¥ 1 | At least one majority paragraph | **Precondition:** without this, claim is not "rooted" in the evidence. No routing consideration possible. |
+| MAXLEN â‰¥ 2 | At least one passage with 2+ paragraphs | **Structural gate:** evidence is sustained, not scattered. Used in landscape position assignment (see Passage Routing). |
+| MAJ = 0 but MAXLEN â‰¥ 1 | No majority paragraphs, but some coverage | Claim is mentioned but never dominant. Typically routed to floor or skipped. |
+| MAJ â‰¥ 2, MAXLEN â‰¥ 3 | Multiple majorities, sustained passages | Strong candidate for northStar or mechanism positions. |
+
+**Worked examples:**
+
+*Example 1 (northStar candidate):*
+- Claim-A: MAJ=4, passageCount=2, maxPassageLength=5, modelSpread=3
+- Interpretation: 4 paragraphs dominated by Claim-A; longest passage is 5 paragraphs; 3 models contribute
+- Verdict: Structurally robust, qualifies for routing
+
+*Example 2 (floor/skip):*
+- Claim-B: MAJ=0, passageCount=3, maxPassageLength=1, modelSpread=1
+- Interpretation: No paragraph dominated by Claim-B; all mentions are isolated (length 1); only 1 model mentions it
+- Verdict: Incidental mention, not structural significance
+
+*Example 3 (ambiguous):*
+- Claim-C: MAJ=1, passageCount=1, maxPassageLength=2, modelSpread=2
+- Interpretation: Minimally rooted (MAJ=1); one passage of length 2; two models touch it
+- Verdict: Barely passes precondition; will depend on concentration ratio for routing decision
+
+---
+
+## Conflict Validation (L1)
+
+**Note:** Conflict validation is computed in the **Validate phase** (Phase 2) of the provenance pipeline but is **NOT persisted to the artifact**. The validated conflict data is available only in memory during pipeline execution. Use these diagnostics to understand when the semantic mapper has labeled genuine conflicts, but do not confuse validation with routing gates.
+
+#### What It Is
+
+Conflict validation detects semantic contradictions between claim pairs using two independent geometric signals:
+1. **Cross-pool proximity:** How distant are the exclusive evidence statements of one claim from the entire evidence pool of another?
+2. **Triangle residual:** Do the claims diverge more than their shared query relevance predicts?
+
+Conflicts are **validated** (confirmed as genuine contradictions) when cross-pool proximity exceeds the corpus baseline â€” meaning the claims occupy distinct evidence territories beyond typical corpus variance. The triangle residual provides additional context but is not gating.
+
+#### Why It Matters
+
+The semantic mapper labels potential conflicts based on semantic role analysis (opposite stances, contradictory roles). But not all mapper-labeled conflicts are geometric conflicts. Conflict validation separates:
+- **Mapper label only:** The mapper identified an opposite role, but embeddings show the claims use overlapping evidence.
+- **Validated conflicts:** Both mapper label AND geometric evidence suggest genuine contradiction.
+
+Validated conflicts form **conflict clusters** (connected components on validated edges), which are tracked in the instrument panel diagnostics.
+
+#### Computation
+
+**Phase 1: Cross-Pool Proximity**
+
+For each claim pair (A, B):
+1. Identify exclusive statements per claim: statements assigned to A but not B, and vice versa.
+2. For each exclusive statement in A, compute max similarity to ANY statement in B's full pool.
+3. Average those max similarities â†’ `meanAtoB`.
+4. Repeat Bâ†’A â†’ `meanBtoA`.
+5. Take the minimum: `crossPoolProximity = min(meanAtoB, meanBtoA)`.
+
+This asymmetric-then-minimize approach detects when one claim's evidence is very distant from the other's. If either direction shows claims are isolated, the pair is considered structurally separate.
+
+**Phase 2: Triangle Residual** (diagnostic only)
+
+For claim centroids (A, B) and query embedding (Q):
+```
+residual = (sim(A,Q) * sim(B,Q)) - sim(A,B)
+```
+
+Intuition: If both claims are equally relevant to the query but distant from each other, the product of their query similarities should be large. If they're also far apart, the residual is positive â€” they fork on the query.
+
+**Phase 3: Baseline Computation**
+
+Compute corpus-wide means:
+- `muProximity` = mean of all valid cross-pool proximities (all claim pairs with sufficient exclusive statements)
+- `muResidual` = mean of all triangle residuals
+
+**Phase 4: Validation Gate**
+
+```
+validated = (crossPoolProximity !== null) AND (crossPoolProximity > muProximity)
+```
+
+Higher-than-average proximity = claims are more distant than typical â†’ genuine conflict.
+
+Source code: `src/core/provenance/validate.ts`, `validateEdgesAndAllegiance()` (lines 52â€“436).
+
+#### Thresholds & Interpretation
+
+| Measurement | Computation | Healthy Range | Concerning | Failure |
+|---|---|---|---|---|
+| **crossPoolProximity** | min(meanAtoB, meanBtoA) on exclusive statements | Varies by corpus. Validated when > muProximity. | equals muProximity (borderline) | < muProximity (claims not distinct) OR null (insufficient exclusive statements) |
+| **muProximity** | Mean of all valid proximity values | 0.15â€“0.35 typical. Reflects corpus baseline. | < 0.10 (claims too similar overall) or > 0.50 (highly scattered) | null (no valid pairs computed) |
+| **Proximity Gap** | max(crossPoolProximity) - min(crossPoolProximity) | â‰¥ 0.20 indicates clear separation | â‰ˆ 0.05â€“0.10 (weak differentiation) | â‰ˆ 0.01â€“0.02 (all pairs nearly identical) |
+| **triangleResidual** | (sim(A,Q) * sim(B,Q)) - sim(A,B) | Varies. Used for diagnostics. Positive = divergence. | Residual â‰ˆ muResidual (no extra divergence) | Residual << 0 (claims aligned despite opposite labels) |
+| **Exclusive Statement Counts** | per-claim statements not shared with conflicting claim | â‰¥ 5 per side (strong signal) | 2â€“4 per side (weak signal) | < 2 (insufficient data) |
+
+**Health Check: Conflict Concentration**
+
+Count pairs by validation outcome:
+- `validatedCount` = pairs with `validated === true`
+- `mapperLabeledButNotValidated` = pairs with `mapperLabeledConflict === true` but `validated === false`
+- `validatedButNotMapped` = pairs with `validated === true` but `mapperLabeledConflict === false` (should be rare)
+
+Healthy state: ~70â€“80% of mapper-labeled conflicts validate geometrically. If this ratio drops below 50%, mapper confidence is low; if above 90%, mapper is very conservative.
+
+#### Worked Examples
+
+**Example 1: Validated Conflict (Clean Fork)**
+
+Claim A: "X is beneficial because of mechanism M1"
+Claim B: "X is harmful because of mechanism M2"
+
+- Exclusive statements in A: {A1, A2, A3, A4, A5} (5 statements unique to this claim)
+- Exclusive statements in B: {B1, B2, B3, B4} (4 statements)
+- meanAtoB = 0.32 (A's exclusive statements average 0.32 similarity to B's full pool)
+- meanBtoA = 0.28
+- crossPoolProximity = min(0.32, 0.28) = **0.28**
+- muProximity = 0.22 (corpus baseline)
+- **Validation:** 0.28 > 0.22 â†’ **VALIDATED** âœ“
+
+This conflict passes because the claims genuinely occupy distinct evidence space.
+
+**Example 2: Mapper Label Only (Semantic Difference, Not Geometric)**
+
+Claim A: "Drug reduces symptom X"
+Claim B: "Drug reduces symptom Y"
+
+Both claims are about the same drug's benefits, just different symptoms. Mapper labels opposite roles (different outcomes), but they share much evidence:
+
+- Exclusive statements in A: {A1, A2} (2 statements)
+- Exclusive statements in B: {B1, B2} (2 statements)
+- meanAtoB = 0.18
+- meanBtoA = 0.16
+- crossPoolProximity = min(0.18, 0.16) = **0.16**
+- muProximity = 0.22
+- **Validation:** 0.16 < 0.22 â†’ **NOT VALIDATED** âœ—
+
+The mapper labels this as a conflict, but the evidence pools overlap significantly â€” this conflict is not validated geometrically.
+
+**Example 3: Insufficient Exclusive Statements**
+
+Claim A: "X causes Y" (many shared statements with other claims)
+Claim B: "X does not cause Y"
+
+- Exclusive statements in A: {A1} (only 1 unique statement)
+- Exclusive statements in B: {} (no unique statements)
+- **Result:** crossPoolProximity = **null** (insufficient data)
+- **failReason:** "insufficient exclusive statements"
+- **Validation:** **UNRESOLVED** â€” no geometric signal because claims are too overlapped
+
+Even if the mapper labeled them as conflicting, validation fails due to insufficient independent evidence.
+
+#### Related Measurements
+
+- **Passage Routing & Load-Bearing Claims:** Routing gates are independent. A claim can be both "non-load-bearing" (fails concentration and passage gates) AND part of a validated conflict cluster (still routed to survey).
+- **Mapper-Labeled Edges:** Compare `mapperLabeledConflict` count to `validatedConflict` count to assess mapper confidence.
+- **Claim Provenance (Exclusivity):** Low exclusivity per claim â†’ fewer exclusive statements â†’ higher failure rate for validation. See exclusivity rates in claim provenance.
+- **Conflict Clusters:** Post-validation, validated pairs are grouped into connected components. Cluster size indicates cascade complexity.
+
+#### Failure Modes & Diagnostics
+
+| Symptom | Root Cause | Check |
+|---|---|---|
+| **Most mapper labels not validating** | Mapper is labeling semantic opposition that doesn't reflect evidence distance | Read mapper edge labels: do they really indicate contradictions, or just different aspects? |
+| **All pairs validating** | muProximity is too low (corpus is too scattered) | Check muProximity value. If < 0.10, corpus geometry is degenerate. |
+| **High exclusive statement counts but low proximity** | Claims use different vocabularies but address similar ideas | Check triangle residuals; if positive, claims do diverge on query. |
+| **"insufficient exclusive statements" failures** | Claims have high claim overlap; hard to distinguish positions | Check claim provenance: are claims sharing > 50% of statements? Consider merging or reframing. |
+| **Validations but muTriangle â‰ˆ 0** | Validated pairs don't actually diverge on query | Check `querySimPair`: are both claims equally relevant? If so, no fork on query. Validation may be spurious. |
+| **Triangle residuals consistently negative** | Claims align on query despite opposite labels | Mapper may be over-identifying conflicts; review mapper output for false positives. |
+
+---
+
+## Provenance Refinement (L1/L2)
+
+**The problem this solves:** After mixed-method merge, some statements may appear in multiple claims' canonical sets. This is ambiguity â€” the mixed-method system couldn't decisively assign the statement to one claim. Provenance refinement disambiguates these joint statements by choosing a **primaryClaim** using a 3-tier allegiance cascade. (Historically, the primary assignment fed into passage pruning logic; that feature is now deprecated.)
+
+**When does this happen?** A statement appears in multiple canonical sets when:
+- It sits in a semantic overlap zone between two claims
+- Both claims' thresholds were satisfied (either competitively or claim-centric)
+- The statement is genuinely ambiguous (could reasonably belong to multiple claims)
+
+**Why resolve it?** A clear primary owner provides an unambiguous signal for downstream structural measurements (e.g., passage routing). While a primary claim was historically used by deprecated passage pruning logic, the refinement itself remains valuable for clean evidence attribution.
+
+Computed in the **Validate phase** of the provenance pipeline (Phase 2).
+
+---
+
+### The 3-Tier Allegiance Cascade
+
+When a statement is jointly assigned to claims A and B, the system tries three tiers in order to pick a primary:
+
+#### Tier 1: Calibration Pool (Highest Confidence)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **calibrationPool** | Statements in the same paragraph that are EXCLUSIVELY owned by one claim (dominantClaim) | Anchor set: these statements are unambiguously "this claim's territory" |
+| **calibrationPoolSize** | Number of exclusive statements | How much anchor data is available. Need â‰¥ 2 for this tier to fire. |
+| **allegiance via calibration** | `mean(cosine_similarities(joint_stmt, calibration_pool))` â€” positive if close to dominant claim's pool, negative if close to rival claim's pool | **The decision:** If the joint statement is more similar to Claim-A's exclusive statements, Claim-A wins. |
+| **calibrationWeight** | `calibrationPoolSize / paragraphLength` | Confidence multiplier. Higher weight = more anchor data = more reliable. |
+
+**Why this works:** If Claim-A dominates a paragraph (many exclusive statements), then any statement in that paragraph that's ambiguous is probably Claim-A's. The calibration pool acts as a "fingerprint" of Claim-A's territory in this context.
+
+**Example:**
+- Paragraph P contains 8 statements
+- Claim-A exclusive statements (in P): 5 statements
+- Claim-B exclusive statements (in P): 2 statements
+- Joint statement J (in both A and B's canonical sets)
+- Calibration pool for tier 1 = Claim-A's 5 exclusive statements (A dominates the paragraph)
+- Compute `cosine(embedding_J, mean(embeddings of A's 5 statements))`
+- If similarity > 0.7, allegiance to A; if < 0.7, allegiance to B
+
+#### Tier 2: Centroid Fallback (Medium Confidence)
+
+If Tier 1 can't fire (e.g., calibration pool < 2 statements), use claim embeddings directly:
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **claimCentroid_A, claimCentroid_B** | Pre-computed claim embedding centroids | Direct semantic comparison without anchor pool. |
+| **allegiance via centroid** | `cosine(statement_J, centroid_A) - cosine(statement_J, centroid_B)` | Positive = J is closer to A; negative = J is closer to B. |
+| **method** | 'centroid-fallback' (vs tier 1: 'calibrated') | Signal tier used. |
+
+**Why this is weaker:** Centroid doesn't account for local context (the paragraph J sits in). But it's better than nothing.
+
+#### Tier 3: Passage Dominance (Lowest Confidence)
+
+If neither tier 1 nor tier 2 available, use structural signal:
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **passageOwner** | Which claim has the majority/sustained passage containing this statement | Structural assignment: if J sits in Claim-A's 5-paragraph passage, A owns it structurally. |
+| **coverageFraction** | Claim's coverage in the containing passage | How dominant is the passage owner. Coverage > 0.5 = strong structural ownership. |
+| **allegianceValue** | +1 if A owns passage, -1 if B owns passage | Binary decision. |
+| **method** | 'passage-dominance' | Coarsest signal. |
+
+**Why this works as a tiebreaker:** Passages encode the model's narrative structure. If a statement sits in Claim-A's sustained 3-paragraph passage, it's probably part of that argument, even if Claim-B also technically claimed it.
+
+#### Tier 4: Unresolved (No Signal)
+
+If none of the above apply:
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **unresolved** | Joint statement with no method available | Ownership remains ambiguous. primaryClaim = null. Statement kept in both canonical sets. (Historically would be handled by deprecated pruning engine.) |
+
+---
+
+### Signal Integration & Output
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **primaryClaim** | Winning claim ID (from allegiance comparison, or null if unresolved) | **Canonical owner.** Used for structural analysis. (Historically fed deprecated passage pruning logic.) |
+| **allegianceValue** | Signed numerical value (positive = leaning primary, negative = leaning secondary) | Strength and direction of the ownership signal. Larger magnitude = stronger signal. |
+| **signalStrength / signalWeight** | `nounEntityCount / wordCount` (referential density) | How information-dense the statement is. Low density (mostly articles, prepositions) = weaker signal (filler text). High density (many nouns/entities) = stronger signal (substantive content). Used to weight the allegiance decision. |
+| **secondaryClaims** | All non-primary claims that also had this statement | Backup owners. Provide visibility into alternative claim assignments. (Historically used by deprecated pruning logic for fallback ownership.) |
+
+---
+
+### Refinement Summary & Diagnostics
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **totalJoint** | Statements assigned to > 1 claim (before refinement) | **Scale of ambiguity.** What fraction of the statement pool is ambiguous? |
+| **resolvedByCalibration** | Statements disambiguated via Tier 1 | High-confidence resolutions. These are "safe" assignments. |
+| **resolvedByCentroidFallback** | Statements disambiguated via Tier 2 | Medium-confidence. Centroid was the deciding signal. |
+| **resolvedByPassageDominance** | Statements disambiguated via Tier 3 | Low-confidence. Structural signal was the tiebreaker. |
+| **unresolved** | Statements with no primary (null) | Ownership remains genuinely ambiguous. Retained in both claims' canonical sets. |
+
+**Health checks:**
+
+*Good profile:*
+- totalJoint < 20% of statement pool: limited ambiguity
+- resolvedByCalibration > 60%: most joint statements have anchor data
+- unresolved < 5%: few genuinely ambiguous cases
+
+*Concerning profile:*
+- totalJoint > 40% of pool: widespread ambiguity suggests claims overlap heavily
+- resolvedByPassageDominance > 50%: most resolutions are structural (weak signal)
+- unresolved > 15%: many statements have no clear primary
+
+---
+
+### Deprecated: Passage Pruning Logic (Historical Reference)
+
+âš ï¸ **This feature is no longer active.** Provenance refinement originally fed into passage pruning logic, which would have operated as follows:
+
+1. **Primary claim is marked for pruning:** Check if any secondary claim survives
+   - Yes â†’ statement becomes "supporting" (idea carries forward)
+   - No â†’ statement becomes "orphan" (lost)
+2. **All claims marked for pruning:** Statement is orphaned regardless of refinement
+
+This design shows why secondary claims were important: they provided a fallback when primary ownership didn't hold. The primary/secondary structure is retained for potential future use but is not active in the current pipeline.
+
+---
+
+## Passage Routing (L1)
+
+Pure arithmetic on claim density fields â€” no embeddings accessed at this stage. Classifies claims by structural contribution pattern and assigns landscape positions that determine routing. Computed in the **Surface phase** of the provenance pipeline. Replaces blast surface for routing decisions (as of Mar 2026).
+
+### Design Rationale: Two Gates
+
+Passage routing assigns each claim a "landscape position" based on two independent structural signals. Together, they identify which claims are structurally significant and warrant survey validation.
+
+**Gate A â€” Concentration (model irreplaceability):**
+- Does this claim depend critically on one model?
+- High concentration = removal of that model leaves a gap
+- Measured as: `dominantMAJ / totalMAJ` (fraction of majority paragraphs from the dominant model)
+- Threshold: claims with ratio â‰¥ Î¼+Ïƒ are "concentration outliers" (unusually concentrated)
+
+**Gate B â€” Passage (sustained treatment):**
+- Is this claim treated coherently or scattered?
+- Sustained treatment = longest passage has â‰¥ 2 paragraphs
+- Scattered treatment = all passages are length 1 (isolated mentions)
+- Threshold: MAXLEN â‰¥ 2
+
+**Why both?** They measure different structural properties:
+- Concentration: is the evidence reliable? (Would alternative models provide this?)
+- Passage: is the evidence coherent? (Is there a unified argument or scattered fragments?)
+- A claim can be concentrated but fragmented (low reliability + incoherent)
+- A claim can be distributed but sustained (reliable + coherent)
+
+---
+
+### Structural Contributors & Concentration
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **structuralContributors** | Models with â‰¥ 1 majority paragraph (MAJ â‰¥ 1) for this claim | Models providing substantive evidence (not just incidental mentions). Count = how many models are "invested" in this claim. |
+| **dominantModel** | Model index with the most MAJ paragraphs | The primary evidence source. |
+| **dominantMAJ** | Count of majority paragraphs from the dominant model | Strength of the dominant contributor. High = dominant model carries the claim. |
+| **incidentalModels** | Models with 0 MAJ paragraphs but â‰¥1 statements for claim | Models that mention the claim but don't dominate any paragraph. These are supporting context, not evidence anchors. |
+| **concentrationRatio** | `dominantMAJ / totalMAJ` (range 0â€“1) | **Model irreplaceability metric.** How much the claim depends on one source. |
+
+**Concentration interpretation:**
+- 1.0: all evidence from one model (claim is 100% dependent on that model's output)
+- 0.5: evenly split between two models (claim has redundancy; either model could provide the evidence)
+- 0.33: distributed across three models (strong redundancy)
+- Low concentration = claim is robust to model removal
+
+**Worked example:**
+- Claim-X: totalMAJ=6 (6 majority paragraphs across all models)
+- Model-A contributes 5 MAJ paragraphs (dominantModel=A, dominantMAJ=5)
+- Model-B contributes 1 MAJ paragraph
+- concentrationRatio = 5/6 = 0.833
+- Interpretation: Claim-X is highly concentrated in Model-A; if Model-A is removed, evidence drops 83%
+
+---
+
+### Distribution Statistics & Threshold
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **muConcentration** | Mean concentration ratio across all claims in the corpus | Corpus-wide baseline. What's typical for this corpus? |
+| **sigmaConcentration** | Standard deviation of concentration ratios | Spread. How varied is model dependence across claims? |
+| **concentrationThreshold** | `muConcentration + sigmaConcentration` | The outlier cutoff. Claims with ratio â‰¥ this threshold are "unusually concentrated" (1Ïƒ above the mean). This is Gate A. |
+
+**Threshold interpretation:**
+- If muConcentration = 0.65 and sigmaConcentration = 0.15:
+  - concentrationThreshold = 0.80
+  - Claims with ratio â‰¥ 0.80 are concentration outliers (Gate A pass)
+  - Claims with ratio < 0.80 are normally distributed (Gate A fail)
+
+**What high vs low corpus-wide concentration means:**
+- High muConcentration (>0.70): most claims in the corpus depend on single models
+  - Possible causes: models have specialized roles, or poor claim diversity
+- Low muConcentration (<0.50): most claims are distributed across multiple models
+  - Indicates consensus or well-separated model coverage
+
+---
+
+### Passage-Related Metrics
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **maxPassageLength** (MAXLEN) | Longest contiguous paragraph run for this claim (from Claim Density) | Sustained treatment depth. MAXLEN â‰¥ 2 = Gate B pass (sustained). MAXLEN = 1 = Gate B fail (scattered). |
+| **maxPassageLengthOfDominant** | Longest passage from the dominant model specifically | How coherently the dominant model treats this claim. High = concentrated + coherent. Low = concentrated but fragmented. |
+| **densityRatio** | `maxPassageLengthOfDominant / dominantMAJ` | Contiguity indicator. How tightly packed is the dominant model's evidence? |
+
+**Density ratio interpretation:**
+- Ratio = 1.0: all dominant model's evidence in one passage (maximally coherent)
+- Ratio = 0.5: dominant model's evidence split between two passages
+- Ratio < 0.3: dominant model's evidence scattered across many isolated mentions
+
+**Why this matters:** A claim can have many MAJ paragraphs from one model but scattered across many isolated passages. This is different from those MAJ paragraphs being contiguous (one coherent argument).
+
+---
+
+### Landscape Positions
+
+Each claim receives exactly one of four positions based on two binary gates:
+
+| Gate | Condition | Meaning |
+|---|---|---|
+| **Gate A (concentration)** | `concentrationRatio >= concentrationThreshold` | Is this claim highly concentrated in one model? |
+| **Gate B (passage)** | `maxPassageLength >= 2` | Does this claim have sustained treatment? |
+
+| Position | A | B | Interpretation | Routing Strategy |
+|---|---|---|---|---|
+| **northStar** | âœ“ | âœ“ | Concentrated AND sustained | High structural authority. Single model provides deep, coherent treatment. Prioritize for survey validation. |
+| **eastStar** | âœ“ | âœ— | Concentrated but fragmented | Model-dependent and incoherent. Isolated mentions that add up. May indicate weak integration. |
+| **mechanism** | âœ— | âœ“ | Distributed but sustained | Multiple models treat it coherently. Strong redundancy; if one model removed, others cover it. |
+| **floor** | âœ— | âœ— | Neither concentrated nor sustained | Scattered mentions across many models. Low structural weight. |
+
+**Routing implications:**
+
+- **northStar:** Structurally significant claim with both concentration and sustained passage coverage. May be a decision point.
+- **eastStar:** Concentrated but not sustained in depth. Informational; treat with caution.
+- **mechanism:** Distributed across many paragraphs but lacks concentration. Well-supported by redundancy.
+- **floor:** Fails both gates. Low structural significance.
+
+---
+
+### Load-Bearing Gate (Precondition)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **MAJ >= 1** | **Precondition:** Claim must have at least one majority paragraph | Gate threshold for any routing consideration. Claims with MAJ=0 are NOT rooted in evidence and skip routing entirely. |
+| **isLoadBearing** | `(Gate A pass OR Gate B pass) AND (MAJ >= 1)` | Claim passes both precondition and at least one structural gate. Eligible for routing. |
+| **preconditionPassCount** | Number of claims with MAJ >= 1 | How many claims cleared the precondition. Diagnostic: if very low, claim set may be poorly structured or corpus may lack clear differentiation. |
+
+**Failure modes for precondition:**
+
+*Scenario 1: Very low preconditionPassCount*
+- Symptom: Only 2 out of 10 claims have MAJ â‰¥ 1
+- Diagnosis: Most claims are minority voices; poor structural differentiation
+- Likely cause: Claims are too similar, or corpus doesn't clearly support the claim set
+- Fix: Redefine claims or increase majority coverage threshold slightly
+
+*Scenario 2: All claims pass precondition, but all are "floor"*
+- Symptom: preconditionPassCount=10, isLoadBearing count=10, but all are floor positions
+- Diagnosis: Claims are rooted (MAJ â‰¥ 1) but none are concentrated or sustained
+- Likely cause: Corpus is fragmented across many models with no coherent passages
+- Fix: Check geometry health (basin inversion, model spread)
+
+---
+
+| **loadBearingCount** | Claims passing at least one gate | How many claims are structurally significant. |
+| **floorCount** | Claims failing both gates | Claims with no structural weight. |
+
+---
+
+### Conflict Clusters
+
+Clusters formed by grouping validated conflict edges into connected components. A cluster is a maximal set of claims where each is either directly conflicted with another in the group, or indirectly connected through a chain of conflicts.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **conflictClusters** | Array of claim ID sets, one per connected component on validated edges | Each cluster represents a group of claims in genuine geometric tension. Claims within a cluster diverge more than corpus baseline. |
+| **clusterCount** | Number of conflict clusters | How many separate conflict groups exist. |
+| **clusterSizes** | Array of sizes (# claims per cluster) | Distribution of conflict group sizes. Most clusters are pairs; larger clusters indicate complex multi-way contradictions. |
+| **clusterCentroid** | Mean similarity of claims within each cluster (optional diagnostic) | How tightly grouped the conflict is. Lower = more divergent claims. |
+
+**Interpretation:**
+- Clusters identify semantic forks that need human arbitration. Claims in the same cluster contradict each other and cannot both be equally prioritized.
+- A conflict cluster with 2â€“3 claims is typical (simple fork). Clusters with > 5 claims indicate complex multi-way contradictions.
+- Claims in different clusters are independent; no direct geometric conflict detected.
+
+---
+
+## Blast Surface (L1) â€” Instrumentation & Diagnostics
+
+**Status:** Computed in the Surface phase for diagnostics and UI visibility. Passage routing gates handle all routing decisions. Blast surface remains active for structural analysis. (The twin map was historically prepared for deprecated passage pruning logic.)
+
+#### What It Is
+
+A speculative impact analysis that measures what would hypothetically happen if individual claims were removed from the corpus. The blast surface computes:
+1. **Twin Map:** For each statement in a claim, identifies semantically equivalent statements in other claims (insurance against claim removal)
+2. **Risk Vectors:** Per-claim aggregate measures of deletion risk, degradation risk, and cascade fragility
+3. **Evidence Mass Classification:** Categorizes statements by their sharing pattern and twin status
+
+The analysis is purely diagnostic. It does NOT influence routing, pruning, or any active decisions â€” it informs UI diagnostics and researcher understanding of evidence interdependence.
+
+#### Why It Matters
+
+âš ï¸ **Note on Passage Pruning:** The passage pruning engine referenced in earlier sections is **deprecated** â€” it was originally designed but is no longer active in the pipeline.
+
+Blast surface provides UI diagnostics and structural understanding:
+- Twin map: Maps semantically equivalent statements across claims for redundancy analysis
+- Type classification: Structural categorization of statements by ownership pattern (exclusive, shared, orphan potential)
+- Per-claim diagnostics: Visibility into evidence interdependencies
+
+#### Computation
+
+**Twin Map** (`computeTwinMap()` in `src/provenance/surface.ts`)
+
+For each claim and each of its canonical statements:
+1. Build candidate set: all statements from other claims' canonical sets + unclassified statements
+2. Compute per-statement threshold: `tauS = mu_S + 2 * sqrt(var_S)` (adaptive to candidate pool density)
+3. Find best-matching candidate above threshold
+4. **Reciprocity check:** Confirm forward match is also best backward match from candidate
+
+Output: `{ twinStatementId, similarity }` or `null`.
+
+**Evidence Mass Classification**
+
+For each claim, canonical statements classified as:
+- **Type 1 (nonExclusive):** Shared with other claims
+- **Type 2 (exclusiveNonOrphan):** Exclusive to this claim but has a twin
+- **Type 3 (exclusiveOrphan):** Exclusive to this claim and no twin
+
+
+
+### Noun Survival Ratio (degradation cost) â€” Deprecated Metric
+
+âš ï¸ **Note:** This ratio is computed for statements that would be skeletonized if the claim were pruned (historical reference to deprecated pruning logic). Skeletonization does NOT occur during active routing.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **nounSurvivalRatio** | `count(surviving nouns/entities) / count(original nouns/entities)` after POS-based stripping | How much referential content survives skeletonization. Low ratio = the skeleton is nearly empty. Uses compromise.js POS tagging. |
+
+**For expanded diagnostic details on evidence classification, risk vectors, deletion certainty thresholds, and composite score context, see the Expanded Measurements section at the end of this document.**
+
+---
+
+## Structural Analysis (L2) â€” Computed but Not Persisted
+
+Graph-theoretic analysis of the claim-to-claim edge graph. Identifies claim dependencies, conflicts, convergences, and structural patterns. **Computed in the Structure phase (Phase 4) of the provenance pipeline but NOT persisted to the artifact.** The measurements below are available only in memory during pipeline execution.
+
+For view-time structural analysis, client-side computations can be derived from `artifact.semantic.{claims, edges, conditionals}` (e.g., in the Decision Map Sheet instrument panel).
+
+### System-Level Metrics
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **concentration** | `max(supporters) / modelCount` | How dominated the claim set is by one model's support. |
+| **alignment** | `reinforcingEdges / topEdges` (supports + prerequisite ratio) | How much the claims reinforce vs contradict each other. |
+| **tension** | `(conflicts + tradeoff) / allEdges` | Proportion of adversarial relationships. |
+| **fragmentation** | `(components - 1) / (claims - 1)` | How disconnected the claim graph is. |
+| **depth** | `longestChain / claimCount` | How deep the dependency chains run. |
+
+### Per-Claim Flags (percentile-based)
+
+| Flag | Condition | Meaning |
+|---|---|---|
+| **isHighSupport** | supportRatio > top-30% threshold | Broadly supported claim. |
+| **isKeystone** | Hub dominance + cascade dependency | Structural linchpin. |
+| **isOutlier** | Bottom-percentile support | Poorly supported claim. |
+| **isContested** | Edge to high-support conflict | Claim in tension with a strong claim. |
+| **isIsolated** | No edges to other claims | Disconnected from the claim graph. |
+
+### Per-Claim Measures
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **supportRatio** | `supporters.length / modelCount` | Cross-model consensus. |
+| **inDegree, outDegree** | Incoming/outgoing edge counts | Connectivity in the claim graph. |
+| **prerequisiteOutDegree** | Prerequisite child count | How many claims depend on this one. |
+| **conflictEdgeCount** | Conflict edges touched | How contested this claim is. |
+| **chainDepth** | Distance from chain root | Position in dependency hierarchy. |
+
+### Cascade Risk Analysis
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **cascadeRisks** | Fragile convergence points with many prerequisite inputs | Structural vulnerabilities: if multiple prerequisite claims are pruned, the convergence point may fail. |
+| **articulationPoints** | Graph-critical nodes (Tarjan's DFS) | Removal would disconnect the claim graph; candidates for structural importance. |
+| **hubClaim** | Out-degree z-score outlier (top > Î¼+Ïƒ) | Single claim supporting many others; high structural influence. |
+
+### Graph Topology
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **components** | Connected components (union-find) | How fragmented the claim graph is. |
+| **convergencePoints** | Claims serving as common conclusions | N claims leading to one successor; convergent architectural pattern. |
+| **prerequisiteChains** | Longest paths through prerequisite edges | Deepest dependency hierarchies in the graph. |
+| **tradeoffs** | Bidirectional conflicts with structural balance | Mutually exclusive but similarly supported pairs. |
+
+### Structural Layers & Shapes
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **layers** | Iterative peeling of salient claims by round | Decomposition of the claim graph into concentric layers. |
+| **primaryShape** | 'forked' \| 'constrained' \| 'convergent' \| 'sparse' | Dominant architectural pattern of the current layer. |
+| **secondaryPatterns** | 'keystone', 'chain', 'fragile', 'challenged', 'conditional' | Supplementary structural patterns detected per layer. |
+
+---
+
+## Statement Classification (L1/L2)
+
+Classifies every statement as claimed or unclaimed, groups unclaimed statements, and computes proximity to the claim landscape. Computed in the **Classify phase** of the provenance pipeline.
+
+### Per-Statement Classification
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **claimIds** | All claims citing this statement | Which claims own this statement (empty = unclaimed). |
+| **inPassage** | Whether the statement is within a claim's passage | Structural membership. |
+
+### Unclaimed Groups
+
+Unclaimed statements are clustered into groups for the reading surface.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **nearestClaimId** | Closest claim by similarity | Which claim this group is most related to. |
+| **nearestClaimLandscapePosition** | Landscape position of nearest claim | Structural context for the unclaimed group. |
+| **claimSimilarities** | cos(statement, each claim) per statement | How close each unclaimed statement is to each claim. |
+| **meanClaimSimilarity** | Average claim similarity across group | Overall relatedness to the claim landscape. |
+| **meanQueryRelevance** | Average query relevance across group | Whether the unclaimed content is on-topic. |
+| **maxQueryRelevance** | Peak query relevance in group | Whether any individual unclaimed statement is highly relevant. |
+
+### Classification Summary
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **totalStatements** | All statements in corpus | Total evidence base. |
+| **claimedCount** | Statements in at least one claim | Evidence captured by the claim set. |
+| **unclaimedCount** | Statements in no claims | Evidence not captured â€” potential gaps. |
+| **mixedParagraphCount** | Paragraphs with both claimed + unclaimed | Boundary paragraphs where claim coverage is partial. |
+| **fullyUnclaimedParagraphCount** | Paragraphs entirely outside all claims | Completely missed content. |
+| **fullyCoveredParagraphCount** | Paragraphs entirely within claims | Fully captured content. |
+| **unclaimedGroupCount** | Number of unclaimed clusters | Distinct pockets of missed evidence. |
+
+---
+
+## Field-Level Thresholds Quick Reference
+
+| Value | Used in | Meaning | Status |
+|---|---|---|---|
+| mu+sigma | Mixed-method provenance statement allocation | Per-statement dynamic threshold for cross-claim competition (or just mu when N=2 claims) | Active â€” canonical |
+| mu+2sigma | Twin map (`computeTwinMap`) | Per-statement adaptive threshold for twin detection across claim boundaries | Active â€” canonical |
+| T_v | Basin inversion valley | Dynamic threshold from topology; separates "soft" from "strong" similarities | Active |
+| mu+sigma | Passage routing concentration gate | Claims with concentration above this are structurally significant | Active |
+| MAXLEN >= 2 | Passage routing passage gate | Sustained treatment threshold | Active |
+| MAJ >= 1 | Passage routing precondition | Minimum majority paragraph count | Active |
+| muProximity (cross-pool) | Conflict validation gate | Proximity > muProximity â†’ claims more distant than average â†’ validated conflict | Active |
+| muResidual (triangle) | Conflict validation diagnostic | Baseline for triangle residual; helps assess geometric divergence on query | Active (diagnostic) |
+
+**Discontinued thresholds (not currently computed):**
+- 0.85 (alignment split alert) â€” alignment module not active
+- 0.92 (merge alert) â€” alignment module not active
+- nounEntityCount < 3 (passage pruning legibility floor) â€” passage pruning engine not active
+- mu+sigma (fragility resolution damage outliers) â€” fragility resolution not active
+
+---
+
+## Implementation Mapping (artifact paths & storage philosophy)
+
+### Pipeline Storage Philosophy: Immutable Inputs Only, Compute Everything Else On Demand
+
+The pipeline operates on a **pure minimal-state model**: it persists **only immutable inputs** (responses, embeddings, editorial estimates), then **recomputes all derived measurements on-the-fly** from those primitives. Nothing else is storedâ€”everything is rederivable.
+
+1. **Immutable inputs (persisted to storage)**:
+   - **Model responses** (batch-phase LLM outputs: stances, summarization, reframing, queries, disputes, gates)
+   - **Embeddings** (vectorized representations of all statements + query)
+   - **Editorial estimates** (metadata about evidence estimates, claims, etc.)
+   - Query text, statement texts, paragraph-to-statement mappings (metadata needed for reconstruction)
+
+2. **Everything else is computed and discarded**:
+   - **Geometry layer** (substrate, basin inversion, query relevance): pure L1 math on embeddings â†’ computed on pipeline load, not persisted
+   - **Semantic mapper output** (claims, edges, conditionals): LLM output, computed on pipeline load from responses, not persisted as separate file
+   - **Provenance layers** (mixed-method, claim density, exclusivity, twin maps, conflict validation, passage routing, blast surface, refinement):
+     - All deterministically derived from embeddings + semantic output
+     - Computed during execution to support routing decisions
+     - **Not persisted** â€” rederivable in <100ms from immutable inputs when needed
+
+3. **Why this matters**:
+   - **Storage footprint**: Only immutable inputs â†’ artifact is small, portable
+   - **Determinism guarantee**: Same inputs always produce identical outputs; no hidden state
+   - **Auditability**: All computations are reproducible from the stored responses + embeddings
+   - **Scalability**: No intermediate state to manage; computation is the storage
+
+---
+
+### Artifact Paths: Immutable Inputs Only
+
+**Persisted to storage (immutable inputs):**
+- **Statements**: `artifact.shadow.statements` (statement text + statement-to-paragraph mapping)
+- **Embeddings**: `artifact.embeddings` (vectorized statement representations)
+- **Query embedding**: `artifact.queryEmbedding` (query vector)
+- **Model responses**: `artifact.responses` (batch-phase LLM outputsâ€”immutable source of truth)
+- **Semantic mapper output**: `artifact.semantic.claims`, `.edges`, `.conditionals`, `.narrative` (LLM mapper reframingâ€”immutable source of truth for semantic relationships)
+
+**Everything else is computed on-the-fly from these immutable inputs. It is NOT persisted:**
+
+| Layer | What's Computed | From What | When | Rederivation Cost |
+|---|---|---|---|---|
+| **Geometry** | Substrate, basin inversion, query relevance, pre-semantic regions | Embeddings only | Pipeline load | O(nÂ²) similarity, ~100ms |
+| **Enriched claims & passages** | Claim labels, passage entries, evidence grouping | Semantic mapper output (claims/edges) + statement allocations | Pipeline execution | Merge/grouping logic, ~20ms |
+| **Mixed-method provenance** | Statement-to-claim allocations | Embeddings + semantic edges | Pipeline execution | Embedding union logic, ~50ms |
+| **Claim density** | Passage profiles, concentration, density metrics | Statement allocations + paragraphs | Pipeline execution | Arithmetic on allocations, ~30ms |
+| **Claim provenance** | Exclusivity, twin map, statement ownership | Allocations + cross-claim topology | Pipeline execution | Graph analysis, ~20ms |
+| **Conflict validation** | Validated conflicts, triangle metrics | Twin map + basin inversion | Pipeline execution | Distance metrics, ~40ms |
+| **Passage routing** | Claim landscape (northStar/eastStar/mechanism/floor) | Density fields + gates | Pipeline execution, routing decision | Threshold arithmetic, <20ms |
+| **Blast surface** | Evidence mass trios, risk vectors | Twin map + exclusivity | Pipeline execution, diagnostics | Classification rules, <20ms |
+| **Provenance refinement** | Allegiance, primary claims | Conflict clusters + passage dominance | Pipeline execution | Tier resolution, ~30ms |
+| **Structural analysis** | Cascade risk, leverage, cycles | Semantic edges + artifact structure | Client-side on demand | Graph algorithms, ~60ms |
+| **Statement classification** | Claimed/unclaimed breakdown | Allocations + gates | Pipeline execution | Sorting, <10ms |
+
+**Key principle**: If it can be derived from embeddings + responses in <100ms, it's not persisted. It's computed during pipeline execution and discarded after each decision.
+
+---
+
+## Implementation Details
+
+### Mapping artifacts are ephemeral
+(`assembleMapperArtifact` in `src/core/execution/deterministicPipeline.js`):
+- Mapper outputs are immutable, but the artifacts derived from them (passageRouting, claimDensity, blastSurface, etc.) are not
+- These derived artifacts are computed for the current pipeline execution to support routing/assembly logic
+- They are **not persisted** â€” they can be rederived by running the pipeline with the same batch + embeddings but a different mapper
+- Multiple mappers can be applied to the same immutable batch; each produces its own set of derived artifacts
+
+### How clients use the pipeline
+- Load immutable inputs (responses, embeddings, editorial metadata)
+- Reconstruct geometry, provenance, and all derived layers on-the-fly
+- All layers are computed when needed (routing, display, export) from stored primitives
+- Example: UI needs passage routing â†’ recompute from density fields in <50ms; no database lookup
+
+### Adding new measurements
+- Add computation to `computeDerivedFields()` in `deterministicPipeline.js`
+- Computation happens during pipeline execution (for routing logic)
+- **Do NOT persist it unless it's an immutable input** (responses, embeddings, editorial data)
+- If UI needs it later, recompute from immutable inputs on-demand
+- If a new field is immutable (like a new response type from batch), add it to storage
+
+### CognitiveArtifact and UI
+- `buildCognitiveArtifact()` transforms the mapper artifact (in-memory) into CognitiveArtifact shape
+- Auto-forwards unknown mapper keys, but this is for the **current execution's in-memory object**, not stored artifact
+- UI resilience: if an expected metric is missing, compute it locally from immutable inputs (embeddings, responses)
+- Example: Need structural analysis? Call `computeStructuralAnalysis(artifact)` at view-time, don't expect it in stored data
+
+### No backward compatibility burden
+- Since nothing except immutable inputs is stored, schema changes don't affect old artifacts
+- Load responses + embeddings, recompute everything â†’ always current computation logic
+- New engineers don't need to maintain migration code for derived fields
+
+---
+
+## Expanded Measurements â€” Diagnostic Context
+
+This section contains detailed diagnostic and speculative measurements that support understanding of the provenance pipeline's internal state. These measurements are computed but are not used for routing decisionsâ€”they provide deeper visibility into evidence structure, damage potential, and statement classification. Each subsection is labeled with its source measurement area for easy reference.
+
+---
+
+### From Blast Surface - Evidence Mass Trio (Layer C, L1)
+
+âš ï¸ **Note:** These are structural classifications derived from the canonical provenance,
+not routing outcomes. Passage routing gates (concentration, MAXLEN, MAJ) control which
+claims are routed for survey, not these types.
+
+Per-claim decomposition of canonical statements into three types based on exclusivity and twin status.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **canonicalCount** | Total canonical statements from mixed provenance | Total evidence mass. |
+| **nonExclusiveCount** (Type 1) | Statements shared with other claims | Protected â€” survive single-claim pruning because other claims also cite them. |
+| **exclusiveNonOrphanCount** (Type 2) | Exclusive statements WITH a twin | Deletion risk â€” removable on prune, but the idea survives via twin. |
+| **exclusiveOrphanCount** (Type 3) | Exclusive statements with NO twin | Degradation risk â€” skeletonizable on prune, irrecoverable. |
+| **allocatedCellUnits** | Table cell-units allocated to this claim | Table evidence mass (when table cells are present). |
+
+### From Blast Surface - Risk Vector (per-claim, Instrumentation Only)
+
+âš ï¸ **Note:** These measurements characterize statement isolation and damage potential
+for **diagnostics only**. Claim routing decisions are made by passage routing gates
+(concentration â‰¥ Î¼+Ïƒ, MAXLEN â‰¥ 2, MAJ â‰¥ 1), not by these risk scores.
+
+| Field | What it measures |
+|---|---|
+| **deletionRisk** | Count of Type 2 statements. |
+| **deletionStatementIds** | List of Type 2 statement IDs. |
+| **degradationRisk** | Count of Type 3 statements. |
+| **degradationStatementIds** | List of Type 3 statement IDs. |
+| **cascadeFragility** | `sum(1/(parentCount-1))` over non-exclusive statements. Measures vulnerability of shared statements to multi-parent collapse. |
+| **isolation** | `(Type2 + Type3) / canonicalCount`. 0 = fully shared, 1 = fully isolated. |
+| **orphanCharacter** | `Type3 / (Type2 + Type3)`. 0 = all twinned, 1 = all orphaned. |
+| **simplex** | `[type1Frac, type2Frac, type3Frac]` summing to 1.0. Visualization coordinates. |
+| **deletionDamage** | `sum(1 - twinSimilarity)` over Type 2. Higher = lossier twins. |
+| **degradationDamage** | `sum(1 - nounSurvivalRatio)` over Type 3. Higher = more context destroyed by skeletonization. |
+| **totalDamage** | `deletionDamage + degradationDamage`. Ranking value for question priority. |
+
+### From Blast Surface - Deletion Certainty (Type 2 decomposition, Speculative Classification)
+
+âš ï¸ **Note:** These certainty labels describe hypothetical outcomes if claims were pruned.
+Since passage routing gates control actual routing (not damage), these classifications
+are diagnostic telemetry, not decision criteria.
+
+| Subtype | Condition | Meaning |
+|---|---|---|
+| **2a (unconditional)** | Twin is unclassified (outside all claims) | Safe deletion â€” twin is free-floating. |
+| **2b (conditional)** | Twin is in another claim with multiple parents | Deletion depends on whether the twin's other parents survive. |
+| **2c (fragile)** | Twin is exclusive to its host claim | If the host claim is also pruned, the twin is lost too. |
+
+### From Blast Surface - Composite Score (Not Currently Computed)
+
+The blast surface previously computed a `compositeScore` combining structural mass
+and query relevance (the "Vernal" score) for routing decisions. **This is no longer
+computed.** Passage routing gates have replaced composite-score-based decisions entirely.
+
+**Fallback:** If passage routing encounters errors, the routing decision is re-evaluated,
+not reverted to composite scoring. Blast surface remains available for diagnostics.
+
+### From Mixed-Method Provenance - Aggregate Health Rates (Filter Diagnostics)
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **recoveryRate** | `bothCount / (bothCount + competitiveOnlyCount)` (% of competitive evidence also found by claim-centric) | How much of the competitive allocation survived claim-centric refinement. High recovery (>70%) = both methods agree; claims are well-separated. Low recovery (<40%) = competitive and claim-centric diverge; ambiguity in claim boundaries. |
+| **expansionRate** | `claimCentricOnlyCount / (bothCount + claimCentricOnlyCount)` (% of final kept from claim-centric-only) | How much new evidence claim-centric scoring added beyond competitive. High expansion (>30%) = competitive threshold was too strict; claim-centric had to rescue evidence. Low expansion (<10%) = competitive threshold was appropriate; minimal recovery needed. |
+| **removalRate** | `removedCount / (totalMerged)` (% of merged pool removed by globalMu) | Noise filtering effectiveness. High removal (>40%) = merged pool contained many generic statements (common when corpus is off-topic). Low removal (<20%) = merged paragraphs are clean. |
+
+**Interpretation guide:**
+- **Healthy profile:** High recovery (>70%), low expansion (<20%), moderate removal (15â€“30%)
+  - Both methods agree on core evidence; competitive threshold is well-calibrated
+- **Competitive too strict:** Low recovery (<50%), high expansion (>30%), normal removal
+  - Claim-centric is rescuing evidence that competitive rejected; consider raising competitive threshold or reviewing claim embeddings
+- **Merged pool dirty:** Any profile with removalRate >40%
+  - Either statements in merged paragraphs are off-topic, or globalMu threshold is too high
+  - Check if merged paragraphs contain models with very different outputs
+- **Ambiguous claims:** Low recovery, high expansion, high removal
+  - All three signals degraded; claims may overlap semantically or corpus structure is weak
+
+---
+
+## Legacy Measurements â€” Not Currently Computed
+
+These sections document measurements that are **not currently computed in the pipeline**. They are retained here as reference for planned future implementations or historical context.
+
+---
+
+## Cascade Echo â€” Layer D (L1) â€” Not Currently Computed
+
+This section documents a planned measurement for cross-claim impact analysis.
+The metric is not currently computed in the pipeline.
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **cascadeExposure** | `sum over other claims D of (sharedCount / D.canonicalCount) * D.exclusivityRatio` | How much pruning this claim would destabilize other claims' evidence bases. |
+| **overlappingClaims** | Per-overlap breakdown | Which specific claims are exposed and by how much. |
+
+---
+
+## Mixed-Owned Statement Resolution (L1) â€” Speculative Only
+
+**Status:** Computed in the Surface phase but never applied to actual routing.
+This is a speculative analysis for diagnostics: "if this claim were to be pruned,
+what would happen to its jointly-owned statements?"
+
+Passage routing gates (concentration, MAXLEN, MAJ) determine which claims are routed,
+not damage assessments.
+
+### Speculative Resolution Logic
+
+When a claim is hypothetically pruned, statements owned by both that claim
+and surviving claims are analyzed for damage. This analysis is computed speculatively
+but is NOT used to make actual routing decisions. Computed in the **Surface phase**
+of the provenance pipeline as part of `computeTopologicalSurface()`.
+
+### Resolution Logic
+
+For each statement owned by both pruned and surviving claims:
+
+| Condition | Action | Meaning |
+|---|---|---|
+| Statement has a twin in a surviving claim | Decision depends on twin owner status | See Fate table below |
+| Twin's owner is also pruned | SKELETONIZE if legible | Twin carries the idea, but in a claim being removed |
+| Twin's owner is surviving (safe) | REMOVE | Twin survives in a living claim â€” original statement is redundant |
+| Twin is unclassified (outside all claims) | REMOVE | Twin is free-floating; evidence is preserved elsewhere |
+| No twin exists at all | SKELETONIZE if legible | Evidence dies with the claim; skeleton preserves some content |
+
+### Statement Fate (per mixed-owned statement)
+
+| Fate | Meaning |
+|---|---|
+| **PROTECTED** | Resolved by finding a safe protector claim (surviving claim without twin complications) |
+| **REMOVE** | Statement deleted (twin or shared ownership guarantees idea survives) |
+| **SKELETONIZE** | Statement stripped of adjuncts/context, noun entities retained |
+
+### Mixed-Owned Statement Summary
+
+| Measurement | What it is | What it tells you |
+|---|---|---|
+| **mixedCount** | Total jointly-owned statements across all pruned claims | Scale of the mixed ownership problem |
+| **mixedProtectedCount** | Statements with safe protectors in surviving claims | Evidence stabilized through cross-claim sharing |
+| **mixedRemovedCount** | Statements deleted (twin/shared ownership handles loss) | Non-damaging deletions |
+| **mixedSkeletonizedCount** | Statements reduced to skeleton form | Evidence damaged but surviving |
+
+---
+
+## Semantic Density (L1) â€” Deprecated
+
+OLS regression of embedding magnitude vs text length to detect density outliers. **Note:** This measurement was planned but is no longer active in the pipeline. The concept is documented here for reference only.
+
+Per-statement density score derived from embedding magnitudes and text lengths. This would have been a foundational embedding-layer diagnostic used to flag noise and outliers before any geometric analysis.
+
+#### What It Is (Historical)
+
+Semantic density would measure how informationally concentrated a statement's embedding is relative to its text length. The assumption: longer statements naturally have larger embeddings (more aggregate information). Statements that deviate from this pattern would be either:
+- **High density (positive z-score):** Packed with semantic information relative to length. Likely specific, detailed, or technical.
+- **Low density (negative z-score):** Sparse semantic content relative to length. Likely generic, filler, or boilerplate.
+
+Density would be computed via OLS regression of embedding magnitude against log(text length), then residuals z-scored. Outliers (|z| > 2.5) would warrant investigation as potential noise or mislabeled content.
+
+#### Deprecated Computation
+
+**Phase 1: Regression Fit**
+
+Across all statements in the corpus:
+1. For each statement, compute embedding magnitude: `mag_i = ||emb_i||_2` (L2 norm).
+2. Compute text length: `len_i` (character or word count).
+3. Run OLS regression: `mag_i ~ alpha + beta * ln(len_i)` across all statements.
+4. Compute residuals: `res_i = mag_i - (alpha + beta * ln(len_i))`.
+
+Output: OLS coefficients `alpha` (intercept), `beta` (slope), and residual distribution stats.
+
+**Phase 2: Z-Scoring**
+
+Compute corpus-wide residual statistics:
+- `mu_res` = mean of all residuals
+- `sigma_res` = std dev of all residuals
+
+Z-score each statement: `z_density_i = (res_i - mu_res) / sigma_res`
+
+**Phase 3: Outlier Flagging**
+
+Statements with `|z_density| > 2.5` (beyond Â±2.5Ïƒ) would be density outliers â€” worth manual inspection.
+
+#### Deprecated Thresholds & Interpretation
+
+| Measurement | Computation | Healthy Range | Concerning | Failure |
+|---|---|---|---|---|
+| **density (z-score)** | (magnitude - fitted) / sigma_res | -1.0 to +1.0 (within 1Ïƒ) | -2.0 to -1.0 or +1.0 to +2.0 (outlying) | < -2.5 or > +2.5 (extreme; likely noise) |
+| **beta (slope)** | OLS coefficient for ln(length) | 0.08â€“0.20 typical. Positive = longer statements have larger embeddings. | 0.02â€“0.08 (weak relationship) | < 0.01 (no length dependency; embeddings uniform) or > 0.30 (length dominates; poor quality) |
+| **sigma_res (std dev)** | Std of residuals after fit | 0.15â€“0.40 typical. Reflects embedding variance. | < 0.10 (uniform; no signal) | > 0.60 (high variance; embeddings incoherent) |
+| **Outlier rate** | % of statements with \|z\| > 2.5 | 1â€“5% (acceptable noise floor) | 5â€“15% (elevated noise) | > 15% (corpus quality problem; embeddings may be corrupted) |
+| **Density range** | max(z_density) - min(z_density) | â‰¥ 4.0 (good spread) | 2.0â€“4.0 (moderate) | < 2.0 (flat; no differentiation) |
+
+#### Deprecated Worked Examples
+
+**Example 1: High-Density Statement (Specific, Detailed)**
+
+Statement: "The glycoprotein spike (S) protein of SARS-CoV-2 contains two functional subunits, S1 and S2, which mediate cell-cell fusion through angiotensin-converting enzyme 2 (ACE2) receptors."
+
+- Text length: 145 characters
+- Embedding magnitude: 18.2 (large, because text is technical/specific)
+- Fitted magnitude from regression: 15.1 (expected for 145 chars)
+- Residual: 18.2 - 15.1 = +3.1
+- z_density: +2.8 (beyond +2Ïƒ)
+- **Assessment:** High-density outlier. Statement is dense with domain-specific terminology. Would be reliable for clustering.
+
+**Example 2: Low-Density Statement (Generic, Filler)**
+
+Statement: "This is important. We should look at this. The data shows something."
+
+- Text length: 68 characters
+- Embedding magnitude: 8.1 (small, vague language)
+- Fitted magnitude: 11.5 (expected for 68 chars)
+- Residual: 8.1 - 11.5 = -3.4
+- z_density: -2.2 (beyond -2Ïƒ)
+- **Assessment:** Low-density outlier. Statement lacks semantic content despite length. Would be a candidate for removal or merging with neighbors.
+
+**Example 3: Normal-Density Statement (Typical)**
+
+Statement: "The vaccine reduces infection risk by 95% in clinical trials."
+
+- Text length: 60 characters
+- Embedding magnitude: 12.4
+- Fitted magnitude: 12.1 (expected for 60 chars)
+- Residual: 0.3
+- z_density: +0.08 (within 1Ïƒ)
+- **Assessment:** Normal. Statement has expected informativeness for its length.
+
+---
+
+## Fragility Resolution (L1/L2) â€” Not Currently Computed
+
+Iterative damage threshold convergence for routing stability analysis. **Note:** This measurement is not currently computed in the pipeline. The blast surface computes damage scores, but the iterative convergence algorithm described below is not wired into the routing decision process.
+
+Deprecated algorithm (historical reference):
+
+1. Seed routed set with conflict cluster claim IDs
+2. Resolve all claims' damage given current routed set
+3. Compute mu + sigma of resolved damages
+4. Identify new outliers (damage > mu+sigma AND supportRatio <= 0.5)
+5. Add to routed set; repeat until convergence (max 20 iterations)
+
+Deprecated measurements (historical reference):
+
+### Resolved Statement Damage (per-statement)
+
+| Measurement | What it would measure |
+|---|---|
+| **originalType** | '2a' / '2b' / '2c' / '3' (from blast surface) â€” Pre-resolution type classification. |
+| **resolvedType** | '2a' / 'effective-2a' / 'effective-3' / '3' â€” Post-resolution type reflecting routing topology. |
+| **damage** | Numeric cost (0 to 1) â€” Per-statement damage contribution. |
+| **reason** | Explanation of resolution. |
+
+### Resolved Claim Damage (per-claim)
+
+| Measurement | What it would measure |
+|---|---|
+| **resolvedDamage** | Sum of per-statement damage (routing-aware) â€” the actual damage given current routing topology. |
+| **rawTotalDamage** | Original totalDamage from blast surface â€” pre-resolution baseline. |
+
+### Convergence Telemetry
+
+| Measurement | What it would measure |
+|---|---|
+| **iterations** | Number of convergence loops â€” typically 1-3. |
+| **iterationLog** | `[iteration, newOutlierIds]` per round â€” which claims were added at each step. |
+| **finalRoutedSet** | Claims selected for survey â€” the authoritative routing decision. |
+| **damageThreshold** | Final mu + sigma â€” the converged damage cutoff. |
+
+---
+
+## Alignment (L1) â€” Not Currently Computed
+
+Region-to-claim coverage analysis. Checks whether geometric regions are correctly covered by semantic claims. **Note:** This measurement is not currently computed in the pipeline. The infrastructure exists in cognitive-artifact.ts for forwarding alignment data (if computed), but the actual computation is not wired into any current pipeline phase.
+
+Deprecated measurements (historical reference):
+
+| Measurement | What it would tell you |
+|---|---|
+| **globalCoverage** | 0-1. High means most region content is covered by at least one claim. |
+| **unattendedRegionIds** | Regions with no covering claims. |
+| **regionCoverages** | Per-region: `regionId`, `coverageRatio`, `totalStatements`, `bestClaimSimilarity`. |
+| **splitAlerts** | Claims spanning far-apart regions: `maxInterRegionDistance` + `regionIds`. Threshold: 0.85. |
+| **mergeAlerts** | Near-duplicate claim pairs: `(claimIdA, claimIdB, similarity)`. Threshold: 0.92. |
+
+---
+
+## Completeness & Statement Fates (L2) â€” Not Currently Computed
+
+Statement fate triage. For each statement, tracks whether it ended up as primary evidence, supporting evidence, or fell through. **Note:** This measurement is not currently computed in the pipeline. The twin map and statement classification indicate approximate fates, but explicit fate labeling across all statements is not generated.
+
+Deprecated statement fates (historical reference):
+
+| Fate | Meaning |
+|---|---|
+| **primary** | Statement is directly cited as evidence for at least one claim. |
+| **supporting** | Statement is stranded but has a surviving twin in the twin map â€” the idea carries forward, original text does not. |
+| **unaddressed** | Statement passed relevance gating but wasn't placed. |
+| **orphan** | Statement had no claim relationship at all. |
+| **noise** | Statement was explicitly rejected. |
+
+Deprecated measurements (historical reference):
+
+| Measurement | What it would have measured |
+|---|---|
+| **Coverage rate** | `(primary + supporting) / total` â€” proportion of statements utilized. |
+| **Unaddressed count** | Relevant but not incorporated â€” missed evidence opportunities. |
+| **Orphan + noise count** | Not relevant at all. |
+
+---
+
+## Model Ordering (L1) â€” Not Currently Computed
+
+Ranks models by their geometric irreplaceability â€” how much unique evidence each model contributes that no other model covers. **Note:** This measurement is not currently computed in the pipeline.
+
+Planned measurements (for future implementation):
+
+| Measurement | What it would measure |
+|---|---|
+| **Irreplaceability** | Score 0-1. High = statements are geometrically unique; removal creates evidence gaps. Low = redundant model. |
+| **soloCarrierRegions** | Regions where this model is the only carrier. High count = critical model. |
+| **lowDiversityContribution** | Penalty for contributing to regions that already have many contributors. |
+| **Spread (max - min irreplaceability)** | How differentiated the models are. Low spread = all contribute equally. High spread = some essential, some redundant. |
+
+---
+
+This document is intended to be the single source-of-truth for what the pipeline measures, where it stores the numbers, and how derived diagnostics are computed. Keep it in sync with:
+- The deterministic pipeline (`src/core/execution/deterministicPipeline.js` and `src/core/execution/step-executor.js`)
+- The 5-phase provenance pipeline (`src/core/provenance/`: measure, validate, surface, structure, classify)
+- The 4-phase geometry pipeline (`src/geometry/`: measure, interpret, annotate, engine)
+- The clustering layer (`src/clustering/`)
+- The UI instrument panels and Decision Map Sheet
+

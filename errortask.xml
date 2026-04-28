@@ -1,0 +1,99 @@
+  Full console.error → logInfraError retrofit
+
+  The infra-logger system is already in place at src/errors/infra-logger.ts, exported from
+  src/errors/index.ts as logInfraError(label: string, err: unknown): void. It logs to console.error
+  internally and calls errorHandler.incrementErrorCount. The goal is to retrofit all bare
+  console.error calls inside catch blocks to use logInfraError so errors get telemetry counting.
+
+  Scope: src/, shared/, ui/ — .ts, .tsx, .js, .jsx
+  Exclude: node_modules/, dist/, build/, *.test.ts, *.spec.ts, __tests__/
+
+  Import path by location:
+  - File in src/execution/pipeline/ → import { logInfraError } from '../../errors';
+  - File in src/provenance/ → import { logInfraError } from '../errors';
+  - File in ui/hooks/chat/ → import { logInfraError } from '../../../src/errors';
+  - File in ui/shell/layout/ → import { logInfraError } from '../../../src/errors';
+  - File in shared/ → import { logInfraError } from '../src/errors';
+  - General rule: resolve src/errors relative to the file's location. Never use absolute paths.
+  - If logInfraError is already imported in the file, do not add a duplicate import.
+
+  ---
+  What to change
+
+  Before:
+  } catch (err) {
+    console.error('[some/label] operation failed:', err);
+  }
+
+  After:
+  } catch (err) {
+    logInfraError('some/label', err);
+  }
+
+  The label comes from the existing console.error string — strip the brackets and trailing message,
+  keep the path. If the existing label is vague (e.g. [Error]), derive a specific one from the file
+  path and function name: module/functionName.
+
+  ---
+  Hard skip rules — do not touch these
+
+  1. Provider/concierge error handlers — any catch inside src/providers/ or src/concierge-service/
+  that calls errorHandler.handleProviderError, errorHandler.handleError, normalizeError, or
+  handleProviderError directly. These already increment the counter internally; retrofitting would
+  double-count.
+  2. Already uses logInfraError — skip entirely, no changes needed.
+  3. console.warn catches — do not touch. console.warn is used for documented expected conditions
+  (Chrome port closed on navigation, clipboard permission denied, WebGPU unavailable, feature
+  detection fallbacks). These must stay as console.warn. Do not upgrade them to logInfraError.
+  4. Catches that rethrow — if the catch body is console.error(...); throw err; — retrofit is fine,
+  the rethrow stays identical.
+  5. Catches that call multiple loggers — if the catch already calls both console.error and something
+  else (e.g. persistenceMonitor.recordError, setAlertText), replace only the console.error line with
+  logInfraError. Leave all other lines untouched.
+  6. The errors module itself — skip src/errors/ entirely.
+  7. JS files without module imports — files like src/offscreen/embedding-controller.js that have no
+  ES module imports cannot import logInfraError. Use console.error directly in those files. Do not add
+   an import statement to a non-module JS file.
+  8. console.error outside catch blocks — only retrofit console.error calls that are directly inside a
+   catch body. Do not touch console.error calls in normal code paths, .catch() chains on
+  fire-and-forget promises where the error is not the catch variable, or error boundary render
+  methods.
+  9. .catch(() => console.error(...)) inline lambdas — these are fine to retrofit to .catch((err) => {
+   logInfraError('label', err); }). But only if the .catch is on a fire-and-forget call (not one where
+   the return value is used or the error is re-thrown upstream).
+  10. Do not rename catch variables unless the existing name is _ or _e with no references in the
+  body. If the body references e, keep e. If the body references err, keep err.
+  11. Do not change indentation, braces, or control flow. The only lines that change are the
+  console.error(...) call and the import block.
+  12. Preserve the original diagnostic content exactly. If the existing console.error message
+  contains interpolated values, contextual strings, or multi-part arguments, carry them into
+  the label or as additional output alongside logInfraError. Do not discard any information
+  that was present in the original call.
+
+  ---
+  Execution order
+
+  Process one directory at a time. After each directory, run npm run typecheck, report the result, and
+   stop for human approval before moving to the next.
+
+  1. src/execution/
+  2. src/provenance/
+  3. src/geometry/
+  4. src/clustering/
+  5. src/shadow/
+  6. src/system/
+  7. src/sw-entry.ts
+  8. src/persistence/
+  9. src/providers/ — skip catches already using provider error handlers
+  10. src/concierge-service/ — same rule
+  11. shared/
+  12. ui/state/
+  13. ui/hooks/
+  14. ui/instrument/
+  15. ui/reading/
+  16. ui/shell/
+  17. ui/chat/
+  18. ui/services/
+  19. ui/shared/
+  20. ui/utils/
+  21. Anything remaining under ui/ not yet covered

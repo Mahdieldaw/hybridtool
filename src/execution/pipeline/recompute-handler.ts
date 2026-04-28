@@ -13,6 +13,7 @@ import { parseEditorialOutput } from '../../concierge-service/editorial-mapper.j
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
 import { ConciergeService } from '../../concierge-service/concierge-service.js';
 import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings.js';
+import { logInfraError } from '../../errors';
 
 /**
  * Handles recompute requests (formerly handleContinueRequest from CognitivePipelineHandler)
@@ -46,7 +47,7 @@ export async function handleRecompute(payload, options) {
           error: 'Session mismatch for continuation request',
         });
       } catch (err) {
-        console.error('[recompute-handler/handleRecompute] Failed to post CONTINUATION_ERROR to port:', err);
+        logInfraError('recompute-handler/handleRecompute: Failed to post CONTINUATION_ERROR to port', err);
       }
       return;
     }
@@ -90,22 +91,19 @@ export async function handleRecompute(payload, options) {
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
 
-      const latestSingularityResponse = (priorResponses || [])
-        .filter((r) => r && r.responseType === 'singularity')
-        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0];
-
-      const frozenSingularityPromptType =
-        latestSingularityResponse?.meta?.frozenSingularityPromptType;
-      const frozenSingularityPromptSeed =
-        latestSingularityResponse?.meta?.frozenSingularityPromptSeed;
-      const frozenSingularityPrompt = latestSingularityResponse?.meta?.frozenSingularityPrompt;
-
       const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === 'mapping' && r.providerId)
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
-      const latestMappingText = mappingResponses?.[0]?.text || '';
-      const latestMappingMeta = mappingResponses?.[0]?.meta || {};
+      // Honor UI's active-mapper selection when provided; otherwise default to most recent.
+      const activeMappingProviderId = payload?.activeMappingProviderId;
+      const selectedMappingResponse =
+        (activeMappingProviderId
+          ? mappingResponses.find((r) => r.providerId === activeMappingProviderId)
+          : null) || mappingResponses?.[0] || null;
+
+      const latestMappingText = selectedMappingResponse?.text || '';
+      const latestMappingMeta = selectedMappingResponse?.meta || {};
 
       // Phase 2 rebuild (preferred path — uses the ONE code path)
       if (!mappingArtifact && latestMappingText) {
@@ -129,7 +127,7 @@ export async function handleRecompute(payload, options) {
                 : null;
 
             let claimEmbeddings = null;
-            const mappingProviderId = mappingResponses?.[0]?.providerId;
+            const mappingProviderId = selectedMappingResponse?.providerId;
             if (mappingProviderId) {
               try {
                 const claimEmbeddingsRecord = await sessionManager.loadClaimEmbeddings(aiTurnId, mappingProviderId);
@@ -356,7 +354,7 @@ export async function handleRecompute(payload, options) {
           ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
         });
       } catch (err) {
-        console.error('port.postMessage failed in RecomputeHandler (handleRecompute):', err);
+        logInfraError('recompute-handler: port.postMessage failed (handleRecompute)', err);
       }
 
       await sessionManager.upsertProviderResponse(
@@ -500,7 +498,7 @@ export async function handleRecompute(payload, options) {
       options.inflightContinuations?.delete(inflightKey);
     }
   } catch (error) {
-    console.error(`[RecomputeHandler] Orchestration failed:`, error);
+    logInfraError('RecomputeHandler: Orchestration failed', error);
     try {
       const msg = error instanceof Error ? error.message : String(error);
       port?.postMessage({
@@ -512,10 +510,7 @@ export async function handleRecompute(payload, options) {
         ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
       });
     } catch (err) {
-      console.error(
-        'port.postMessage failed in RecomputeHandler (handleRecompute/errorBoundary):',
-        err
-      );
+      logInfraError('recompute-handler: port.postMessage failed (handleRecompute/errorBoundary)', err);
     }
   }
 }

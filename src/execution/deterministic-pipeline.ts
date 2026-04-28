@@ -40,6 +40,7 @@ import { buildPreSemanticInterpretation } from '../geometry/interpret.js';
 import { measureProvenance } from '../provenance/measure.js';
 import { buildCognitiveArtifact } from '../../shared/cognitive-artifact.js';
 import { packEmbeddingMap } from '../persistence/embedding-codec.js';
+import { logInfraError } from '../errors';
 
 function getErrorMessage(err: unknown): string {
   if (!err) return 'Unknown error';
@@ -634,7 +635,7 @@ export async function executeArtifactPipeline({
     enrichedClaims = measure.enrichedClaims;
     claimEmbeddings = measure.claimEmbeddings;
   } catch (err) {
-    console.error('[executeArtifactPipeline] Phase 1 bootstrap failed:', getErrorMessage(err));
+    logInfraError('executeArtifactPipeline: Phase 1 bootstrap failed', err);
     throw err;
   }
 

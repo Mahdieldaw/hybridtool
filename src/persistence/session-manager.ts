@@ -536,7 +536,7 @@ export class SessionManager {
       ...(mapping !== undefined ? { mapping } : {}),
       ...(singularity !== undefined ? { singularity } : {}),
       lastContextSummary: contextSummary,
-      meta: await this._attachRunIdMeta(aiTurnId),
+      meta: await this._attachRunIdMeta(aiTurnId, result),
       ...(pipelineStatus ? { pipelineStatus } : {}),
     };
     await adapter.put('turns', aiTurnRecord);
@@ -712,7 +712,7 @@ export class SessionManager {
       ...(mapping !== undefined ? { mapping } : {}),
       ...(singularity !== undefined ? { singularity } : {}),
       lastContextSummary: contextSummary,
-      meta: await this._attachRunIdMeta(aiTurnId),
+      meta: await this._attachRunIdMeta(aiTurnId, result),
       ...(pipelineStatus ? { pipelineStatus } : {}),
     };
     await adapter.put('turns', aiTurnRecord);
@@ -1105,7 +1105,9 @@ export class SessionManager {
     this.isInitialized = true;
   }
 
-  async _attachRunIdMeta(aiTurnId: string): Promise<Record<string, unknown>> {
+  async _attachRunIdMeta(aiTurnId: string, result?: PersistenceResult): Promise<Record<string, unknown>> {
+    const meta: Record<string, unknown> = {};
+
     try {
       const adapter = this._requireAdapter();
       const metas = (await adapter.getMetadataByEntityId(aiTurnId)) as unknown[];
@@ -1114,12 +1116,18 @@ export class SessionManager {
       );
       if (isPlainObject(inflight)) {
         const runId = inflight['runId'];
-        if (typeof runId === 'string' && runId) return { runId };
+        if (typeof runId === 'string' && runId) meta.runId = runId;
       }
     } catch (err) {
       getSessionLogger().error('[SessionManager] _attachRunIdMeta failed', err);
     }
-    return {};
+
+    const mapperPids = result?.mappingOutputs ? Object.keys(result.mappingOutputs) : [];
+    if (mapperPids.length > 0) {
+      meta.mapper = mapperPids[0];
+    }
+
+    return meta;
   }
 
   /**

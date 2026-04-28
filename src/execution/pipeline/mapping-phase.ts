@@ -15,6 +15,7 @@ import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '.
 import { buildLookupCacheFromIndex } from '../../concierge-service/evidence-substrate.js';
 import { getConfigForModel } from '../../clustering/index.js';
 import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
+import { logInfraError } from '../../errors';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -79,7 +80,7 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
         return { [pid]: { meta, continueThread: true } };
       }
     } catch (err) {
-      console.error('[mapping-phase/resolveProviderContextsForMapping] Historical response lookup failed:', err);
+      logInfraError('mapping-phase/resolveProviderContextsForMapping: Historical response lookup failed', err);
     }
   }
 
@@ -93,7 +94,7 @@ async function resolveProviderContexts(pid, payload, context, stepResults, sessi
       return { [pid]: { meta, continueThread: true } };
     }
   } catch (err) {
-    console.error('[mapping-phase/resolveProviderContextsForMapping] getProviderContexts failed:', err);
+    logInfraError('mapping-phase/resolveProviderContextsForMapping: getProviderContexts failed', err);
   }
 
   return undefined;
@@ -436,7 +437,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                         }
                       }
                     } catch (err) {
-                      console.error('[executeMappingPhase] sourceCoherence stamp failed', err);
+                      logInfraError('executeMappingPhase: sourceCoherence stamp failed', err);
                     }
                   }
                   // ── EDITORIAL MODEL CALL (executeMappingPhase-only) ──────────────
@@ -607,10 +608,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     `[executeMappingPhase] Generated mapper artifact with ${enrichedClaims.length} claims, ${mapperArtifact.edges?.length || 0} edges`
                   );
                 } catch (err) {
-                  console.error(
-                    '[executeMappingPhase] Artifact pipeline failed (recoverable via regenerate-embeddings):',
-                    getErrorMessage(err)
-                  );
+                  logInfraError('executeMappingPhase: Artifact pipeline failed (recoverable via regenerate-embeddings)', err);
                   // Don't throw — let the turn complete with raw text.
                   // Batch responses are already persisted, so regenerate-embeddings
                   // can rebuild the full pipeline from saved data + fresh embeddings.
@@ -660,7 +658,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                 const meta = finalResult?.meta;
                 if (meta && typeof meta === 'object') return { ...meta };
               } catch (err) {
-                console.error('[mapping-phase/executeMappingPhase] Failed to read providerThreadMeta:', err);
+                logInfraError('mapping-phase/executeMappingPhase: Failed to read providerThreadMeta', err);
               }
               return {};
             })();
@@ -678,7 +676,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                 workflowContexts[payload.mappingProvider] = providerThreadMeta;
               }
             } catch (err) {
-              console.error('[mapping-phase/executeMappingPhase] Failed to cache workflowContexts for mapping provider:', err);
+              logInfraError('mapping-phase/executeMappingPhase: Failed to cache workflowContexts for mapping provider', err);
             }
 
             // Persist semantic mapper's thread position for the next extend turn.

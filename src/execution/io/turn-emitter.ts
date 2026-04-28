@@ -1,5 +1,6 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings';
+import { logInfraError } from '../../errors';
 
 interface Statement {
   id: string;
@@ -515,7 +516,7 @@ export class TurnEmitter {
         });
       }
     } catch (error) {
-      console.error('[turn-emitter] Failed to emit TURN_FINALIZED:', error);
+      logInfraError('turn-emitter: Failed to emit TURN_FINALIZED', error);
     }
   }
 }

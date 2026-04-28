@@ -1,0 +1,184 @@
+## Mission
+
+Audit the codebase for `catch` blocks and `.catch()` handlers that silently swallow errors, and add `console.error` logging so they surface in the browser devtools console. **This must not change runtime behavior.** Every existing return value, default fallback, and control-flow path stays identical. The pipeline behaves exactly as it does today — operators just gain visibility into errors that are currently invisible.
+
+This codebase is in active production. Silent swallows accumulated during the JS→TS conversion when `catch (e)` became `catch (e: unknown)` and previous agents "fixed" type errors by deleting the log instead of properly typing it. The goal is to restore visibility without altering recovery behavior.
+
+## Scope
+
+**Include:** `src/`, `ui/`, `shared/`, `offscreen/`
+**Exclude:** `node_modules/`, `dist/`, `build/`, `.codesight/`, any `*.test.ts`, `*.spec.ts`, `__tests__/`
+**Languages:** `.ts`, `.tsx`, `.js`, `.jsx`
+
+## Patterns to find
+
+Use the Grep tool with these regexes. Inspect every match.
+
+1. **Empty / no-op catches:**
+   ```
+   catch\s*\([^)]*\)\s*\{\s*\}
+   catch\s*\{\s*\}
+   ```
+
+2. **Silent return-only catches** (no log, just returns a default — these are the most common case):
+   ```
+   catch\s*\([^)]*\)\s*\{\s*return\b
+   ```
+
+3. **Promise `.catch` silencers:**
+   ```
+   \.catch\s*\(\s*\(\s*\)\s*=>\s*(null|undefined|\{\}|void\s+0|false|true)\s*\)
+   \.catch\s*\(\s*\([^)]*\)\s*=>\s*(null|undefined|\{\}|void\s+0|false|true)\s*\)
+   ```
+
+4. **`void e;` or bare-identifier catches:**
+   ```
+   catch\s*\([^)]+\)\s*\{\s*(void\s+\w+;?\s*|\w+;\s*)\}
+   ```
+
+5. **Comments flagging intentional swallow** (review for legitimacy, may need a `console.warn`):
+   ```
+   //\s*(ignore|swallow|suppress|silent|noop|no-op)
+   ```
+
+For each match, read enough surrounding context (the function body, ideally) to understand:
+- What operation was being attempted
+- What the recovery value/path is
+- Whether the swallow is intentional (rare — usually feature detection)
+
+## Canonical fix pattern
+
+### Before (silent swallow):
+```ts
+try {
+  const data = await fetchSomething(id);
+  return data;
+} catch (e) {
+  return null;
+}
+```
+
+### After (additive log, behavior unchanged):
+```ts
+try {
+  const data = await fetchSomething(id);
+  return data;
+} catch (err) {
+  console.error('[module-name/functionName] fetchSomething failed:', err);
+  return null;
+}
+```
+
+### Promise chain — Before:
+```ts
+loadConfig().catch(() => DEFAULT_CONFIG);
+```
+
+### Promise chain — After:
+```ts
+loadConfig().catch((err) => {
+  console.error('[module-name/loadConfig] failed, using DEFAULT_CONFIG:', err);
+  return DEFAULT_CONFIG;
+});
+```
+
+### Label format
+
+`[<module-or-short-file>/<function-or-context>] <one-line description>:`
+
+Examples:
+- `[session-manager/_attachRunIdMeta] failed to read inflight metadata:`
+- `[mapping-phase/runMapping] paragraph projection failed, continuing without it:`
+- `[shadow-extractor/extractStatements] regex parse failed for response:`
+
+Labels should be short but greppable. The reader scanning a noisy console must be able to identify the source quickly.
+
+### Severity choice
+
+- **`console.error`** — default. Use whenever an unexpected exception was caught. Even if the recovery is graceful, the underlying failure is unexpected.
+- **`console.warn`** — use only when the catch is genuinely an *expected* condition (e.g., feature detection, "this API may not exist in some contexts"). Must be justified in code by an adjacent comment.
+- **`console.info`** / **`console.log`** — never, for caught errors.
+
+## Hard rules — what NOT to change
+
+1. **Do not add new try/catch blocks.** Only modify existing ones.
+2. **Do not move code into or out of try blocks.** The architectural question of "should geometry be inside the try block in mapping-phase" is out of scope for this task. Don't touch it.
+3. **Do not rethrow where the code currently swallows.** Adding `throw err` after the log changes behavior — forbidden.
+4. **Do not change return values, default fallbacks, or recovery branches.** If the catch returned `null`, it still returns `null` after.
+5. **Do not consolidate or remove existing logs.** If a catch already calls `console.error`, leave it. If it already calls a project logger like `getSessionLogger().error`, leave it. Only *add* where missing.
+6. **Do not rename catch variables across-the-board.** If the existing variable name (`e`, `err`, `error`) is referenced inside the catch body, keep it. Only rename when adopting `err` doesn't break a reference.
+7. **Do not touch test files** even if they match patterns.
+8. **Do not "improve" the error message by reading `err.message`** unless you also write a type guard (`err instanceof Error ? err.message : String(err)`). The simpler `console.error('[...] :', err)` form prints the full Error object including stack — preferred.
+
+## Special cases — leave alone
+
+- **Already logging:** catches that call `console.*`, `logger.*`, `getSessionLogger().*`, or any project-specific log function. Skip.
+- **Already rethrowing:** catches whose entire body is `throw err` or equivalent. The rethrow is the surfacing mechanism. Skip.
+- **Documented intentional swallow:** catches with an adjacent comment explaining why silence is correct (e.g., `// chrome.tabs may not exist in offscreen context`). For these, *upgrade* to `console.warn` (one-time visibility into the expected condition is still useful for debugging) **only if** the comment confirms intent. Otherwise treat as silent and apply `console.error`.
+- **Pure type-narrowing catches:** catches whose only purpose is to narrow a type at a boundary, with no recovery behavior. Rare. If found, treat as silent and add `console.error`.
+
+## Execution order
+
+Process directories in this order so the diff stays reviewable and high-blast-radius shared code is fixed first:
+
+1. `shared/`
+2. `src/persistence/`
+3. `src/execution/`
+4. `src/provenance/`, `src/geometry/`, `src/clustering/`, `src/shadow/`
+5. `src/system/`, `src/sw-entry.ts`, `src/offscreen/`, `src/providers/`, `src/concierge-service/`
+6. `ui/state/`, `ui/services/`, `ui/hooks/`
+7. `ui/chat/`, `ui/instrument/`, `ui/reading/`, `ui/shell/`, `ui/components/`
+8. Anything else under `ui/` not yet covered
+
+After each directory, run typecheck (`npm run build` or whatever the project uses — check `package.json` `scripts`) before moving on. If typecheck fails, fix only the new failure introduced by your edits — do not fix unrelated pre-existing errors.
+
+## Verification (after all directories complete)
+
+1. **Typecheck passes:** `npm run build` (or equivalent). No new errors.
+2. **Tests pass:** any existing test suite. No new failures.
+3. **Diff is purely additive:** review the full diff. Every change should be either:
+   - A new `console.error` / `console.warn` line inside an existing catch body, OR
+   - A safe `(e)` → `(err)` rename inside a single catch where no other reference uses the old name.
+   No deletions of code, no reordering, no moved braces, no changed return values.
+
+If the diff contains anything else, revert that hunk.
+
+## Final report
+
+Produce a markdown summary at the end:
+
+```
+# Silent Error Surfacing — Audit Report
+
+## Totals
+- Catches audited: N
+- Catches updated (added console.error/warn): N
+- Already logging — skipped: N
+- Intentional swallow — left alone: N (with reasons)
+- Files touched: N
+
+## Updated catches by directory
+- shared/: N catches across M files
+- src/persistence/: ...
+- (etc)
+
+## Intentional swallows preserved
+- path/to/file.ts:LINE — reason from comment
+- (etc)
+
+## Notes / things worth flagging
+- (anything that looked suspicious but didn't match the rules — e.g. catches that swallow but the recovery value seems wrong; flag for human review, do not fix)
+```
+
+---
+
+## Operator-side: how to read the new logs
+
+After this lands, every silent failure will print to the devtools console with a `[module/function]` prefix. To monitor in production:
+
+- Open devtools on the extension's service worker (chrome://extensions → "service worker" link)
+- Open devtools on the UI page
+- Open devtools on the offscreen document (chrome://extensions → "offscreen" link, if available)
+- Filter by `[` prefix or specific module name when investigating a report
+
+Errors will not block the pipeline. They surface so you can investigate.

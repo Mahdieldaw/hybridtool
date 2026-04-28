@@ -1,6 +1,7 @@
 // src/core/execution/io/context-resolver.ts
 import { DEFAULT_THREAD } from '../../../shared/messaging';
 import { parseSemanticMapperOutput } from '../../../shared/parsing-utils';
+import { logInfraError } from '../../errors';
 import type { ProviderResponseRecord, SessionRecord, AiTurnRecord, TurnRecord } from '../../persistence/types';
 import type { ResolvedContext, InitializeContext, ExtendContext, RecomputeContext } from '../../../shared/types/contract';
 
@@ -364,7 +365,7 @@ export class ContextResolver {
       }
       return null;
     } catch (e) {
-      console.error('[ContextResolver] _getSessionMetadata failed:', e);
+      logInfraError('ContextResolver: _getSessionMetadata failed', e);
       return null;
     }
   }
@@ -441,7 +442,7 @@ export class ContextResolver {
       }
       return null;
     } catch (e) {
-      console.error('[ContextResolver] _getTurn failed:', e);
+      logInfraError('ContextResolver: _getTurn failed', e);
       return null;
     }
   }

@@ -4,12 +4,9 @@ import { executeGenericSingleStep } from '../utils/llm-runner.js';
 import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/concierge-service.js';
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
 import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.js';
-import type { 
-  WorkflowStep, 
-  WorkflowContext, 
-  ProviderKey, 
-  ProviderOutput 
-} from '../../../shared/types';
+import { logInfraError } from '../../errors';
+import type { WorkflowStep } from '../../../shared/types/contract';
+type WorkflowContext = any;
 
 const handoffV2Enabled = !!HANDOFF_V2_ENABLED;
 
@@ -154,7 +151,7 @@ export async function executeSingularityPhase(
       null;
 
     if (!mappingArtifact) {
-      console.error('[SingularityPhase] CRITICAL: Missing mapping artifact for Singularity phase.');
+      logInfraError('SingularityPhase/CRITICAL: Missing mapping artifact for Singularity phase', new Error('Missing mapping artifact'));
       throw new Error(
         'Singularity mode requires a valid Mapper Artifact which is missing in this context.'
       );
@@ -350,7 +347,7 @@ export async function executeSingularityPhase(
             }
           }
         } catch (err) {
-          console.error('[SingularityPhase] Error building concierge prompt:', err);
+          logInfraError('SingularityPhase: Error building concierge prompt', err);
           conciergePrompt = null; // Will trigger fallback below
         }
 
@@ -363,9 +360,7 @@ export async function executeSingularityPhase(
               isFirstTurn: turnInCurrentInstance === 1,
             });
           } else {
-            console.error(
-              '[SingularityPhase] ConciergeService.buildConciergePrompt unavailable for fallback'
-            );
+            logInfraError('SingularityPhase/CRITICAL: ConciergeService.buildConciergePrompt unavailable for fallback', new Error('buildConciergePrompt unavailable'));
           }
         }
 
@@ -511,17 +506,14 @@ export async function executeSingularityPhase(
                 },
               });
             } catch (err) {
-              console.error(
-                'port.postMessage failed in SingularityPhase (executeSingularityPhase):',
-                err
-              );
+              logInfraError('SingularityPhase: port.postMessage failed (executeSingularityPhase)', err);
             }
           } catch (e) {
             console.warn('[SingularityPhase] Failed to update concierge state:', e);
           }
         }
       } catch (singularityErr) {
-        console.error('[SingularityPhase] Singularity execution failed:', singularityErr);
+        logInfraError('SingularityPhase: Singularity execution failed', singularityErr);
         try {
           if (singularityStep?.stepId) {
             const msg = getErrorMessage(singularityErr);
@@ -534,10 +526,7 @@ export async function executeSingularityPhase(
             });
           }
         } catch (err) {
-          console.error(
-            'port.postMessage failed in SingularityPhase (executeSingularityPhase/singularityStep):',
-            err
-          );
+          logInfraError('SingularityPhase: port.postMessage failed (executeSingularityPhase/singularityStep)', err);
         }
       }
     }
@@ -562,7 +551,7 @@ export async function executeSingularityPhase(
     // Singularity step has already executed above, no need to halt early
     return false;
   } catch (err) {
-    console.error('[SingularityPhase] executeSingularityPhase failed:', err);
+    logInfraError('SingularityPhase: executeSingularityPhase failed', err);
     return false;
   }
 }

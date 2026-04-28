@@ -1,0 +1,390 @@
+ shared/parsing-utils.ts                | 16 ++++++++++----
+ src/execution/pipeline/batch-phase.ts  | 40 +++++++++++++++++++++++++---------
+ src/persistence/database.ts            |  4 +++-
+ src/persistence/session-manager.ts     | 17 ++++++++++-----
+ src/provenance/surface.ts              |  3 ++-
+ src/system/connection-handler.ts       | 12 +++++-----
+ ui/chat/ChatView.tsx                   | 40 +++++++++++++++++++---------------
+ ui/hooks/chat/usePortMessageHandler.ts |  3 ++-
+ ui/services/extension-api.ts           |  8 +++++--
+ ui/utils/safe-lazy.ts                  |  4 +++-
+ 10 files changed, 98 insertions(+), 49 deletions(-)
+diff --git a/shared/parsing-utils.ts b/shared/parsing-utils.ts
+index 7277264..96dd12c 100644
+--- a/shared/parsing-utils.ts
++++ b/shared/parsing-utils.ts
+@@ -280,11 +280,13 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
+         try {
+           const parsed2 = JSON.parse(parsed);
+           if (parsed2 && typeof parsed2 === 'object') return { ok: true, value: parsed2 };
+-        } catch {
++        } catch (err) {
++          console.error('[parsing-utils/extractJsonObject] double-parse failed:', err);
+           return { ok: false, value: null };
+         }
+       }
+-    } catch {
++    } catch (err) {
++      console.error('[parsing-utils/extractJsonObject] initial parse failed:', err);
+       return { ok: false, value: null };
+     }
+     return { ok: false, value: null };
+@@ -384,11 +386,17 @@ export function extractJsonFromContent(content: string | null): any | null {
+   if (firstBrace !== -1 && lastBrace > firstBrace) {
+     try {
+       return JSON.parse(jsonText.substring(firstBrace, lastBrace + 1));
+-    } catch {}
++    } catch (err) {
++      console.error(
++        '[parsing-utils/extractJsonFromContent] failed to parse extracted brace content:',
++        err
++      );
++    }
+   }
+   try {
+     return JSON.parse(jsonText);
+-  } catch {
++  } catch (err) {
++    console.error('[parsing-utils/extractJsonFromContent] failed to parse fallback jsonText:', err);
+     return null;
+   }
+ }
+diff --git a/src/execution/pipeline/batch-phase.ts b/src/execution/pipeline/batch-phase.ts
+index 380ebe0..5dbf0fd 100644
+--- a/src/execution/pipeline/batch-phase.ts
++++ b/src/execution/pipeline/batch-phase.ts
+@@ -129,7 +129,9 @@ export async function executeBatchPhase(
+               },
+             });
+           }
+-        } catch (_) { }
++        } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+       });
+       try {
+         streamingManager.port.postMessage({
+@@ -141,7 +143,9 @@ export async function executeBatchPhase(
+           completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+           totalCount: providerStatuses.length,
+         });
+-      } catch (_) { }
++      } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+     }
+     if (allowedProviders.length === 0) {
+       throw new Error(
+@@ -182,7 +186,9 @@ export async function executeBatchPhase(
+               totalCount: providers.length,
+             });
+           }
+-        } catch (_) { }
++        } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+       },
+       onProviderComplete: (providerId: ProviderKey, resultWrapper: any) => {
+         const entry = providerStatuses.find((s) => s.providerId === providerId);
+@@ -204,7 +210,9 @@ export async function executeBatchPhase(
+                 delayMs: classified?.retryAfterMs || 0,
+               });
+             }
+-          } catch (_) { }
++          } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+ 
+           if (entry) {
+             entry.status = 'failed';
+@@ -233,7 +241,9 @@ export async function executeBatchPhase(
+             completedProviders.add(providerId);
+             healthTracker?.recordSuccess?.(providerId);
+           }
+-        } catch (_) { }
++        } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+ 
+         if (entry) {
+           entry.status = 'completed';
+@@ -250,7 +260,9 @@ export async function executeBatchPhase(
+               completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+               totalCount: providers.length,
+             });
+-          } catch (_) { }
++          } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+         }
+       },
+       onError: (error: any) => {
+@@ -262,7 +274,9 @@ export async function executeBatchPhase(
+             status: 'failed',
+             error: error?.message || String(error),
+           });
+-        } catch (_) { }
++        } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+       },
+       onAllComplete: async (results: Map<ProviderKey, any>, errors: Map<ProviderKey, any>) => {
+         const batchUpdates: Record<string, any> = {};
+@@ -316,7 +330,9 @@ export async function executeBatchPhase(
+               entry.progress = 100;
+               if (entry.error) delete entry.error;
+             }
+-          } catch (_) { }
++          } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+         });
+ 
+         errors.forEach((error, providerId) => {
+@@ -364,7 +380,9 @@ export async function executeBatchPhase(
+               formattedResults[providerId].meta.errorMessage = classified?.message;
+               formattedResults[providerId].meta.requiresReauth = classified?.requiresReauth;
+             }
+-          } catch (_) { }
++          } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+         });
+ 
+         const hasAnyValidResults = Object.values(formattedResults).some(
+@@ -440,7 +458,9 @@ export async function executeBatchPhase(
+               mappingCompleted: false,
+             });
+           }
+-        } catch (_) { }
++        } catch (err) {
++      console.error('[execution/pipeline/batch-phase] operation failed:', err);
++    }
+ 
+         resolve({
+           results: formattedResults,
+diff --git a/src/persistence/database.ts b/src/persistence/database.ts
+index 95324f9..579201d 100644
+--- a/src/persistence/database.ts
++++ b/src/persistence/database.ts
+@@ -204,7 +204,9 @@ export async function openDatabase(): Promise<IDBDatabase> {
+             updatedAt: now,
+           };
+           metadataStore.put(rec);
+-        } catch (_) {}
++        } catch (err) {
++          console.error('[persistence/database/openDatabase] failed to update schema version (v6):', err);
++        }
+       }
+ 
+       // Migration to v7: Add context_bridges store
+diff --git a/src/persistence/session-manager.ts b/src/persistence/session-manager.ts
+index d3a72f2..92f0c27 100644
+--- a/src/persistence/session-manager.ts
++++ b/src/persistence/session-manager.ts
+@@ -219,7 +219,8 @@ export class SessionManager {
+       try {
+         if (_stack.has(value)) return '[Circular]';
+         _stack.add(value);
+-      } catch (_) {
++      } catch (err) {
++        console.error('[persistence/session-manager/_toJsonSafe] circular reference check failed:', err);
+         return String(value);
+       }
+       const arr: unknown[] = [];
+@@ -229,7 +230,9 @@ export class SessionManager {
+       }
+       try {
+         _stack.delete(value);
+-      } catch (_) {}
++      } catch (err) {
++        console.error('[persistence/session-manager/_toJsonSafe] failed to delete from stack:', err);
++      }
+       return arr;
+     }
+ 
+@@ -238,7 +241,8 @@ export class SessionManager {
+       try {
+         if (_stack.has(obj)) return '[Circular]';
+         _stack.add(obj);
+-      } catch (_) {
++      } catch (err) {
++        console.error('[persistence/session-manager/_toJsonSafe] circular reference check failed for object:', err);
+         return String(value);
+       }
+ 
+@@ -251,13 +255,16 @@ export class SessionManager {
+       }
+       try {
+         _stack.delete(obj);
+-      } catch (_) {}
++      } catch (err) {
++        console.error('[persistence/session-manager/_toJsonSafe] failed to delete object from stack:', err);
++      }
+       return out;
+     }
+ 
+     try {
+       return String(value);
+-    } catch (_) {
++    } catch (err) {
++      console.error('[persistence/session-manager/_toJsonSafe] failed to stringify value:', err);
+       return undefined;
+     }
+   }
+diff --git a/src/provenance/surface.ts b/src/provenance/surface.ts
+index 230ea29..370dbbd 100644
+--- a/src/provenance/surface.ts
++++ b/src/provenance/surface.ts
+@@ -121,7 +121,8 @@ export function computeNounSurvivalRatio(text: string): number {
+     doc.remove('#QuestionWord');
+     const skeleton = doc.text('normal').replace(/\s+/g, ' ').trim();
+     return skeleton.split(/\s+/).filter((w) => w.length > 0).length / words.length;
+-  } catch {
++  } catch (err) {
++    console.error('[provenance/surface/computeNounSurvivalRatio] nlp processing failed:', err);
+     return 0;
+   }
+ }
+diff --git a/src/system/connection-handler.ts b/src/system/connection-handler.ts
+index a4bfd7e..b5e5a8a 100644
+--- a/src/system/connection-handler.ts
++++ b/src/system/connection-handler.ts
+@@ -356,8 +356,8 @@ export class ConnectionHandler {
+           },
+         },
+       });
+-    } catch {
+-      // port closed
++    } catch (err) {
++      console.error('[system/connection-handler] connection cleanup failed:', err);
+     }
+   }
+ 
+@@ -521,8 +521,8 @@ export class ConnectionHandler {
+           modelIndex: indices.get(providerId) ?? 0,
+         })),
+       });
+-    } catch {
+-      // port closed
++    } catch (err) {
++      console.error('[system/connection-handler] connection cleanup failed:', err);
+     }
+   }
+ 
+@@ -1375,8 +1375,8 @@ export class ConnectionHandler {
+         status: 'failed',
+         error: error instanceof Error ? error.message : String(error),
+       });
+-    } catch {
+-      // port closed
++    } catch (err) {
++      console.error('[system/connection-handler] connection cleanup failed:', err);
+     }
+   }
+ 
+diff --git a/ui/chat/ChatView.tsx b/ui/chat/ChatView.tsx
+index d7d675f..e7592fc 100644
+--- a/ui/chat/ChatView.tsx
++++ b/ui/chat/ChatView.tsx
+@@ -155,28 +155,32 @@ export default function ChatView() {
+               }, 120);
+             }
+           } catch (e) {
+-            console.warn('[ChatView] doScroll failed', e);
++            console.error('[ui/chat/ChatView] operation failed:', e);
+           }
+         };
+ 
+         // Cross-session navigation support
+-        if (targetSessionId && currentSessionId && targetSessionId !== currentSessionId) {
+-          const summary = {
+-            id: targetSessionId,
+-            sessionId: targetSessionId,
+-            startTime: Date.now(),
+-            lastActivity: Date.now(),
+-            title: '',
+-            firstMessage: '',
+-            messageCount: 0,
+-            messages: [],
+-          };
+-          await selectChat(summary as any);
+-          if (aborted) return;
+-          // Wait a tick for state to settle then scroll
+-          requestAnimationFrame(() => doScroll());
+-        } else {
+-          doScroll();
++        try {
++          if (targetSessionId && currentSessionId && targetSessionId !== currentSessionId) {
++            const summary = {
++              id: targetSessionId,
++              sessionId: targetSessionId,
++              startTime: Date.now(),
++              lastActivity: Date.now(),
++              title: '',
++              firstMessage: '',
++              messageCount: 0,
++              messages: [],
++            };
++            await selectChat(summary as any);
++            if (aborted) return;
++            // Wait a tick for state to settle then scroll
++            requestAnimationFrame(() => doScroll());
++          } else {
++            doScroll();
++          }
++        } catch (e) {
++          console.error('[ui/chat/ChatView] session navigation failed:', e);
+         }
+       } catch (e) {
+         console.warn('[ChatView] jump-to-turn handler failed', e);
+diff --git a/ui/hooks/chat/usePortMessageHandler.ts b/ui/hooks/chat/usePortMessageHandler.ts
+index c8341e3..3b8bcd5 100644
+--- a/ui/hooks/chat/usePortMessageHandler.ts
++++ b/ui/hooks/chat/usePortMessageHandler.ts
+@@ -83,7 +83,8 @@ function normalizeArtifactCandidate(input: unknown): any | null {
+     try {
+       const parsed = JSON.parse(raw);
+       artifact = parsed && typeof parsed === 'object' ? parsed : null;
+-    } catch {
++    } catch (err) {
++      console.error('[ui/hooks/chat/usePortMessageHandler] JSON parse failed:', err);
+       return null;
+     }
+   }
+diff --git a/ui/services/extension-api.ts b/ui/services/extension-api.ts
+index 65d2d22..43b5345 100644
+--- a/ui/services/extension-api.ts
++++ b/ui/services/extension-api.ts
+@@ -47,10 +47,14 @@ class ExtensionAPI {
+   private disconnectAll() {
+     try {
+       this.portHealthManager?.disconnect();
+-    } catch {}
++    } catch (e) {
++      console.error('[ui/services/extension-api] failed:', e);
++    }
+     try {
+       this.port?.disconnect();
+-    } catch {}
++    } catch (e) {
++      console.error('[ui/services/extension-api] failed:', e);
++    }
+     this.port = null;
+   }
+ 
+diff --git a/ui/utils/safe-lazy.ts b/ui/utils/safe-lazy.ts
+index bf05f13..fd20477 100644
+--- a/ui/utils/safe-lazy.ts
++++ b/ui/utils/safe-lazy.ts
+@@ -21,7 +21,9 @@ export function safeLazy<T extends React.ComponentType<any>>(
+         try {
+           // Reset counter on success so next failure in same session can still reload
+           sessionStorage.removeItem(RELOAD_COUNTER_KEY);
+-        } catch (e) {}
++        } catch (e) {
++          console.error('[ui/utils/safe-lazy] failed:', e);
++        }
+         return module;
+       } catch (error: any) {
+         const errorName = error?.name || '';

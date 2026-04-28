@@ -44,7 +44,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 }) => {
   const { runSingularity } = useSingularityMode(aiTurn.id);
   const activeMappingPid = useAtomValue(mappingProviderAtom);
-  const effectivePid = activeMappingPid || aiTurn.meta?.mapper;
+  const effectivePid =
+    activeMappingPid ||
+    aiTurn.meta?.mapper ||
+    Object.keys((aiTurn as any).mappingResponses ?? {})[0] ||
+    null;
   const { artifact: mappingArtifact, rebuild: rebuildArtifact } = useProviderArtifact(
     aiTurn.id,
     effectivePid
@@ -62,7 +66,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     if (options.providerId) {
       singularityState.setPinnedProvider(options.providerId);
     }
-    await runSingularity(aiTurn.id, { ...options, isRecompute: true, sourceTurnId: aiTurn.id });
+    await runSingularity(aiTurn.id, {
+      ...options,
+      isRecompute: true,
+      sourceTurnId: aiTurn.id,
+      activeMappingProviderId: effectivePid ?? undefined,
+    });
   };
 
   // Helper for deferred first-run synthesis (no existing output)

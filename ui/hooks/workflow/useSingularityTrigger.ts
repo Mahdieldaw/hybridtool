@@ -17,6 +17,7 @@ export type SingularityTransitionOptions = {
   userNotes?: string[];
   isRecompute?: boolean;
   sourceTurnId?: string;
+  activeMappingProviderId?: string;
 };
 
 export function useSingularityMode(trackedAiTurnId?: string) {
@@ -74,6 +75,7 @@ export function useSingularityMode(trackedAiTurnId?: string) {
             userNotes: options.userNotes,
             isRecompute: !!options.isRecompute,
             sourceTurnId: options.sourceTurnId,
+            activeMappingProviderId: options.activeMappingProviderId,
           },
         });
       } catch (err: any) {

@@ -6,12 +6,18 @@ import { buildReactiveBridge } from '../utils/reactive-bridge';
 import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
 import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
 import { logInfraError } from '../../errors';
-import type { 
-  WorkflowStep, 
-  WorkflowContext, 
-  ProviderKey, 
-  ProviderStatus 
-} from '../../../shared/types';
+
+// Types (re-exported or defined locally)
+type ProviderKey = string;
+type ProviderStatus = any;
+interface WorkflowStep {
+  stepId: string;
+  payload?: any;
+}
+interface WorkflowContext {
+  sessionId: string;
+  canonicalAiTurnId?: string;
+}
 
 interface BatchPhaseOptions {
   streamingManager: any;
@@ -92,7 +98,7 @@ export async function executeBatchPhase(
       completedCount: 0,
       totalCount: providers.length,
     });
-  } catch (_) { }
+  } catch (err) { logInfraError('batch-phase/providerStatus: WORKFLOW_PROGRESS postMessage failed', err); }
 
   const promptLength = enhancedPrompt.length;
   const allowedProviders: ProviderKey[] = [];
@@ -188,7 +194,7 @@ export async function executeBatchPhase(
             });
           }
         } catch (err) {
-          console.error('[batch-phase/onPartial] postMessage failed:', err);
+          logInfraError('batch-phase/onPartial: postMessage failed', err);
         }
       },
       onProviderComplete: (providerId: ProviderKey, resultWrapper: any) => {
@@ -212,7 +218,7 @@ export async function executeBatchPhase(
               });
             }
           } catch (err) {
-            console.error('[batch-phase/onProviderComplete] health tracker failed:', err);
+            logInfraError('batch-phase/onProviderComplete: health tracker failed', err);
           }
 
           if (entry) {
@@ -243,7 +249,7 @@ export async function executeBatchPhase(
             healthTracker?.recordSuccess?.(providerId);
           }
         } catch (err) {
-          console.error('[batch-phase/onProviderComplete] health tracker update failed:', err);
+          logInfraError('batch-phase/onProviderComplete: health tracker update failed', err);
         }
 
         if (entry) {
@@ -262,7 +268,7 @@ export async function executeBatchPhase(
               totalCount: providers.length,
             });
           } catch (err) {
-            console.error('[batch-phase/onProviderComplete] postMessage failed:', err);
+            logInfraError('batch-phase/onProviderComplete: postMessage failed', err);
           }
         }
       },
@@ -276,7 +282,7 @@ export async function executeBatchPhase(
             error: error?.message || String(error),
           });
         } catch (err) {
-          console.error('[batch-phase/onError] postMessage failed:', err);
+          logInfraError('batch-phase/onError: postMessage failed', err);
         }
       },
       onAllComplete: async (results: Map<ProviderKey, any>, errors: Map<ProviderKey, any>) => {
@@ -294,10 +300,7 @@ export async function executeBatchPhase(
           );
         } catch (err) {
           const providerSummary = Object.keys(batchUpdates).join(', ') || '(none)';
-          console.error(
-            `[BatchPhase] Persistence failed for session ${context.sessionId} (providers: ${providerSummary}):`,
-            err
-          );
+          logInfraError(`BatchPhase: Persistence failed for session ${context.sessionId} (providers: ${providerSummary})`, err);
           reject(
             new Error(
               `[BatchPhase] Failed to persist provider contexts for session ${context.sessionId} ` +
@@ -332,7 +335,7 @@ export async function executeBatchPhase(
               if (entry.error) delete entry.error;
             }
           } catch (err) {
-            console.error('[batch-phase/onAllComplete] result processing failed:', err);
+            logInfraError('batch-phase/onAllComplete: result processing failed', err);
           }
         });
 
@@ -382,7 +385,7 @@ export async function executeBatchPhase(
               formattedResults[providerId].meta.requiresReauth = classified?.requiresReauth;
             }
           } catch (err) {
-            console.error('[batch-phase/onAllComplete] error processing failed:', err);
+            logInfraError('batch-phase/onAllComplete: error processing failed', err);
           }
         });
 
@@ -460,7 +463,7 @@ export async function executeBatchPhase(
             });
           }
         } catch (err) {
-          console.error('[batch-phase/onAllComplete] postMessage failed:', err);
+          logInfraError('batch-phase/onAllComplete: postMessage failed', err);
         }
 
         resolve({

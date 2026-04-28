@@ -612,20 +612,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   // ── Block C: Pre-phase compute over candidates
 
-  // Compute totalModels: distinct model indices observed across all candidates
-  const totalModels = new Set<number>();
-  for (const c of candidates) {
-    const profile = profiles[c.claimId];
-    if (!profile) continue;
-    const activeCoverage = filterPeripheral
-      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
-      : profile.paragraphCoverage;
-    for (const entry of activeCoverage) {
-      totalModels.add(entry.modelIndex);
-    }
-  }
-  const totalModelsCount = totalModels.size;
-
   // Compute paragraphToAllClaims: any presence (not just MAJ)
   const paragraphToAllClaims = new Map<string, Set<string>>();
   for (const c of candidates) {
@@ -639,17 +625,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         paragraphToAllClaims.set(entry.paragraphId, new Set());
       }
       paragraphToAllClaims.get(entry.paragraphId)!.add(c.claimId);
-    }
-  }
-
-  // Compute paragraphToMajClaims: MAJ paragraphs only (coverage > 0.5)
-  const paragraphToMajClaims = new Map<string, Set<string>>();
-  for (const c of candidates) {
-    for (const pid of c.activeMajParagraphIds) {
-      if (!paragraphToMajClaims.has(pid)) {
-        paragraphToMajClaims.set(pid, new Set());
-      }
-      paragraphToMajClaims.get(pid)!.add(c.claimId);
     }
   }
 
