@@ -41,17 +41,17 @@ export interface MapperClaim {
 
 export type MapperEdge =
   | {
-    from: string;
-    to: string;
-    type: 'conflicts';
-    question?: string | null;
-  }
+      from: string;
+      to: string;
+      type: 'conflicts';
+      question?: string | null;
+    }
   | {
-    from: string;
-    to: string;
-    type: 'prerequisite';
-    question?: string | null;
-  };
+      from: string;
+      to: string;
+      type: 'prerequisite';
+      question?: string | null;
+    };
 
 export interface UnifiedMapperOutput {
   claims: MapperClaim[];
@@ -380,7 +380,7 @@ export interface ClaimDensityProfile {
   passageCount: number;
   /** Longest contiguous run in paragraphs */
   maxPassageLength: number;
-  /** Mean coverage across paragraphs in the longest contiguous majority-support run */
+  /** Mean coverage across paragraphs in the longest contiguous run where coverage > 0.5 (majority re-thresholded) */
   meanCoverageInLongestRun: number;
   /** Distinct models containing this claim */
   modelSpread: number;
@@ -483,15 +483,15 @@ export interface RoutingMeasurements {
   territorialMass: number;
   /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
   sovereignMass: number;
-  /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normMAJ) */
+  /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normPresence) — normPresence computed by re-thresholding coverage > 0.5 */
   sustainedMassCohort: SustainedMassCohort;
   /** Distinct models with ≥1 paragraph for this claim (used as tiebreaker) */
   modelSpread: number;
-  /** Novel majority paragraphs / this claim's majority paragraph count */
+  /** Novel majority paragraphs (coverage > 0.5) / this claim's majority paragraph count (coverage > 0.5) */
   claimNoveltyRatio: number;
-  /** Novel majority paragraphs / remaining unassigned corpus paragraphs */
+  /** Novel majority paragraphs (coverage > 0.5) / remaining unassigned corpus paragraphs */
   corpusNoveltyRatio: number;
-  /** Count of novel majority paragraphs assigned at decision time */
+  /** Count of novel majority paragraphs (coverage > 0.5) assigned at decision time */
   novelParagraphCount: number;
   /** Populated for majority-phase claims (mechanism + northStar). Null for minority claims. */
   majorityGateSnapshot: MajorityGateSnapshot | null;
@@ -506,7 +506,7 @@ export interface PassageClaimProfile {
   /** Routing measurements (contestedDominance, territorialMass, novelty ratios, gate snapshot) — null if floor */
   routingMeasurements: RoutingMeasurements | null;
 
-  /** MAJ paragraphs C wins where ≥1 other claim has any presence (≠ MAJ). */
+  /** Majority paragraphs (coverage > 0.5) C wins where ≥1 other claim has any presence (≠ majority). */
   dominatedParagraphCount: number;
   /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
   presenceMass: number;
@@ -514,7 +514,7 @@ export interface PassageClaimProfile {
   territorialMass: number;
   /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
   sovereignMass: number;
-  /** sqrt(normMAXLEN × normMAJ) — percentile rank within current run. */
+  /** sqrt(normMAXLEN × normPresence) — percentile rank within current run (normPresence from re-thresholded coverage > 0.5). */
   sustainedMass: number;
   /** Cohort derived from sustainedMass. */
   sustainedMassCohort: SustainedMassCohort;
@@ -534,9 +534,9 @@ export interface PassageClaimProfile {
   densityRatio: number;
   /** Longest passage across all models (from density profile) */
   maxPassageLength: number;
-  /** Mean coverage across paragraphs in the longest contiguous majority run */
+  /** Mean coverage across paragraphs in the longest contiguous run where coverage > 0.5 (majority re-thresholded) */
   meanCoverageInLongestRun: number;
-  /** Model indices contributing ≥ 1 majority paragraph */
+  /** Model indices contributing ≥ 1 paragraph with coverage > 0.5 */
   structuralContributors: number[];
   /** Model indices contributing only minority statements */
   incidentalMentions: number[];
@@ -596,7 +596,7 @@ export interface PassageRoutingResult {
     sigmaConcentration: number;
     /** μ + σ — distributional threshold for concentration outlier */
     concentrationThreshold: number;
-    /** Claims with ≥1 majority paragraph (coverage > 0.5) — precondition pass */
+    /** Claims with ≥1 paragraph where coverage > 0.5 — precondition pass */
     preconditionPassCount: number;
     /** Claims passing at least one gate */
     loadBearingCount: number;
@@ -827,15 +827,17 @@ export interface PreSemanticInterpretation {
 
   // New flat shape (SubstrateInterpretation — populated after refactor)
   gate?: PipelineGateResult;
-  regions?: Array<PipelineRegion & {
-    nodeCount?: number;
-    modelDiversity?: number;
-    modelDiversityRatio?: number;
-    internalDensity?: number;
-    recognitionMass?: number;
-    nearestCarrierSimilarity?: number;
-    avgInternalSimilarity?: number;
-  }>;
+  regions?: Array<
+    PipelineRegion & {
+      nodeCount?: number;
+      modelDiversity?: number;
+      modelDiversityRatio?: number;
+      internalDensity?: number;
+      recognitionMass?: number;
+      nearestCarrierSimilarity?: number;
+      avgInternalSimilarity?: number;
+    }
+  >;
   regionMeta?: {
     regionCount: number;
     kindCounts: Record<'basin' | 'gap', number>;
@@ -1126,7 +1128,10 @@ export interface ExtendContext {
   type: 'extend';
   sessionId: string;
   lastTurnId: string;
-  providerContexts: Record<string, { meta?: Record<string, unknown>; continueThread?: boolean } | Record<string, unknown>>;
+  providerContexts: Record<
+    string,
+    { meta?: Record<string, unknown>; continueThread?: boolean } | Record<string, unknown>
+  >;
   previousContext: string | null;
   previousAnalysis: { claims: unknown[]; edges: unknown[] } | null;
 }
@@ -1306,7 +1311,6 @@ export type ProviderConfigEntry = {
   loginUrl: string;
   maxInputChars: number;
 };
-
 
 export type RetryPolicy = {
   maxRetries: number;

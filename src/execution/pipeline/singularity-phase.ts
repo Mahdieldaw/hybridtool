@@ -5,12 +5,7 @@ import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/co
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
 import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.js';
 import { logInfraError } from '../../errors';
-
-interface WorkflowStep {
-  stepId: string;
-  type: any;
-  payload: any;
-}
+import type { WorkflowStep } from '../../../shared/types/contract.js';
 
 const handoffV2Enabled = !!HANDOFF_V2_ENABLED;
 

@@ -691,19 +691,39 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
+  // Hoisted: precompute active-major paragraph IDs per claim (presence vector @ 0.5)
+  const activeMajByClaimId = new Map<string, string[]>();
+  for (const c2 of candidates) {
+    const profile = profiles[c2.claimId];
+    if (!profile) {
+      activeMajByClaimId.set(c2.claimId, []);
+      continue;
+    }
+    const activeCoverageForClaim = filterPeripheral
+      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
+      : profile.paragraphCoverage;
+    const majIdsForClaim = activeCoverageForClaim
+      .filter((pc) => pc.coverage > 0.5)
+      .map((pc) => pc.paragraphId);
+    activeMajByClaimId.set(c2.claimId, majIdsForClaim);
+  }
+
+  const getMaj = (claimId: string) => activeMajByClaimId.get(claimId) ?? [];
+
   // Hoisted: percentile inputs sorted once, ascending. Used for normMAXLEN / normMAJ.
   const sortedMaxLen = candidates
     .map((c2) => profiles[c2.claimId]?.maxPassageLength ?? 0)
     .sort((a, b) => a - b);
-  const sortedMaj = candidates.map((c2) => c2.activeMajParagraphIds.length).sort((a, b) => a - b);
+  const sortedMaj = candidates.map((c2) => getMaj(c2.claimId).length).sort((a, b) => a - b);
 
   for (const c of candidates) {
     const profile = profiles[c.claimId];
     if (!profile) continue;
+    const derivedActiveMajIds = getMaj(c.claimId);
 
     // dominatedParagraphCount: MAJ paragraphs where ≥1 other claim has ANY presence
     let dominatedCount = 0;
-    for (const pid of c.activeMajParagraphIds) {
+    for (const pid of derivedActiveMajIds) {
       const claimsInPara = paragraphToAllClaims.get(pid) ?? new Set();
       if (claimsInPara.size > 1) dominatedCount++;
     }
@@ -746,7 +766,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     // sustainedMass cohort computation: percentile ranks for MAXLEN and MAJ
     const MAXLEN = profile.maxPassageLength;
-    const MAJ = c.activeMajParagraphIds.length;
+    const MAJ = derivedActiveMajIds.length;
 
     const normMAXLEN = percentileFromSortedAsc(MAXLEN, sortedMaxLen);
     const normMAJ = percentileFromSortedAsc(MAJ, sortedMaj);
@@ -821,7 +841,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       const maxLenDiff =
         (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
       if (maxLenDiff !== 0) return maxLenDiff;
-      return b.activeMajParagraphIds.length - a.activeMajParagraphIds.length;
+      return getMaj(b.claimId).length - getMaj(a.claimId).length;
     });
   }
 
@@ -877,11 +897,11 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   const assignedSet = new Set<string>();
   for (let i = 0; i < sortedMinorityPool.length; i++) {
     const c = sortedMinorityPool[i];
-    const novelIds = c.activeMajParagraphIds.filter((pid) => !assignedSet.has(pid));
+    const maj = getMaj(c.claimId);
+    const novelIds = maj.filter((pid) => !assignedSet.has(pid));
     c.landscapePosition = i === 0 ? 'leadMinority' : 'mechanism';
 
-    const claimNoveltyRatio =
-      c.activeMajParagraphIds.length > 0 ? novelIds.length / c.activeMajParagraphIds.length : 0;
+    const claimNoveltyRatio = maj.length > 0 ? novelIds.length / maj.length : 0;
     const corpusNoveltyRatio =
       totalCorpusParagraphs - assignedSet.size > 0
         ? novelIds.length / (totalCorpusParagraphs - assignedSet.size)
@@ -900,7 +920,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       majorityGateSnapshot: null,
     };
 
-    for (const pid of c.activeMajParagraphIds) {
+    for (const pid of maj) {
       assignedSet.add(pid);
     }
   }
@@ -908,7 +928,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   // ── Block G: Phase 4 — Majority mechanism assignment
 
   const majorityPool = extendedCandidates.filter(
-    (c) => !c.isMinority && c.activeMajParagraphIds.length > 0
+    (c) => !c.isMinority && getMaj(c.claimId).length > 0
   );
 
   // Extract NorthStar before cohort sorting: largest by sustainedMass overall
@@ -942,7 +962,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
       if (maxLenDiff !== 0) return maxLenDiff;
 
-      return b.activeMajParagraphIds.length - a.activeMajParagraphIds.length;
+      return getMaj(b.claimId).length - getMaj(a.claimId).length;
     });
 
     sortedMajorityPool.push(...cohortClaims);
@@ -951,15 +971,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   // Iterate remaining majority candidates
   for (let i = 0; i < sortedMajorityPool.length; i++) {
     const c = sortedMajorityPool[i];
-    const nsIds = northStarCandidate?.activeMajParagraphIds ?? [];
+    const maj = getMaj(c.claimId);
+    const nsIds = northStarCandidate ? getMaj(northStarCandidate.claimId) : [];
     const currentNSNovel = nsIds.filter((pid) => !assignedSet.has(pid)).length;
     const projectedNSNovel = nsIds.filter(
-      (pid) => !assignedSet.has(pid) && !c.activeMajParagraphIds.includes(pid)
+      (pid) => !assignedSet.has(pid) && !maj.includes(pid)
     ).length;
     const delta = currentNSNovel - projectedNSNovel;
-    const candidateContribution = c.activeMajParagraphIds.filter(
-      (pid) => !assignedSet.has(pid)
-    ).length;
+    const candidateContribution = maj.filter((pid) => !assignedSet.has(pid)).length;
 
     if (candidateContribution === 0) {
       c.landscapePosition = 'floor';
@@ -991,10 +1010,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       sovereignMass: c.sovereignMass,
       sustainedMassCohort: c.sustainedMassCohort,
       modelSpread: c.modelSpread,
-      claimNoveltyRatio:
-        c.activeMajParagraphIds.length > 0
-          ? candidateContribution / c.activeMajParagraphIds.length
-          : 0,
+      claimNoveltyRatio: maj.length > 0 ? candidateContribution / maj.length : 0,
       corpusNoveltyRatio:
         totalCorpusParagraphs - assignedSet.size > 0
           ? candidateContribution / (totalCorpusParagraphs - assignedSet.size)
@@ -1003,7 +1019,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       majorityGateSnapshot: { delta, currentNSNovel, projectedNSNovel, candidateContribution },
     };
 
-    for (const pid of c.activeMajParagraphIds) {
+    for (const pid of maj) {
       assignedSet.add(pid);
     }
   }
@@ -1011,10 +1027,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   // ── Block H: Phase 5 — NorthStar
   if (northStarCandidate) {
     northStarCandidate.landscapePosition = 'northStar';
-    const nsNovel = northStarCandidate.activeMajParagraphIds.filter(
-      (pid) => !assignedSet.has(pid)
-    ).length;
-    const nsTotal = northStarCandidate.activeMajParagraphIds.length;
+    const nsMaj = getMaj(northStarCandidate.claimId);
+    const nsNovel = nsMaj.filter((pid) => !assignedSet.has(pid)).length;
+    const nsTotal = nsMaj.length;
 
     // Compute corrected contestedDominance for northStar
     // (This was also statically computed earlier)
@@ -1036,7 +1051,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       majorityGateSnapshot: null,
     };
 
-    for (const pid of northStarCandidate.activeMajParagraphIds) {
+    for (const pid of nsMaj) {
       assignedSet.add(pid);
     }
   }
