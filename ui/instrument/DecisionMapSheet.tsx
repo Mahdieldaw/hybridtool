@@ -484,7 +484,7 @@ export const DecisionMapSheet = React.memo(() => {
       claims: 0,
       edges: 0,
     });
-    return { claims: [], edges: [], source: 'traversal' as const };
+    return { claims: [], edges: [], source: 'topology' as const };
   }, [mappingArtifact, parsedMapping, parsedSemanticFromText]);
 
   const derivedMapperArtifact = useMemo(() => {

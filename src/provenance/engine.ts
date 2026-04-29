@@ -159,6 +159,11 @@ export async function buildProvenancePipeline(
     safeExclusiveIds.set(claimId, filterIdsToProse(ids));
   }
 
+  const safeExclusivityMap = new Map<string, ClaimExclusivity>();
+  for (const [claimId, ids] of safeExclusiveIds.entries()) {
+    safeExclusivityMap.set(claimId, { exclusiveIds: ids });
+  }
+
   const safeCanonicalStatementIds = new Map<string, string[]>();
   for (const [claimId, ids] of measure.canonicalStatementIds.entries()) {
     safeCanonicalStatementIds.set(claimId, filterIdsToProse(ids));
@@ -221,9 +226,9 @@ export async function buildProvenancePipeline(
     mixedProvenanceResult: measure.mixedProvenance,
     claimProvenance: {
       ownershipMap: measure.ownershipMap,
-      exclusivityMap: measure.exclusivityMap,
+      exclusivityMap: safeExclusivityMap,
       canonicalSets: measure.canonicalSets,
-      exclusiveIds: measure.exclusiveIds,
+      exclusiveIds: safeExclusiveIds,
     },
     claimDensityResult: measure.claimDensity,
     claimEmbeddings: measure.claimEmbeddings,

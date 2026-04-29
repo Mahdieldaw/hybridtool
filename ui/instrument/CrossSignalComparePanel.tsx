@@ -9,7 +9,7 @@ interface CrossSignalComparePanelProps {
 
 // Default axes vary by selected layer
 const layerDefaults: Record<string, [string, string]> = {
-  'competitive-provenance': ['provenanceBulk', 'exclusivityMass'],
+  'competitive-provenance': ['provenanceBulk', 'sovereignMass'],
   'blast-radius': ['provenanceBulk', 'blastRadius'],
   'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
 };
@@ -62,13 +62,13 @@ export function CrossSignalComparePanel({
             : null,
       },
       {
-        key: 'exclusivityMass',
-        label: 'Exclusivity %',
+        key: 'sovereignMass',
+        label: 'Sovereignty %',
         get: (c) => {
           const id = String(c?.id ?? '');
           const ex = exclusivityObj?.[id];
-          return typeof ex?.exclusivityMass === 'number' && Number.isFinite(ex.exclusivityMass)
-            ? ex.exclusivityMass * 100
+          return typeof (ex as any)?.sovereignMass === 'number' && Number.isFinite((ex as any).sovereignMass)
+            ? (ex as any).sovereignMass * 100
             : null;
         },
       },

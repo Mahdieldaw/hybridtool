@@ -44,21 +44,22 @@ declare namespace chrome {
             callback?: (response: any) => void,
         ): void;
 
-        // onMessage event with add/remove listener methods
+        // onMessage event with add/remove listener methods.
+        // Listeners may return `true` (or a Promise) to keep `sendResponse` valid for async use.
         const onMessage: {
             addListener(
                 callback: (
                     message: any,
                     sender: any,
                     sendResponse: (response?: any) => void,
-                ) => void,
+                ) => boolean | Promise<boolean> | void | Promise<void>,
             ): void;
             removeListener(
                 callback: (
                     message: any,
                     sender: any,
                     sendResponse: (response?: any) => void,
-                ) => void,
+                ) => boolean | Promise<boolean> | void | Promise<void>,
             ): void;
         };
     }

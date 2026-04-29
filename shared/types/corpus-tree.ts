@@ -18,7 +18,6 @@ export interface StatementNode {
     paragraphId: string;
     regionId: string | null;
     basinId: number | null;
-    isolationScore: number;
   };
 }
 

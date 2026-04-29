@@ -5,15 +5,19 @@ import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/co
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
 import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.js';
 import { logInfraError } from '../../errors';
-import type { WorkflowStep } from '../../../shared/types/contract';
-type WorkflowContext = any;
+
+interface WorkflowStep {
+  stepId: string;
+  type: any;
+  payload: any;
+}
 
 const handoffV2Enabled = !!HANDOFF_V2_ENABLED;
 
 // Exported for use by recompute-handler
 export async function runSingularityLLM(
   step: WorkflowStep, 
-  context: WorkflowContext, 
+  context: any,
   options: any
 ): Promise<any> {
   const payload = step.payload;
@@ -123,7 +127,7 @@ export async function runSingularityLLM(
  */
 export async function executeSingularityPhase(
   request: any,
-  context: WorkflowContext,
+  context: any,
   stepResults: Map<string, any>,
   _resolvedContext: any,
   currentUserMessage: string,

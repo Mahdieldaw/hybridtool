@@ -50,7 +50,7 @@ function clamp01(n: number): number {
 // ─── Enrichment ───────────────────────────────────────────────────────────────
 
 /**
- * Attach geometric position data (paragraphId, regionId, isolationScore) to
+ * Attach geometric position data (paragraphId, regionId, basinId) to
  * each shadow statement in-place.
  */
 export function enrichStatementsWithGeometry(
@@ -91,7 +91,6 @@ export function enrichStatementsWithGeometry(
           paragraphId,
           regionId: null,
           basinId: null,
-          isolationScore: 1,
         };
         enrichedCount++;
       } else {
@@ -106,7 +105,6 @@ export function enrichStatementsWithGeometry(
       paragraphId,
       regionId: annotation?.regionId ?? null,
       basinId: annotation?.basinId ?? null,
-      isolationScore: node.isolationScore,
     };
 
     enrichedCount++;

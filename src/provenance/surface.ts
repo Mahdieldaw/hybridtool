@@ -44,7 +44,7 @@ export interface SurfaceInput {
   totalCorpusStatements: number;
   canonicalSets: Map<string, Set<string>>;
   exclusiveIds: Map<string, string[]>;
-  shadowParagraphs: ShadowParagraph[]; // needed for exclusivityMass computation
+  shadowParagraphs: ShadowParagraph[]; // needed for mass triple computation
 }
 
 export interface SurfaceOutput {
@@ -434,15 +434,15 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         isMinority: false,
         routingMeasurements: null,
         dominatedParagraphCount: 0,
-        exclusivityMass: 0,
+        presenceMass: 0,
+        territorialMass: 0,
+        sovereignMass: 0,
         sustainedMass: 0,
         sustainedMassCohort: 'balanced',
         modelSpread: 0,
         modelsWithPassages: 0,
         isLoadBearing: null,
-        totalMAJ: 0,
         dominantModel: null,
-        dominantMAJ: 0,
         concentrationRatio: 0,
         densityRatio: 0,
         maxPassageLength: 0,
@@ -458,31 +458,36 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
       : profile.paragraphCoverage;
 
-    const majByModel = new Map<number, number>();
+    // Per-model presence mass decomposition (replaces MAJ-count-based metrics)
+    const presenceByModel = new Map<number, number>();
     const allModels = new Set<number>();
     for (const entry of activeCoverage) {
       allModels.add(entry.modelIndex);
-      if (entry.coverage > 0.5)
-        majByModel.set(entry.modelIndex, (majByModel.get(entry.modelIndex) ?? 0) + 1);
+      presenceByModel.set(
+        entry.modelIndex,
+        (presenceByModel.get(entry.modelIndex) ?? 0) + entry.coverage
+      );
     }
 
     const structuralContributors: number[] = [];
     const incidentalMentions: number[] = [];
     for (const mi of allModels) {
-      ((majByModel.get(mi) ?? 0) >= 1 ? structuralContributors : incidentalMentions).push(mi);
+      const hasMaj = activeCoverage.some((pc) => pc.modelIndex === mi && pc.coverage > 0.5);
+      (hasMaj ? structuralContributors : incidentalMentions).push(mi);
     }
 
     let dominantModel: number | null = null;
-    let dominantMAJ = 0;
-    for (const [mi, count] of majByModel) {
-      if (count > dominantMAJ) {
-        dominantMAJ = count;
+    let dominantPresenceMass = 0;
+    let totalPresenceMass = 0;
+    for (const [mi, pm] of presenceByModel) {
+      totalPresenceMass += pm;
+      if (pm > dominantPresenceMass) {
+        dominantPresenceMass = pm;
         dominantModel = mi;
       }
     }
 
-    const totalMAJ = Array.from(majByModel.values()).reduce((s, c) => s + c, 0);
-    const concentrationRatio = totalMAJ > 0 ? dominantMAJ / totalMAJ : 0;
+    const concentrationRatio = totalPresenceMass > 0 ? dominantPresenceMass / totalPresenceMass : 0;
 
     let maxPassageLengthOfDominant = 0;
     for (const passage of profile.passages) {
@@ -496,17 +501,18 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       isMinority: false,
       routingMeasurements: null,
       dominatedParagraphCount: 0,
-      exclusivityMass: 0,
+      presenceMass: 0,
+      territorialMass: 0,
+      sovereignMass: 0,
       sustainedMass: 0,
       sustainedMassCohort: 'balanced',
       modelSpread: profile.modelSpread,
       modelsWithPassages: profile.modelsWithPassages,
       isLoadBearing: null,
-      totalMAJ,
       dominantModel,
-      dominantMAJ,
       concentrationRatio,
-      densityRatio: dominantMAJ > 0 ? maxPassageLengthOfDominant / dominantMAJ : 0,
+      densityRatio:
+        dominantPresenceMass > 0 ? maxPassageLengthOfDominant / dominantPresenceMass : 0,
       maxPassageLength: profile.maxPassageLength,
       meanCoverageInLongestRun: profile.meanCoverageInLongestRun,
       structuralContributors,
@@ -531,11 +537,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       continue;
     }
 
-    // Get majority paragraph IDs, filtered by periphery if needed
-    let activeMajIds = profile.majorityParagraphIds || [];
-    if (filterPeripheral) {
-      activeMajIds = activeMajIds.filter((pid) => !periphery.peripheralNodeIds.has(pid));
-    }
+    // Derive majority paragraph IDs from the continuous coverage vector (coverage > 0.5)
+    const activeMajIds = (
+      filterPeripheral
+        ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
+        : profile.paragraphCoverage
+    )
+      .filter((pc) => pc.coverage > 0.5)
+      .map((pc) => pc.paragraphId);
 
     if (activeMajIds.length === 0) {
       p.landscapePosition = 'floor';
@@ -601,7 +610,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
           scores: enrichedClaims.map((claim) => ({
             claimId: String(claim.id),
             claimLabel: (claim as any).label ?? String(claim.id),
-            layerC: { canonicalCount: 0, nonExclusiveCount: 0, exclusiveNonOrphanCount: 0, exclusiveOrphanCount: 0 },
+            layerC: { canonicalCount: 0, nonExclusiveCount: 0, twinCount: 0, orphanCount: 0 },
           })),
           twinMap,
           meta: { totalCorpusStatements, processingTimeMs: performance.now() - t0 },
@@ -655,7 +664,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   // Extended candidate interface with computed fields
   interface ExtendedCandidate extends CandidateProfile {
     contestedDominance: number;
-    exclusivityMass: number;
+    presenceMass: number;
+    territorialMass: number;
+    sovereignMass: number;
     sustainedMass: number;
     sustainedMassCohort: 'passage-heavy' | 'balanced' | 'maj-breadth';
     allParagraphIds: Set<string>;
@@ -671,13 +682,20 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     paragraphStatementSets.set(para.id, new Set(para.statementIds));
   }
 
+  // Hoisted: k per statement — how many claims share each canonical statement.
+  // Used by territorial mass (fractional-credit) computation.
+  const statementOwnerCount = new Map<string, number>();
+  for (const stmtSet of canonicalSets.values()) {
+    for (const sid of stmtSet) {
+      statementOwnerCount.set(sid, (statementOwnerCount.get(sid) ?? 0) + 1);
+    }
+  }
+
   // Hoisted: percentile inputs sorted once, ascending. Used for normMAXLEN / normMAJ.
   const sortedMaxLen = candidates
     .map((c2) => profiles[c2.claimId]?.maxPassageLength ?? 0)
     .sort((a, b) => a - b);
-  const sortedMaj = candidates
-    .map((c2) => c2.activeMajParagraphIds.length)
-    .sort((a, b) => a - b);
+  const sortedMaj = candidates.map((c2) => c2.activeMajParagraphIds.length).sort((a, b) => a - b);
 
   for (const c of candidates) {
     const profile = profiles[c.claimId];
@@ -690,26 +708,40 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       if (claimsInPara.size > 1) dominatedCount++;
     }
 
-    // exclusivityMass: sum of per-paragraph exclusive ratios
-    // Numerator is exclusiveClaimStatements (not all claim statements).
-    // Denominator is totalStatements in the paragraph.
+    // Single-pass triple mass computation:
+    //   presenceMass  = Σ(claimStmts/paraTotal)           — raw presence volume
+    //   territorialMass = Σ(Σ(1/k)/paraTotal)             — fractional-credit exclusivity
+    //   sovereignMass = Σ(exclusiveStmts/paraTotal)        — sole-holder only
+    // Invariant: sovereignMass ≤ territorialMass ≤ presenceMass
     const activeCoverage = filterPeripheral
       ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
       : profile.paragraphCoverage;
 
-    const claimExclusiveIds = exclusiveIds.get(c.claimId) ?? [];
-    let exclusivityMass = 0;
+    const claimAllIds = canonicalSets.get(c.claimId) ?? new Set<string>();
+    const claimExclusiveSet = new Set(exclusiveIds.get(c.claimId) ?? []);
+    let presenceMass = 0;
+    let territorialMass = 0;
+    let sovereignMass = 0;
     const allParaSet = new Set<string>();
     for (const entry of activeCoverage) {
       allParaSet.add(entry.paragraphId);
+      presenceMass += entry.coverage;
+      if (entry.totalStatements === 0) continue;
       const stmtSet = paragraphStatementSets.get(entry.paragraphId);
+      if (!stmtSet) continue;
       let exclusiveCount = 0;
-      if (stmtSet) {
-        for (const sid of claimExclusiveIds) {
-          if (stmtSet.has(sid)) exclusiveCount++;
+      let fractionalSum = 0;
+      for (const sid of claimAllIds) {
+        if (!stmtSet.has(sid)) continue;
+        if (claimExclusiveSet.has(sid)) {
+          exclusiveCount++;
+          fractionalSum += 1;
+        } else {
+          fractionalSum += 1 / (statementOwnerCount.get(sid) ?? 1);
         }
       }
-      exclusivityMass += entry.totalStatements > 0 ? exclusiveCount / entry.totalStatements : 0;
+      sovereignMass += exclusiveCount / entry.totalStatements;
+      territorialMass += fractionalSum / entry.totalStatements;
     }
 
     // sustainedMass cohort computation: percentile ranks for MAXLEN and MAJ
@@ -730,7 +762,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       sustainedMassCohort = 'balanced';
     }
 
-
     // Compute corrected contestedDominance for this candidate
     // Numerator (dominatedCount): MAJ paragraphs of C where another claim is present
     // Denominator (contestedTouchedCount): ALL paragraphs C touches where another claim is present
@@ -739,13 +770,16 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       const allClaimsInPara = paragraphToAllClaims.get(pid) ?? new Set();
       if (allClaimsInPara.size > 1) contestedTouchedCount++;
     }
-    const contestedDominance = contestedTouchedCount > 0 ? dominatedCount / contestedTouchedCount : 0;
+    const contestedDominance =
+      contestedTouchedCount > 0 ? dominatedCount / contestedTouchedCount : 0;
 
     // Build extended candidate
     const extCand: ExtendedCandidate = {
       ...(c as any),
       contestedDominance,
-      exclusivityMass,
+      presenceMass,
+      territorialMass,
+      sovereignMass,
       sustainedMass,
       sustainedMassCohort,
       allParagraphIds: allParaSet,
@@ -756,7 +790,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     // Persist static fields on claimProfiles
     claimProfiles[c.claimId].dominatedParagraphCount = dominatedCount;
-    claimProfiles[c.claimId].exclusivityMass = exclusivityMass;
+    claimProfiles[c.claimId].presenceMass = presenceMass;
+    claimProfiles[c.claimId].territorialMass = territorialMass;
+    claimProfiles[c.claimId].sovereignMass = sovereignMass;
     claimProfiles[c.claimId].sustainedMass = sustainedMass;
     claimProfiles[c.claimId].sustainedMassCohort = sustainedMassCohort;
   }
@@ -773,13 +809,17 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   // Stage 1: Group by cohort
   const byCohort = new Map<string, ExtendedCandidate[]>();
   for (const cohort of ['maj-breadth', 'balanced', 'passage-heavy']) {
-    byCohort.set(cohort, minorityPool.filter((c) => c.sustainedMassCohort === cohort));
+    byCohort.set(
+      cohort,
+      minorityPool.filter((c) => c.sustainedMassCohort === cohort)
+    );
   }
 
   // Stage 2: Within each cohort, seed-sort by MAXLEN DESC, then MAJ DESC
   for (const cohortClaims of byCohort.values()) {
     cohortClaims.sort((a, b) => {
-      const maxLenDiff = (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
+      const maxLenDiff =
+        (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
       if (maxLenDiff !== 0) return maxLenDiff;
       return b.activeMajParagraphIds.length - a.activeMajParagraphIds.length;
     });
@@ -793,11 +833,11 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   // (O(m log m)) and reuse the sorted arrays across all m percentile lookups (O(m log m)
   // total via findIndex, vs the previous O(m² log m) when each comparator call re-sorted).
   const sortedContested = minorityPool.map((c) => c.contestedDominance).sort((a, b) => a - b);
-  const sortedExclusivity = minorityPool.map((c) => c.exclusivityMass).sort((a, b) => a - b);
+  const sortedExclusivity = minorityPool.map((c) => c.sovereignMass).sort((a, b) => a - b);
   const bucketByClaim = new Map<string, number>();
   for (const c of minorityPool) {
     const contestedPerc = percentileFromSortedAsc(c.contestedDominance, sortedContested);
-    const exclusivityPerc = percentileFromSortedAsc(c.exclusivityMass, sortedExclusivity);
+    const exclusivityPerc = percentileFromSortedAsc(c.sovereignMass, sortedExclusivity);
     const highC = contestedPerc >= 0.5;
     const highE = exclusivityPerc >= 0.5;
     const bucket = highC && highE ? 1 : !highC && highE ? 2 : highC && !highE ? 3 : 4;
@@ -815,7 +855,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       c.routingMeasurements = null;
     }
 
-    // Sort by priority bucket -> contestedDominance DESC -> exclusivityMass DESC -> supporters.length DESC
+    // Sort by priority bucket -> contestedDominance DESC -> sovereignMass DESC -> supporters.length DESC
     survivingClaims.sort((a, b) => {
       const bucketA = bucketByClaim.get(a.claimId) ?? 4;
       const bucketB = bucketByClaim.get(b.claimId) ?? 4;
@@ -824,7 +864,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       const contDiff = b.contestedDominance - a.contestedDominance;
       if (contDiff !== 0) return contDiff;
 
-      const exclDiff = b.exclusivityMass - a.exclusivityMass;
+      const exclDiff = b.sovereignMass - a.sovereignMass;
       if (exclDiff !== 0) return exclDiff;
 
       return b.supporters.length - a.supporters.length;
@@ -849,7 +889,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     c.routingMeasurements = {
       contestedDominance: c.contestedDominance,
-      exclusivityMass: c.exclusivityMass,
+      presenceMass: c.presenceMass,
+      territorialMass: c.territorialMass,
+      sovereignMass: c.sovereignMass,
       sustainedMassCohort: c.sustainedMassCohort,
       modelSpread: c.modelSpread,
       claimNoveltyRatio,
@@ -865,8 +907,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   // ── Block G: Phase 4 — Majority mechanism assignment
 
-  const majorityPool = extendedCandidates
-    .filter((c) => !c.isMinority && c.activeMajParagraphIds.length > 0);
+  const majorityPool = extendedCandidates.filter(
+    (c) => !c.isMinority && c.activeMajParagraphIds.length > 0
+  );
 
   // Extract NorthStar before cohort sorting: largest by sustainedMass overall
   let northStarCandidate: ExtendedCandidate | null = null;
@@ -891,10 +934,12 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     // Inside cohorts, tiebreakers: inverted supporter count (ASC), exclusivity (DESC)
     cohortClaims.sort((a, b) => {
-      if (a.supporters.length !== b.supporters.length) return a.supporters.length - b.supporters.length;
-      if (b.exclusivityMass !== a.exclusivityMass) return b.exclusivityMass - a.exclusivityMass;
+      if (a.supporters.length !== b.supporters.length)
+        return a.supporters.length - b.supporters.length;
+      if (b.sovereignMass !== a.sovereignMass) return b.sovereignMass - a.sovereignMass;
 
-      const maxLenDiff = (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
+      const maxLenDiff =
+        (profiles[b.claimId]?.maxPassageLength ?? 0) - (profiles[a.claimId]?.maxPassageLength ?? 0);
       if (maxLenDiff !== 0) return maxLenDiff;
 
       return b.activeMajParagraphIds.length - a.activeMajParagraphIds.length;
@@ -941,10 +986,15 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     c.routingMeasurements = {
       contestedDominance: majorityContested,
-      exclusivityMass: c.exclusivityMass,
+      presenceMass: c.presenceMass,
+      territorialMass: c.territorialMass,
+      sovereignMass: c.sovereignMass,
       sustainedMassCohort: c.sustainedMassCohort,
       modelSpread: c.modelSpread,
-      claimNoveltyRatio: c.activeMajParagraphIds.length > 0 ? candidateContribution / c.activeMajParagraphIds.length : 0,
+      claimNoveltyRatio:
+        c.activeMajParagraphIds.length > 0
+          ? candidateContribution / c.activeMajParagraphIds.length
+          : 0,
       corpusNoveltyRatio:
         totalCorpusParagraphs - assignedSet.size > 0
           ? candidateContribution / (totalCorpusParagraphs - assignedSet.size)
@@ -972,7 +1022,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     northStarCandidate.routingMeasurements = {
       contestedDominance: nsContested,
-      exclusivityMass: northStarCandidate.exclusivityMass,
+      presenceMass: northStarCandidate.presenceMass,
+      territorialMass: northStarCandidate.territorialMass,
+      sovereignMass: northStarCandidate.sovereignMass,
       sustainedMassCohort: northStarCandidate.sustainedMassCohort,
       modelSpread: northStarCandidate.modelSpread,
       claimNoveltyRatio: nsTotal > 0 ? nsNovel / nsTotal : 0,
@@ -1069,12 +1121,18 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   for (const c of enrichedClaims) claimMap.set(String(c.id), c);
 
   // Define priority order for sorting (not for routing — routing is determined by landscapePosition)
-  const priorityOrder: Record<string, number> = { northStar: 0, leadMinority: 1, mechanism: 2, floor: 3 };
+  const priorityOrder: Record<string, number> = {
+    northStar: 0,
+    leadMinority: 1,
+    mechanism: 2,
+    floor: 3,
+  };
 
   const loadBearingClaims: PassageRoutedClaim[] = Object.values(claimProfiles)
     .filter((p) => p.landscapePosition !== 'floor' && !claimsInRoutedConflict.has(p.claimId))
     .sort((a, b) => {
-      const priorityDiff = (priorityOrder[a.landscapePosition] ?? 99) - (priorityOrder[b.landscapePosition] ?? 99);
+      const priorityDiff =
+        (priorityOrder[a.landscapePosition] ?? 99) - (priorityOrder[b.landscapePosition] ?? 99);
       if (priorityDiff !== 0) return priorityDiff;
       return b.concentrationRatio - a.concentrationRatio;
     })
@@ -1111,7 +1169,8 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       concentrationDistribution: Object.values(claimProfiles).map((p) => p.concentrationRatio),
       densityRatioDistribution: Object.values(claimProfiles).map((p) => p.densityRatio),
       totalClaims: enrichedClaims.length,
-      floorCount: Object.values(claimProfiles).filter((p) => p.landscapePosition === 'floor').length,
+      floorCount: Object.values(claimProfiles).filter((p) => p.landscapePosition === 'floor')
+        .length,
       corpusMode: periphery.corpusMode,
       peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
       peripheralRatio: periphery.peripheralRatio,
@@ -1245,8 +1304,8 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const cascadeFragilitySigma =
       fragValues.length > 0
         ? Math.sqrt(
-          fragValues.reduce((s, v) => s + (v - cascadeFragilityMu) ** 2, 0) / fragValues.length
-        )
+            fragValues.reduce((s, v) => s + (v - cascadeFragilityMu) ** 2, 0) / fragValues.length
+          )
         : 0;
 
     let count2a = 0,
@@ -1259,10 +1318,10 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
 
     const riskVector: BlastSurfaceRiskVector = {
-      deletionRisk: type2Count,
-      deletionStatementIds: deletionIds,
-      degradationRisk: type3Count,
-      degradationStatementIds: degradationIds,
+      twinCount: type2Count,
+      twinStatementIds: deletionIds,
+      orphanCount: type3Count,
+      orphanStatementIds: degradationIds,
       cascadeFragility: cascadeFragilitySum,
       cascadeFragilityDetails,
       cascadeFragilityMu,
@@ -1288,8 +1347,8 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       layerC: {
         canonicalCount: K,
         nonExclusiveCount: type1Count,
-        exclusiveNonOrphanCount: type2Count,
-        exclusiveOrphanCount: type3Count,
+        twinCount: type2Count,
+        orphanCount: type3Count,
       },
       riskVector,
       mixedResolution: speculativeMixedResolution(

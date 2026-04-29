@@ -35,7 +35,7 @@ export interface NodeLocalStats {
   contested: boolean;
   statementIds: string[];
 
-  isolationScore: number; // 0 = connected hub, 1 = fully isolated
+  recognitionMass: number; // 0 = no recognition, 1 = top-ranked connectivity
 
   // From mutual recognition graph (μ+σ)
   mutualNeighborhoodPatch: string[];
@@ -109,7 +109,6 @@ export interface Layout2D {
 export interface SubstrateHealth {
   isolationRatio: number; // fraction of nodes with zero mutual recognition edges
   edgeCount: number; // total edges in mutual recognition graph
-  edgeSaturation: number; // edgeCount / maxPossibleEdges
   discriminationRange: number; // p90 - p10 from pairwise field
   nodeCount: number;
 }
@@ -182,7 +181,6 @@ export interface PipelineGateResult {
     isDegenerate: boolean;
     isolationRatio: number;
     edgeCount: number;
-    edgeSaturation: number;
     discriminationRange: number;
     nodeCount: number;
   };
@@ -207,7 +205,7 @@ export interface MeasuredRegion {
 
   // Geometry metrics
   internalDensity: number;
-  isolation: number;
+  recognitionMass: number;
   nearestCarrierSimilarity: number;
   avgInternalSimilarity: number;
 }

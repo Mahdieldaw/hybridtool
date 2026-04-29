@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { AiTurn, SecondaryPattern } from '../../shared/types';
 import type { EditorialAST } from '../../shared/types';
 import { useSingularityMode } from '../hooks/workflow/useSingularityTrigger';
@@ -13,7 +13,6 @@ import {
   activeSplitPanelAtom,
   turnStreamingStateFamily,
   isDecisionMapOpenAtom,
-  mappingProviderAtom,
   modelResponsePanelModeFamily,
   singularityProviderAtom,
 } from '../state';
@@ -21,7 +20,7 @@ import { MetricsRibbon } from '../instrument/MetricsRibbon';
 import StructureGlyph from '../instrument/StructureGlyph';
 import { analyzeGlobalStructure as computeStructuralAnalysis } from '../../src/provenance/structure';
 import { PipelineErrorBanner } from '../shell/chrome/PipelineErrorBanner';
-import { useProviderArtifact } from '../hooks/providers/useProviderArtifact';
+import { useArtifactResolution } from '../hooks/reading/useArtifactResolution';
 import { EditorialPreview } from '../reading/EditorialPreview';
 import { formatFullTurn } from '../utils/copy-format-utils';
 import { getArtifactStatements } from '../../shared/corpus-utils';
@@ -43,23 +42,10 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
   singularityState,
 }) => {
   const { runSingularity } = useSingularityMode(aiTurn.id);
-  const activeMappingPid = useAtomValue(mappingProviderAtom);
-  const effectivePid =
-    activeMappingPid ||
-    aiTurn.meta?.mapper ||
-    Object.keys((aiTurn as any).mappingResponses ?? {})[0] ||
-    null;
-  const { artifact: mappingArtifact, rebuild: rebuildArtifact } = useProviderArtifact(
-    aiTurn.id,
-    effectivePid
-  );
-
-  // Tier 3: trigger lazy rebuild if artifact not yet in memory
-  useEffect(() => {
-    if (!mappingArtifact && effectivePid && aiTurn.pipelineStatus !== 'error') {
-      rebuildArtifact();
-    }
-  }, [mappingArtifact, effectivePid, aiTurn.pipelineStatus, rebuildArtifact]);
+  const {
+    artifact: mappingArtifact,
+    activeMappingPid: effectivePid,
+  } = useArtifactResolution(aiTurn.id);
 
   // Helper for recomputing singularity (already has output — true recompute)
   const triggerAndSwitch = async (options: any = {}) => {
@@ -91,6 +77,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
   const selectedModels = useAtomValue(selectedModelsAtom);
   const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
   const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
+  const isRoundActive = streamingState.isLoading;
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const setPanelMode = useSetAtom(modelResponsePanelModeFamily(aiTurn.id));
@@ -109,10 +96,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
   const [isOrbTrayExpanded, setIsOrbTrayExpanded] = useState(false);
 
-  const mapperProviderId = useMemo(() => {
-    if (aiTurn.meta?.mapper) return String(aiTurn.meta.mapper);
-    return null;
-  }, [aiTurn.meta?.mapper]);
 
   // Visible providers for orbs
   const visibleProviderIds = useMemo(() => {
@@ -121,18 +104,25 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     return LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]).map((p) => p.id);
   }, [aiTurn, selectedModels]);
 
-  const orbProviderIds = useMemo(() => {
-    const ids = [...visibleProviderIds, ...(mapperProviderId ? [String(mapperProviderId)] : [])]
-      .filter(Boolean)
-      .map(String);
-    return Array.from(new Set(ids));
-  }, [mapperProviderId, visibleProviderIds]);
+  // Orbs only represent batch participants — mapper and singularity are not shown as separate
+  // orbs because their responses aren't in the batch response set (clicking would open an
+  // empty panel). If they also participated in the batch, they'll naturally be in this list.
+  const orbProviderIds = useMemo(
+    () => Array.from(new Set(visibleProviderIds.map(String))),
+    [visibleProviderIds]
+  );
 
   const orbVoiceProviderId = useMemo(() => {
-    const fromMeta = mapperProviderId ? String(mapperProviderId) : null;
-    if (fromMeta) return fromMeta;
-    return orbProviderIds[0] ? String(orbProviderIds[0]) : null;
-  }, [mapperProviderId, orbProviderIds]);
+    // No crown while batch responses are streaming — mapper/synthesizer controls are
+    // irrelevant during this phase; the global council tray above the input handles config.
+    if (isRoundActive) return null;
+    // Crown marks the synthesizer for this turn, mirroring the global council tray.
+    // Only assign if the singularity provider is also a batch participant (in orbProviderIds),
+    // otherwise clicking an orb-less crown would produce an empty response panel.
+    const singularityPid = aiTurn.meta?.singularity ? String(aiTurn.meta.singularity) : null;
+    if (singularityPid && orbProviderIds.includes(singularityPid)) return singularityPid;
+    return orbProviderIds[0] ?? null;
+  }, [aiTurn.meta?.singularity, orbProviderIds, isRoundActive]);
 
   const isWorkflowSettled = useMemo(() => {
     const states = Object.values(workflowProgress || {});
@@ -192,7 +182,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
   }
 
   const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
-  const isRoundActive = streamingState.isLoading;
 
   const canShowResponse =
     hasSingularityText || singularityState.isLoading || singularityState.isError;
@@ -250,8 +239,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
           </div>
         </div>
 
-        {/* Structural Summary (Ribbon + Glyph) */}
-        {isPipelineComplete && structuralAnalysis && (
+        {/* Structural Summary (Ribbon + Glyph) — shown as soon as semantic artifact is ready */}
+        {mappingArtifact && structuralAnalysis && (
           <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 items-stretch animate-in fade-in slide-in-from-top-2 duration-500">
             <div className="min-w-0">
               <MetricsRibbon
@@ -337,6 +326,13 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             setPanelMode('reading');
           }}
         />
+      ) : mappingArtifact && isRoundActive ? (
+        <div className="animate-in fade-in duration-500">
+          <div className="flex flex-col items-center justify-center p-8 bg-surface-highlight/5 rounded-xl border border-dashed border-border-subtle/50">
+            <div className="w-5 h-5 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin mb-3" />
+            <div className="text-text-muted text-sm">Synthesizing response...</div>
+          </div>
+        </div>
       ) : (
         <div className="animate-in fade-in duration-500">
           <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">

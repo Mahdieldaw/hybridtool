@@ -12,7 +12,8 @@ type ProviderKey = string;
 type ProviderStatus = any;
 interface WorkflowStep {
   stepId: string;
-  payload?: any;
+  type: any;
+  payload: any;
 }
 interface WorkflowContext {
   sessionId: string;

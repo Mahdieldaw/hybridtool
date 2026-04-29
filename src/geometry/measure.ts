@@ -287,18 +287,36 @@ export function buildMutualRankGraph(pairwiseField: PairwiseField): MutualRankGr
 
 // --─ Phase 3: Node stats ------------------------------------------------------
 
+function percentileRankAsc(val: number, sortedAsc: number[]): number {
+  const n = sortedAsc.length;
+  if (n <= 1) return 0;
+  const firstIdx = sortedAsc.findIndex((v) => v === val);
+  if (firstIdx === -1) return 0;
+  let lastIdx = firstIdx;
+  while (lastIdx + 1 < n && sortedAsc[lastIdx + 1] === val) lastIdx++;
+  return ((firstIdx + lastIdx) / 2) / (n - 1);
+}
+
 export function computeNodeStats(
   paragraphs: ShadowParagraph[],
   mutualRankGraph: MutualRankGraph
 ): NodeLocalStats[] {
+  // First pass: collect all mutualRankDegree values
+  const degrees: number[] = [];
+  for (const p of paragraphs) {
+    const mrStats = mutualRankGraph.nodeStats.get(p.id);
+    degrees.push(mrStats?.mutualRankDegree ?? 0);
+  }
+  const sortedDegrees = degrees.slice().sort((a, b) => a - b);
+
   const nodes: NodeLocalStats[] = [];
 
+  // Second pass: assign recognitionMass as percentile rank
   for (const p of paragraphs) {
     const id = p.id;
     const mrStats = mutualRankGraph.nodeStats.get(id);
     const mutualRankDegree = mrStats?.mutualRankDegree ?? 0;
     const patch = mrStats?.mutualRankNeighborhood ?? [id];
-    const isolated = mrStats?.isolated ?? true;
 
     nodes.push({
       paragraphId: id,
@@ -306,7 +324,7 @@ export function computeNodeStats(
       dominantStance: p.dominantStance,
       contested: p.contested,
       statementIds: [...p.statementIds],
-      isolationScore: isolated ? 1 : 0,
+      recognitionMass: percentileRankAsc(mutualRankDegree, sortedDegrees),
       mutualNeighborhoodPatch: patch,
       mutualRankDegree,
     });
@@ -324,7 +342,6 @@ function deriveHealth(
   n: number
 ): SubstrateHealth {
   const edgeCount = mutualRankGraph.edges.length;
-  const maxPossibleEdges = n > 1 ? (n * (n - 1)) / 2 : 0;
   let isolatedCount = 0;
   for (const ns of mutualRankGraph.nodeStats.values()) {
     if (ns.isolated) isolatedCount++;
@@ -332,7 +349,6 @@ function deriveHealth(
   return {
     isolationRatio: n > 0 ? isolatedCount / n : 1,
     edgeCount,
-    edgeSaturation: maxPossibleEdges > 0 ? edgeCount / maxPossibleEdges : 0,
     discriminationRange: pairwiseField.stats.discriminationRange,
     nodeCount: n,
   };
@@ -354,7 +370,7 @@ function buildDegenerateSubstrate(
     dominantStance: p.dominantStance,
     contested: p.contested,
     statementIds: [...p.statementIds],
-    isolationScore: 1,
+    recognitionMass: 1,
     mutualNeighborhoodPatch: [p.id],
     mutualRankDegree: 0,
   }));
@@ -407,7 +423,7 @@ function buildDegenerateSubstrate(
     nodes,
     pairwiseField,
     mutualRankGraph,
-    health: { isolationRatio: 1, edgeCount: 0, edgeSaturation: 0, discriminationRange: 0, nodeCount: n },
+    health: { isolationRatio: 1, edgeCount: 0, discriminationRange: 0, nodeCount: n },
     meta: {
       embeddingSuccess: reason !== 'embedding_failure',
       embeddingBackend,

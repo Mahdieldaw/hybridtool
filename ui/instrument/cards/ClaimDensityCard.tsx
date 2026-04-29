@@ -53,7 +53,6 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       id: String(p.claimId ?? ''),
       label: claimLabelById.get(String(p.claimId ?? '')) ?? String(p.claimId ?? ''),
       paragraphCount: p.paragraphCount ?? 0,
-      majorityParagraphCount: p.majorityParagraphCount ?? 0,
       passageCount: p.passageCount ?? 0,
       maxPassageLength: p.maxPassageLength ?? 0,
       modelSpread: p.modelSpread ?? 0,
@@ -129,7 +128,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
         density: typeof p.densityRatio === 'number' ? p.densityRatio : 0,
         meanCoverageInLongestRun:
           typeof p.meanCoverageInLongestRun === 'number' ? p.meanCoverageInLongestRun : 0,
-        totalMAJ: p.totalMAJ ?? 0,
+        presenceMass: p.presenceMass ?? 0,
         maxPassageLength: p.maxPassageLength ?? 0,
         structContrib: p.structuralContributors?.length ?? 0,
         supporterCount: supportersById.get(String(p.claimId ?? '')) ?? 0,
@@ -137,7 +136,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
         sustainedMassCohort: String(p.sustainedMassCohort ?? rm?.sustainedMassCohort ?? '–'),
         contestedDominance: rm?.contestedDominance ?? null,
         dominatedParagraphCount: p.dominatedParagraphCount ?? null,
-        exclusivityMass: p.exclusivityMass ?? null,
+        sovereignMass: p.sovereignMass ?? null,
         novelParagraphCount: rm?.novelParagraphCount ?? null,
         claimNoveltyRatio: rm?.claimNoveltyRatio ?? null,
         corpusNoveltyRatio: rm?.corpusNoveltyRatio ?? null,
@@ -232,17 +231,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                   <span className="font-mono text-text-muted">{fmtInt(r.paragraphCount)}</span>
                 ),
               },
-              {
-                key: 'majorityParagraphCount',
-                header: 'maj',
-                title: 'Paragraphs where this claim owns >50% of statements',
-                sortValue: (r: any) => r.majorityParagraphCount,
-                cell: (r: any) => (
-                  <span className="font-mono text-text-muted">
-                    {fmtInt(r.majorityParagraphCount)}
-                  </span>
-                ),
-              },
+
               {
                 key: 'passageCount',
                 header: 'pass#',
@@ -538,12 +527,11 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 sortValue: (r: any) => r.meanCoverageInLongestRun,
               },
               {
-                key: 'totalMAJ',
-                header: 'MAJ',
-                title:
-                  'Total majority paragraphs: number of paragraphs where this claim owns >50% of the statements.',
-                cell: (r: any) => r.totalMAJ,
-                sortValue: (r: any) => r.totalMAJ,
+                key: 'presenceMass',
+                header: 'mass',
+                title: 'Continuous presence mass: Σ(claimStmts / paragraphTotal) across paragraphs',
+                cell: (r: any) => fmt(r.presenceMass, 2),
+                sortValue: (r: any) => r.presenceMass ?? 0,
               },
               {
                 key: 'maxPassageLength',
@@ -598,13 +586,13 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 sortValue: (r: any) => r.dominatedParagraphCount ?? -1,
               },
               {
-                key: 'exclusivityMass',
-                header: 'EM',
+                key: 'sovereignMass',
+                header: 'SM',
                 title:
-                  'Exclusivity Mass: Summed block-level exclusivity weight across all paragraphs.',
+                  'Sovereign Mass: Σ(exclusive-stmts/paraTotal) — sole-holder statements only.',
                 cell: (r: any) =>
-                  r.exclusivityMass == null ? <span className="text-text-muted">–</span> : fmt(r.exclusivityMass, 2),
-                sortValue: (r: any) => r.exclusivityMass ?? -1,
+                  r.sovereignMass == null ? <span className="text-text-muted">–</span> : fmt(r.sovereignMass, 2),
+                sortValue: (r: any) => r.sovereignMass ?? -1,
               },
               {
                 key: 'novelParagraphCount',

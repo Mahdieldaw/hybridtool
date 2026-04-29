@@ -331,7 +331,7 @@ export function buildSubstrateGraph({
         contested: n.contested,
         statementIds: n.statementIds,
         mutualRankDegree: n.mutualRankDegree ?? 0,
-        isolationScore: n.isolationScore,
+        recognitionMass: n.recognitionMass,
         regionId: regionsByNode.get(p) ?? null,
         x: xy[0],
         y: xy[1],

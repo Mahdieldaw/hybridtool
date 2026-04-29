@@ -1,8 +1,7 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect } from 'react';
 import { m } from 'framer-motion';
 import MarkdownDisplay from '../shared/MarkdownDisplay';
 import { SupporterOrbs } from './SupporterOrbs';
-import { getCanonicalStatementsForClaim, getArtifactStatements } from '../../shared/corpus-utils';
 
 interface ClaimDetailDrawerProps {
   claim: any;
@@ -38,9 +37,6 @@ function extractNarrativeExcerpt(narrativeText: string, label: string): string {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-const fmt = (v: number | null | undefined, d = 2) =>
-  v != null && Number.isFinite(v) ? v.toFixed(d) : '—';
-
 const ROLE_COLORS: Record<string, string> = {
   anchor: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
   branch: 'bg-green-500/20 text-green-300 border-green-500/40',
@@ -55,23 +51,6 @@ const EDGE_TYPE_STYLE: Record<string, { color: string; label: string }> = {
   prerequisite: { color: 'text-blue-400', label: 'prerequisite' },
   dependency: { color: 'text-blue-400', label: 'dependency' },
 };
-
-function MiniBar({
-  value,
-  max,
-  color = 'bg-brand-500',
-}: {
-  value: number;
-  max: number;
-  color?: string;
-}) {
-  const pct = max > 0 ? Math.min(1, value / max) * 100 : 0;
-  return (
-    <div className="h-1.5 bg-white/5 rounded-full overflow-hidden w-full">
-      <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
 
 // ── Main Component ────────────────────────────────────────────────────────
 
@@ -116,38 +95,6 @@ export function ClaimDetailDrawer({
       });
   }, [claim.id, artifact]);
 
-  // Blast radius score for this claim
-  const blastScore = useMemo(() => {
-    const scores: any[] = artifact?.blastSurface?.scores ?? [];
-    return scores.find((s: any) => s.claimId === claim.id) || null;
-  }, [claim.id, artifact]);
-
-  // Mixed provenance (canonical source provenance) for this claim
-  const mixedClaim = useMemo(() => {
-    return artifact?.mixedProvenance?.perClaim?.[claim.id] ?? null;
-  }, [claim.id, artifact]);
-
-  // Build statement text lookup
-  const stmtTextMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of getArtifactStatements(artifact)) {
-      map.set(String(s.id), String(s.text ?? ''));
-    }
-    return map;
-  }, [artifact]);
-  // Provenance data
-  const provenanceData = useMemo(() => {
-    const exclusivity = artifact?.claimProvenance?.claimExclusivity;
-    if (!exclusivity) return null;
-    const entry = exclusivity[claim.id];
-    if (!entry) return null;
-    return {
-      exclusiveCount: entry.exclusiveIds?.length ?? 0,
-      sharedCount: entry.sharedIds?.length ?? 0,
-      exclusivityMass: entry.exclusivityRatio ?? null,
-    };
-  }, [claim.id, artifact]);
-
   // Narrative excerpt
   const narrativeExcerpt = useMemo(
     () => extractNarrativeExcerpt(narrativeText, claim.label || ''),
@@ -155,11 +102,6 @@ export function ClaimDetailDrawer({
   );
 
   const roleClass = ROLE_COLORS[claim.role] || ROLE_COLORS.supplement;
-
-  const [showAllCanonical, setShowAllCanonical] = useState(false);
-  useEffect(() => {
-    setShowAllCanonical(false);
-  }, [claim?.id]);
 
   const containerClassName =
     variant === 'bottom'
@@ -264,7 +206,7 @@ export function ClaimDetailDrawer({
                         {style.label}
                       </span>
                       <span className="text-text-muted">
-                        {edge.direction === 'outgoing' ? '\u2192' : '\u2190'}
+                        {edge.direction === 'outgoing' ? '→' : '←'}
                       </span>
                       <span className="text-text-primary truncate">{edge.otherLabel}</span>
                     </button>
@@ -283,227 +225,6 @@ export function ClaimDetailDrawer({
               </div>
             ) : (
               <div className="text-[11px] text-text-muted italic">No matching excerpt found.</div>
-            )}
-          </div>
-
-          {/* ── Geometric Profile ─────────────────────────────────────── */}
-          <div className="border-t border-white/10 pt-4 space-y-4">
-            <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-              Geometric Profile
-            </h4>
-
-            {/* Provenance */}
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                Provenance
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                <div className="text-text-muted">Canonical statements</div>
-                <div className="text-text-primary text-right">
-                  {artifact?.index
-                    ? getCanonicalStatementsForClaim(artifact.index, String(claim.id ?? '')).length
-                    : '—'}
-                </div>
-                <div className="text-text-muted">Support ratio</div>
-                <div className="text-text-primary text-right">{fmt(claim.supportRatio)}</div>
-                <div className="text-text-muted">Provenance bulk</div>
-                <div className="text-text-primary text-right">{fmt(claim.provenanceBulk)}</div>
-                {provenanceData && (
-                  <>
-                    <div className="text-text-muted">Exclusivity</div>
-                    <div className="text-text-primary text-right">
-                      {fmt(provenanceData.exclusivityMass)}
-                    </div>
-                    <div className="text-text-muted">Exclusive / shared</div>
-                    <div className="text-text-primary text-right">
-                      {provenanceData.exclusiveCount} / {provenanceData.sharedCount}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Structural */}
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                Structural
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                <div className="text-text-muted">In-degree / Out-degree</div>
-                <div className="text-text-primary text-right">
-                  {claim.inDegree ?? '—'} / {claim.outDegree ?? '—'}
-                </div>
-                <div className="text-text-muted">Chain depth</div>
-                <div className="text-text-primary text-right">{claim.chainDepth ?? '—'}</div>
-                <div className="text-text-muted">Prerequisite out-degree</div>
-                <div className="text-text-primary text-right">
-                  {claim.prerequisiteOutDegree ?? '—'}
-                </div>
-                <div className="text-text-muted">Conflict edges</div>
-                <div className="text-text-primary text-right">{claim.conflictEdgeCount ?? '—'}</div>
-                <div className="text-text-muted">Hub dominance</div>
-                <div className="text-text-primary text-right">
-                  {claim.outDegree >= 2 && claim.hubDominance != null
-                    ? fmt(claim.hubDominance, 2)
-                    : '—'}
-                </div>
-              </div>
-            </div>
-
-            {/* Blast Radius */}
-            {blastScore && (
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                  Blast Radius
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-text-muted">Composite</span>
-                    <span className="text-text-primary font-medium">
-                      {fmt(blastScore.composite)}
-                    </span>
-                  </div>
-                  <MiniBar value={blastScore.composite} max={1} color="bg-amber-500" />
-                </div>
-                {blastScore.components && (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] mt-1">
-                    <div className="text-text-muted">Cascade</div>
-                    <div className="text-text-primary text-right">
-                      {fmt(blastScore.components.cascadeBreadth)}
-                    </div>
-                    <div className="text-text-muted">Exclusivity</div>
-                    <div className="text-text-primary text-right">
-                      {fmt(blastScore.components.exclusiveEvidence)}
-                    </div>
-                    <div className="text-text-muted">Leverage</div>
-                    <div className="text-text-primary text-right">
-                      {fmt(blastScore.components.leverage)}
-                    </div>
-                    <div className="text-text-muted">Query relevance</div>
-                    <div className="text-text-primary text-right">
-                      {fmt(blastScore.components.queryRelevance)}
-                    </div>
-                    <div className="text-text-muted">Articulation</div>
-                    <div className="text-text-primary text-right">
-                      {fmt(blastScore.components.articulationPoint)}
-                    </div>
-                  </div>
-                )}
-                {blastScore.suppressed && (
-                  <div className="text-[10px] text-red-400 mt-1">
-                    Suppressed: {blastScore.suppressionReason || 'below floor'}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Skeletonization — canonical source provenance */}
-            {mixedClaim && (
-              <div className="space-y-1.5">
-                <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide">
-                  Skeletonization
-                </div>
-                {/* Fate breakdown */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                  <div className="text-text-muted">Canonical statements</div>
-                  <div className="text-text-primary text-right font-medium">
-                    {mixedClaim.canonicalStatementIds?.length ?? '—'}
-                  </div>
-                  <div className="text-text-muted">Core (above μ)</div>
-                  <div className="text-emerald-400 text-right">{mixedClaim.coreCount ?? '—'}</div>
-                  <div className="text-text-muted">Removed (below μ)</div>
-                  <div className="text-rose-400 text-right">{mixedClaim.removedCount ?? 0}</div>
-                  <div className="text-text-muted">μ_global</div>
-                  <div className="text-text-primary text-right font-mono text-[10px]">
-                    {fmt(mixedClaim.globalMu)}
-                  </div>
-                </div>
-                {/* Fate bar */}
-                {(mixedClaim.coreCount > 0 || (mixedClaim.removedCount ?? 0) > 0) && (
-                  <div className="flex h-2 rounded-full overflow-hidden gap-px">
-                    {mixedClaim.coreCount > 0 && (
-                      <div
-                        className="bg-emerald-500/70"
-                        style={{ flex: mixedClaim.coreCount }}
-                        title={`Core: ${mixedClaim.coreCount}`}
-                      />
-                    )}
-                    {(mixedClaim.removedCount ?? 0) > 0 && (
-                      <div
-                        className="bg-rose-500/30"
-                        style={{ flex: mixedClaim.removedCount ?? 0 }}
-                        title={`Removed: ${mixedClaim.removedCount ?? 0}`}
-                      />
-                    )}
-                  </div>
-                )}
-                {/* Canonical statement list */}
-                {mixedClaim.canonicalStatementIds?.length > 0 && (
-                  <div className="space-y-0.5 mt-1">
-                    <div className="text-[9px] text-text-muted mb-1">Survived statements:</div>
-                    {(mixedClaim.statements ?? [])
-                      .filter((s: any) => s.zone === 'core' && s.fromSupporterModel)
-                      .sort((a: any, b: any) => b.globalSim - a.globalSim)
-                      .slice(0, showAllCanonical ? (mixedClaim.statements?.length ?? 9999) : 12)
-                      .map((s: any) => {
-                        const text = stmtTextMap.get(s.statementId) ?? s.statementId;
-                        const truncText = text.length > 90 ? text.slice(0, 90) + '\u2026' : text;
-                        return (
-                          <div
-                            key={s.statementId}
-                            className="flex items-start gap-1.5 text-[9px] py-0.5 border-b border-white/5"
-                          >
-                            <span className="flex-none font-mono text-emerald-400">
-                              {s.globalSim?.toFixed(3)}
-                            </span>
-                            <span className="text-text-secondary" title={text}>
-                              {truncText}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    {mixedClaim.canonicalStatementIds.length > 12 && !showAllCanonical && (
-                      <button
-                        type="button"
-                        className="text-left text-[9px] text-text-muted italic hover:text-text-secondary"
-                        onClick={() => setShowAllCanonical(true)}
-                      >
-                        +{mixedClaim.canonicalStatementIds.length - 12} more
-                      </button>
-                    )}
-                    {showAllCanonical && (
-                      <button
-                        type="button"
-                        className="text-left text-[9px] text-text-muted italic hover:text-text-secondary"
-                        onClick={() => setShowAllCanonical(false)}
-                      >
-                        Show less
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Boolean flags */}
-            {(claim.isKeystone || claim.isOutlier || claim.isIsolated) && (
-              <div className="flex flex-wrap gap-1.5">
-                {claim.isKeystone && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    keystone
-                  </span>
-                )}
-                {claim.isOutlier && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-orange-500/20 text-orange-300 border border-orange-500/30">
-                    outlier
-                  </span>
-                )}
-                {claim.isIsolated && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-slate-500/20 text-slate-300 border border-slate-500/30">
-                    isolated
-                  </span>
-                )}
-              </div>
             )}
           </div>
         </div>

@@ -59,7 +59,6 @@ export function GeometryCard({
   const substrate = artifact?.geometry?.substrate ?? null;
   const nodes: any[] = useMemo(() => substrate?.nodes ?? [], [substrate]);
   const mutualEdges: any[] = useMemo(() => substrate?.mutualEdges ?? [], [substrate]);
-  const edgeSaturation = substrate?.health?.edgeSaturation ?? 0;
   const status: string = basin?.status ?? 'unknown';
   const basinCount = basin?.basinCount ?? 0;
 
@@ -103,7 +102,7 @@ export function GeometryCard({
     [components, nodes.length]
   );
 
-  type NodeRow = { id: string; mutualRankDegree: number; isolationScore: number | null };
+  type NodeRow = { id: string; mutualRankDegree: number; recognitionMass: number | null };
   const nodeRows = useMemo<NodeRow[]>(
     () =>
       nodes.map((n: any, idx: number) => ({
@@ -113,7 +112,7 @@ export function GeometryCard({
           return trimmed || `node-${idx}`;
         })(),
         mutualRankDegree: typeof n.mutualRankDegree === 'number' ? n.mutualRankDegree : 0,
-        isolationScore: typeof n.isolationScore === 'number' ? n.isolationScore : null,
+        recognitionMass: typeof n.recognitionMass === 'number' ? n.recognitionMass : null,
       })),
     [nodes]
   );
@@ -243,14 +242,13 @@ export function GeometryCard({
         <CardSection
           title="Mutual Recognition"
           badge={{
-            text: `${fmtInt(mutualEdges.length)} edges (${fmt(edgeSaturation * 100, 1)}%)`,
+            text: `${fmtInt(mutualEdges.length)} edges`,
             color: participationRate != null && participationRate > 0.05 ? '#34d399' : '#f87171',
           }}
         >
           <div className="grid grid-cols-2 gap-x-4">
             <div>
               <StatRow {...statRowProps("Mutual Edges", fmtInt(mutualEdges.length))} />
-              <StatRow {...statRowProps("Edge Saturation", `${fmt(edgeSaturation * 100, 1)}%`)} />
               <StatRow
                 {...statRowProps(
                   "Participating",
@@ -346,23 +344,23 @@ export function GeometryCard({
                     ),
                   },
                   {
-                    key: 'isolationScore',
-                    header: 'Isolation',
-                    sortValue: (r) => r.isolationScore,
+                    key: 'recognitionMass',
+                    header: 'Rec. Mass',
+                    sortValue: (r) => r.recognitionMass,
                     cell: (r) => (
                       <span
                         className={clsx(
                           'font-mono',
-                          (r.isolationScore ?? 0) > 0.5 && 'text-rose-400'
+                          (r.recognitionMass ?? 1) < 0.5 && 'text-rose-400'
                         )}
                       >
-                        {fmt(r.isolationScore, 4)}
+                        {fmt(r.recognitionMass, 4)}
                       </span>
                     ),
                   },
                 ]}
                 rows={nodeRows}
-                defaultSortKey="isolationScore"
+                defaultSortKey="recognitionMass"
                 defaultSortDir="desc"
                 maxRows={10}
               />

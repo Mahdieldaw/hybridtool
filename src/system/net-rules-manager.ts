@@ -7,6 +7,7 @@
  */
 
 import { DNRUtils } from './dnr-utils.js';
+import { logInfraError } from '../errors';
 
 // =============================================================================
 // TYPES
@@ -502,7 +503,7 @@ const ArkoseController = {
       console.debug(`ArkoseController: Injected AE header ${headerName} for tab ${tabId}`);
       return ruleId;
     } catch (error) {
-      console.error('ArkoseController: Failed to inject AE headers:', error);
+      logInfraError('ArkoseController: Failed to inject AE headers', error);
       throw error;
     }
   },
@@ -514,7 +515,7 @@ const ArkoseController = {
       NetRulesManager._rules = NetRulesManager._rules.filter((r) => r.id !== ruleId);
       console.debug(`ArkoseController: Removed AE header rule ${ruleId}`);
     } catch (error) {
-      console.error('ArkoseController: Failed to remove AE header rule:', error);
+      logInfraError('ArkoseController: Failed to remove AE header rule', error);
       throw error;
     }
   },
@@ -540,7 +541,7 @@ const ArkoseController = {
       }
       console.debug('ArkoseController: Removed all AE header rules');
     } catch (error) {
-      console.error('ArkoseController: Failed to remove all AE header rules:', error);
+      logInfraError('ArkoseController: Failed to remove all AE header rules', error);
       throw error;
     }
   },

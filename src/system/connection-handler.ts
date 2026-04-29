@@ -4,6 +4,7 @@ import { authManager } from '../providers/auth-manager.js';
 import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging.js';
 import { getArtifactParagraphs } from '../../shared/corpus-utils.js';
 import { computeProbeGeometry } from '../execution/deterministic-pipeline.js';
+import { logInfraError } from '../errors';
 import type { PrimitiveWorkflowRequest, ResolvedContext } from '../../shared/types/contract.js';
 import type { ProbeCorpusHit } from '../../shared/types/turns.js';
 import type { SessionManager } from '../persistence/session-manager.js';
@@ -418,7 +419,7 @@ export class ConnectionHandler {
             console.warn(`[ConnectionHandler] Unknown message type: ${msg['type']}`);
         }
       } catch (error: unknown) {
-        console.error('[ConnectionHandler] Message handling failed:', error);
+        logInfraError('ConnectionHandler: Message handling failed', error);
         this._sendError(msg, error);
       }
     };
@@ -964,7 +965,7 @@ export class ConnectionHandler {
                 // port closed
               }
             } catch (error: unknown) {
-              console.error('[ConnectionHandler] Probe provider failed:', providerId, error);
+              logInfraError(`ConnectionHandler: Probe provider failed for ${providerId}`, error);
               try {
                 this.port?.postMessage({
                   type: 'PROBE_COMPLETE',
@@ -1281,7 +1282,7 @@ export class ConnectionHandler {
         console.warn('[ConnectionHandler] Failed to delete inflight metadata:', e);
       }
     } catch (error: unknown) {
-      console.error('[ConnectionHandler] Workflow failed:', error);
+      logInfraError('ConnectionHandler: Workflow failed', error);
       const msg = error instanceof Error ? error.message : String(error);
       try {
         this.port?.postMessage({
@@ -1299,7 +1300,7 @@ export class ConnectionHandler {
           error: msg,
         });
       } catch (e: unknown) {
-        console.error('[ConnectionHandler] Failed to send error message:', e);
+        logInfraError('ConnectionHandler: Failed to send error message', e);
       }
     } finally {
       if (_recomputeKey) this._activeRecomputes.delete(_recomputeKey);

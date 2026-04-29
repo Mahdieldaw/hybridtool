@@ -603,8 +603,8 @@ export function ParagraphSpaceView({
         m.set(id, {
           claimId: id,
           type1: (s as any).layerC?.nonExclusiveCount ?? 0,
-          type2: rv.deletionRisk,
-          type3: rv.degradationRisk,
+          type2: rv.twinCount,
+          type3: rv.orphanCount,
           total: (s as any).layerC?.canonicalCount ?? 0,
           isolation: rv.isolation,
           orphanCharacter: rv.orphanCharacter,
@@ -618,8 +618,8 @@ export function ParagraphSpaceView({
       } else {
         // Fallback: derive from layerC (backward compat with cached data)
         const canonicalCount = s.layerC?.canonicalCount ?? 0;
-        const type2 = s.layerC?.exclusiveNonOrphanCount ?? 0;
-        const type3 = s.layerC?.exclusiveOrphanCount ?? 0;
+        const type2 = s.layerC?.twinCount ?? 0;
+        const type3 = s.layerC?.orphanCount ?? 0;
         const type1 = Math.max(0, canonicalCount - type2 - type3);
         const total = type1 + type2 + type3;
         const exclTotal = type2 + type3;

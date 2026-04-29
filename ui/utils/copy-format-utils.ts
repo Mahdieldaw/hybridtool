@@ -759,7 +759,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
       const nodes = safeArr(sub?.nodes).map((n: any) => ({
         id: n.id,
         mutualRankDegree: n.mutualRankDegree,
-        isolationScore: n.isolationScore,
+        recognitionMass: n.recognitionMass,
       }));
       return ser({
         pairwiseField: {

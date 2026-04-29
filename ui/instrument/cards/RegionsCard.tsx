@@ -26,7 +26,7 @@ export function RegionsCard({
 
     const normalize = (input: unknown) => {
       if (!Array.isArray(input)) return [];
-      const out: Array<{ id: string; nodeIds: string[] }> = [];
+      const out: Array<{ id: string; nodeIds: string[]; internalDensity: number; recognitionMass: number }> = [];
       for (const r of input) {
         if (!r || typeof r !== 'object') continue;
         const rr = r as Record<string, unknown>;
@@ -35,7 +35,9 @@ export function RegionsCard({
         const nodeIds = Array.isArray(rr.nodeIds)
           ? rr.nodeIds.map((x) => String(x)).filter(Boolean)
           : [];
-        out.push({ id, nodeIds });
+        const internalDensity = typeof rr.internalDensity === 'number' ? rr.internalDensity : 0;
+        const recognitionMass = typeof rr.recognitionMass === 'number' ? rr.recognitionMass : 0;
+        out.push({ id, nodeIds, internalDensity, recognitionMass });
       }
       return out;
     };
@@ -58,6 +60,8 @@ export function RegionsCard({
         nodeIds: r.nodeIds,
         size: r.nodeIds.length,
         ratio: totalNodes > 0 ? r.nodeIds.length / totalNodes : 0,
+        internalDensity: r.internalDensity,
+        recognitionMass: r.recognitionMass,
       }))
       .sort((a, b) => b.size - a.size);
   }, [regions, totalNodes]);
@@ -110,6 +114,22 @@ export function RegionsCard({
               sortValue: (r: any) => r.ratio,
               cell: (r: any) => (
                 <span className="font-mono text-text-muted">{(r.ratio * 100).toFixed(1)}%</span>
+              ),
+            },
+            {
+              key: 'internalDensity',
+              header: 'Density',
+              sortValue: (r: any) => r.internalDensity,
+              cell: (r: any) => (
+                <span className="font-mono text-text-muted">{(r.internalDensity * 100).toFixed(1)}%</span>
+              ),
+            },
+            {
+              key: 'recognitionMass',
+              header: 'Rec.',
+              sortValue: (r: any) => r.recognitionMass,
+              cell: (r: any) => (
+                <span className="font-mono text-text-muted">{(r.recognitionMass * 100).toFixed(1)}%</span>
               ),
             },
           ]}

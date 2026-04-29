@@ -53,9 +53,7 @@ export type {
 const DISCRIMINATION_MIN_RANGE = 0.1;
 const ISOLATION_SKIP_THRESHOLD = 0.7;
 const GATE_CONFIDENCE_BASELINE = 0.25;
-const GATE_DENSITY_WEIGHT = 0.45;
-const GATE_DENSITY_SATURATION = 0.35;
-const GATE_CONNECTIVITY_WEIGHT = 0.3;
+const GATE_CONNECTIVITY_WEIGHT = 0.75;
 const GATE_CONNECTIVITY_SATURATION = 0.9;
 
 function clamp01(value: number): number {
@@ -69,13 +67,12 @@ function formatPct(value: number): string {
 // ----- Step 1: Gate evaluation ---------------------------------
 
 function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
-  const { isolationRatio, edgeCount, edgeSaturation, discriminationRange, nodeCount } = substrate.health;
+  const { isolationRatio, edgeCount, discriminationRange, nodeCount } = substrate.health;
 
   const measurements: PipelineGateResult['measurements'] = {
     isDegenerate: isDegenerate(substrate),
     isolationRatio,
     edgeCount,
-    edgeSaturation,
     discriminationRange,
     nodeCount,
   };
@@ -93,7 +90,6 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
     `mutual_recognition_edges=${edgeCount}`,
     `discrimination_range=${discriminationRange.toFixed(3)}`,
     `isolation_ratio=${formatPct(isolationRatio)}`,
-    `edge_saturation=${edgeSaturation.toFixed(4)}`,
   ];
 
   if (edgeCount === 0 || discriminationRange < DISCRIMINATION_MIN_RANGE) {
@@ -127,7 +123,6 @@ function evaluateGate(substrate: GeometricSubstrate): PipelineGateResult {
 
   const proceedConfidence = clamp01(
     GATE_CONFIDENCE_BASELINE +
-      GATE_DENSITY_WEIGHT * clamp01(edgeSaturation / GATE_DENSITY_SATURATION) +
       GATE_CONNECTIVITY_WEIGHT * clamp01((1 - isolationRatio) / GATE_CONNECTIVITY_SATURATION)
   );
 
@@ -140,7 +135,7 @@ interface TopologyIndex {
   nodeToBasin: Map<string, number>; // paragraphId → basinId
   nodeToGap: Map<string, number>; // paragraphId → gapId
   gapSizes: Map<number, number>; // gapId → node count
-  nodeIsolation: Map<string, number>; // paragraphId → isolationScore
+  nodeIsolation: Map<string, number>; // paragraphId → recognitionMass
   nodeNeighborhood: Map<string, string[]>; // paragraphId → neighbor ids
 }
 
@@ -177,7 +172,7 @@ function buildTopologyIndex(
 
   // Node isolation + neighborhood from substrate
   for (const node of substrate.nodes) {
-    nodeIsolation.set(node.paragraphId, node.isolationScore);
+    nodeIsolation.set(node.paragraphId, node.recognitionMass);
     const neighbors = (substrate.mutualRankGraph.adjacency.get(node.paragraphId) || []).map(
       (e) => e.target
     );
@@ -271,7 +266,7 @@ interface PopulationMetrics {
   modelDiversity: number;
   modelDiversityRatio: number;
   internalDensity: number;
-  isolation: number;
+  recognitionMass: number;
   nearestCarrierSimilarity: number;
   avgInternalSimilarity: number;
 }
@@ -407,19 +402,19 @@ function computePopulationMetrics(
     const internalDensity = computeInternalDensity(nodeIds, substrate);
     const avgInternalSimilarity = computeAvgInternalSimilarity(nodeIds, substrate);
 
-    let totalIsolation = 0;
+    let totalRecognitionMass = 0;
     for (const nodeId of nodeIds) {
       const node = nodesById.get(nodeId);
-      if (node) totalIsolation += node.isolationScore;
+      if (node) totalRecognitionMass += node.recognitionMass;
     }
-    const isolation = nodeIds.length > 0 ? totalIsolation / nodeIds.length : 1;
+    const recognitionMass = nodeIds.length > 0 ? totalRecognitionMass / nodeIds.length : 1;
 
     result.set(r.id, {
       nodeCount: nodeIds.length,
       modelDiversity,
       modelDiversityRatio,
       internalDensity,
-      isolation,
+      recognitionMass,
       nearestCarrierSimilarity: nearestCarrierByRegion.get(r.id) ?? 0,
       avgInternalSimilarity,
     });
@@ -440,7 +435,7 @@ function constructMeasuredRegions(
       modelDiversity: 0,
       modelDiversityRatio: 0,
       internalDensity: 0,
-      isolation: 1,
+      recognitionMass: 1,
       nearestCarrierSimilarity: 0,
       avgInternalSimilarity: 0,
     };
@@ -455,7 +450,7 @@ function constructMeasuredRegions(
       modelDiversity: pop.modelDiversity,
       modelDiversityRatio: pop.modelDiversityRatio,
       internalDensity: pop.internalDensity,
-      isolation: pop.isolation,
+      recognitionMass: pop.recognitionMass,
       nearestCarrierSimilarity: pop.nearestCarrierSimilarity,
       avgInternalSimilarity: pop.avgInternalSimilarity,
     };

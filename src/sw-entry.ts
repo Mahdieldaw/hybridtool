@@ -124,7 +124,7 @@ try {
   if (typeof fetch === 'function' && typeof globalThis !== 'undefined') {
     globalThis.fetch = fetch.bind(globalThis);
   }
-} catch (e) { console.error('[SW] fetch.bind failed:', e); }
+} catch (e) { logInfraError('SW: fetch.bind failed', e); }
 
 // Initialize BusController globally (needed for message bus)
 (self as unknown as Record<string, unknown>)['BusController'] = BusController;
@@ -164,7 +164,7 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
       .initialize()
       .then(() => authManager.handleCookieChange(changeInfo))
       .catch((err) => {
-        console.error('[SW] Cookie change handler failed:', getErrorMessage(err), err);
+        logInfraError('SW: Cookie change handler failed', err);
       });
   }, 100);
 
@@ -190,13 +190,13 @@ async function handleStartup(reason: string): Promise<void> {
 
 chrome.runtime.onStartup.addListener(() => {
   handleStartup('startup').catch((err) =>
-    console.error('[onStartup] handleStartup failed:', err)
+    logInfraError('onStartup: handleStartup failed', err)
   );
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
   handleStartup(`installed: ${details.reason}`).catch((err) =>
-    console.error('[onInstalled] handleStartup failed:', err)
+    logInfraError('onInstalled: handleStartup failed', err)
   );
 });
 
@@ -238,7 +238,7 @@ async function initializePersistence(): Promise<unknown> {
       operation: 'initializePersistence',
       context: { useAdapter: true },
     });
-    console.error('[SW] ❌ Failed to initialize:', handledError);
+    logInfraError('SW: Failed to initialize persistence', handledError);
     throw handledError;
   }
 }
@@ -260,7 +260,7 @@ async function initializeSessionManager(pl: unknown): Promise<SessionManager> {
     console.log('[SW] ✅ SessionManager initialized');
     return sm;
   } catch (error) {
-    console.error('[SW] ❌ Failed to initialize SessionManager:', error);
+    logInfraError('SW: Failed to initialize SessionManager', error);
     throw error;
   }
 }
@@ -339,7 +339,7 @@ async function initializeProviders(): Promise<string[]> {
       providerRegistry.register(config.name, controller, adapter);
       initialized.push(config.name);
     } catch (e) {
-      console.error(`[SW] Failed to initialize ${config.name}:`, e);
+      logInfraError(`SW: Failed to initialize ${config.name}`, e);
     }
   }
 
@@ -634,7 +634,7 @@ class FaultTolerantOrchestrator {
           if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
         })
         .catch((err) => {
-          console.error('[FaultTolerantOrchestrator] onAllComplete threw:', err);
+          logInfraError('FaultTolerantOrchestrator: onAllComplete threw', err);
           this.activeRequests.delete(sessionId);
           if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
           if (typeof options.onError === 'function') {
@@ -677,7 +677,7 @@ async function initializeOrchestrator(): Promise<FaultTolerantOrchestrator> {
     console.log('[SW] ✓ FaultTolerantOrchestrator initialized');
     return orchestrator;
   } catch (e) {
-    console.error('[SW] Orchestrator init failed', e);
+    logInfraError('SW: Orchestrator init failed', e);
     throw e;
   }
 }
@@ -759,7 +759,7 @@ async function initializeGlobalServices(): Promise<GlobalServices> {
         providerRegistry: services.get('providerRegistry') as ProviderRegistry,
       };
     } catch (error) {
-      console.error('[SW] ❌ Global services initialization failed:', error);
+      logInfraError('SW: Global services initialization failed', error);
       for (const key of Array.from(services.services.keys())) {
         if (!keysBeforeInit.has(key)) {
           services.unregister(key);
@@ -779,7 +779,7 @@ async function initializeGlobalInfrastructure(): Promise<void> {
     try {
       await fn();
     } catch (e) {
-      console.error(`[SW] Infra init failed — ${name}:`, e);
+      logInfraError(`SW: Infra init failed — ${name}`, e);
     }
   };
 
@@ -807,7 +807,7 @@ const OffscreenController = {
       }
       return false;
     } catch (e) {
-      console.error('[SW] offscreen.hasDocument check failed:', e);
+      logInfraError('SW: offscreen.hasDocument check failed', e);
       return false;
     }
   },
@@ -831,7 +831,7 @@ const OffscreenController = {
         this._initialized = true;
         return;
       } catch (e) {
-        console.error(`[SW] Offscreen init failed (attempt ${attempt}/${maxAttempts})`, e);
+        logInfraError(`SW: Offscreen init failed (attempt ${attempt}/${maxAttempts})`, e);
         if (attempt < maxAttempts) {
           await new Promise<void>((resolve) => setTimeout(resolve, 1000));
         }
@@ -928,7 +928,7 @@ async function handleUnifiedMessage(
           const result = await doRegenerateEmbeddings(aiTurnId, providerId, sm, embeddingModelId, { broadcast: false });
           sendResponse(result);
         })().catch((e) => {
-          console.error('[Regenerate] Failed:', e);
+          logInfraError('Regenerate: Failed', e);
           sendResponse({ success: false, error: getErrorMessage(e) });
         });
         return true;
@@ -1507,7 +1507,7 @@ async function handleUnifiedMessage(
           // Return explicit removed boolean so UI can react optimistically
           sendResponse({ success: true, removed });
         } catch (e) {
-          console.error('[SW] DELETE_SESSION failed:', e);
+          logInfraError('SW: DELETE_SESSION failed', e);
           sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;
@@ -1527,7 +1527,7 @@ async function handleUnifiedMessage(
                 const removed = await sm.deleteSession(id);
                 return { id, removed };
               } catch (err) {
-                console.error('[SW] DELETE_SESSIONS item failed:', id, err);
+                logInfraError(`SW: DELETE_SESSIONS item failed for ${id}`, err);
                 return { id, removed: false };
               }
             })
@@ -1540,7 +1540,7 @@ async function handleUnifiedMessage(
             ids: removedIds,
           });
         } catch (e) {
-          console.error('[SW] DELETE_SESSIONS failed:', e);
+          logInfraError('SW: DELETE_SESSIONS failed', e);
           sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;
@@ -1586,7 +1586,7 @@ async function handleUnifiedMessage(
             title: newTitle,
           });
         } catch (e) {
-          console.error('[SW] RENAME_SESSION failed:', e);
+          logInfraError('SW: RENAME_SESSION failed', e);
           sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;
@@ -1676,7 +1676,7 @@ function doRegenerateEmbeddings(
         const userTurn = await smAdapter.get('turns', userTurnId);
         queryText = (userTurn?.text as string) || (userTurn?.content as string) || '';
       } catch (err) {
-        console.error(`[Regenerate] Failed to load user turn for aiTurnId=${aiTurnId}:`, err);
+        logInfraError(`Regenerate: Failed to load user turn for aiTurnId=${aiTurnId}`, err);
       }
     }
 
@@ -1703,7 +1703,7 @@ function doRegenerateEmbeddings(
         responsesForTurn = Array.isArray(resps) ? resps : [];
       }
     } catch (err) {
-      console.error(`[Regenerate] Failed to load responses for aiTurnId=${aiTurnId}:`, err);
+      logInfraError(`Regenerate: Failed to load responses for aiTurnId=${aiTurnId}`, err);
       return { success: false, error: 'Failed to load responses for this turn' };
     }
 
@@ -1754,7 +1754,7 @@ function doRegenerateEmbeddings(
         })
         .filter((s) => s.content);
     } catch (err) {
-      console.error(`[Regenerate] Shadow reconstruction failed for aiTurnId=${aiTurnId}:`, err);
+      logInfraError(`Regenerate: Shadow reconstruction failed for aiTurnId=${aiTurnId}`, err);
       return { success: false, error: 'Shadow reconstruction failed' };
     }
 
@@ -2246,7 +2246,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
     await handler.init();
     console.log('[SW] Connection handler ready');
   } catch (error) {
-    console.error('[SW] Failed to initialize connection handler:', error);
+    logInfraError('SW: Failed to initialize connection handler', error);
     try {
       port.postMessage({ type: 'INITIALIZATION_FAILED', error: getErrorMessage(error) });
     } catch (e) {
@@ -2265,12 +2265,12 @@ chrome.action?.onClicked.addListener(async () => {
       if (typeof tab.windowId === 'number') {
         try {
           await chrome.windows.update(tab.windowId, { focused: true });
-        } catch (e) { console.error('[SW] chrome.windows.update failed:', e); }
+        } catch (e) { logInfraError('SW: chrome.windows.update failed', e); }
       }
       await chrome.tabs.update(tab.id, { active: true });
       return;
     }
-  } catch (e) { console.error('[SW] chrome.tabs.query failed:', e); }
+  } catch (e) { logInfraError('SW: chrome.tabs.query failed', e); }
   await chrome.tabs.create({ url });
 });
 

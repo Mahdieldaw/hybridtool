@@ -142,7 +142,7 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   statementCount: 60,
   dominantStance: 88,
   contested: 68,
-  isolationScore: 72,
+  recognitionMass: 72,
   mutualRankDegree: 60,
   origin: 120,
   claimCentricSim: 72,

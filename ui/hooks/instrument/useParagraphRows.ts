@@ -23,7 +23,7 @@ export interface ParagraphRow {
   confidence: number;
 
   // Geometry (node-level)
-  isolationScore: number | null;
+  recognitionMass: number | null;
   mutualRankDegree: number | null;
 
   // Mixed provenance (claim-relative)
@@ -159,7 +159,7 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
         contested: para.contested === true,
         confidence: typeof para.confidence === 'number' ? para.confidence : 0,
 
-        isolationScore: fin(node?.isolationScore),
+        recognitionMass: fin(node?.recognitionMass),
         mutualRankDegree: fin(node?.mutualRankDegree),
 
         origin: mixed?.origin ?? null,

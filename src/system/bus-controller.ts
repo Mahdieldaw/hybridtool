@@ -8,6 +8,8 @@
  * in Chrome extensions, supporting background, content script, offscreen, popup, and iframe communication.
  */
 
+import { logInfraError } from '../errors';
+
 // =============================================================================
 // UTILITY TYPES & FUNCTIONS
 // =============================================================================
@@ -375,7 +377,7 @@ class BusControllerImpl {
         ]);
         respondToIframe(msg, result);
       } catch (e) {
-        console.error('[BusController-os] Error while forwarding iframe message:', e);
+        logInfraError('BusController-os: Error while forwarding iframe message', e);
         respondToIframe(msg, null);
       }
     });
@@ -445,7 +447,7 @@ class BusControllerImpl {
           }
           iframe.contentWindow.postMessage(busMsg, iframeOrigin);
         } catch (error) {
-          console.error('[BusController-os] Failed to forward message to iframe:', error);
+          logInfraError('BusController-os: Failed to forward message to iframe', error);
           try {
             sendResponse(
               this._serialize({ error: 'Failed to communicate with the offscreen iframe.' })
@@ -508,7 +510,7 @@ class BusControllerImpl {
           resolve(null);
           return;
         }
-        console.error('Bus error:', err);
+        logInfraError('Bus error', err);
         resolve(null);
       }
     });
@@ -637,7 +639,7 @@ class BusControllerImpl {
               ...resolvedArgs
             );
           } catch (err) {
-            console.error(`Failed to handle "${entry.name}":`, err);
+            logInfraError(`Failed to handle "${entry.name}"`, err);
             return err;
           }
         })
@@ -679,7 +681,7 @@ class BusControllerImpl {
             }
           },
           (err) => {
-            console.error('[BusController._pick] promise rejected:', err);
+            logInfraError('BusController._pick: promise rejected', err);
             settled += 1;
             if (settled === promises.length) resolve(null);
           }

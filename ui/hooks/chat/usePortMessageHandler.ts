@@ -995,6 +995,29 @@ export function usePortMessageHandler(enabled: boolean = true) {
           });
           break;
         }
+
+        case 'SEMANTIC_ARTIFACT_READY': {
+          const { aiTurnId, providerId: mapperPid, mapping, embeddingModelId } = message as any;
+          const artifactRaw = mapping?.artifact;
+          const artifact = normalizeArtifactCandidate(artifactRaw) || artifactRaw;
+          if (!aiTurnId) return;
+
+          if (embeddingModelId) {
+            const currentModelId = jotaiStore.get(embeddingModelIdAtom);
+            if (embeddingModelId !== currentModelId) return;
+          }
+
+          if (artifact && typeof artifact === 'object') {
+            const pid = mapperPid ? normalizeProviderId(String(mapperPid)) : null;
+            if (pid) {
+              jotaiStore.set(
+                providerArtifactFamily({ turnId: aiTurnId, providerId: pid }),
+                artifact
+              );
+            }
+          }
+          break;
+        }
       }
     },
     [

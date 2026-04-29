@@ -440,6 +440,20 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       logInfraError('executeMappingPhase: sourceCoherence stamp failed', err);
                     }
                   }
+                  // Signal UI with semantic artifact before awaiting editorial LLM
+                  if (cognitiveArtifact && context.canonicalAiTurnId) {
+                    try {
+                      options.port?.postMessage({
+                        type: 'SEMANTIC_ARTIFACT_READY',
+                        sessionId: context.sessionId,
+                        aiTurnId: context.canonicalAiTurnId,
+                        providerId: payload.mappingProvider,
+                        embeddingModelId: payload.embeddingModelId,
+                        mapping: { artifact: cognitiveArtifact, timestamp: Date.now() },
+                      });
+                    } catch (_e) { /* non-blocking */ }
+                  }
+
                   // ── EDITORIAL MODEL CALL (executeMappingPhase-only) ──────────────
                   if (mapperArtifact && pipelineResult?.claimDensityResult) {
                     try {
@@ -558,6 +572,19 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                           console.log(
                             `[executeMappingPhase] Editorial AST: ${parsed.ast.threads.length} thread(s), ${parsed.errors.length} warning(s)`
                           );
+                          // Update UI with editorial AST so Reading tab unlocks before singularity
+                          if (cognitiveArtifact && context.canonicalAiTurnId) {
+                            try {
+                              options.port?.postMessage({
+                                type: 'SEMANTIC_ARTIFACT_READY',
+                                sessionId: context.sessionId,
+                                aiTurnId: context.canonicalAiTurnId,
+                                providerId: payload.mappingProvider,
+                                embeddingModelId: payload.embeddingModelId,
+                                mapping: { artifact: cognitiveArtifact, timestamp: Date.now() },
+                              });
+                            } catch (_e) { /* non-blocking */ }
+                          }
                         } else {
                           console.warn(
                             '[executeMappingPhase] Editorial parse failed:',

@@ -33,9 +33,7 @@ Thumbs.db
 docs/
 # Documentation
 scripts/
-**.spec.ts
 ui/hooks/reading/useCorpusSearch.test.tsx*.d.ts
-*.test.ts
 .*test.ts
 src/core/V31Verification.ts
 jest.config.js

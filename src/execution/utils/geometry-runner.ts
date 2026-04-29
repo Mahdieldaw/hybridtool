@@ -99,7 +99,6 @@ interface GeometryAsyncResults {
     };
     nodes: {
       contestedCount: number;
-      avgIsolationScore: number;
     };
   } | null;
   substrateDegenerate: boolean | null;
@@ -363,13 +362,6 @@ export async function buildGeometryAsync(
       const contestedCount = Array.isArray(substrate.nodes)
         ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
         : 0;
-      const avgIsolationScore =
-        Array.isArray(substrate.nodes) && nodeCount > 0
-          ? substrate.nodes.reduce(
-            (acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0),
-            0
-          ) / nodeCount
-          : 0;
       const mutualRankEdgeCount = substrate.mutualRankGraph?.edges?.length ?? 0;
 
       results.substrateSummary = {
@@ -384,7 +376,6 @@ export async function buildGeometryAsync(
         },
         nodes: {
           contestedCount,
-          avgIsolationScore,
         },
       };
     } catch (err) {

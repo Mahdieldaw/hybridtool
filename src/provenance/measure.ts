@@ -28,8 +28,6 @@ import { getConfigForModel } from '../clustering/config';
 
 export interface ClaimExclusivity {
   exclusiveIds: string[];
-  sharedIds: string[];
-  exclusivityRatio: number;
 }
 
 export interface MeasurePhaseInput {
@@ -49,7 +47,6 @@ export interface MeasurePhaseOutput {
   enrichedClaims: EnrichedClaim[];
   mixedProvenance: MixedProvenanceResult;
   ownershipMap: Map<string, Set<string>>;
-  exclusivityMap: Map<string, ClaimExclusivity>;
   claimDensity: ClaimDensityResult;
   canonicalSets: Map<string, Set<string>>;
   canonicalStatementIds: Map<string, string[]>;
@@ -419,23 +416,19 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       }
     }
 
-    const majParas = paragraphCoverage.filter((pc) => pc.coverage > 0.5);
+    const presenceMass = paragraphCoverage.reduce((s, pc) => s + pc.coverage, 0);
     densityProfiles[claim.id] = {
       claimId: claim.id,
       paragraphCount: paragraphCoverage.length,
       passageCount: passages.length,
       maxPassageLength,
-      majorityParagraphCount: majParas.length,
-      majorityParagraphIds: majParas.map((pc) => pc.paragraphId),
       meanCoverageInLongestRun,
       modelSpread: byModel.size,
       modelsWithPassages: new Set(passages.filter((p) => p.length >= 2).map((p) => p.modelIndex))
         .size,
       totalClaimStatements: Array.from(paraStmtCounts.values()).reduce((a, b) => a + b, 0),
-      meanCoverage:
-        paragraphCoverage.length > 0
-          ? paragraphCoverage.reduce((s, pc) => s + pc.coverage, 0) / paragraphCoverage.length
-          : 0,
+      presenceMass,
+      meanCoverage: paragraphCoverage.length > 0 ? presenceMass / paragraphCoverage.length : 0,
       paragraphCoverage,
       passages,
     };
@@ -448,13 +441,11 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       mergedParagraphs,
       statements: candidateStatements,
       globalMu,
-      keptCount: canonicalStatements.length,
       removedCount,
       totalCount: candidateStatements.length,
       bothCount,
       competitiveOnlyCount: compOnlyCount,
       claimCentricOnlyCount: ccOnlyCount,
-      coreCount: canonicalStatements.length,
       canonicalStatementIds,
     };
 
@@ -492,7 +483,6 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
   );
 
   // Exclusivity — single pass now that ownershipMap is complete
-  const exclusivityMap = new Map<string, ClaimExclusivity>();
   const canonicalSets = new Map<string, Set<string>>();
   const exclusiveIdsMap = new Map<string, string[]>();
 
@@ -514,18 +504,10 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     const id = String(claim.id);
     const sourceIds = canonicalStatementIds.get(id) ?? [];
     const exclusiveIds: string[] = [];
-    const sharedIds: string[] = [];
     for (const sid of sourceIds) {
       const owners = ownershipMap.get(sid);
       if (!owners || owners.size <= 1) exclusiveIds.push(sid);
-      else sharedIds.push(sid);
     }
-    const total = sourceIds.length;
-    exclusivityMap.set(id, {
-      exclusiveIds,
-      sharedIds,
-      exclusivityRatio: total > 0 ? exclusiveIds.length / total : 0,
-    });
     canonicalSets.set(id, new Set(sourceIds));
     exclusiveIdsMap.set(id, exclusiveIds);
   }
@@ -534,7 +516,6 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     enrichedClaims,
     mixedProvenance: { perClaim: perClaimMixed, recoveryRate, expansionRate, removalRate },
     ownershipMap,
-    exclusivityMap,
     claimDensity: {
       profiles: densityProfiles,
       meta: {

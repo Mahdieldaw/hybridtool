@@ -177,14 +177,11 @@ export interface MixedProvenanceClaimResult {
   // Global floor threshold used for statement filter
   globalMu: number;
   // Counts
-  keptCount: number;
   removedCount: number;
   totalCount: number;
   bothCount: number;
   competitiveOnlyCount: number;
   claimCentricOnlyCount: number;
-  // Fate breakdown after μ_global filter
-  coreCount: number;
   // Canonical survived statement IDs (core, after supporter filter)
   canonicalStatementIds: string[];
 }
@@ -211,22 +208,22 @@ export interface BlastSurfaceLayerC {
   canonicalCount: number; // total canonical statements from mixed provenance
   /** Non-exclusive statements (Type 1) — protected by living parents on single prune */
   nonExclusiveCount: number;
-  /** Exclusive non-orphan statements (Type 2) — removable on prune */
-  exclusiveNonOrphanCount: number;
-  /** Exclusive orphan statements (Type 3) — skeletonized on prune, never removed */
-  exclusiveOrphanCount: number;
+  /** Twin statements (Type 2) — exclusive but have a semantic twin in another claim */
+  twinCount: number;
+  /** Orphan statements (Type 3) — exclusive with no twin */
+  orphanCount: number;
 }
 
 /** Risk vector: three orthogonal axes of pruning damage, derived from the canonical fate table. */
 export interface BlastSurfaceRiskVector {
-  /** Type 2 count: exclusive non-orphan statements. These are REMOVED on prune. Highest removal risk. */
-  deletionRisk: number;
+  /** Type 2 count: exclusive statements with a semantic twin. */
+  twinCount: number;
   /** Type 2 statement IDs for drilldown */
-  deletionStatementIds: string[];
-  /** Type 3 count: exclusive orphan statements. These are SKELETONIZED on prune. Irrecoverable but never deleted. */
-  degradationRisk: number;
+  twinStatementIds: string[];
+  /** Type 3 count: exclusive orphan statements — no twin exists. */
+  orphanCount: number;
   /** Type 3 statement IDs for drilldown */
-  degradationStatementIds: string[];
+  orphanStatementIds: string[];
   /** Continuous protection-depth: sum of 1/(parentCount-1) over non-exclusive statements. Dimensionally compatible with statement counts. */
   cascadeFragility: number;
   /** Per-statement fragility contributions for drilldown */
@@ -383,10 +380,6 @@ export interface ClaimDensityProfile {
   passageCount: number;
   /** Longest contiguous run in paragraphs */
   maxPassageLength: number;
-  /** Paragraphs where coverage > 0.5 */
-  majorityParagraphCount: number;
-  /** Paragraph IDs where coverage > 0.5 */
-  majorityParagraphIds: string[];
   /** Mean coverage across paragraphs in the longest contiguous majority-support run */
   meanCoverageInLongestRun: number;
   /** Distinct models containing this claim */
@@ -395,7 +388,9 @@ export interface ClaimDensityProfile {
   modelsWithPassages: number;
   /** Total statements owned across all paragraphs (excludes table cells) */
   totalClaimStatements: number;
-  /** Mean of per-paragraph coverage */
+  /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
+  presenceMass: number;
+  /** Mean of per-paragraph coverage (= presenceMass / paragraphCount) */
   meanCoverage: number;
   /** Per-paragraph detail */
   paragraphCoverage: ParagraphCoverageEntry[];
@@ -410,73 +405,6 @@ export interface ClaimDensityResult {
     totalModels: number;
     processingTimeMs: number;
   };
-}
-
-// ── Passage pruning (4-rule collateral resolution) ──────────────────────
-
-export type PruningFate = 'REMOVE' | 'KEEP' | 'SKELETONIZE' | 'DROP';
-
-export interface StatementDisposition {
-  statementId: string;
-  statementText: string;
-  modelIndex: number;
-  paragraphIndex: number;
-  /** Which rule resolved this statement (1–3) */
-  rule: 1 | 2 | 3;
-  category: any;
-  fate: PruningFate;
-  /** Sub-step detail: 'twin-exists', 'no-twin', 'legibility-fail', etc. */
-  substep: string;
-  reason: string;
-  ownerClaimIds: string[];
-  prunedClaimIds: string[];
-  twinStatementId?: string;
-  twinSimilarity?: number;
-  /** Rule 3 only: noun/entity count for legibility check */
-  nounEntityCount?: number;
-  skeletonText?: string;
-}
-
-export interface ConservationAnomaly {
-  /** The living claim that lost ALL canonical statements */
-  livingClaimId: string;
-  livingClaimLabel: string;
-  /** Pruned claims whose passages contain this claim's statements */
-  prunedClaimIds: string[];
-  /** cosSim(living centroid, each pruned centroid) — diagnostic */
-  centroidSimilarities: Array<{ prunedClaimId: string; cosSim: number }>;
-  totalCanonicalStatements: number;
-  removedStatements: number;
-}
-
-export interface ProvenanceQualityEntry {
-  statementId: string;
-  statementText: string;
-  livingClaimIds: string[];
-  livingClaimLabels: string[];
-  prunedClaimIds: string[];
-  prunedClaimLabels: string[];
-  /** cosSim(statement embedding, each living claim centroid) */
-  cosSimToLiving: Array<{ claimId: string; cosSim: number }>;
-  /** cosSim(statement embedding, each pruned claim centroid) */
-  cosSimToPruned: Array<{ claimId: string; cosSim: number }>;
-  livingClaimTotalStatements: Array<{ claimId: string; count: number }>;
-  livingClaimStatementsInPassage: Array<{ claimId: string; count: number }>;
-  /** True if statement is closer to any pruned centroid than its best living centroid */
-  closerToPruned: boolean;
-  /** From provenance refinement layer (null if refinement not available) */
-  refinedPrimaryClaim?: string | null;
-  refinedAllegianceMethod?: string | null;
-  /** Signed allegiance value: positive = leans dominant, negative = leans rival */
-  refinedAllegianceValue?: number | null;
-  /** Calibration pool weight (0 = no calibration pool, higher = more confident) */
-  refinedCalibrationWeight?: number | null;
-  /** Per-rival allegiance breakdown from refinement */
-  refinedRivalAllegiances?: Array<{
-    claimId: string;
-    rawAllegiance: number;
-    weightedAllegiance: number;
-  }>;
 }
 
 // ── Provenance Refinement (canonical provenance assignment) ──────────────
@@ -549,8 +477,12 @@ export interface MajorityGateSnapshot {
 export interface RoutingMeasurements {
   /** dominatedParagraphCount(C) / |paragraphs C touches that any other claim also touches| */
   contestedDominance: number;
-  /** Σ_pid (claim's exclusive statements in pid / total statements in pid) over all paragraphs C touches */
-  exclusivityMass: number;
+  /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
+  presenceMass: number;
+  /** Σ(Σ(1/k)/paraTotal) across paragraphs — fractional-credit exclusivity (k = sharing claims) */
+  territorialMass: number;
+  /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
+  sovereignMass: number;
   /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normMAJ) */
   sustainedMassCohort: SustainedMassCohort;
   /** Distinct models with ≥1 paragraph for this claim (used as tiebreaker) */
@@ -571,13 +503,17 @@ export interface PassageClaimProfile {
   landscapePosition: LandscapePosition;
   /** True if this claim is classified as minority (lower cumulative coverage) */
   isMinority: boolean;
-  /** Routing measurements (contestedDominance, exclusivityMass, novelty ratios, gate snapshot) — null if floor */
+  /** Routing measurements (contestedDominance, territorialMass, novelty ratios, gate snapshot) — null if floor */
   routingMeasurements: RoutingMeasurements | null;
 
   /** MAJ paragraphs C wins where ≥1 other claim has any presence (≠ MAJ). */
   dominatedParagraphCount: number;
-  /** Block-level exclusivity aggregate (sum, not mean). */
-  exclusivityMass: number;
+  /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
+  presenceMass: number;
+  /** Σ(Σ(1/k)/paraTotal) across paragraphs — fractional-credit exclusivity */
+  territorialMass: number;
+  /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
+  sovereignMass: number;
   /** sqrt(normMAXLEN × normMAJ) — percentile rank within current run. */
   sustainedMass: number;
   /** Cohort derived from sustainedMass. */
@@ -590,15 +526,11 @@ export interface PassageClaimProfile {
   isLoadBearing: boolean | null;
 
   /** Instrumentation only — not consumed by routing */
-  /** Sum of majority paragraphs across all structural contributors */
-  totalMAJ: number;
-  /** Model index of the structural contributor with the most MAJ paragraphs */
+  /** Model index of the structural contributor with the highest presence mass */
   dominantModel: number | null;
-  /** MAJ paragraph count of the dominant model */
-  dominantMAJ: number;
-  /** MAJ(dominant) / MAJ(total) — how replaceable is the dominant model? */
+  /** presenceMass(dominant) / presenceMass(total) — how replaceable is the dominant model? */
   concentrationRatio: number;
-  /** MAXLEN(dominant) / MAJ(dominant) — contiguity within the dominant model */
+  /** MAXLEN(dominant) / presenceMass(dominant) — contiguity relative to presence footprint */
   densityRatio: number;
   /** Longest passage across all models (from density profile) */
   maxPassageLength: number;
@@ -664,7 +596,7 @@ export interface PassageRoutingResult {
     sigmaConcentration: number;
     /** μ + σ — distributional threshold for concentration outlier */
     concentrationThreshold: number;
-    /** Claims with MAJ ≥ 1 (precondition pass) */
+    /** Claims with ≥1 majority paragraph (coverage > 0.5) — precondition pass */
     preconditionPassCount: number;
     /** Claims passing at least one gate */
     loadBearingCount: number;
@@ -782,7 +714,6 @@ export interface PipelineShadowStatement {
     paragraphId: string;
     regionId: string | null;
     basinId: number | null;
-    isolationScore: number;
   };
 }
 
@@ -822,7 +753,7 @@ export interface PipelineSubstrateNode {
   contested: boolean;
   statementIds: string[];
   mutualRankDegree: number;
-  isolationScore: number;
+  recognitionMass: number;
   regionId: string | null;
   x: number;
   y: number;
@@ -867,7 +798,7 @@ export interface PipelineRegionProfile {
   };
   geometry: {
     internalDensity: number;
-    isolation: number;
+    recognitionMass: number;
     nearestCarrierSimilarity: number;
     avgInternalSimilarity: number;
   };
@@ -883,7 +814,6 @@ export interface PipelineGateResult {
     isDegenerate: boolean;
     isolationRatio: number;
     edgeCount: number;
-    edgeDensity: number;
     discriminationRange: number;
     nodeCount: number;
   };
@@ -902,7 +832,7 @@ export interface PreSemanticInterpretation {
     modelDiversity?: number;
     modelDiversityRatio?: number;
     internalDensity?: number;
-    isolation?: number;
+    recognitionMass?: number;
     nearestCarrierSimilarity?: number;
     avgInternalSimilarity?: number;
   }>;

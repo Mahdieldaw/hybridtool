@@ -5,6 +5,8 @@
  * - Ensures minimal blast radius for network modifications
  */
 
+import { logInfraError } from '../errors';
+
 type DNRRule = chrome.declarativeNetRequest.Rule;
 type DNRRuleInput = Omit<DNRRule, 'id'>;
 type MatchedRuleInfo = chrome.declarativeNetRequest.MatchedRuleInfoDebug;
@@ -97,7 +99,7 @@ export class DNRUtils {
       );
       return ruleId;
     } catch (error) {
-      console.error('Failed to register tab-scoped DNR rule:', error);
+      logInfraError('DNR: Failed to register tab-scoped DNR rule', error);
       throw error;
     }
   }
@@ -135,7 +137,7 @@ export class DNRUtils {
       );
       return ruleId;
     } catch (error) {
-      console.error('Failed to register temporary DNR rule:', error);
+      logInfraError('DNR: Failed to register temporary DNR rule', error);
       throw error;
     }
   }
@@ -180,7 +182,7 @@ export class DNRUtils {
         `DNR: Cleaned up ${totalExpired} expired rules (${expiredDynamicRules.length} dynamic, ${expiredSessionRules.length} session)`
       );
     } catch (error) {
-      console.error('Failed to cleanup expired DNR rules:', error);
+      logInfraError('DNR: Failed to cleanup expired DNR rules', error);
     }
   }
 
@@ -286,7 +288,7 @@ export class DNRUtils {
 
       return finalRuleId;
     } catch (error) {
-      console.error('Failed to register header modification rule:', error);
+      logInfraError('DNR: Failed to register header modification rule', error);
       throw error;
     }
   }
@@ -327,7 +329,7 @@ export class DNRUtils {
 
       this.dbg(`DNR: Removed rule ${ruleId}`);
     } catch (error) {
-      console.error(`Failed to remove DNR rule ${ruleId}:`, error);
+      logInfraError(`DNR: Failed to remove DNR rule ${ruleId}`, error);
       throw error;
     }
   }
@@ -366,7 +368,7 @@ export class DNRUtils {
         this.dbg(`DNR: Removed ${totalRemoved} rules for provider ${providerId}`);
       }
     } catch (error) {
-      console.error(`Failed to remove provider rules for ${providerId}:`, error);
+      logInfraError(`DNR: Failed to remove provider rules for ${providerId}`, error);
       throw error;
     }
   }
@@ -388,7 +390,7 @@ export class DNRUtils {
         },
       };
     } catch (error) {
-      console.error('Failed to get active DNR rules:', error);
+      logInfraError('DNR: Failed to get active DNR rules', error);
       return {
         dynamic: [],
         session: [],
@@ -494,7 +496,7 @@ export class DNRUtils {
       this.initialized = true;
       this.dbg('DNR: Initialized successfully');
     } catch (error) {
-      console.error('DNR: Initialization failed:', error);
+      logInfraError('DNR: Initialization failed', error);
     }
   }
 

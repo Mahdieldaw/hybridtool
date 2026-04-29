@@ -11,7 +11,6 @@ import {
   activeProviderTargetAtom,
   currentSessionIdAtom,
   activeRecomputeStateAtom,
-  workflowProgressAtom,
   isRoundActiveAtom,
   singularityProviderAtom,
   turnIdsAtom,
@@ -260,7 +259,6 @@ const ChatInput = ({
   const showAbortBtn = !!onAbort && isLoading;
 
   const providerName = activeTarget ? getProviderName(activeTarget.providerId) : '';
-  const workflowProgress = useAtomValue(workflowProgressAtom);
   const latestAiTurn = React.useMemo(() => {
     for (let i = turnIds.length - 1; i >= 0; i -= 1) {
       const t = turnsMap.get(turnIds[i]);
@@ -282,7 +280,6 @@ const ChatInput = ({
             providers={LLM_PROVIDERS_CONFIG}
             voiceProviderId={singularityProvider}
             variant="active"
-            workflowProgress={workflowProgress as any}
             collapsed={!isRoundActive}
             onCrownMove={(pid) => {
               setSingularityProvider(pid);

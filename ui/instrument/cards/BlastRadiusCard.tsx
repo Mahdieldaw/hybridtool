@@ -238,8 +238,8 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
     label: string;
     canonicalCount: number | null;
     riskTotal: number | null;
-    deletionRisk: number | null;
-    degradationRisk: number | null;
+    twinCount: number | null;
+    orphanCount: number | null;
     cascadeFragility: number | null;
     isolation: number | null;
     orphanCharacter: number | null;
@@ -256,15 +256,15 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
       scores.map((s: any) => {
         const rv = s?.riskVector;
         const lc = s?.layerC;
-        const del = typeof rv?.deletionRisk === 'number' ? rv.deletionRisk : null;
-        const deg = typeof rv?.degradationRisk === 'number' ? rv.degradationRisk : null;
+        const del = typeof rv?.twinCount === 'number' ? rv.twinCount : null;
+        const deg = typeof rv?.orphanCount === 'number' ? rv.orphanCount : null;
         return {
           id: s?.claimId || '',
           label: s?.claimLabel || '',
           canonicalCount: typeof lc?.canonicalCount === 'number' ? lc.canonicalCount : null,
           riskTotal: del !== null && deg !== null ? del + deg : null,
-          deletionRisk: del,
-          degradationRisk: deg,
+          twinCount: del,
+          orphanCount: deg,
           cascadeFragility: typeof rv?.cascadeFragility === 'number' ? rv.cascadeFragility : null,
           isolation: typeof rv?.isolation === 'number' ? rv.isolation : null,
           orphanCharacter: typeof rv?.orphanCharacter === 'number' ? rv.orphanCharacter : null,
@@ -345,21 +345,21 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
               ),
             },
             {
-              key: 'deletionRisk',
+              key: 'twinCount',
               header: 'Del',
               title:
-                'Deletion risk (Type 2): exclusive non-orphan statements. These will be fully REMOVED from the corpus on prune — the highest-severity loss.',
-              sortValue: (r) => r.deletionRisk,
-              cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.deletionRisk ?? '–'}</span>,
+                'Twin count (Type 2): exclusive statements with a semantic twin in another claim.',
+              sortValue: (r) => r.twinCount,
+              cell: (r) => <span className="font-mono text-[10px] text-red-400">{r.twinCount ?? '–'}</span>,
             },
             {
-              key: 'degradationRisk',
+              key: 'orphanCount',
               header: 'Deg',
               title:
-                'Degradation risk (Type 3): exclusive orphan statements. These will be SKELETONIZED — entities survive but relational framing is stripped.',
-              sortValue: (r) => r.degradationRisk,
+                'Orphan count (Type 3): exclusive statements with no twin — irrecoverable if removed.',
+              sortValue: (r) => r.orphanCount,
               cell: (r) => (
-                <span className="font-mono text-[10px] text-amber-400">{r.degradationRisk ?? '–'}</span>
+                <span className="font-mono text-[10px] text-amber-400">{r.orphanCount ?? '–'}</span>
               ),
             },
             {

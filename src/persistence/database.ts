@@ -1,5 +1,6 @@
 // IndexedDB Database Initialization for HTOS Document Composition System
 
+import { logInfraError } from '../errors';
 import { StoreConfig, MetadataRecord } from './types';
 
 const DB_NAME = 'OpusDeusDB';
@@ -205,7 +206,7 @@ export async function openDatabase(): Promise<IDBDatabase> {
           };
           metadataStore.put(rec);
         } catch (err) {
-          console.error('[persistence/database/openDatabase] failed to update schema version (v6):', err);
+          logInfraError('persistence/database/openDatabase: failed to update schema version (v6)', err);
         }
       }
 
