@@ -214,7 +214,7 @@ export interface BlastSurfaceLayerC {
   orphanCount: number;
 }
 
-/** Risk vector: three orthogonal axes of pruning damage, derived from the canonical fate table. */
+/** Risk vector: pruning damage axes, derived from the canonical fate table. */
 export interface BlastSurfaceRiskVector {
   /** Type 2 count: exclusive statements with a semantic twin. */
   twinCount: number;
@@ -224,28 +224,30 @@ export interface BlastSurfaceRiskVector {
   orphanCount: number;
   /** Type 3 statement IDs for drilldown */
   orphanStatementIds: string[];
-  /** Continuous protection-depth: sum of 1/(parentCount-1) over non-exclusive statements. Dimensionally compatible with statement counts. */
+  /**
+   * Continuous protection-depth: sum of 1/(parentCount-1) over non-exclusive statements.
+   * Instruments the topology of shared-evidence relationships (concentrated few-way sharing
+   * vs diffuse many-way sharing). The mass triple does not expose this dimension.
+   * STATUS: Kept as independent topology signal. Decision pending on whether to retain
+   * long-term or accept that the pipeline does not instrument shared-evidence topology.
+   */
   cascadeFragility: number;
   /** Per-statement fragility contributions for drilldown */
   cascadeFragilityDetails: Array<{ statementId: string; parentCount: number; fragility: number }>;
   /** Distribution stats of per-statement fragility values */
   cascadeFragilityMu: number;
   cascadeFragilitySigma: number;
-  /** Derived: (Type2 + Type3) / canonicalCount. 0 = fully shared, 1 = fully isolated. */
-  isolation: number;
-  /** Derived: Type3 / (Type2 + Type3). 0 = all twinned, 1 = all orphaned. NaN-safe: 0 when no exclusives. */
-  orphanCharacter: number;
   /** Simplex coordinates for visualization: [type1Frac, type2Frac, type3Frac] summing to 1.0 */
   simplex: [number, number, number];
 
-  /** Sum of (1 - twinSimilarity) over Type 2 statements. Higher = lossier twins. */
-  deletionDamage: number;
-  /** Sum of (1 - nounSurvivalRatio) over Type 3 statements. Higher = more context destroyed. */
+  /**
+   * Referential density of statements — Sum of (1 - nounSurvivalRatio) over canonical statements.
+   * Applicable to any statement subset, not only orphans. Aggregable per claim, per paragraph,
+   * per any partition.
+   */
   degradationDamage: number;
-  /** deletionDamage + degradationDamage. Ranking value for question priority. */
-  totalDamage: number;
 
-  /** Per-Type-3 noun survival details */
+  /** Per-statement noun survival details */
   degradationDetails?: Array<{
     statementId: string;
     originalWordCount: number;
@@ -361,41 +363,52 @@ export interface ParagraphCoverageEntry {
   coverage: number;
 }
 
-export interface PassageEntry {
+
+
+/** Statement-level passage: a contiguous run of ≥2 canonical claim statements in document order within a single model. */
+export interface StatementPassageEntry {
   modelIndex: number;
+  /** Statement IDs forming this contiguous run, in document order */
+  statementIds: string[];
+  /** Number of statements in the run (always ≥ 2) */
+  statementLength: number;
+  /** Legacy compat: paragraph index of the first statement in the run */
   startParagraphIndex: number;
-  /** inclusive */
+  /** Legacy compat: paragraph index of the last statement in the run (inclusive) */
   endParagraphIndex: number;
-  /** Number of paragraphs in this contiguous run */
-  length: number;
-  /** Mean coverage across paragraphs in this passage */
+  /** Mean coverage of spanned paragraphs (for passage dominance fallback) */
   avgCoverage: number;
+  /** Number of distinct paragraphs spanned by the statements in this passage */
+  spanParagraphCount: number;
 }
 
 export interface ClaimDensityProfile {
   claimId: string;
-  /** Total paragraphs containing any statement from this claim */
+  /** Total paragraphs containing any statement from this claim (display companion, not load-bearing) */
   paragraphCount: number;
-  /** Number of contiguous paragraph runs across all models */
+  /** Number of contiguous statement runs of length ≥ 2 across all models */
   passageCount: number;
-  /** Longest contiguous run in paragraphs */
+  /** Longest contiguous run in statement units */
   maxPassageLength: number;
-  /** Mean coverage across paragraphs in the longest contiguous run where coverage > 0.5 (majority re-thresholded) */
+  /** Mean coverage across paragraphs spanned by the longest statement passage */
   meanCoverageInLongestRun: number;
   /** Distinct models containing this claim */
   modelSpread: number;
-  /** Distinct models containing a passage of length >= 2 */
+  /** Distinct models containing a statement passage of length ≥ 2 */
   modelsWithPassages: number;
   /** Total statements owned across all paragraphs (excludes table cells) */
   totalClaimStatements: number;
   /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
   presenceMass: number;
-  /** Mean of per-paragraph coverage (= presenceMass / paragraphCount) */
+  /** Derived on demand: presenceMass / paragraphCount */
   meanCoverage: number;
+  /** Per-paragraph presence contribution vector: [paragraphId → claimStmts/paraTotal] */
+  presenceVector: Array<{ paragraphId: string; value: number }>;
   /** Per-paragraph detail */
   paragraphCoverage: ParagraphCoverageEntry[];
-  /** Per-passage detail */
-  passages: PassageEntry[];
+
+  /** Statement-level passages: contiguous runs of ≥2 claim statements in document order per model */
+  statementPassages: StatementPassageEntry[];
 }
 
 export interface ClaimDensityResult {
@@ -475,21 +488,36 @@ export interface MajorityGateSnapshot {
 }
 
 export interface RoutingMeasurements {
-  /** dominatedParagraphCount(C) / |paragraphs C touches that any other claim also touches| */
-  contestedDominance: number;
+  /**
+   * Continuous contested dominance: territorialMass / (presenceMass - sovereignMass).
+   * Measures the yield rate of fractional exclusivity credit relative to shared territory.
+   * Returns null when presenceMass - sovereignMass = 0 (fully sovereign or empty claim).
+   */
+  contestedDominance: number | null;
   /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
   presenceMass: number;
   /** Σ(Σ(1/k)/paraTotal) across paragraphs — fractional-credit exclusivity (k = sharing claims) */
   territorialMass: number;
   /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
   sovereignMass: number;
-  /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normPresence) — normPresence computed by re-thresholding coverage > 0.5 */
+  /**
+   * Derived: sovereignMass / presenceMass. Fraction of presence volume held exclusively.
+   * Returns null when presenceMass = 0.
+   */
+  sovereignRatio: number | null;
+  /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normPresenceMass) */
   sustainedMassCohort: SustainedMassCohort;
   /** Distinct models with ≥1 paragraph for this claim (used as tiebreaker) */
   modelSpread: number;
-  /** Novel majority paragraphs (coverage > 0.5) / this claim's majority paragraph count (coverage > 0.5) */
+  /**
+   * Novel majority paragraphs (coverage > 0.5) / this claim's majority paragraph count.
+   * TODO: Redefine against presenceMass once novelty ratios are migrated off MAJ.
+   */
   claimNoveltyRatio: number;
-  /** Novel majority paragraphs (coverage > 0.5) / remaining unassigned corpus paragraphs */
+  /**
+   * Novel majority paragraphs (coverage > 0.5) / remaining unassigned corpus paragraphs.
+   * TODO: Redefine against presenceMass once novelty ratios are migrated off MAJ.
+   */
   corpusNoveltyRatio: number;
   /** Count of novel majority paragraphs (coverage > 0.5) assigned at decision time */
   novelParagraphCount: number;
@@ -514,7 +542,9 @@ export interface PassageClaimProfile {
   territorialMass: number;
   /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
   sovereignMass: number;
-  /** sqrt(normMAXLEN × normPresence) — percentile rank within current run (normPresence from re-thresholded coverage > 0.5). */
+  /** Derived: sovereignMass / presenceMass. Null when presenceMass = 0. */
+  sovereignRatio: number | null;
+  /** sqrt(normMAXLEN × normPresenceMass) — percentile rank within current run. */
   sustainedMass: number;
   /** Cohort derived from sustainedMass. */
   sustainedMassCohort: SustainedMassCohort;

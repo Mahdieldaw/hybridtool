@@ -42,7 +42,7 @@ export const ClaimRibbon: React.FC<ClaimRibbonProps> = ({
           label,
           landscapePosition: pos,
           concentrationRatio: rp?.concentrationRatio ?? 0,
-          passageCount: densityProfiles[id]?.passages?.length ?? 0,
+          passageCount: densityProfiles[id]?.passageCount ?? 0,
         };
       })
       .sort((a, b) => {

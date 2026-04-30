@@ -5,7 +5,6 @@ node_modules/
 /dist
 
 # Build analysis
-*.md
 
 # Data and large files
 digest*txt

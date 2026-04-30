@@ -122,9 +122,9 @@ function buildResolver(
     if (isNaN(modelIndex) || isNaN(startParagraphIndex)) return null;
 
     const profile = densityProfiles[claimId];
-    if (!profile?.passages) return null;
+    if (!profile?.statementPassages) return null;
 
-    const passageEntry = profile.passages.find(
+    const passageEntry = profile.statementPassages.find(
       (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex
     );
     if (!passageEntry) return null;

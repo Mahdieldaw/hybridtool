@@ -18,7 +18,7 @@ interface MapperSelectorProps {
 
 export const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderId }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const { handleClipClick } = useClipActions();
+  const { handleClipClick, switchMappingProvider } = useClipActions();
   const authStatus = useAtomValue(providerAuthStatusAtom);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -84,7 +84,11 @@ export const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activePr
                   key={pid}
                   onClick={() => {
                     if (!isUnauthorized) {
-                      handleClipClick(aiTurn.id, 'mapping', pid);
+                      if (hasData) {
+                        switchMappingProvider(pid);
+                      } else {
+                        handleClipClick(aiTurn.id, 'mapping', pid);
+                      }
                       setIsOpen(false);
                     }
                   }}

@@ -153,7 +153,7 @@ function buildPassageMembership(densityResult: ClaimDensityResult): Map<string, 
     for (const pc of profile.paragraphCoverage) {
       coverageByParaKey.set(`${pc.modelIndex}:${pc.paragraphIndex}`, pc.coverage);
     }
-    for (const passage of profile.passages) {
+    for (const passage of profile.statementPassages) {
       for (let pi = passage.startParagraphIndex; pi <= passage.endParagraphIndex; pi++) {
         const key = `${passage.modelIndex}:${pi}`;
         const coverage = coverageByParaKey.get(key) ?? passage.avgCoverage;
@@ -162,7 +162,7 @@ function buildPassageMembership(densityResult: ClaimDensityResult): Map<string, 
           arr = [];
           membership.set(key, arr);
         }
-        arr.push({ claimId, passageLength: passage.length, coverageFraction: coverage });
+        arr.push({ claimId, passageLength: passage.statementLength, coverageFraction: coverage });
       }
     }
   }

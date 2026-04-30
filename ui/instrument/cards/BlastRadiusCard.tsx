@@ -241,11 +241,7 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
     twinCount: number | null;
     orphanCount: number | null;
     cascadeFragility: number | null;
-    isolation: number | null;
-    orphanCharacter: number | null;
-    deletionDamage: number | null;
     degradationDamage: number | null;
-    totalDamage: number | null;
     unconditional: number | null;
     conditional: number | null;
     fragile: number | null;
@@ -266,11 +262,7 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
           twinCount: del,
           orphanCount: deg,
           cascadeFragility: typeof rv?.cascadeFragility === 'number' ? rv.cascadeFragility : null,
-          isolation: typeof rv?.isolation === 'number' ? rv.isolation : null,
-          orphanCharacter: typeof rv?.orphanCharacter === 'number' ? rv.orphanCharacter : null,
-          deletionDamage: typeof rv?.deletionDamage === 'number' ? rv.deletionDamage : null,
           degradationDamage: typeof rv?.degradationDamage === 'number' ? rv.degradationDamage : null,
-          totalDamage: typeof rv?.totalDamage === 'number' ? rv.totalDamage : null,
           unconditional:
             typeof rv?.deletionCertainty?.unconditional === 'number'
               ? rv.deletionCertainty.unconditional
@@ -375,61 +367,14 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
               ),
             },
             {
-              key: 'isolation',
-              header: 'Iso',
-              title:
-                'Isolation: (Del+Deg) / K — fraction of canonical evidence exclusively owned by this claim. 0 = fully shared (safe), 1 = fully isolated (maximum exposure).',
-              sortValue: (r) => r.isolation,
-              cell: (r) => (
-                <span className="font-mono text-[10px]">
-                  {r.isolation !== null ? r.isolation.toFixed(2) : '–'}
-                </span>
-              ),
-            },
-            {
-              key: 'orphanCharacter',
-              header: 'OC',
-              title:
-                'Orphan character: Deg / (Del+Deg) — within exclusive statements, the fraction that are orphans (no twin anywhere). 0 = all twinned, 1 = all orphaned.',
-              sortValue: (r) => r.orphanCharacter,
-              cell: (r) => (
-                <span className="font-mono text-[10px]">
-                  {r.orphanCharacter !== null ? r.orphanCharacter.toFixed(2) : '–'}
-                </span>
-              ),
-            },
-            {
-              key: 'deletionDamage',
-              header: 'DD',
-              title:
-                'Deletion damage: sum of twin gaps (1 - similarity) over Type 2 statements. Higher = lossier twins.',
-              sortValue: (r) => r.deletionDamage,
-              cell: (r) => (
-                <span className="font-mono text-[10px] text-red-400">
-                  {r.deletionDamage !== null ? r.deletionDamage.toFixed(2) : '–'}
-                </span>
-              ),
-            },
-            {
               key: 'degradationDamage',
               header: 'GD',
               title:
-                'Degradation damage: sum of noun loss (1 - nounSurvivalRatio) over Type 3 statements. Higher = more context destroyed.',
+                'Degradation damage: Σ(1 - nounSurvivalRatio) over ALL canonical statements. Measures context density loss on prune.',
               sortValue: (r) => r.degradationDamage,
               cell: (r) => (
                 <span className="font-mono text-[10px] text-amber-400">
                   {r.degradationDamage !== null ? r.degradationDamage.toFixed(2) : '–'}
-                </span>
-              ),
-            },
-            {
-              key: 'totalDamage',
-              header: 'TD',
-              title: 'Total damage: DD + GD. Ranking value for question priority.',
-              sortValue: (r) => r.totalDamage,
-              cell: (r) => (
-                <span className="font-mono text-[10px] text-white">
-                  {r.totalDamage !== null ? r.totalDamage.toFixed(2) : '–'}
                 </span>
               ),
             },
@@ -459,7 +404,7 @@ export function BlastVernalInline({ artifact }: { artifact: any }) {
             },
           ]}
           rows={rows}
-          defaultSortKey="totalDamage"
+          defaultSortKey="riskTotal"
           defaultSortDir="desc"
           maxRows={12}
         />

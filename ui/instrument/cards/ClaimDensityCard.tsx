@@ -81,7 +81,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
   const modelSummary = useMemo(() => {
     if (!selectedProfile) return [];
     const paraCoverage: any[] = safeArr(selectedProfile.paragraphCoverage);
-    const passages: any[] = safeArr(selectedProfile.passages);
+    const passages: any[] = safeArr(selectedProfile.statementPassages);
 
     const byModel = new Map<
       number,
@@ -98,7 +98,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       if (Number.isFinite(mi)) {
         const entry = byModel.get(mi)!;
         entry.passageCount++;
-        if ((p.length ?? 0) >= 2) entry.hasPassage = true;
+        if ((p.spanParagraphCount ?? 0) >= 2) entry.hasPassage = true;
       }
     }
 
@@ -323,9 +323,9 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 <div className="text-[9px] font-semibold text-text-muted uppercase tracking-wider mb-1">
                   Passages
                 </div>
-                {safeArr(selectedProfile.passages).length === 0 ? (
+                {safeArr(selectedProfile.statementPassages).length === 0 ? (
                   <div className="text-[9px] text-text-muted italic">
-                    No passages (all paragraphs isolated)
+                    No passages (all statements isolated)
                   </div>
                 ) : (
                   <SortableTable
@@ -366,20 +366,31 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                       {
                         key: 'length',
                         header: 'Len',
-                        title: 'Paragraph count in this passage',
-                        sortValue: (r: any) => r.length,
+                        title: 'Statement count in this contiguous run',
+                        sortValue: (r: any) => r.statementLength,
                         cell: (r: any) => (
                           <span
                             className={clsx(
                               'font-mono',
-                              r.length >= 3
+                              r.statementLength >= 5
                                 ? 'text-amber-400'
-                                : r.length >= 2
+                                : r.statementLength >= 2
                                   ? 'text-sky-400'
                                   : 'text-text-muted'
                             )}
                           >
-                            {fmtInt(r.length)}
+                            {fmtInt(r.statementLength)}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: 'paraCount',
+                        header: '¶',
+                        title: 'Number of paragraphs spanned by this run',
+                        sortValue: (r: any) => r.paragraphCount,
+                        cell: (r: any) => (
+                          <span className="font-mono text-text-muted">
+                            {fmtInt(r.paragraphCount)}
                           </span>
                         ),
                       },
@@ -393,12 +404,13 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                         ),
                       },
                     ]}
-                    rows={safeArr(selectedProfile.passages).map((p: any, i: number) => ({
+                    rows={safeArr(selectedProfile.statementPassages).map((p: any, i: number) => ({
                       id: `passage-${i}`,
                       modelIndex: p.modelIndex,
                       startParagraphIndex: p.startParagraphIndex,
                       endParagraphIndex: p.endParagraphIndex,
-                      length: p.length,
+                      statementLength: p.statementLength,
+                      paragraphCount: p.spanParagraphCount,
                       avgCoverage: p.avgCoverage,
                       modelParaTotal: modelParaTotals.get(p.modelIndex) ?? 0,
                     }))}

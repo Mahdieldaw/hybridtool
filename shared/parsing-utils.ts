@@ -20,16 +20,27 @@ export function repairJson(text: string): string {
     let quote: '"' | "'" | null = null;
     let esc = false;
 
-    const isAllowedEscape = (c: string) =>
-      c === '"' ||
-      c === '\\' ||
-      c === '/' ||
-      c === 'b' ||
-      c === 'f' ||
-      c === 'n' ||
-      c === 'r' ||
-      c === 't' ||
-      c === 'u';
+    const isHex = (c: string) => /[0-9A-Fa-f]/.test(c);
+    const isAllowedEscape = (c: string, idx: number, full: string) => {
+      if (c === 'u') {
+        // Must be followed by exactly 4 hex digits
+        for (let j = 1; j <= 4; j++) {
+          const nextChar = full[idx + j];
+          if (!nextChar || !isHex(nextChar)) return false;
+        }
+        return true;
+      }
+      return (
+        c === '"' ||
+        c === '\\' ||
+        c === '/' ||
+        c === 'b' ||
+        c === 'f' ||
+        c === 'n' ||
+        c === 'r' ||
+        c === 't'
+      );
+    };
 
     for (let i = 0; i < src.length; i++) {
       const ch = src[i];
@@ -42,15 +53,22 @@ export function repairJson(text: string): string {
           continue;
         }
         if (ch === '\\') {
-          if (next && !isAllowedEscape(next)) {
-            out += next;
-            i++;
+          if (next && !isAllowedEscape(next, i, src)) {
+            // Invalid escape (like \user or \unit) - drop the backslash
             continue;
           }
           esc = true;
           out += ch;
           continue;
         }
+
+        // Handle literal newlines in strings
+        if (ch === '\n' || ch === '\r') {
+          out += '\\n';
+          if (ch === '\r' && next === '\n') i++; // Consume CRLF
+          continue;
+        }
+
         out += ch;
         if (ch === quote) {
           quote = null;
@@ -272,7 +290,7 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
   const raw = String(text ?? '').trim();
   if (!raw) return { json: null, path: 'none' };
 
-  const tryParse = (candidate: string): { ok: boolean; value: any } => {
+  const tryParse = (candidate: string): { ok: boolean; value: any; error?: any } => {
     try {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === 'object') return { ok: true, value: parsed };
@@ -281,13 +299,11 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
           const parsed2 = JSON.parse(parsed);
           if (parsed2 && typeof parsed2 === 'object') return { ok: true, value: parsed2 };
         } catch (err) {
-          console.error('[parsing-utils/extractJsonObject] double-parse failed:', err);
-          return { ok: false, value: null };
+          return { ok: false, value: null, error: err };
         }
       }
     } catch (err) {
-      console.error('[parsing-utils/extractJsonObject] initial parse failed:', err);
-      return { ok: false, value: null };
+      return { ok: false, value: null, error: err };
     }
     return { ok: false, value: null };
   };
@@ -297,11 +313,18 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
   ): { ok: boolean; value: any; repaired: boolean } => {
     const direct = tryParse(candidate);
     if (direct.ok) return { ok: true, value: direct.value, repaired: false };
+
     const repairedText = repairJson(candidate);
     if (repairedText && repairedText !== candidate) {
       const repaired = tryParse(repairedText);
       if (repaired.ok) return { ok: true, value: repaired.value, repaired: true };
     }
+
+    // Only log if even the repair failed, or if we want to surface the initial failure as a warning
+    if (direct.error) {
+      console.warn('[parsing-utils/extractJsonObject] parse failed (even after repair attempt):', direct.error);
+    }
+
     return { ok: false, value: null, repaired: false };
   };
 
@@ -346,19 +369,32 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
     return null;
   };
 
+  // Proactive check for markdown code blocks to avoid noisy SyntaxErrors on backticks
+  if (raw.startsWith('```')) {
+    const code = extractCodeBlock(raw);
+    if (code) {
+      const fromCode = tryParseWithRepair(code);
+      if (fromCode.ok)
+        return { json: fromCode.value, path: fromCode.repaired ? 'repaired' : 'code_block' };
+    }
+  }
+
   const direct = tryParseWithRepair(raw);
   if (direct.ok) return { json: direct.value, path: direct.repaired ? 'repaired' : 'direct' };
 
-  const code = extractCodeBlock(raw);
-  if (code) {
-    const fromCode = tryParseWithRepair(code);
-    if (fromCode.ok)
-      return { json: fromCode.value, path: fromCode.repaired ? 'repaired' : 'code_block' };
-    const braceInCode = extractBalancedBraces(code);
-    if (braceInCode) {
-      const fromBrace = tryParseWithRepair(braceInCode);
-      if (fromBrace.ok)
-        return { json: fromBrace.value, path: fromBrace.repaired ? 'repaired' : 'brace_match' };
+  // Fallbacks if not direct or already handled code block
+  if (!raw.startsWith('```')) {
+    const code = extractCodeBlock(raw);
+    if (code) {
+      const fromCode = tryParseWithRepair(code);
+      if (fromCode.ok)
+        return { json: fromCode.value, path: fromCode.repaired ? 'repaired' : 'code_block' };
+      const braceInCode = extractBalancedBraces(code);
+      if (braceInCode) {
+        const fromBrace = tryParseWithRepair(braceInCode);
+        if (fromBrace.ok)
+          return { json: fromBrace.value, path: fromBrace.repaired ? 'repaired' : 'brace_match' };
+      }
     }
   }
 
@@ -375,30 +411,7 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
 export function extractJsonFromContent(content: string | null): any | null {
   if (!content) return null;
   const extracted = extractJsonObject(content);
-  if (extracted.json) return extracted.json;
-
-  let jsonText = content.trim();
-  const codeFenceMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (codeFenceMatch) jsonText = codeFenceMatch[1].trim();
-
-  const firstBrace = jsonText.indexOf('{');
-  const lastBrace = jsonText.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try {
-      return JSON.parse(jsonText.substring(firstBrace, lastBrace + 1));
-    } catch (err) {
-      console.error(
-        '[parsing-utils/extractJsonFromContent] failed to parse extracted brace content:',
-        err
-      );
-    }
-  }
-  try {
-    return JSON.parse(jsonText);
-  } catch (err) {
-    console.error('[parsing-utils/extractJsonFromContent] failed to parse fallback jsonText:', err);
-    return null;
-  }
+  return extracted.json;
 }
 
 // ============================================================================

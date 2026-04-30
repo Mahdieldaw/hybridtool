@@ -16,6 +16,13 @@ export function useClipActions() {
   const setAlertText = useSetAtom(alertTextAtom);
   const { runMappingForAiTurn, runSingularityForAiTurn } = useRoundActions();
 
+  const switchMappingProvider = useCallback(
+    (providerId: string) => {
+      setMappingProvider(providerId);
+    },
+    [setMappingProvider]
+  );
+
   const handleClipClick = useCallback(
     async (aiTurnId: string, type: 'mapping' | 'singularity', providerId: string) => {
       try {
@@ -64,5 +71,5 @@ export function useClipActions() {
     ]
   );
 
-  return { handleClipClick };
+  return { handleClipClick, switchMappingProvider };
 }

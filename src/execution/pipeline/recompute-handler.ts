@@ -232,7 +232,7 @@ export async function handleRecompute(payload, options) {
             const validPassageKeys = new Set();
             const densityProfiles = mappingArtifact?.claimDensity?.profiles ?? {};
             for (const [claimId, profile] of Object.entries(densityProfiles)) {
-              for (const p of profile?.passages || []) {
+              for (const p of profile?.statementPassages || []) {
                 validPassageKeys.add(`${claimId}:${p.modelIndex}:${p.startParagraphIndex}`);
               }
             }

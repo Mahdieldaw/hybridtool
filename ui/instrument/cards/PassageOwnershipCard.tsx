@@ -55,7 +55,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       const key = `${entry.modelIndex}:${getParaIdx(entry)}`;
       covMap.set(key, entry.coverage ?? 0);
     }
-    const passages = safeArr<any>(profile?.passages);
+    const passages = safeArr<any>(profile?.statementPassages);
     return { coverageByKey: covMap, passageRanges: passages };
   }, [selectedClaimId, artifact]);
 
@@ -129,7 +129,7 @@ export function PassageOwnershipCard({ artifact }: { artifact: any }) {
       for (const entry of safeArr<any>(profile?.paragraphCoverage)) {
         covMap.set(`${entry.modelIndex}:${getParaIdx(entry)}`, entry.coverage ?? 0);
       }
-      const passages = safeArr<any>(profile?.passages);
+      const passages = safeArr<any>(profile?.statementPassages);
       const inPass = (mi: number, po: number) =>
         passages.some(
           (p: any) =>

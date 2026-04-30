@@ -33,6 +33,8 @@ export interface IndexedPassage {
   startParagraphIndex: number;
   endParagraphIndex: number;
   paragraphCount: number;
+  /** Number of statements in the contiguous run */
+  statementLength: number;
   text: string;
   concentrationRatio: number;
   densityRatio: number;
@@ -103,10 +105,10 @@ export function buildPassageIndex(
     const claimProfile = passageRouting.claimProfiles[claimId];
     if (!claimProfile) continue;
 
-    for (const passageEntry of profile.passages) {
+    for (const passageEntry of profile.statementPassages) {
       const passageKey = `${claimId}:${passageEntry.modelIndex}:${passageEntry.startParagraphIndex}`;
 
-      // Concatenate text from shadow paragraphs
+      // Concatenate text from shadow paragraphs spanned by the run
       const textParts: string[] = [];
       for (let pi = passageEntry.startParagraphIndex; pi <= passageEntry.endParagraphIndex; pi++) {
         const sp = paragraphLookup.get(`${passageEntry.modelIndex}:${pi}`);
@@ -124,7 +126,8 @@ export function buildPassageIndex(
         modelName,
         startParagraphIndex: passageEntry.startParagraphIndex,
         endParagraphIndex: passageEntry.endParagraphIndex,
-        paragraphCount: passageEntry.length,
+        paragraphCount: passageEntry.spanParagraphCount,
+        statementLength: passageEntry.statementLength,
         text: textParts.join('\n\n'),
         concentrationRatio: claimProfile.concentrationRatio,
         densityRatio: claimProfile.densityRatio,

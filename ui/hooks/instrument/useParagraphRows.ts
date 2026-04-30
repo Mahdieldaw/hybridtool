@@ -100,14 +100,14 @@ export function useParagraphRows(artifact: any, selectedClaimId: string | null):
     }
 
     const passageLenByPara = new Map<string, number>();
-    for (const passage of cdProfile.passages ?? []) {
+    for (const passage of cdProfile.statementPassages ?? []) {
       for (const pc of cdProfile.paragraphCoverage ?? []) {
         if (
           pc.modelIndex === passage.modelIndex &&
-          pc.paragraphOrdinal >= passage.startParagraphOrdinal &&
-          pc.paragraphOrdinal <= passage.endParagraphOrdinal
+          pc.paragraphIndex >= passage.startParagraphIndex &&
+          pc.paragraphIndex <= passage.endParagraphIndex
         ) {
-          passageLenByPara.set(String(pc.paragraphId).trim(), passage.length);
+          passageLenByPara.set(String(pc.paragraphId).trim(), passage.spanParagraphCount);
         }
       }
     }

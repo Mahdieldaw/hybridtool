@@ -66,7 +66,6 @@ export function computeStatementClassification(
     claimEmbeddings,
     queryRelevanceScores,
     ownershipMap,
-    canonicalStatementIds,
   } = input;
 
   // ── 1. Claimed set from Phase 1 ownershipMap (no reconstruction) ─────
@@ -84,25 +83,10 @@ export function computeStatementClassification(
 
   for (const claim of enrichedClaims) {
     const profile = profiles[claim.id];
-    if (!profile || !Array.isArray(profile.passages)) continue;
-
-    const claimStmtSet = new Set(
-      (canonicalStatementIds.get(claim.id) ?? []).filter(
-        (s): s is string => typeof s === 'string' && !!s.trim()
-      )
-    );
-    if (claimStmtSet.size === 0) continue;
-
-    for (const passage of profile.passages) {
+    for (const passage of profile.statementPassages) {
       const passageKey = `${claim.id}:${passage.modelIndex}:${passage.startParagraphIndex}`;
-      for (let pi = passage.startParagraphIndex; pi <= passage.endParagraphIndex; pi++) {
-        const para = paraByKey.get(`${passage.modelIndex}:${pi}`);
-        if (!para) continue;
-        for (const stmtId of para.statementIds) {
-          if (claimStmtSet.has(stmtId)) {
-            passageMembership.set(stmtId, passageKey);
-          }
-        }
+      for (const sid of passage.statementIds) {
+        passageMembership.set(sid, passageKey);
       }
     }
   }

@@ -277,16 +277,16 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       for (const pc of cdProfile.paragraphCoverage ?? []) {
         paraCoverageByPara.set(String(pc.paragraphId), pc.coverage);
       }
-      for (const passage of cdProfile.passages ?? []) {
-        const isMulti = passage.length >= 2;
+      for (const passage of cdProfile.statementPassages ?? []) {
+        const isMulti = passage.spanParagraphCount >= 2;
         // Find paragraph IDs in this passage range for this model
         for (const pc of cdProfile.paragraphCoverage ?? []) {
           if (
             pc.modelIndex === passage.modelIndex &&
-            pc.paragraphOrdinal >= passage.startParagraphOrdinal &&
-            pc.paragraphOrdinal <= passage.endParagraphOrdinal
+            pc.paragraphIndex >= passage.startParagraphIndex &&
+            pc.paragraphIndex <= passage.endParagraphIndex
           ) {
-            passageLenByPara.set(String(pc.paragraphId), passage.length);
+            passageLenByPara.set(String(pc.paragraphId), passage.spanParagraphCount);
             if (isMulti) inPassageParas.add(String(pc.paragraphId));
           }
         }

@@ -41,7 +41,7 @@ export function usePassageHighlight(
 
       // Mark passage-interior paragraphs
       const passageIds = new Set<string>();
-      const passages: any[] = Array.isArray(profile?.passages) ? profile.passages : [];
+      const passages: any[] = Array.isArray(profile?.statementPassages) ? profile.statementPassages : [];
       for (const passage of passages) {
         const mi: number = passage.modelIndex ?? 0;
         const start: number = passage.startParagraphIndex ?? 0;
@@ -101,7 +101,7 @@ export function usePassageHighlight(
       for (const claimId of sorted) {
         const profile = densityProfiles[claimId];
         const pos: LandscapePosition = routingProfiles[claimId]?.landscapePosition ?? 'floor';
-        const passages: any[] = Array.isArray(profile?.passages) ? profile.passages : [];
+        const passages: any[] = Array.isArray(profile?.statementPassages) ? profile.statementPassages : [];
         for (const passage of passages) {
           const mi: number = passage.modelIndex ?? 0;
           const start: number = passage.startParagraphIndex ?? 0;

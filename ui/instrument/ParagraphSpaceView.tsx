@@ -1,4 +1,5 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { LAYOUT } from './paragraphSpaceConstants';
 import type {
   BasinInversionResult,
   BlastSurfaceResult,
@@ -7,12 +8,15 @@ import type {
   PipelineSubstrateGraph,
 } from '../../shared/types';
 import type { ClaimCentroid } from '../hooks/instrument/useClaimCentroids';
+import { useZoomPan } from '../hooks/instrument/useZoomPan';
 import {
   getProviderAbbreviation,
   getProviderColor,
   getProviderName,
   resolveProviderIdFromCitationOrder,
 } from '../utils/provider-helpers';
+import { TooltipOverlay, TooltipData } from './components/TooltipOverlay';
+import { RiskDonutGlyph, RiskVector } from './components/RiskDonutGlyph';
 
 type ParagraphData = {
   paragraphId: string;
@@ -124,10 +128,7 @@ const LANDSCAPE_FALLBACK = {
   label: 'Unknown',
 };
 
-// Base radius and weight scale for footprint circles
-const FOOTPRINT_BASE_R = 18;
-const FOOTPRINT_WEIGHT_SCALE = 28;
-const FOOTPRINT_MIN_R = 8;
+// (Removed local constants — now imported from ./paragraphSpaceConstants)
 
 // Risk vector colors for blast surface overlay
 const RISK_COLORS = {
@@ -136,71 +137,10 @@ const RISK_COLORS = {
   shared: '#3b82f6', // Type 1: non-exclusive (PROTECTED, future fragility)
 };
 
-type RiskVector = {
-  claimId: string;
-  type1: number; // shared/non-exclusive count
-  type2: number; // exclusive non-orphan count (absorbable)
-  type3: number; // exclusive orphan count
-  total: number; // canonicalCount
-  isolation: number; // (type2 + type3) / total
-  orphanCharacter: number; // type3 / (type2 + type3), or 0 if no exclusives
-  cascadeFragility?: number;
-  cascadeFragilityMu?: number;
-  cascadeFragilitySigma?: number;
-  deletionDamage?: number;
-  degradationDamage?: number;
-  totalDamage?: number;
-};
+// (RiskVector moved to components/RiskDonutGlyph.tsx)
 
 /** SVG arc path for a donut segment. Angles in radians, 0 = top (12 o'clock). */
-function donutArc(
-  cx: number,
-  cy: number,
-  r: number,
-  width: number,
-  startAngle: number,
-  endAngle: number
-): string {
-  if (endAngle - startAngle >= Math.PI * 2 - 0.001) {
-    // Full circle — use two half-arcs to avoid SVG zero-length arc issue
-    const outer = r,
-      inner = r - width;
-    return [
-      `M ${cx} ${cy - outer}`,
-      `A ${outer} ${outer} 0 1 1 ${cx} ${cy + outer}`,
-      `A ${outer} ${outer} 0 1 1 ${cx} ${cy - outer}`,
-      `Z`,
-      `M ${cx} ${cy - inner}`,
-      `A ${inner} ${inner} 0 1 0 ${cx} ${cy + inner}`,
-      `A ${inner} ${inner} 0 1 0 ${cx} ${cy - inner}`,
-      `Z`,
-    ].join(' ');
-  }
-  const outer = r,
-    inner = r - width;
-  const cos = Math.cos,
-    sin = Math.sin;
-  // Convert from "0=top clockwise" to SVG's "0=right counterclockwise"
-  const toSvg = (a: number) => a - Math.PI / 2;
-  const a1 = toSvg(startAngle),
-    a2 = toSvg(endAngle);
-  const large = endAngle - startAngle > Math.PI ? 1 : 0;
-  const ox1 = cx + outer * cos(a1),
-    oy1 = cy + outer * sin(a1);
-  const ox2 = cx + outer * cos(a2),
-    oy2 = cy + outer * sin(a2);
-  const ix2 = cx + inner * cos(a2),
-    iy2 = cy + inner * sin(a2);
-  const ix1 = cx + inner * cos(a1),
-    iy1 = cy + inner * sin(a1);
-  return [
-    `M ${ox1} ${oy1}`,
-    `A ${outer} ${outer} 0 ${large} 1 ${ox2} ${oy2}`,
-    `L ${ix2} ${iy2}`,
-    `A ${inner} ${inner} 0 ${large} 0 ${ix1} ${iy1}`,
-    `Z`,
-  ].join(' ');
-}
+// (donutArc moved to utils/svg-utils.ts)
 
 function hexToRgba(input: string, alpha: number): string | null {
   const hex = String(input || '').trim();
@@ -322,9 +262,30 @@ export function ParagraphSpaceView({
   onParagraphClick,
 }: Props) {
   const nodes = graph?.nodes ?? [];
+  const svgRef = useRef<SVGSVGElement>(null);
+  const { transform, onWheel, onMouseDown, fitToScreen, isPanning } = useZoomPan(svgRef);
+
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
   const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
   const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<TooltipData | null>(null);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClaimClick?.(null);
+        setSelectedParagraphId(null);
+      } else if (e.key === 'f' || e.key === 'F') {
+        // Only if not typing in an input
+        if ((e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+          fitToScreen();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClaimClick, fitToScreen]);
 
   // Region Toggles
   const [enabledRegionIds, setEnabledRegionIds] = useState<Set<string> | null>(null);
@@ -427,20 +388,18 @@ export function ParagraphSpaceView({
     };
   }, [nodes]);
 
-  const W = 1000;
-  const H = 700;
-  const margin = 28;
+// (W, H, margin moved to LAYOUT constants)
 
   const toX = useMemo(() => {
     if (!bounds) return (x: number) => x;
     const span = bounds.maxX - bounds.minX;
-    return (x: number) => margin + ((x - bounds.minX) / (span || 1)) * (W - margin * 2);
+    return (x: number) => LAYOUT.MARGIN + ((x - bounds.minX) / (span || 1)) * (LAYOUT.W - LAYOUT.MARGIN * 2);
   }, [bounds]);
 
   const toY = useMemo(() => {
     if (!bounds) return (y: number) => y;
     const span = bounds.maxY - bounds.minY;
-    return (y: number) => margin + ((bounds.maxY - y) / (span || 1)) * (H - margin * 2);
+    return (y: number) => LAYOUT.MARGIN + ((bounds.maxY - y) / (span || 1)) * (LAYOUT.W - LAYOUT.MARGIN * 2);
   }, [bounds]);
 
   const claimFootprints = useMemo(() => {
@@ -460,17 +419,16 @@ export function ParagraphSpaceView({
 
         const circles: Array<{ cx: number; cy: number; r: number }> = [];
 
-        for (const n of nodes) {
-          const pid = String((n as any)?.paragraphId ?? '').trim();
-          if (!pid) continue;
-          const fraction = c.paraCanonicalFractions.get(pid);
-          if (fraction === undefined || fraction <= 0) continue;
+        for (const [pid, fraction] of c.paraCanonicalFractions) {
+          if (fraction <= 0) continue;
+          const n = nodeById.get(pid);
+          if (!n) continue;
 
           const cx = toX(Number(n.x));
           const cy = toY(Number(n.y));
           if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
 
-          const r = Math.max(FOOTPRINT_MIN_R, FOOTPRINT_BASE_R + fraction * FOOTPRINT_WEIGHT_SCALE);
+          const r = Math.max(LAYOUT.FOOTPRINT_MIN_R, LAYOUT.FOOTPRINT_BASE_R + fraction * LAYOUT.FOOTPRINT_WEIGHT_SCALE);
           circles.push({ cx, cy, r });
 
           wSumX += cx * fraction;
@@ -583,7 +541,7 @@ export function ParagraphSpaceView({
       const y = toY(Number(n.y));
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
       const degree = typeof n.mutualRankDegree === 'number' ? n.mutualRankDegree : 0;
-      const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7)) + 1; // +1 for isSource
+      const r = Math.max(LAYOUT.NODE_R_MIN, Math.min(LAYOUT.NODE_R_MAX, LAYOUT.NODE_BASE_R + degree * LAYOUT.NODE_DEGREE_SCALE)) + 1; // +1 for isSource
       const fraction = Math.max(0, Math.min(1, selectedClaimCanonicalFractions.get(id) ?? 1));
       m.set(id, { x, y, r, fraction });
     }
@@ -602,35 +560,26 @@ export function ParagraphSpaceView({
       if (rv) {
         m.set(id, {
           claimId: id,
-          type1: (s as any).layerC?.nonExclusiveCount ?? 0,
-          type2: rv.twinCount,
-          type3: rv.orphanCount,
-          total: (s as any).layerC?.canonicalCount ?? 0,
-          isolation: rv.isolation,
-          orphanCharacter: rv.orphanCharacter,
+          sharedCount: Math.max(0,
+            ((s as any).layerC?.canonicalCount ?? 0) - (rv.twinCount ?? 0) - (rv.orphanCount ?? 0)
+          ),
+          sovereignCount: (rv.twinCount ?? 0) + (rv.orphanCount ?? 0),
+          canonicalCount: (s as any).layerC?.canonicalCount ?? 0,
           cascadeFragility: rv.cascadeFragility,
           cascadeFragilityMu: rv.cascadeFragilityMu,
           cascadeFragilitySigma: rv.cascadeFragilitySigma,
-          deletionDamage: rv.deletionDamage,
           degradationDamage: rv.degradationDamage,
-          totalDamage: rv.totalDamage,
         });
       } else {
         // Fallback: derive from layerC (backward compat with cached data)
         const canonicalCount = s.layerC?.canonicalCount ?? 0;
         const type2 = s.layerC?.twinCount ?? 0;
         const type3 = s.layerC?.orphanCount ?? 0;
-        const type1 = Math.max(0, canonicalCount - type2 - type3);
-        const total = type1 + type2 + type3;
-        const exclTotal = type2 + type3;
         m.set(id, {
           claimId: id,
-          type1,
-          type2,
-          type3,
-          total,
-          isolation: total > 0 ? exclTotal / total : 0,
-          orphanCharacter: exclTotal > 0 ? type3 / exclTotal : 0,
+          sovereignCount: type2 + type3,
+          sharedCount: Math.max(0, canonicalCount - type2 - type3),
+          canonicalCount,
         });
       }
     }
@@ -1198,11 +1147,16 @@ export function ParagraphSpaceView({
         )}
 
         <svg
-          className="w-full h-full bg-black/20"
-          viewBox={`0 0 ${W} ${H}`}
+          ref={svgRef}
+          className={`w-full h-full bg-black/20 ${isPanning ? 'cursor-grabbing' : 'cursor-default'}`}
+          viewBox={`0 0 ${LAYOUT.W} ${LAYOUT.H}`}
           preserveAspectRatio="xMidYMid meet"
           onClick={handleSvgClick}
+          onWheel={onWheel}
+          onMouseDown={onMouseDown}
         >
+          {/* Main Transformation Layer */}
+          <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
           {/* ClipPaths for measuring-cylinder partial fill on source nodes */}
           <defs>
             <filter id="metaball-merge" x="-40%" y="-40%" width="180%" height="180%" colorInterpolationFilters="sRGB">
@@ -1224,7 +1178,7 @@ export function ParagraphSpaceView({
           </defs>
 
           {/* Background rect for click-to-deselect */}
-          <rect x={0} y={0} width={W} height={H} fill="transparent" />
+          <rect x={0} y={0} width={LAYOUT.W} height={LAYOUT.H} fill="transparent" />
 
           {/* Basin bounding rects */}
           {basinRectData.map((br) => (
@@ -1330,13 +1284,17 @@ export function ParagraphSpaceView({
                   strokeWidth={1.5}
                   strokeDasharray="6 4"
                   opacity={dimmed ? 0.4 : 0.8}
-                >
-                  {edge.reason && (
-                    <title>
-                      {edge.type}: {edge.reason}
-                    </title>
-                  )}
-                </line>
+                  onMouseEnter={(e) => {
+                    setTooltip({
+                      x: e.clientX,
+                      y: e.clientY,
+                      title: edge.type,
+                      subtitle: 'Mapper Edge',
+                      content: edge.reason,
+                    });
+                  }}
+                  onMouseLeave={() => setTooltip(null)}
+                />
               );
             })}
 
@@ -1424,7 +1382,7 @@ export function ParagraphSpaceView({
             const y = toY(Number(n.y));
             if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
             const degree = typeof n.mutualRankDegree === 'number' ? n.mutualRankDegree : 0;
-            const r = Math.max(3.5, Math.min(9.0, 4.0 + degree * 0.7));
+            const r = Math.max(LAYOUT.NODE_R_MIN, Math.min(LAYOUT.NODE_R_MAX, LAYOUT.NODE_BASE_R + degree * LAYOUT.NODE_DEGREE_SCALE));
 
             const basinId = basinResult?.basinByNodeId?.[id];
             const basinColor =
@@ -1504,8 +1462,20 @@ export function ParagraphSpaceView({
                 <g
                   key={id}
                   opacity={nodeOpacity}
-                  onMouseEnter={() => setHoveredParagraphId(id)}
-                  onMouseLeave={() => setHoveredParagraphId(null)}
+                  onMouseEnter={(e) => {
+                    setTooltip({
+                      x: e.clientX,
+                      y: e.clientY,
+                      title: id,
+                      subtitle: providerAbbrev ?? 'Source Paragraph',
+                      content: paraData?._fullParagraph,
+                    });
+                    setHoveredParagraphId(id);
+                  }}
+                  onMouseLeave={() => {
+                    setTooltip(null);
+                    setHoveredParagraphId(null);
+                  }}
                   onClick={
                     hasText
                       ? (e) => {
@@ -1547,7 +1517,6 @@ export function ParagraphSpaceView({
                       strokeWidth={1}
                     />
                   )}
-                  <title>{titleText}</title>
                 </g>
               );
             }
@@ -1574,8 +1543,20 @@ export function ParagraphSpaceView({
                   strokeWidth={
                     isParaSelected ? 2 : isHovSource ? 1.5 : isHovered ? 1.5 : isHovSibling ? 1 : 1
                   }
-                  onMouseEnter={() => setHoveredParagraphId(id)}
-                  onMouseLeave={() => setHoveredParagraphId(null)}
+                  onMouseEnter={(e) => {
+                    setTooltip({
+                      x: e.clientX,
+                      y: e.clientY,
+                      title: id,
+                      subtitle: providerAbbrev ?? (basinId != null ? `Basin ${basinId}` : 'Paragraph'),
+                      content: paraData?._fullParagraph,
+                    });
+                    setHoveredParagraphId(id);
+                  }}
+                  onMouseLeave={() => {
+                    setTooltip(null);
+                    setHoveredParagraphId(null);
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onParagraphClick) onParagraphClick(id, nodeModelIndex ?? 0);
@@ -1634,84 +1615,8 @@ export function ParagraphSpaceView({
                   }}
                   style={{ cursor: 'pointer', opacity: displayOpacity }}
                 >
-                  {rv && rv.total > 0 ? (
-                    (() => {
-                      // Risk donut glyph — three segments proportional to type1/type2/type3
-                      const r = Math.max(11, Math.min(22, 11 + rv.total * 0.5));
-                      const w = Math.max(3.5, r * 0.35);
-                      const segments = [
-                        {
-                          count: rv.type2,
-                          baseColor: RISK_COLORS.deletion,
-                          damageColor: '#991b1b',
-                          fillRatio:
-                            rv.type2 > 0 ? Math.min(1, (rv.deletionDamage ?? 0) / rv.type2) : 0,
-                        },
-                        {
-                          count: rv.type3,
-                          baseColor: RISK_COLORS.degradation,
-                          damageColor: '#92400e',
-                          fillRatio:
-                            rv.type3 > 0 ? Math.min(1, (rv.degradationDamage ?? 0) / rv.type3) : 0,
-                        },
-                        {
-                          count: rv.type1,
-                          baseColor: RISK_COLORS.shared,
-                          damageColor: null as string | null,
-                          fillRatio: 0,
-                        },
-                      ].filter((s) => s.count > 0);
-                      const total = rv.total;
-                      let angle = 0;
-                      const selStroke = isSel ? 2.5 : isHov ? 1.5 : 0;
-                      return (
-                        <>
-                          {/* Selection/hover ring */}
-                          {(isSel || isHov) && (
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={r + 2}
-                              fill="none"
-                              stroke={isSel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)'}
-                              strokeWidth={selStroke}
-                            />
-                          )}
-                          {/* Donut segments with damage overlays */}
-                          {segments.map((seg, i) => {
-                            const sweep = (seg.count / total) * Math.PI * 2;
-                            const startA = angle;
-                            angle += sweep;
-                            const opac = isSel ? 1 : isHov ? 0.95 : 0.8;
-                            return (
-                              <g key={i}>
-                                <path
-                                  d={donutArc(cx, cy, r, w, startA, startA + sweep)}
-                                  fill={seg.baseColor}
-                                  opacity={opac}
-                                />
-                                {seg.fillRatio > 0 && seg.damageColor && (
-                                  <path
-                                    d={donutArc(
-                                      cx,
-                                      cy,
-                                      r,
-                                      w,
-                                      startA,
-                                      startA + sweep * seg.fillRatio
-                                    )}
-                                    fill={seg.damageColor}
-                                    opacity={opac}
-                                  />
-                                )}
-                              </g>
-                            );
-                          })}
-                          {/* Center dot for visual anchor */}
-                          <circle cx={cx} cy={cy} r={2} fill="rgba(255,255,255,0.6)" />
-                        </>
-                      );
-                    })()
+                  {rv && rv.canonicalCount > 0 ? (
+                    <RiskDonutGlyph cx={cx} cy={cy} rv={rv} isSel={isSel} isHov={isHov} />
                   ) : (
                     /* Fallback: original diamond */
                     <polygon
@@ -1733,7 +1638,7 @@ export function ParagraphSpaceView({
                         x={cx}
                         y={
                           cy -
-                          (rv ? Math.max(11, Math.min(22, 11 + (rv?.total ?? 0) * 0.5)) : size) -
+                          (rv ? Math.max(11, Math.min(22, 11 + (rv?.canonicalCount ?? 0) * 0.5)) : size) -
                           4
                         }
                         textAnchor="middle"
@@ -1749,28 +1654,28 @@ export function ParagraphSpaceView({
                             x={cx}
                             y={
                               cy +
-                              (rv ? Math.max(11, Math.min(22, 11 + rv.total * 0.5)) : size) +
+                              (rv ? Math.max(11, Math.min(22, 11 + rv.canonicalCount * 0.5)) : size) +
                               12
                             }
                             textAnchor="middle"
                             fill="rgba(255,255,255,0.6)"
                             fontSize={9}
                           >
-                            {`D:${rv.type2} S:${rv.type3} P:${rv.type1}${rv.cascadeFragility != null ? ` F:${rv.cascadeFragility.toFixed(1)}` : ''}`}
+                            {`S:${rv.sovereignCount} P:${rv.sharedCount}${rv.cascadeFragility != null ? ` F:${rv.cascadeFragility.toFixed(1)}` : ''}`}
                           </text>
-                          {rv.totalDamage != null && rv.totalDamage > 0 && (
+                          {rv.degradationDamage != null && rv.degradationDamage > 0 && (
                             <text
                               x={cx}
                               y={
                                 cy +
-                                (rv ? Math.max(11, Math.min(22, 11 + rv.total * 0.5)) : size) +
+                                (rv ? Math.max(11, Math.min(22, 11 + rv.canonicalCount * 0.5)) : size) +
                                 23
                               }
                               textAnchor="middle"
                               fill="rgba(255,255,255,0.45)"
                               fontSize={8}
                             >
-                              {`DD:${(rv.deletionDamage ?? 0).toFixed(1)} GD:${(rv.degradationDamage ?? 0).toFixed(1)} TD:${(rv.totalDamage ?? 0).toFixed(1)}`}
+                              {`GD:${(rv.degradationDamage ?? 0).toFixed(1)}`}
                             </text>
                           )}
                         </>
@@ -1780,7 +1685,25 @@ export function ParagraphSpaceView({
                 </g>
               );
             })}
+          </g>
         </svg>
+
+        {/* Zoom Controls */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/40 border border-white/10 rounded-full px-3 py-1.5 backdrop-blur-sm z-20 pointer-events-auto">
+          <button
+            type="button"
+            className="text-[10px] font-bold text-text-muted hover:text-text-primary px-2 py-0.5 transition-colors flex items-center gap-1.5"
+            onClick={fitToScreen}
+            title="Fit to Screen (F)"
+          >
+            <span>FIT</span>
+            <span className="opacity-40 font-mono">[F]</span>
+          </button>
+          <div className="w-px h-3 bg-white/10" />
+          <span className="text-[10px] font-mono text-text-muted w-10 text-center">
+            {Math.round(transform.scale * 100)}%
+          </span>
+        </div>
 
         {/* Paragraph inspect panel — absolute overlay inside the relative container */}
         {selectedParagraphId &&
@@ -1826,6 +1749,8 @@ export function ParagraphSpaceView({
               </div>
             );
           })()}
+        {/* Tooltip Overlay */}
+        <TooltipOverlay tooltip={tooltip} />
       </div>
     </div>
   );

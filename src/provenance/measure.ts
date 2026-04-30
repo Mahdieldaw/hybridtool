@@ -19,7 +19,7 @@ import type {
   ClaimDensityProfile,
   ClaimDensityResult,
   ParagraphCoverageEntry,
-  PassageEntry,
+  StatementPassageEntry,
 } from '../../shared/types';
 import type { MeasuredRegion, PeripheryResult } from '../geometry';
 import { cosineSimilarity } from '../clustering/distance';
@@ -381,37 +381,95 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     }
     for (const arr of byModel.values()) arr.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
 
-    const passages: PassageEntry[] = [];
-    for (const [modelIndex, sorted] of byModel) {
-      const strictCore = sorted.filter(
-        (pc) => pc.coverage > 0.5 && !peripheralNodeIds.has(pc.paragraphId)
-      );
-      let runStart = 0;
-      for (let i = 1; i <= strictCore.length; i++) {
-        const isBreak =
-          i === strictCore.length ||
-          strictCore[i].paragraphIndex !== strictCore[i - 1].paragraphIndex + 1;
-        if (isBreak) {
-          const run = strictCore.slice(runStart, i);
-          passages.push({
-            modelIndex,
-            startParagraphIndex: strictCore[runStart].paragraphIndex,
-            endParagraphIndex: strictCore[i - 1].paragraphIndex,
-            length: i - runStart,
-            avgCoverage: run.reduce((s, p) => s + p.coverage, 0) / run.length,
+    // Build a paragraph-index → coverage lookup for avgCoverage on statement passages
+    const coverageByParagraphId = new Map<string, number>();
+    for (const pc of paragraphCoverage) coverageByParagraphId.set(pc.paragraphId, pc.coverage);
+
+    // ── Statement-level passage builder ──────────────────────────────────────────
+    // For each model, concatenate canonical statement IDs in (paragraphIndex, sentenceIndex)
+    // order. Detect contiguous runs of ≥2 canonical claim statements. Run length is the
+    // continuous measurement — no MAJ threshold applied here.
+    //
+    // Paragraph-boundary annotations (boundaryCrossing, paragraphsCrossed, inParagraphPassage)
+    // are deliberately omitted in this commit. The substrate (stmtToParagraphId) is already
+    // available to add them as a pure annotation pass when they become load-bearing.
+    const statementPassages: StatementPassageEntry[] = [];
+
+    // Group all paragraphs by model, sorted by paragraphIndex
+    const parasByModel = new Map<number, typeof shadowParagraphs[number][]>();
+    for (const para of shadowParagraphs) {
+      if (peripheralNodeIds.has(para.id)) continue;
+      let arr = parasByModel.get(para.modelIndex);
+      if (!arr) { arr = []; parasByModel.set(para.modelIndex, arr); }
+      arr.push(para);
+    }
+    for (const arr of parasByModel.values()) arr.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
+
+    // Build the canonical statement set for quick membership test
+    const canonicalStmtSet = new Set(canonicalStatementIds);
+
+    for (const [modelIndex, sortedParas] of parasByModel) {
+      // Full-sequence scan: walk ALL statements in model order, mark canonical membership
+      const allModelStmts: Array<{ sid: string; isCanonical: boolean; paragraphId: string }> = [];
+      for (const para of sortedParas) {
+        for (const sid of para.statementIds) {
+          allModelStmts.push({
+            sid,
+            isCanonical: canonicalStmtSet.has(sid),
+            paragraphId: para.id,
           });
-          runStart = i;
         }
+      }
+
+      // Detect contiguous canonical runs (no non-canonical gap allowed)
+      let i = 0;
+      while (i < allModelStmts.length) {
+        if (!allModelStmts[i].isCanonical) { i++; continue; }
+        // Start of a canonical run
+        const runSids: string[] = [];
+        const runParaIds: string[] = [];
+        while (i < allModelStmts.length && allModelStmts[i].isCanonical) {
+          runSids.push(allModelStmts[i].sid);
+          runParaIds.push(allModelStmts[i].paragraphId);
+          i++;
+        }
+        if (runSids.length < 2) continue; // isolated mention — not a passage
+
+        // Compute avgCoverage from spanned paragraphs
+        const spannedParaIds = [...new Set(runParaIds)];
+        const avgCov = spannedParaIds.length > 0
+          ? spannedParaIds.reduce((s, pid) => s + (coverageByParagraphId.get(pid) ?? 0), 0) / spannedParaIds.length
+          : 0;
+
+        // paragraph index range (legacy compat fields)
+        const paraIndexMap = new Map<string, number>();
+        for (const para of sortedParas) paraIndexMap.set(para.id, para.paragraphIndex);
+        const spannedParaIndices = spannedParaIds.map(pid => paraIndexMap.get(pid) ?? 0);
+        const startParagraphIndex = Math.min(...spannedParaIndices);
+        const endParagraphIndex = Math.max(...spannedParaIndices);
+
+        statementPassages.push({
+          modelIndex,
+          statementIds: runSids,
+          statementLength: runSids.length,
+          startParagraphIndex,
+          endParagraphIndex,
+          avgCoverage: avgCov,
+          spanParagraphCount: spannedParaIds.length,
+        });
       }
     }
 
+
+
+    // ── Derived measurements from statement passages ─────────────────────────────
     let maxPassageLength = 0,
       meanCoverageInLongestRun = 0;
-    for (const p of passages) {
-      if (p.length > maxPassageLength) {
-        maxPassageLength = p.length;
+    for (const p of statementPassages) {
+      if (p.statementLength > maxPassageLength) {
+        maxPassageLength = p.statementLength;
         meanCoverageInLongestRun = p.avgCoverage;
-      } else if (p.length === maxPassageLength && p.avgCoverage > meanCoverageInLongestRun) {
+      } else if (p.statementLength === maxPassageLength && p.avgCoverage > meanCoverageInLongestRun) {
         meanCoverageInLongestRun = p.avgCoverage;
       }
     }
@@ -420,17 +478,23 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     densityProfiles[claim.id] = {
       claimId: claim.id,
       paragraphCount: paragraphCoverage.length,
-      passageCount: passages.length,
+      passageCount: statementPassages.length,
       maxPassageLength,
       meanCoverageInLongestRun,
       modelSpread: byModel.size,
-      modelsWithPassages: new Set(passages.filter((p) => p.length >= 2).map((p) => p.modelIndex))
-        .size,
+      modelsWithPassages: new Set(
+        statementPassages.map((p) => p.modelIndex)
+      ).size,
       totalClaimStatements: Array.from(paraStmtCounts.values()).reduce((a, b) => a + b, 0),
       presenceMass,
       meanCoverage: paragraphCoverage.length > 0 ? presenceMass / paragraphCoverage.length : 0,
+      presenceVector: paragraphCoverage.map((pc) => ({
+        paragraphId: pc.paragraphId,
+        value: pc.coverage,
+      })),
       paragraphCoverage,
-      passages,
+
+      statementPassages,
     };
 
     perClaimMixed[claim.id] = {

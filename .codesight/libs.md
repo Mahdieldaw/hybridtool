@@ -1,0 +1,413 @@
+# Libraries
+
+- `shared\artifact-processor.ts`
+  - class ArtifactProcessor
+  - interface Artifact
+  - interface ProcessedResponse
+- `shared\citation-utils.ts`
+  - function normalizeProviderId: (backendId) => string
+  - function normalizeCitationSourceOrder: (rawCitationOrder, string | number> | null) => string[]
+  - function resolveProviderId: (modelIndex, citationSourceOrder?, any> | null) => string | null
+  - function resolveModelDisplayName: (modelIndex, citationSourceOrder?, any> | null) => string
+  - function getCitationSourceOrder: (artifact) => Record<string | number, string> | null
+- `shared\cognitive-artifact.ts` — function buildCognitiveArtifact: (mapper?, pipeline?) => any | null
+- `shared\corpus-utils.ts`
+  - function deriveArtifactIndex: (artifact) => CorpusIndex | null
+  - function buildCorpusTree: (shadowStatements, shadowParagraphs) => CorpusTree
+  - function buildCorpusIndex: (tree, enrichedClaims, claimStatementIds?, string[]> | Record<string, string[]>) => CorpusIndex
+  - function getParagraphsForClaim: (index, claimId) => string[]
+  - function getModelsForClaim: (index, claimId) => number[]
+  - function getBasinsForClaim: (index, claimId) => (number | null)[]
+  - _...6 more_
+- `shared\parsing-utils.ts`
+  - function repairJson: (text) => string
+  - function extractJsonObject: (text) => void
+  - function extractJsonFromContent: (content) => any | null
+  - function parseConciergeOutput: (rawResponse) => ConciergeOutput
+  - function parseHandoffResponse: (raw) => ParsedHandoffResponse
+  - function hasHandoffContent: (delta) => boolean
+  - _...3 more_
+- `shared\provider-config.ts`
+  - function canonicalCitationOrder: (activeProviderIds) => string[]
+  - function buildCitationSourceOrder: (orderedProviderIds) => Record<number, string>
+  - function selectBestProvider: (role, authStatus, boolean>, availableProviders?) => string | null
+  - function isProviderAuthorized: (providerId, authStatus, boolean>) => boolean
+  - type ProviderRole
+  - const CANONICAL_PROVIDER_ORDER: readonly string[]
+  - _...1 more_
+- `shared\think-utils.ts`
+  - function computeThinkFlag: ({...}, input, inputFlags }) => boolean
+  - interface ComputeThinkFlagArgs
+  - const AI_THINK_FLAG
+- `shared\types\provider.ts`
+  - class HTOSError
+  - class ProviderAuthError
+  - interface ProviderError
+  - type ProviderKey
+  - type ProviderErrorType
+  - type HTOSErrorCode
+- `shared\types\turns.ts`
+  - function isUserTurn: (turn) => turn is
+  - function isAiTurn: (turn) => turn is
+  - interface ProbeResult
+  - interface ProbeCorpusHit
+  - interface ProbeSessionResponse
+  - interface ProbeSession
+  - _...3 more_
+- `src\clustering\config.ts`
+  - function getConfigForModel: (modelId) => EmbeddingConfig
+  - interface EmbeddingConfig
+  - interface EmbeddingModelEntry
+  - const EMBEDDING_MODELS: EmbeddingModelEntry[]
+  - const DEFAULT_CONFIG: EmbeddingConfig
+- `src\clustering\corpus-search.ts` — function searchCorpus: (queryEmbedding, paragraphEmbeddings, Float32Array>, paragraphMeta, maxResults) => CorpusSearchHit[], interface CorpusSearchHit
+- `src\clustering\distance.ts` — function cosineSimilarity: (a, b) => number
+- `src\clustering\embeddings.ts`
+  - function structuredTruncate: (text, maxChars) => string
+  - function stripInlineMarkdown: (text) => string
+  - function cleanupPendingEmbeddingsBuffers: () => Promise<void>
+  - function generateEmbeddings: (paragraphs, shadowStatements, config) => Promise<EmbeddingResult>
+  - function generateTextEmbeddings: (texts, config) => Promise<TextEmbeddingResult>
+  - function generateStatementEmbeddings: (statements, config) => Promise<StatementEmbeddingResult>
+  - _...4 more_
+- `src\concierge-service\concierge-service.ts`
+  - function buildTurn2Message: (userMessage) => string
+  - function buildTurn3PlusMessage: (userMessage, pendingHandoff) => string
+  - function buildConciergePrompt: (userMessage, options?) => string
+  - interface PriorContext
+  - interface ConciergePromptOptions
+  - const HANDOFF_V2_ENABLED
+  - _...2 more_
+- `src\concierge-service\editorial-mapper.ts`
+  - function buildPassageIndex: (claimDensity, passageRouting, statementClassification, corpus, claims, citationSourceOrder, string>, continuityMap, SourceContinuityEntry>) => void
+  - function buildEditorialPrompt: (userQuery, passages, unclaimed, corpusShape) => string
+  - function parseEditorialOutput: (rawText, validPassageKeys, validUnclaimedKeys) => EditorialParseResult
+  - interface IndexedPassage
+  - interface IndexedUnclaimedGroup
+  - interface EditorialParseResult
+- `src\concierge-service\evidence-substrate.ts` — function buildLookupCacheFromIndex: (passages, unclaimed) => EvidenceSubstrateLookupCache, function buildEvidenceSubstrate: (artifact, mappingText, citationSourceOrder, string>, options?) => string
+- `src\concierge-service\position-brief.ts` — function buildPositionBriefFromClaims: (claims) => string, function buildPositionBrief: (analysis) => string
+- `src\errors\classifier.ts`
+  - function classifyError: (error) => ProviderError
+  - function formatRetryAfter: (ms) => string
+  - function isProviderAuthError: (error) => boolean
+  - function isDefinitiveAuthError: (error) => boolean
+  - function isRateLimitError: (error) => boolean
+  - function isNetworkError: (error) => boolean
+- `src\errors\handler.ts`
+  - function createProviderAuthError: (providerId, originalError, context, unknown>) => ProviderAuthError
+  - function createMultiProviderAuthError: (providerIds, context) => HTOSError | null
+  - function getErrorMessage: (error) => string
+  - function normalizeError: (error, context, unknown>) => HTOSError
+  - class ErrorHandler
+  - const PROVIDER_CONFIG: Record<string, ProviderConfigEntry>
+  - _...1 more_
+- `src\errors\infra-logger.ts` — function logInfraError: (label, err) => void
+- `src\errors\retry.ts`
+  - function getPolicy: (name) => RetryPolicy
+  - function policyForErrorType: (type) => RetryPolicy | null
+  - function logRetryEvent: (event) => void
+  - function computeBackoffMs: (policy, attempt, retryAfterMs?, retryStage?) => number
+  - function retryWithPolicy: (fn) => void
+  - interface RetryPolicy
+  - _...3 more_
+- `src\execution\deterministic-pipeline.ts`
+  - function computeDerivedFields: ({...}, mapperClaimsForProvenance, parsedEdges, shadowStatements, shadowParagraphs, statementEmbeddings, paragraphEmbeddings, claimEmbeddings, queryEmbedding, substrate, preSemantic, regions, existingQueryRelevance, modelCount, mixedProvenanceResult, }, Float32Array> | null;
+  paragraphEmbeddings, Float32Array>;
+  claimEmbeddings, Float32Array> | null;
+  queryEmbedding?) => Promise<DerivedFields>
+  - function buildSubstrateGraph: ({...}, regions, }) => unknown
+  - function assembleMapperArtifact: ({...}, enrichedClaims, parsedNarrative, queryText, modelCount, shadowStatements, shadowParagraphs, turn, }) => Promise<unknown>
+  - function executeArtifactPipeline: ({...}) => void
+  - function buildArtifactForProvider: ({...}, shadowStatements, shadowParagraphs, batchSources, statementEmbeddings, paragraphEmbeddings, queryEmbedding, geoRecord, claimEmbeddings, citationSourceOrder, queryText, modelCount, turn, embeddingModelId, }, Float32Array>;
+  paragraphEmbeddings, Float32Array>;
+  queryEmbedding?, unknown> | null;
+  claimEmbeddings?, Float32Array> | null;
+  citationSourceOrder?, string> | null;
+  queryText?) => Promise<Record<string, unknown>>
+  - function computeProbeGeometry: ({...}, content, embeddingConfig, }) => Promise<Record<string, unknown>>
+- `src\execution\io\context-manager.ts` — class ContextManager
+- `src\execution\io\context-resolver.ts`
+  - function aggregateBatchOutputs: (providerResponses) => FrozenBatchMap
+  - function findLatestMappingOutput: (providerResponses, preferredProvider?) => void
+  - function extractUserMessage: (userTurn) => string
+  - class ContextResolver
+- `src\execution\io\persistence-coordinator.ts` — class PersistenceCoordinator
+- `src\execution\io\streaming-manager.ts` — class StreamingManager
+- `src\execution\io\turn-emitter.ts` — class TurnEmitter
+- `src\execution\pipeline\batch-phase.ts` — function executeBatchPhase: (step, context, options) => void
+- `src\execution\pipeline\mapping-phase.ts` — function executeMappingPhase: (step, context, stepResults, workflowContexts, options) => void
+- `src\execution\pipeline\recompute-handler.ts` — function handleRecompute: (payload, options) => void
+- `src\execution\pipeline\singularity-phase.ts` — function runSingularityLLM: (step, context, options) => Promise<any>, function executeSingularityPhase: (request, context, stepResults, any>, _resolvedContext, currentUserMessage, options) => void
+- `src\execution\preflight-validator.ts`
+  - function getProviderUrl: (providerId) => string
+  - function createAuthErrorMessage: (unauthorizedProviders, context) => string | null
+  - function runPreflight: (request, authStatus, boolean>, availableProviders) => Promise<
+- `src\execution\utils\geometry-runner.ts` — function buildGeometryAsync: (paragraphResult, shadowResult, _indexedSourceData, payload, context, options, geometryDiagnostics, nowMs) => void
+- `src\execution\utils\llm-runner.ts` — function executeGenericSingleStep: (step, context, providerId, prompt, stepType, options, parseOutputFn) => void
+- `src\execution\utils\reactive-bridge.ts`
+  - function buildReactiveBridge: (userMessage, previousAnalysis) => ReactiveBridge | null
+  - function buildReactiveBridgeCached: (userMessage, previousAnalysis, turnId) => ReactiveBridge | null
+  - interface ReactiveBridge
+  - type StoredAnalysis
+- `src\execution\workflow-compiler.ts` — class WorkflowCompiler
+- `src\execution\workflow-engine.ts` — class WorkflowEngine
+- `src\geometry\algorithms\basin-inversion-bayesian.ts` — function computeBasinInversion: (substrate) => BasinInversionResult
+- `src\geometry\algorithms\basin-inversion.ts` — function computeBasinInversion: (idsIn, vectorsIn) => BasinInversionResult
+- `src\geometry\algorithms\gap-regionalization.ts`
+  - function computeGapRegionalization: (nodes) => GapRegionalizationResult
+  - interface GapRegionalizationResult
+  - interface GapRegion
+  - interface NodeGapProfile
+  - interface GapRegionalizationMeta
+- `src\geometry\annotate.ts`
+  - function enrichStatementsWithGeometry: (statements, paragraphs, substrate, interpretation?, statementToParagraph?, string>) => EnrichmentResult
+  - function computeQueryRelevance: (input, Float32Array> | null;
+  paragraphEmbeddings?, Float32Array> | null;
+  paragraphs, string> | null;
+}) => QueryRelevanceResult
+  - function annotateStatements: (input, Float32Array> | null;
+  paragraphEmbeddings?, Float32Array> | null;
+}) => void
+  - interface EnrichmentResult
+  - interface QueryRelevanceStatementScore
+  - interface QueryRelevanceResult
+  - _...1 more_
+- `src\geometry\engine.ts` — function buildGeometryPipeline: (input, Float32Array> | null;
+  statementEmbeddings?, Float32Array> | null;
+  embeddingBackend?) => GeometryPipelineResult, interface GeometryPipelineResult
+- `src\geometry\interpret.ts`
+  - function identifyPeriphery: (basinInversion, regionsOrTopologyIndex?, number>; gapSizes, number> }) => PeripheryResult
+  - function interpretSubstrate: (substrate, paragraphEmbeddings?, Float32Array> | null) => SubstrateInterpretation
+  - function buildPreSemanticInterpretation: (substrate, paragraphEmbeddings?, Float32Array> | null, _queryRelevanceBoost?) => SubstrateInterpretation
+- `src\geometry\layout.ts` — function computeUmapLayout: (paragraphIds, embeddings, Float32Array>, seed) => Layout2DResult, interface Layout2DResult
+- `src\geometry\measure.ts`
+  - function quantize: (value) => number
+  - function computeExtendedStatsFromArray: (allSims) => ExtendedSimilarityStats
+  - function buildPairwiseField: (paragraphIds, embeddings, Float32Array>) => PairwiseField
+  - function buildMutualRankGraph: (pairwiseField) => MutualRankGraph
+  - function computeNodeStats: (paragraphs, mutualRankGraph) => NodeLocalStats[]
+  - function measureSubstrate: (paragraphs, embeddings, Float32Array> | null, embeddingBackend, config) => GeometricSubstrate | DegenerateSubstrate
+  - _...3 more_
+- `src\geometry\types.ts`
+  - function isDegenerate: (s) => s is DegenerateSubstrate
+  - interface ExtendedSimilarityStats
+  - interface NodeLocalStats
+  - interface PairwiseFieldStats
+  - interface PairwiseField
+  - interface MutualRankEdge
+  - _...18 more_
+- `src\persistence\database.ts`
+  - function openDatabase: () => Promise<IDBDatabase>
+  - function getCurrentSchemaVersion: (db) => Promise<number>
+  - function checkDatabaseHealth: () => Promise<
+  - function deleteDatabase: () => Promise<void>
+  - const SCHEMA_VERSION
+  - const STORE_CONFIGS: StoreConfig[]
+- `src\persistence\embedding-codec.ts` — function packEmbeddingMap: (map, Float32Array>, dimensions) => void, function unpackEmbeddingMap: (buffer, index, dimensions) => Map<string, Float32Array>
+- `src\persistence\index.ts` — function initializePersistenceLayer: () => Promise<PersistenceLayer>
+- `src\persistence\persistence-monitor.ts`
+  - class PersistenceMonitor
+  - interface PersistenceOperationRecord
+  - interface PersistencePerformanceMetrics
+  - interface PersistenceErrorRecord
+  - interface PersistenceConnectionRecord
+  - interface PersistenceMonitorMetrics
+  - _...1 more_
+- `src\persistence\schema-verification.ts` — function verifySchemaAndRepair: (autoRepair) => Promise<, interface SchemaHealth
+- `src\persistence\session-manager.ts` — class SessionManager
+- `src\persistence\simple-indexeddb-adapter.ts` — class SimpleIndexedDBAdapter, interface SimpleRecord
+- `src\persistence\transactions.ts`
+  - function withTransaction: (db, storeNames, mode, work) => void
+  - function batchWrite: (db, storeName, records) => Promise<BatchWriteResult>
+  - function batchDelete: (db, storeName, keys) => void
+  - function updateWithVersionCheck: (db, storeName, id, updates, expectedVersion) => Promise<VersionConflictResult>
+  - function multiStoreTransaction: (db, storeNames, operations, IDBObjectStore>) => void
+  - function promisifyRequest: (request) => Promise<T>
+  - _...3 more_
+- `src\provenance\classify.ts` — function computeStatementClassification: (input) => StatementClassificationResult, interface ClassifyPhaseInput
+- `src\provenance\engine.ts`
+  - function buildProvenancePipeline: (input) => Promise<ProvenancePipelineOutput>
+  - interface ProvenancePipelineInput
+  - interface ProvenancePipelineOutput
+- `src\provenance\measure.ts`
+  - function measureProvenance: (input) => Promise<MeasurePhaseOutput>
+  - interface ClaimExclusivity
+  - interface MeasurePhaseInput
+  - interface MeasurePhaseOutput
+- `src\provenance\semantic-mapper.ts`
+  - function buildSemanticMapperPrompt: (userQuery, responses) => string
+  - function parseSemanticMapperOutput: (rawResponse, _shadowStatements?) => ParseResult
+  - interface ParseResult
+- `src\provenance\structure.ts`
+  - function analyzeGlobalStructure: (input) => any
+  - type StructurePhaseOutput
+  - const computeStructuralAnalysis
+  - const runStructurePhase
+- `src\provenance\surface.ts`
+  - function computeNounSurvivalRatio: (text) => number
+  - function computeTopologicalSurface: (input) => SurfaceOutput
+  - function buildSourceContinuityMap: (claimDensity) => Map<string, SourceContinuityEntry>
+  - interface SurfaceInput
+  - interface SurfaceOutput
+  - interface SourceContinuityEntry
+- `src\provenance\validate.ts`
+  - function validateEdgesAndAllegiance: (input) => ValidateOutput
+  - interface ValidateInput
+  - interface ValidateOutput
+- `src\providers\chatgpt-adapter.js` — class ChatGPTAdapter
+- `src\providers\chatgpt.js`
+  - class ChatGPTProviderError
+  - class ChatGPTProviderController
+  - class ChatGPTSessionApi
+  - const ChatGPTModels
+- `src\providers\claude-adapter.js` — class ClaudeAdapter
+- `src\providers\claude.js`
+  - class ClaudeProviderError
+  - class ClaudeSessionApi
+  - class ClaudeProviderController
+  - const ClaudeModels
+- `src\providers\gemini-adapter.js` — class GeminiAdapter
+- `src\providers\gemini.js`
+  - class GeminiProviderError
+  - class ColdStartDetectedError
+  - class GeminiSessionApi
+  - class GeminiProviderController
+  - const GeminiModels
+- `src\providers\grok-adapter.js` — class GrokAdapter
+- `src\providers\grok-crypto.js` — function generateKeys: () => void, function signChallenge: (challengeData, privateKeyB64) => void
+- `src\providers\grok-signature.js`
+  - function generateSign: (path, method, verificationToken, svg, xValues, timeN, randomFloat) => void
+  - function between: (haystack, start, end) => void
+  - function parseVerificationToken: (html, metaName) => void
+  - function parseSvgData: (html, anim) => void
+  - function parseXValues: (scriptContent) => void
+- `src\providers\grok.js`
+  - class GrokProviderError
+  - class GrokSessionApi
+  - class GrokProviderController
+  - const GrokModels
+- `src\providers\health\provider-health-gate.ts`
+  - function runWithProviderHealth: (tracker, providerId, stage, fn) => void
+  - interface RunWithHealthOptions
+  - type HealthTrackerLike
+- `src\providers\health\provider-health-tracker.js` — function getHealthTracker: () => void, class ProviderHealthTracker
+- `src\providers\provider-locks.ts`
+  - function getProviderLocks: () => Promise<ProviderLocks>
+  - function setProviderLock: (role, locked) => Promise<void>
+  - function subscribeToLockChanges: (callback) => void
+  - interface ProviderLocks
+- `src\providers\qwen-adapter.js` — class QwenAdapter
+- `src\providers\qwen.js`
+  - class QwenProviderError
+  - class ServerTransientError
+  - class QwenSessionApi
+  - class QwenProviderController
+- `src\shadow\exclusion-rules.ts`
+  - function isExcluded: (text, stance, opts?) => ExclusionResult
+  - interface ExclusionResult
+  - interface ExclusionRule
+  - const EXCLUSION_RULES: ExclusionRule[]
+- `src\shadow\shadow-extractor.ts`
+  - function extractShadowStatements: (responses) => ShadowExtractionResult
+  - interface TableCellMeta
+  - interface ShadowStatement
+  - interface ShadowStatementLocation
+  - interface ShadowExtractionResult
+- `src\shadow\shadow-paragraph-projector.ts`
+  - function projectParagraphs: (statements) => ParagraphProjectionResult
+  - interface ShadowParagraph
+  - interface ParagraphProjectionResult
+- `src\shadow\statement-types.ts`
+  - function getStancePriority: (stance) => number
+  - function classifyStance: (text) => void
+  - function detectSignals: (text) => void
+  - interface SignalPatterns
+  - type Stance
+  - const STANCE_PRIORITY: Stance[]
+  - _...2 more_
+- `src\system\connection-handler.ts` — class ConnectionHandler
+- `src\system\dnr-utils.ts` — class DNRUtils, class ProviderDNRGate
+- `src\system\lifecycle-manager.ts` — class LifecycleManager
+- `src\system\service-registry.ts` — class ServiceRegistry, const services: ServiceRegistry
+- `ui\config\provider-registry.ts`
+  - function getProviderById: (id) => ProviderConfig | undefined
+  - interface ProviderConfig
+  - const INITIAL_PROVIDERS: ProviderConfig[]
+  - const PROVIDER_COLORS: Record<string, string>
+  - const PROVIDER_ACCENT_COLORS: Record<string, string>
+- `ui\hooks\chat\useChat.ts` — function useChat: () => void
+- `ui\hooks\chat\usePortMessageHandler.ts` — function usePortMessageHandler: (enabled) => void
+- `ui\hooks\chat\useRoundActions.ts` — function useRoundActions: () => void
+- `ui\hooks\instrument\useClaimCentroids.ts` — function useClaimCentroids: (claims, substrate, mixedProvenance?, index?, passageRouting?) => ClaimCentroid[], interface ClaimCentroid
+- `ui\hooks\instrument\useEvidenceRows.ts` — function useEvidenceRows: (artifact, selectedClaimId) => EvidenceRow[], interface EvidenceRow
+- `ui\hooks\instrument\useInstrumentState.ts`
+  - function useInstrumentState: () => [InstrumentState, InstrumentActions]
+  - interface InstrumentState
+  - interface InstrumentActions
+  - type PipelineLayer
+  - type SelectedEntity
+  - type EvidenceScope
+- `ui\hooks\instrument\useParagraphRows.ts` — function useParagraphRows: (artifact, selectedClaimId) => ParagraphRow[], interface ParagraphRow
+- `ui\hooks\instrument\useZoomPan.ts` — function useZoomPan: (svgRef) => void, interface Transform
+- `ui\hooks\providers\useProviderActions.ts` — function useProviderActions: (sessionId, aiTurnId) => void
+- `ui\hooks\providers\useProviderArtifact.ts` — function useProviderArtifact: (turnId, providerId) => void
+- `ui\hooks\providers\useProviderStatus.ts`
+  - function useProviderStatus: (options, enabled) => UseProviderStatusReturn
+  - interface UseProviderStatusOptions
+  - interface UseProviderStatusReturn
+- `ui\hooks\providers\useSmartProviderDefaults.ts` — function useSmartProviderDefaults: (enabled) => void
+- `ui\hooks\reading\useArtifactResolution.ts` — function useArtifactResolution: (turnId) => ArtifactResolution, interface ArtifactResolution
+- `ui\hooks\reading\useCorpusSearch.ts`
+  - function useCorpusSearch: (aiTurnId) => void
+  - interface CorpusSearchHit
+  - interface ProbeSearchResult
+- `ui\hooks\reading\usePassageHighlight.ts` — function usePassageHighlight: (artifact, focusedClaimId) => Map<string, ParagraphHighlight>, interface ParagraphHighlight
+- `ui\hooks\reading\usePassageResolver.ts`
+  - function usePassageResolver: (artifact, citationSourceOrder, string> | null) => PassageResolver
+  - interface ResolvedPassage
+  - interface ResolvedUnclaimedGroup
+  - interface PassageResolver
+  - type ResolvedItem
+- `ui\hooks\ui\useClipActions.ts` — function useClipActions: () => void
+- `ui\hooks\ui\useConnectionMonitoring.ts` — function useConnectionMonitoring: (enabled) => void
+- `ui\hooks\ui\useHistoryLoader.ts` — function useHistoryLoader: (isInitialized) => void
+- `ui\hooks\ui\useInitialization.ts` — function useInitialization: () => boolean
+- `ui\hooks\ui\useKey.ts` — function useKey: (key, callback) => void
+- `ui\hooks\ui\useLoadingWatchdog.ts` — function useResponsiveLoadingGuard: (options?) => void
+- `ui\hooks\ui\useSessionSync.ts` — function useSessionSync: (isInitialized) => void
+- `ui\hooks\ui\useSingularityOutput.ts` — function useSingularityOutput: (aiTurnId, forcedProviderId?) => SingularityOutputState, interface SingularityOutputState
+- `ui\hooks\workflow\useSingularityTrigger.ts` — function useSingularityMode: (trackedAiTurnId?) => void, type SingularityTransitionOptions
+- `ui\instrument\expression-engine.ts`
+  - function compileExpression: (expression, columnIds) => CompiledExpression | null
+  - function validateExpression: (expression, columnIds) => string | null
+  - interface CompiledExpression
+- `ui\instrument\utils\svg-utils.ts` — function donutArc: (cx, cy, r, width, startAngle, endAngle) => string
+- `ui\services\port-health-manager.ts` — class PortHealthManager
+- `ui\state\cleanup.ts` — function cleanupTurnAtoms: (turnIds, turnIdProviderPairs) => void
+- `ui\utils\copy-format-utils.ts`
+  - function formatDecisionMapForMd: (narrative, claims, edges) => string
+  - function formatBatchResponseParts: (batchResponses, any> | null | undefined) => string[]
+  - function formatProviderResponseForMd: (response, providerName) => string
+  - function formatSessionForMarkdown: (fullSession) => string
+  - function formatSingularityResponse: (output) => string
+  - function formatMapperResponse: (aiTurn, effectivePid) => string
+  - _...4 more_
+- `ui\utils\math-renderer.ts` — function loadMathPlugins: () => void, function renderMathInMarkdown: (content) => Promise<string>
+- `ui\utils\math-utils.ts`
+  - function containsMath: (content) => boolean
+  - function safeArr: (v) => T[]
+  - function pearsonR: (xs, ys) => number | null
+- `ui\utils\parse-session-turns.ts` — function parseSessionTurns: (fullSession) => void
+- `ui\utils\provider-helpers.ts`
+  - function getProviderConfig: (providerId) => ProviderConfig | undefined
+  - function getProviderName: (providerId) => string
+  - function getProviderColor: (providerId) => string
+  - function getProviderLogo: (providerId) => string | undefined
+  - function getProviderAbbreviation: (providerId) => string
+  - function resolveProviderIdFromCitationOrder: (modelIndex, citationSourceOrder?, string>) => string | null
+- `ui\utils\streaming-buffer.ts` — class StreamingBuffer
+- `ui\utils\turn-helpers.ts`
+  - function createOptimisticAiTurn: (aiTurnId, userTurn, activeProviders, mappingProvider?, singularityProvider?, timestamp?, explicitUserTurnId?, requestedFeatures?) => AiTurnWithUI
+  - function applyStreamingTurnUpdate: (aiTurn, updates) => void
+  - function normalizeBackendRoundsToTurns: (rawTurns, sessionId) => Array<UserTurn | AiTurnWithUI>

@@ -127,9 +127,9 @@ export function usePassageResolver(
 
       // Find matching passage entry in density profiles
       const profile = densityProfiles[claimId];
-      if (!profile?.passages) return null;
+      if (!profile?.statementPassages) return null;
 
-      const passageEntry = profile.passages.find(
+      const passageEntry = profile.statementPassages.find(
         (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex
       );
       if (!passageEntry) return null;
@@ -152,9 +152,7 @@ export function usePassageResolver(
         modelName,
         claimId,
         claimLabel: claimLabels.get(claimId) || claimId,
-        paragraphCount:
-          passageEntry.length ??
-          passageEntry.endParagraphIndex - passageEntry.startParagraphIndex + 1,
+        paragraphCount: passageEntry.spanParagraphCount,
         concentrationRatio: rp?.concentrationRatio ?? 0,
         densityRatio: rp?.densityRatio ?? 0,
         landscapePosition: rp?.landscapePosition ?? 'floor',
