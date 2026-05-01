@@ -1,29 +1,23 @@
 /**
- * Editorial Mapper — builds a passage index, editorial prompt, and output parser.
+ * Editorial Mapper - builds a passage index, editorial prompt, and output parser.
  *
  * The editorial model arranges geometric passages into a readable, threaded
- * document (EditorialAST). No text generation — only arrangement of existing
+ * document (EditorialAST). No text generation - only arrangement of existing
  * model words.
  */
 
 import type {
+  Claim,
   ClaimDensityResult,
-  PassageRoutingResult,
-  StatementClassificationResult,
   EditorialAST,
   EditorialThread,
-  LandscapePosition,
-  Claim,
+  PassageRoutingResult,
+  StatementClassificationResult,
 } from '../../shared/types';
 import type { CorpusTree } from '../../shared/types/corpus-tree';
 import type { SourceContinuityEntry } from '../provenance/surface';
-import { extractJsonFromContent } from '../../shared/parsing-utils';
 import { resolveModelDisplayName } from '../../shared/citation-utils';
-import { assertMeasurementConsumer } from '../../shared/measurement-registry';
-
-// -------------------------------------------------------------------------
-// Passage Index types
-// -------------------------------------------------------------------------
+import { extractJsonFromContent } from '../../shared/parsing-utils';
 
 export interface IndexedPassage {
   passageKey: string;
@@ -34,13 +28,25 @@ export interface IndexedPassage {
   startParagraphIndex: number;
   endParagraphIndex: number;
   paragraphCount: number;
-  /** Number of statements in the contiguous run */
   statementLength: number;
   text: string;
-  concentrationRatio: number;
-  densityRatio: number;
-  meanCoverageInLongestRun: number;
-  landscapePosition: LandscapePosition;
+  routeOrderIndex: number | null;
+  routeIncluded: boolean;
+  routeOrderingReasons: string[];
+  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
+  concentrationRatio?: any;
+  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
+  densityRatio?: any;
+  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
+  meanCoverageInLongestRun?: any;
+  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
+  landscapePosition?: any;
+  presenceMass: number;
+  sovereignMass: number;
+  contestedShareRatio: number | null;
+  maxStatementRun: number;
+  dominantPresenceShare: number | null;
+  dominantPassageShare: number | null;
   isSoleSource: boolean;
   conflictClusterIndex: number | null;
   continuity: { prev: string | null; next: string | null };
@@ -60,10 +66,6 @@ export interface IndexedUnclaimedGroup {
   maxQueryRelevance: number;
 }
 
-// -------------------------------------------------------------------------
-// buildPassageIndex
-// -------------------------------------------------------------------------
-
 export function buildPassageIndex(
   claimDensity: ClaimDensityResult,
   passageRouting: PassageRoutingResult,
@@ -75,7 +77,6 @@ export function buildPassageIndex(
 ): { passages: IndexedPassage[]; unclaimed: IndexedUnclaimedGroup[] } {
   const passages: IndexedPassage[] = [];
 
-  // Build paragraph lookup: (modelIndex, paragraphOrdinal) → { _fullParagraph, statements }
   const paragraphLookup = new Map<string, { _fullParagraph?: string; statements?: any[] }>();
   for (const model of corpus.models) {
     for (const para of model.paragraphs) {
@@ -83,15 +84,20 @@ export function buildPassageIndex(
     }
   }
 
-  // Build claim label lookup
   const claimLabels = new Map<string, string>();
   for (const c of claims) {
     claimLabels.set(String(c.id), c.label || '');
   }
 
-  // Build a set of claim IDs in each conflict cluster for lookup
-  const claimToClusterIndex = new Map<string, number>();
   const routing = passageRouting.routing;
+  const routePlan = routing?.routePlan;
+  const routeOrderIndexByClaim = new Map<string, number>();
+  routePlan?.orderedClaimIds?.forEach((claimId, index) => {
+    routeOrderIndexByClaim.set(String(claimId), index);
+  });
+  const routeIncludedClaimIds = new Set((routePlan?.includedClaimIds ?? []).map(String));
+
+  const claimToClusterIndex = new Map<string, number>();
   if (routing?.conflictClusters) {
     for (let ci = 0; ci < routing.conflictClusters.length; ci++) {
       const cluster = routing.conflictClusters[ci];
@@ -101,15 +107,12 @@ export function buildPassageIndex(
     }
   }
 
-  // Iterate density profiles → passages
   for (const [claimId, profile] of Object.entries(claimDensity.profiles)) {
     const claimProfile = passageRouting.claimProfiles[claimId];
     if (!claimProfile) continue;
 
     for (const passageEntry of profile.statementPassages) {
       const passageKey = `${claimId}:${passageEntry.modelIndex}:${passageEntry.startParagraphIndex}`;
-
-      // Concatenate text from shadow paragraphs spanned by the run
       const textParts: string[] = [];
       for (let pi = passageEntry.startParagraphIndex; pi <= passageEntry.endParagraphIndex; pi++) {
         const sp = paragraphLookup.get(`${passageEntry.modelIndex}:${pi}`);
@@ -130,10 +133,15 @@ export function buildPassageIndex(
         paragraphCount: passageEntry.spanParagraphCount,
         statementLength: passageEntry.statementLength,
         text: textParts.join('\n\n'),
-        concentrationRatio: claimProfile.concentrationRatio,
-        densityRatio: claimProfile.densityRatio,
-        meanCoverageInLongestRun: claimProfile.meanCoverageInLongestRun ?? 0,
-        landscapePosition: claimProfile.landscapePosition,
+        routeOrderIndex: routeOrderIndexByClaim.get(claimId) ?? null,
+        routeIncluded: routeIncludedClaimIds.has(claimId),
+        routeOrderingReasons: routePlan?.orderingReasonsByClaim?.[claimId] ?? [],
+        presenceMass: claimProfile.presenceMass,
+        sovereignMass: claimProfile.sovereignMass,
+        contestedShareRatio: claimProfile.contestedShareRatio,
+        maxStatementRun: claimProfile.maxStatementRun,
+        dominantPresenceShare: claimProfile.dominantPresenceShare,
+        dominantPassageShare: claimProfile.dominantPassageShare,
         isSoleSource: (claimProfile.structuralContributors?.length ?? 0) === 1,
         conflictClusterIndex: claimToClusterIndex.get(claimId) ?? null,
         continuity: {
@@ -144,10 +152,7 @@ export function buildPassageIndex(
     }
   }
 
-  // Build unclaimed groups
   const unclaimed: IndexedUnclaimedGroup[] = [];
-
-  // Build a statement text lookup from corpus paragraphs
   const statementTextLookup = new Map<string, string>();
   for (const para of paragraphLookup.values()) {
     for (const s of para.statements ?? []) {
@@ -162,7 +167,6 @@ export function buildPassageIndex(
     if (!firstPara) continue;
 
     const groupKey = `unclaimed:${group.nearestClaimId}:${firstPara.modelIndex}:${firstPara.paragraphIndex}`;
-
     const paragraphs = group.paragraphs.map((pe) => {
       const sp = paragraphLookup.get(`${pe.modelIndex}:${pe.paragraphIndex}`);
       return {
@@ -188,22 +192,13 @@ export function buildPassageIndex(
   return { passages, unclaimed };
 }
 
-// -------------------------------------------------------------------------
-// Editorial prompt builder
-// -------------------------------------------------------------------------
-
-const LANDSCAPE_LABELS: Record<LandscapePosition, string> = {
-  northStar: 'North Star (largest majority coverage)',
-  leadMinority: 'Lead Minority (first minority claim)',
-  mechanism: 'Mechanism (secondary claim)',
-  floor: 'Floor (non-routed)',
-};
-
-const ROLE_DESCRIPTIONS = `anchor: the primary passage — establishes the thread's main claim
+const ROLE_DESCRIPTIONS = `anchor: the primary passage - establishes the thread's main claim
 support: reinforces the anchor from a different model or angle
-context: background or framing — worth having nearby but non-essential
+context: background or framing - worth having nearby but non-essential
 reframe: restates the same idea in a notably different frame
 alternative: a competing or conflicting take on the anchor's claim`;
+
+const fmt = (value: number | null): string => (value == null ? 'null' : value.toFixed(3));
 
 export function buildEditorialPrompt(
   userQuery: string,
@@ -213,34 +208,11 @@ export function buildEditorialPrompt(
     passageCount: number;
     claimCount: number;
     conflictCount: number;
-    concentrationSpread: { min: number; max: number; mean: number };
-    landscapeComposition: { northStar: number; leadMinority: number; mechanism: number; floor: number };
+    [legacyIgnored: string]: unknown;
   }
 ): string {
   const sections: string[] = [];
 
-  if (passages.length > 0) {
-    assertMeasurementConsumer('concentrationRatio', 'synthesis', 'editorial passage prompt');
-    assertMeasurementConsumer('densityRatio', 'synthesis', 'editorial passage prompt');
-    assertMeasurementConsumer('meanCoverageInLongestRun', 'synthesis', 'editorial passage prompt');
-
-    const landscapePositions = new Set(passages.map((p) => p.landscapePosition));
-    for (const position of landscapePositions) {
-      assertMeasurementConsumer(position, 'synthesis', 'editorial passage prompt');
-    }
-  }
-
-  for (const [position, count] of Object.entries(corpusShape.landscapeComposition)) {
-    if (count > 0) {
-      assertMeasurementConsumer(position, 'synthesis', 'editorial corpus shape prompt');
-    }
-  }
-
-  if (corpusShape.conflictCount > 0 || passages.some((p) => p.conflictClusterIndex !== null)) {
-    assertMeasurementConsumer('validatedConflict', 'synthesis', 'editorial conflict prompt');
-  }
-
-  // -- Role --
   sections.push(`You are an editorial arranger. You receive a set of pre-extracted passages from multiple AI models responding to a user query. Your job is to arrange these passages into a threaded reading document.
 
 CRITICAL CONSTRAINTS:
@@ -249,18 +221,13 @@ CRITICAL CONSTRAINTS:
 - Each thread must have at least one item with role "anchor".
 - A passage ID may appear in at most one thread.`);
 
-  // -- User query --
   sections.push(`## User Query
 ${userQuery}`);
 
-  // -- Corpus shape --
   sections.push(`## Corpus Shape
 - ${corpusShape.passageCount} passages across ${corpusShape.claimCount} claims
-- ${corpusShape.conflictCount} conflict cluster(s)
-- Concentration spread: min=${corpusShape.concentrationSpread.min.toFixed(2)}, max=${corpusShape.concentrationSpread.max.toFixed(2)}, mean=${corpusShape.concentrationSpread.mean.toFixed(2)}
-- Landscape: ${corpusShape.landscapeComposition.northStar} northStar, ${corpusShape.landscapeComposition.leadMinority} leadMinority, ${corpusShape.landscapeComposition.mechanism} mechanism, ${corpusShape.landscapeComposition.floor} floor`);
+- ${corpusShape.conflictCount} conflict cluster(s)`);
 
-  // -- Passages --
   const passageLines = passages.map((p) => {
     const extent = p.paragraphCount > 1 ? ` (${p.paragraphCount} paragraphs)` : '';
     const conflict =
@@ -273,18 +240,24 @@ ${userQuery}`);
       .filter(Boolean)
       .join(', ');
     const contStr = cont ? ` continuity: ${cont}` : '';
+    const route = p.routeIncluded
+      ? `included, order=${p.routeOrderIndex == null ? 'n/a' : p.routeOrderIndex}`
+      : 'not included in primary route plan';
+    const reasons = p.routeOrderingReasons.length
+      ? `\n- Route reasons: ${p.routeOrderingReasons.join('; ')}`
+      : '';
 
     return `### ${p.passageKey}
 - Model: ${p.modelName} (index ${p.modelIndex})
 - Claim: "${p.claimLabel}" (${p.claimId})
-- Landscape: ${LANDSCAPE_LABELS[p.landscapePosition]}
-- Concentration: ${p.concentrationRatio.toFixed(3)}, Density: ${p.densityRatio.toFixed(3)}, μRunCovg: ${p.meanCoverageInLongestRun.toFixed(3)}${sole}${conflict}${extent}${contStr}
+- Route: ${route}
+- Structural: presenceMass=${fmt(p.presenceMass)}, sovereignMass=${fmt(p.sovereignMass)}, contestedShareRatio=${fmt(p.contestedShareRatio)}, maxStatementRun=${p.maxStatementRun}, dominantPresenceShare=${fmt(p.dominantPresenceShare)}, dominantPassageShare=${fmt(p.dominantPassageShare)}${reasons}
+- Passage: statementLength=${p.statementLength}${sole}${conflict}${extent}${contStr}
 
 ${p.text}`;
   });
   sections.push(`## Passages\n${passageLines.join('\n\n---\n\n')}`);
 
-  // -- Unclaimed groups --
   if (unclaimed.length > 0) {
     const unclaimedLines = unclaimed.map((u) => {
       const stmts = u.paragraphs
@@ -300,11 +273,9 @@ ${stmts}`;
     sections.push(`## Unclaimed Groups\n${unclaimedLines.join('\n\n---\n\n')}`);
   }
 
-  // -- Roles --
   sections.push(`## Item Roles
 ${ROLE_DESCRIPTIONS}`);
 
-  // -- Output contract --
   sections.push(`## Output Format
 Return ONLY a JSON object inside a code fence. No text before or after.
 
@@ -338,17 +309,13 @@ Rules:
 - Each thread must contain at least one item with role "anchor".
 - A passage/unclaimed key may appear in at most one thread.
 - "thread_order" must list every thread id.
-- "start_here": true on exactly one thread — the recommended starting point.
+- "start_here": true on exactly one thread - the recommended starting point.
 - "flat_corpus": true if all passages share essentially the same claim with no meaningful differentiation.
 - Prefer fewer, richer threads over many thin ones. Typical range: 2-5 threads.
 - Group conflicting passages (same conflict cluster) into the same thread with roles "anchor" and "alternative".`);
 
   return sections.join('\n\n');
 }
-
-// -------------------------------------------------------------------------
-// Editorial output parser
-// -------------------------------------------------------------------------
 
 export interface EditorialParseResult {
   success: boolean;
@@ -364,20 +331,14 @@ export function parseEditorialOutput(
   validUnclaimedKeys: Set<string>
 ): EditorialParseResult {
   const errors: string[] = [];
-
-  // Extract JSON
   const parsed = extractJsonFromContent(rawText);
   if (!parsed || typeof parsed !== 'object') {
     return { success: false, errors: ['Failed to extract JSON from editorial output'] };
   }
 
-  // Validate orientation
   const orientation = typeof parsed.orientation === 'string' ? parsed.orientation.trim() : '';
-  if (!orientation) {
-    errors.push('Missing or empty orientation');
-  }
+  if (!orientation) errors.push('Missing or empty orientation');
 
-  // Validate threads array
   if (!Array.isArray(parsed.threads)) {
     return { success: false, errors: ['Missing threads array'] };
   }
@@ -401,13 +362,11 @@ export function parseEditorialOutput(
       errors.push('Thread missing id');
       continue;
     }
-
     if (!Array.isArray(thread.items)) {
       errors.push(`Thread "${threadId}" has no items array`);
       continue;
     }
 
-    // Validate items — drop hallucinated IDs, deduplicate
     const validItems: Array<{
       id: string;
       role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
@@ -418,15 +377,15 @@ export function parseEditorialOutput(
       const role = typeof item.role === 'string' ? item.role : '';
 
       if (!allValidKeys.has(itemId)) {
-        errors.push(`Hallucinated ID "${itemId}" in thread "${threadId}" — dropped`);
+        errors.push(`Hallucinated ID "${itemId}" in thread "${threadId}" - dropped`);
         continue;
       }
       if (usedIds.has(itemId)) {
-        errors.push(`Duplicate ID "${itemId}" in thread "${threadId}" — dropped`);
+        errors.push(`Duplicate ID "${itemId}" in thread "${threadId}" - dropped`);
         continue;
       }
       if (!VALID_ROLES.has(role)) {
-        errors.push(`Invalid role "${role}" for item "${itemId}" — defaulting to "support"`);
+        errors.push(`Invalid role "${role}" for item "${itemId}" - defaulting to "support"`);
       }
 
       usedIds.add(itemId);
@@ -436,15 +395,13 @@ export function parseEditorialOutput(
       });
     }
 
-    // Require at least one anchor
     const hasAnchor = validItems.some((i) => i.role === 'anchor');
     if (!hasAnchor) {
       if (validItems.length > 0) {
-        // Promote first item to anchor
         validItems[0].role = 'anchor';
-        errors.push(`Thread "${threadId}" had no anchor — promoted first item`);
+        errors.push(`Thread "${threadId}" had no anchor - promoted first item`);
       } else {
-        errors.push(`Thread "${threadId}" is empty after validation — dropped`);
+        errors.push(`Thread "${threadId}" is empty after validation - dropped`);
         continue;
       }
     }
@@ -462,11 +419,10 @@ export function parseEditorialOutput(
     return { success: false, errors: [...errors, 'No valid threads after validation'] };
   }
 
-  // Ensure exactly one start_here
   const startCount = validThreads.filter((t) => t.start_here).length;
   if (startCount === 0) {
     validThreads[0].start_here = true;
-    errors.push('No thread had start_here — defaulted to first thread');
+    errors.push('No thread had start_here - defaulted to first thread');
   } else if (startCount > 1) {
     let found = false;
     for (const t of validThreads) {
@@ -476,26 +432,23 @@ export function parseEditorialOutput(
       }
       if (t.start_here) t.start_here = false;
     }
-    errors.push('Multiple start_here threads — kept only first');
+    errors.push('Multiple start_here threads - kept only first');
   }
 
-  // Validate thread_order
   const validThreadIds = new Set(validThreads.map((t) => t.id));
   let threadOrder: string[];
   if (Array.isArray(parsed.thread_order)) {
     threadOrder = parsed.thread_order.filter(
       (id: unknown) => typeof id === 'string' && validThreadIds.has(id as string)
     ) as string[];
-    // Add any missing thread IDs
     for (const t of validThreads) {
       if (!threadOrder.includes(t.id)) threadOrder.push(t.id);
     }
   } else {
     threadOrder = validThreads.map((t) => t.id);
-    errors.push('Missing thread_order — using thread array order');
+    errors.push('Missing thread_order - using thread array order');
   }
 
-  // Parse diagnostics
   const diag =
     parsed.diagnostics && typeof parsed.diagnostics === 'object' ? parsed.diagnostics : {};
   const diagnostics = {

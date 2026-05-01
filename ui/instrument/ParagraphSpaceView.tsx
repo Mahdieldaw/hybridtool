@@ -99,33 +99,9 @@ const MAPPER_EDGE_COLORS: Record<string, string> = {
   dependency: 'rgba(96,165,250,0.6)',
 };
 
-const LANDSCAPE_COLORS: Record<string, { fill: string; stroke: string; label: string }> = {
-  northStar: {
-    fill: 'rgba(251, 230, 160, 0.85)', // warm pale gold
-    stroke: 'rgba(251, 200, 80, 0.95)',
-    label: 'North Star',
-  },
-  leadMinority: {
-    fill: 'rgba(147, 197, 253, 0.75)', // cool blue
-    stroke: 'rgba(96, 165, 250, 0.90)',
-    label: 'Lead Minority',
-  },
-  mechanism: {
-    fill: 'rgba(110, 231, 183, 0.60)', // muted teal-green
-    stroke: 'rgba(52, 211, 153, 0.80)',
-    label: 'Mechanism',
-  },
-  floor: {
-    fill: 'rgba(148, 163, 184, 0.35)', // slate, visually recessive
-    stroke: 'rgba(148, 163, 184, 0.55)',
-    label: 'Floor',
-  },
-};
-
-const LANDSCAPE_FALLBACK = {
-  fill: 'rgba(245, 158, 11, 0.60)', // original amber, for claims with no position
-  stroke: 'rgba(245, 158, 11, 0.85)',
-  label: 'Unknown',
+const CLAIM_OVERLAY_BASE_STYLE = {
+  fill: 'rgba(56, 189, 248, 0.32)',
+  stroke: 'rgba(14, 116, 144, 0.72)',
 };
 
 // (Removed local constants — now imported from ./paragraphSpaceConstants)
@@ -294,11 +270,6 @@ export function ParagraphSpaceView({
   const [isMapLegendOpen, setIsMapLegendOpen] = useState(false);
   const [isRiskLegendOpen, setIsRiskLegendOpen] = useState(false);
 
-  // Landscape Position Toggles
-  const [enabledLandscapePositions, setEnabledLandscapePositions] = useState<Set<string>>(
-    () => new Set([...Object.keys(LANDSCAPE_COLORS), 'unknown'])
-  );
-
   const modelIndexCounts = useMemo(() => {
     const m = new Map<number, number>();
     for (const n of nodes) {
@@ -408,9 +379,16 @@ export function ParagraphSpaceView({
     return claimCentroids
       .filter((c) => c.hasPosition && c.paraCanonicalFractions.size > 0)
       .map((c) => {
-        const colorStyle = c.landscapePosition
-          ? (LANDSCAPE_COLORS[c.landscapePosition] ?? LANDSCAPE_FALLBACK)
-          : LANDSCAPE_FALLBACK;
+        const totalMass = Array.from(c.paraCanonicalFractions.values()).reduce((acc, v) => acc + Math.max(0, v), 0);
+        const sovereignMass = Array.from(c.paraCanonicalFractions.values()).reduce((acc, v) => acc + (v >= 0.95 ? v : 0), 0);
+        const sovereignRatio = totalMass > 0 ? sovereignMass / totalMass : 0;
+        const opacity = Math.max(0.18, Math.min(0.88, 0.22 + totalMass * 0.22));
+        const strokeOpacity = Math.max(0.5, Math.min(0.96, 0.5 + sovereignRatio * 0.42));
+        const colorStyle = {
+          fill: `rgba(56, 189, 248, ${opacity.toFixed(3)})`,
+          stroke: `rgba(14, 116, 144, ${strokeOpacity.toFixed(3)})`,
+          label: 'Claim footprint',
+        };
 
         // Weighted centroid for label anchor
         let wSumX = 0,
@@ -441,8 +419,6 @@ export function ParagraphSpaceView({
         const labelX = wTotal > 0 ? wSumX / wTotal : circles[0].cx;
         const labelY = wTotal > 0 ? wSumY / wTotal : circles[0].cy;
 
-        const isVisible = enabledLandscapePositions.has(c.landscapePosition || 'unknown');
-
         return {
           claimId: c.claimId,
           label: c.label ?? c.claimId,
@@ -450,8 +426,7 @@ export function ParagraphSpaceView({
           labelX,
           labelY,
           colorStyle,
-          landscapePosition: c.landscapePosition,
-          isVisible,
+          isVisible: true,
         };
       })
       .filter(Boolean) as Array<{
@@ -461,10 +436,9 @@ export function ParagraphSpaceView({
         labelX: number;
         labelY: number;
         colorStyle: { fill: string; stroke: string; label: string };
-        landscapePosition?: string;
         isVisible: boolean;
       }>;
-  }, [claimCentroids, nodes, toX, toY, enabledLandscapePositions]);
+  }, [claimCentroids, nodes, toX, toY]);
 
   // Source paragraph IDs for the selected claim
   const selectedClaimSourceIds = useMemo(() => {
@@ -922,47 +896,24 @@ export function ParagraphSpaceView({
           </div>
         )}
 
-        {/* Landscape position legend (Horizontal & Togglable) */}
+        {/* Claim overlay legend */}
         <div
           className={`absolute right-[calc(4rem+300px)] bg-black/50 border border-white/10 rounded-lg p-3 backdrop-blur-md shadow-lg z-20 pointer-events-auto flex flex-col gap-2 transition-all ${selectedParagraphId && paragraphDataMap.has(selectedParagraphId) ? 'bottom-[196px]' : 'bottom-4'}`}
         >
           <span className="text-[9px] uppercase font-bold text-text-muted tracking-wider">
-            Landscape Position
+            Claim Overlay
           </span>
           <div className="flex items-center gap-3">
-            {[
-              ...Object.entries(LANDSCAPE_COLORS),
-              ['unknown', LANDSCAPE_FALLBACK] as const,
-            ].map(([pos, style]) => {
-              const active = enabledLandscapePositions.has(pos);
-              return (
-                <button
-                  key={pos}
-                  type="button"
-                  className={`flex items-center gap-1.5 transition-opacity ${active ? 'opacity-100' : 'opacity-40'}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEnabledLandscapePositions((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(pos)) next.delete(pos);
-                      else next.add(pos);
-                      return next;
-                    });
-                  }}
-                >
-                  <span
-                    className="w-3 h-3 rounded-sm inline-block border"
-                    style={{
-                      backgroundColor: style.fill,
-                      borderColor: style.stroke,
-                    }}
-                  />
-                  <span className="text-[10px] text-text-secondary whitespace-nowrap">
-                    {style.label}
-                  </span>
-                </button>
-              );
-            })}
+            <span
+              className="w-3 h-3 rounded-sm inline-block border"
+              style={{
+                backgroundColor: CLAIM_OVERLAY_BASE_STYLE.fill,
+                borderColor: CLAIM_OVERLAY_BASE_STYLE.stroke,
+              }}
+            />
+            <span className="text-[10px] text-text-secondary whitespace-nowrap">
+              Fill opacity tracks claim footprint mass; stroke intensity tracks sovereign share.
+            </span>
           </div>
         </div>
 

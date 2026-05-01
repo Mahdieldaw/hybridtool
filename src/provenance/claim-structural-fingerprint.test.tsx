@@ -317,6 +317,11 @@ describe('claim structural fingerprint', () => {
       collector,
       context: 'collector test',
     });
+    assertMeasurementConsumer('landscapePosition', 'routing', {
+      mode: 'collect',
+      collector,
+      context: 'collector test',
+    });
     assertMeasurementConsumer('validatedConflict', 'routing', {
       mode: 'collect',
       collector,
@@ -325,7 +330,10 @@ describe('claim structural fingerprint', () => {
 
     expect(collector.map((violation) => violation.key)).toEqual([
       'northStar',
+      'landscapePosition',
       'validatedConflict',
     ]);
+    expect(() => assertMeasurementConsumer('northStar', 'legacyCompatibility')).not.toThrow();
+    expect(() => assertMeasurementConsumer('landscapePosition', 'legacyCompatibility')).not.toThrow();
   });
 });

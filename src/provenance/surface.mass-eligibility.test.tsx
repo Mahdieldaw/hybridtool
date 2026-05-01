@@ -171,6 +171,11 @@ describe('surface mass eligibility', () => {
     expect(routing.diagnostics.measurementGuardViolations?.map((v) => v.key)).not.toContain(
       'MAJ'
     );
+    expect(routing.routePlan.includedClaimIds).toEqual(['c1']);
+    expect(routing.routedClaimIds).toEqual(routing.routePlan.includedClaimIds);
+    expect(routing.loadBearingClaims.map((claim) => claim.claimId)).toEqual(
+      routing.routePlan.includedClaimIds
+    );
   });
 
   test('zero canonical presence mass is not footprint-eligible even if legacy coverage is high', () => {
@@ -213,6 +218,10 @@ describe('surface mass eligibility', () => {
         changedEligibility: true,
       }),
     ]);
+    expect(result.passageRoutingResult.routing.routePlan.includedClaimIds).toEqual([]);
+    expect(result.passageRoutingResult.routing.routePlan.nonPrimaryClaimIds).toEqual(['c1']);
+    expect(result.passageRoutingResult.routing.passthrough).toEqual(['c1']);
+    expect(result.passageRoutingResult.routing.diagnostics.floorCount).toBe(1);
   });
 
   test('routes expose replacement scalar fields and do not guard deprecated scalar reads', () => {
@@ -294,6 +303,16 @@ describe('surface mass eligibility', () => {
     expect(profile.dominantPresenceShare).toBe(0.8);
     expect(profile.dominantPassageShare).toBeCloseTo(4 / 6);
     expect(profile.maxStatementRun).toBe(4);
+    expect(result.passageRoutingResult.routing.routePlan.structuralInputsByClaim.c1).toEqual(
+      expect.objectContaining({
+        presenceMass: 5,
+        sovereignMass: 3,
+        contestedShareRatio: 0.5,
+        dominantPresenceShare: 0.8,
+        dominantPassageShare: expect.any(Number),
+        maxStatementRun: 4,
+      })
+    );
     expect(routed).toEqual(
       expect.objectContaining({
         contestedShareRatio: 0.5,
@@ -326,7 +345,7 @@ describe('surface mass eligibility', () => {
     );
   });
 
-  test('legacy contested bucket routing differences are reported diagnostically', () => {
+  test('routePlan, compatibility fields, and counts are structurally derived', () => {
     const c1 = makeProfile({
       claimId: 'c1',
       footprint: {
@@ -375,25 +394,89 @@ describe('surface mass eligibility', () => {
         },
       ],
     });
+    const c3 = makeProfile({
+      claimId: 'c3',
+      footprint: {
+        vectors: {
+          presenceByParagraph: [],
+          territorialByParagraph: [],
+          sovereignByParagraph: [],
+        },
+        totals: {
+          presenceMass: 0,
+          territorialMass: 0,
+          sovereignMass: 0,
+        },
+        derived: {
+          sovereignRatio: null,
+          contestedShareRatio: null,
+        },
+      },
+      paragraphCoverage: [],
+      statementPassages: [],
+    });
 
     const result = runSurfaceWithProfiles(
-      { c1, c2 },
+      { c1, c2, c3 },
       [
         { id: 'c1', label: 'Claim 1', text: 'Claim text', supporters: [0, 1] },
         { id: 'c2', label: 'Claim 2', text: 'Claim text', supporters: [] },
+        { id: 'c3', label: 'Claim 3', text: 'Claim text', supporters: [] },
       ]
     );
-    const c2Diagnostic = result.passageRoutingResult.routing.diagnostics.scalarMigration.find(
-      (diagnostic) => diagnostic.claimId === 'c2'
-    );
+    const routing = result.passageRoutingResult.routing;
+    const labelKeys = [
+      'northStar',
+      'eastStar',
+      'mechanism',
+      'floor',
+      'leadMinority',
+      'landscapePosition',
+    ];
 
-    expect(c2Diagnostic).toEqual(
+    expect(routing.routePlan.includedClaimIds).toEqual(routing.routePlan.orderedClaimIds);
+    expect(routing.routePlan.includedClaimIds).toEqual(expect.arrayContaining(['c1', 'c2']));
+    expect(routing.routePlan.nonPrimaryClaimIds).toEqual(['c3']);
+    expect(routing.loadBearingClaims.map((claim) => claim.claimId)).toEqual(
+      routing.routePlan.includedClaimIds
+    );
+    expect(routing.routedClaimIds).toEqual(routing.routePlan.includedClaimIds);
+    expect(routing.passthrough).toEqual(routing.routePlan.nonPrimaryClaimIds);
+    expect(routing.diagnostics.floorCount).toBe(routing.routePlan.nonPrimaryClaimIds.length);
+    expect(JSON.stringify(routing.routePlan)).not.toMatch(
+      /northStar|eastStar|mechanism|floor|leadMinority|landscapePosition/
+    );
+    expect(routing.legacyCompatibility.landscapePositionByClaim).toEqual(
       expect.objectContaining({
-        legacyMinorityBucket: 4,
-        legacyWouldFloorByScalarBucket: true,
-        newLandscapePosition: 'leadMinority',
-        changedRoutingOutcome: true,
+        c3: 'floor',
       })
     );
+    expect(routing.diagnostics.labelExcision).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          claimId: 'c1',
+          newRoutePlanInclusion: true,
+          routeOrderIndex: expect.any(Number),
+          consumersRemoved: expect.arrayContaining(['routing', 'editorial prompt input']),
+        }),
+        expect.objectContaining({
+          claimId: 'c3',
+          newRoutePlanInclusion: false,
+          routeOrderIndex: null,
+        }),
+      ])
+    );
+    expect(
+      routing.diagnostics.measurementGuardViolations?.map((violation) => violation.key) ?? []
+    ).toEqual(expect.not.arrayContaining(labelKeys));
+    expect(routing.routePlan).not.toHaveProperty('policyPosition');
+    expect(routing.routePlan).not.toHaveProperty('projectedLandscapePosition');
+    expect(routing.routePlan).not.toHaveProperty('isRouted');
+    expect(routing.routePlan).not.toHaveProperty('isPassthrough');
+
+    for (const profile of Object.values(result.passageRoutingResult.claimProfiles) as any[]) {
+      delete profile.landscapePosition;
+    }
+    expect(routing.routePlan.includedClaimIds).toEqual(routing.routedClaimIds);
   });
 });

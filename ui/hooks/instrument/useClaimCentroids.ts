@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { PipelineSubstrateGraph, PassageRoutingResult, LandscapePosition } from '../../../shared/types';
+import type { PipelineSubstrateGraph } from '../../../shared/types';
 import type { CorpusIndex } from '../../../shared/types/corpus-tree';
 import { getCanonicalStatementsForClaim, getStatementCoordinates } from '../../../shared/corpus-utils';
 
@@ -17,7 +17,6 @@ export interface ClaimCentroid {
   type: string;
   /** Fraction of each paragraph's statements that are canonical for this claim (0..1) */
   paraCanonicalFractions: Map<string, number>;
-  landscapePosition?: LandscapePosition;
 }
 
 /**
@@ -33,7 +32,7 @@ export function useClaimCentroids(
   substrate: PipelineSubstrateGraph | null | undefined,
   mixedProvenance?: any | null,
   index?: CorpusIndex | null,
-  passageRouting?: PassageRoutingResult | null
+  _passageRouting?: unknown | null
 ): ClaimCentroid[] {
   return useMemo(() => {
     if (!claims || !substrate?.nodes?.length) return [];
@@ -112,9 +111,8 @@ export function useClaimCentroids(
         role: String(claim.role ?? ''),
         type: String(claim.type ?? ''),
         paraCanonicalFractions,
-        landscapePosition: passageRouting?.claimProfiles?.[claimId]?.landscapePosition,
       });
     }
     return out;
-  }, [claims, substrate, mixedProvenance, index, passageRouting]);
+  }, [claims, substrate, mixedProvenance, index]);
 }

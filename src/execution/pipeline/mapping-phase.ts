@@ -491,12 +491,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       const validPassageKeys = new Set(indexedPassages.map((p) => p.passageKey));
                       const validUnclaimedKeys = new Set(indexedUnclaimed.map((u) => u.groupKey));
 
-                      // Build corpus shape summary
-                      const concentrations = indexedPassages.map((p) => p.concentrationRatio);
-                      const landscapeComp = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
-                      indexedPassages.forEach((p) => {
-                        landscapeComp[p.landscapePosition]++;
-                      });
+                      const routePlan = pipelineResult.passageRoutingResult?.routing?.routePlan;
 
                       const editorialPrompt = buildEditorialPrompt(
                         payload.originalPrompt,
@@ -508,14 +503,10 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                           conflictCount:
                             pipelineResult.passageRoutingResult?.routing?.conflictClusters
                               ?.length ?? 0,
-                          concentrationSpread: {
-                            min: concentrations.length ? Math.min(...concentrations) : 0,
-                            max: concentrations.length ? Math.max(...concentrations) : 0,
-                            mean: concentrations.length
-                              ? concentrations.reduce((a, b) => a + b, 0) / concentrations.length
-                              : 0,
+                          routePlanSummary: {
+                            includedCount: routePlan?.includedClaimIds?.length ?? 0,
+                            nonPrimaryCount: routePlan?.nonPrimaryClaimIds?.length ?? 0,
                           },
-                          landscapeComposition: landscapeComp,
                         }
                       );
 

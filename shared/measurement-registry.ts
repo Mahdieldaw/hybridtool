@@ -7,6 +7,7 @@ export type Consumer =
   | 'claimSuppression'
   | 'synthesisConclusion'
   | 'userVisiblePriority'
+  | 'legacyCompatibility'
   | 'debug';
 
 export type MeasurementStatus =
@@ -45,6 +46,7 @@ export type MeasurementGuardOptions = {
 };
 
 const DEBUG_TRACE: Consumer[] = ['debug', 'trace'];
+const DEBUG_TRACE_LEGACY_COMPATIBILITY: Consumer[] = ['debug', 'trace', 'legacyCompatibility'];
 const DEBUG_TRACE_PRESENTATION: Consumer[] = ['debug', 'trace', 'presentation'];
 const STEERING_CONSUMERS: Consumer[] = [
   'routing',
@@ -75,7 +77,7 @@ const deprecatedPolicyOutput = (key: string): MeasurementRule =>
   measurementRule(
     key,
     'deprecated',
-    DEBUG_TRACE,
+    DEBUG_TRACE_LEGACY_COMPATIBILITY,
     POLICY_CONSUMERS,
     'Old landscape identity. Consumer-policy output only, not a measurement.'
   );
@@ -103,6 +105,7 @@ export const MEASUREMENT_REGISTRY: Record<string, MeasurementRule> = {
   leadMinority: deprecatedPolicyOutput('leadMinority'),
   mechanism: deprecatedPolicyOutput('mechanism'),
   floor: deprecatedPolicyOutput('floor'),
+  landscapePosition: deprecatedPolicyOutput('landscapePosition'),
 
   meanCoverage: deprecatedVisibleMetric(
     'meanCoverage',

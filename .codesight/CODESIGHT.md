@@ -4,7 +4,7 @@
 
 > 0 routes | 0 models | 84 components | 123 lib files | 6 env vars | 4 middleware | 0% test coverage
 > **Token savings:** this file is ~11,000 tokens. Without it, AI exploration would cost ~70,200 tokens. **Saves ~59,200 tokens per conversation.**
-> **Last scanned:** 2026-05-01 10:03 — re-run after significant changes
+> **Last scanned:** 2026-05-01 13:18 — re-run after significant changes
 
 ---
 
@@ -457,7 +457,7 @@
 - `ui\hooks\chat\useChat.ts` — function useChat: () => void
 - `ui\hooks\chat\usePortMessageHandler.ts` — function usePortMessageHandler: (enabled) => void
 - `ui\hooks\chat\useRoundActions.ts` — function useRoundActions: () => void
-- `ui\hooks\instrument\useClaimCentroids.ts` — function useClaimCentroids: (claims, substrate, mixedProvenance?, index?, passageRouting?) => ClaimCentroid[], interface ClaimCentroid
+- `ui\hooks\instrument\useClaimCentroids.ts` — function useClaimCentroids: (claims, substrate, mixedProvenance?, index?, _passageRouting?) => ClaimCentroid[], interface ClaimCentroid
 - `ui\hooks\instrument\useEvidenceRows.ts` — function useEvidenceRows: (artifact, selectedClaimId) => EvidenceRow[], interface EvidenceRow
 - `ui\hooks\instrument\useInstrumentState.ts`
   - function useInstrumentState: () => [InstrumentState, InstrumentActions]
@@ -589,7 +589,7 @@
 - `src\errors\handler.ts` — imported by **7** files
 - `src\geometry\annotate.ts` — imported by **7** files
 - `shared\parsing-utils.ts` — imported by **6** files
-- `src\persistence\types.ts` — imported by **6** files
+- `src\concierge-service\editorial-mapper.ts` — imported by **6** files
 
 ## Import Map (who imports what)
 
@@ -609,7 +609,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 16 test files found
+> 17 test files found
 
 ---
 

@@ -358,7 +358,7 @@
 - `ui\hooks\chat\useChat.ts` — function useChat: () => void
 - `ui\hooks\chat\usePortMessageHandler.ts` — function usePortMessageHandler: (enabled) => void
 - `ui\hooks\chat\useRoundActions.ts` — function useRoundActions: () => void
-- `ui\hooks\instrument\useClaimCentroids.ts` — function useClaimCentroids: (claims, substrate, mixedProvenance?, index?, passageRouting?) => ClaimCentroid[], interface ClaimCentroid
+- `ui\hooks\instrument\useClaimCentroids.ts` — function useClaimCentroids: (claims, substrate, mixedProvenance?, index?, _passageRouting?) => ClaimCentroid[], interface ClaimCentroid
 - `ui\hooks\instrument\useEvidenceRows.ts` — function useEvidenceRows: (artifact, selectedClaimId) => EvidenceRow[], interface EvidenceRow
 - `ui\hooks\instrument\useInstrumentState.ts`
   - function useInstrumentState: () => [InstrumentState, InstrumentActions]

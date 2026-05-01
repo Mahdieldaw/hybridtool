@@ -554,17 +554,17 @@ export interface RoutingMeasurements {
   corpusNoveltyRatio: number;
   /** Count of novel majority paragraphs (coverage > 0.5) assigned at decision time */
   novelParagraphCount: number;
-  /** Populated for majority-phase claims (mechanism + northStar). Null for minority claims. */
+  /** Legacy novelty-gate payload retained for older diagnostics. Active routePlan does not read it. */
   majorityGateSnapshot: MajorityGateSnapshot | null;
 }
 
 export interface PassageClaimProfile {
   claimId: string;
-  /** Landscape position assigned by 5-phase routing algorithm */
+  /** @deprecated Compatibility label. Active routing reads routing.routePlan instead. */
   landscapePosition: LandscapePosition;
   /** True if this claim is classified as minority (lower cumulative coverage) */
   isMinority: boolean;
-  /** Routing measurements (mass-native footprint/model/passage values plus legacy compatibility payload) — null if floor */
+  /** Mass-native footprint/model/passage values plus legacy compatibility payload. */
   routingMeasurements: RoutingMeasurements | null;
 
   /** Footprint paragraphs where ≥1 other claim also has any presence. */
@@ -585,6 +585,8 @@ export interface PassageClaimProfile {
   sustainedMassCohort: SustainedMassCohort;
   /** Distinct models contributing ≥1 paragraph (mirrors ClaimDensityProfile.modelSpread). */
   modelSpread: number;
+  /** Number of contiguous statement runs of length >= 2 (mirrors ClaimDensityProfile.passageCount). */
+  passageCount: number;
   /** Distinct models with passage length ≥2 (mirrors ClaimDensityProfile.modelsWithPassages). */
   modelsWithPassages: number;
   /** Reserved — concordance matrix output. Always null this iteration. */
@@ -621,6 +623,7 @@ export interface PassageRoutedClaim {
   claimId: string;
   claimLabel: string;
   claimText: string;
+  /** @deprecated Compatibility label. Active routing reads routing.routePlan instead. */
   landscapePosition: LandscapePosition;
   contestedShareRatio: number | null;
   dominantPresenceShare: number | null;
@@ -636,16 +639,47 @@ export interface PassageRoutedClaim {
   queryDistance?: number;
 }
 
+export interface RoutePlanStructuralInputs {
+  presenceMass: number;
+  territorialMass: number;
+  sovereignMass: number;
+  sovereignRatio: number | null;
+  contestedShareRatio: number | null;
+  dominantPresenceShare: number | null;
+  dominantPassageShare: number | null;
+  maxStatementRun: number;
+  passageCount: number;
+  modelSpread: number;
+  modelsWithPassages: number;
+  sustainedMass: number;
+}
+
+export interface PassageRoutePlan {
+  orderedClaimIds: string[];
+  includedClaimIds: string[];
+  nonPrimaryClaimIds: string[];
+  orderingReasonsByClaim: Record<string, string[]>;
+  structuralInputsByClaim: Record<string, RoutePlanStructuralInputs>;
+}
+
+export interface PassageRoutingLegacyCompatibility {
+  landscapePositionByClaim: Record<string, LandscapePosition>;
+}
+
 export interface PassageClaimRouting {
   conflictClusters: Array<{
     claimIds: string[];
     edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
   }>;
-  /** Load-bearing claims from the routing surface. Legacy labels remain compatibility output. */
+  /** Active structural route plan. Fixed landscape labels are not inputs to this object. */
+  routePlan: PassageRoutePlan;
+  /** Dead-end compatibility export. Internal routing/synthesis code must not read this object. */
+  legacyCompatibility: PassageRoutingLegacyCompatibility;
+  /** @deprecated Derived from routePlan.includedClaimIds for older consumers. */
   loadBearingClaims: PassageRoutedClaim[];
-  /** Claims not included in routedClaimIds (neither conflict nor load-bearing) */
+  /** @deprecated Derived from routePlan.nonPrimaryClaimIds for older consumers. */
   passthrough: string[];
-  /** All routed claim IDs (conflicts + load-bearing) */
+  /** @deprecated Derived from routePlan.includedClaimIds for older consumers. */
   routedClaimIds: string[];
   diagnostics: {
     massEligibility: Array<{
@@ -676,9 +710,20 @@ export interface PassageClaimRouting {
       changedRoutingOutcome: boolean;
       reason: string | null;
     }>;
+    labelExcision: Array<{
+      claimId: string;
+      oldLegacyLandscapePosition: LandscapePosition;
+      newRoutePlanInclusion: boolean;
+      routeOrderIndex: number | null;
+      structuralValuesUsed: RoutePlanStructuralInputs;
+      changedRoutingOutcome: boolean;
+      reason: string;
+      consumersRemoved: string[];
+    }>;
     concentrationDistribution: number[];
     densityRatioDistribution: number[];
     totalClaims: number;
+    /** @deprecated Derived from routePlan.nonPrimaryClaimIds.length for older consumers. */
     floorCount: number;
     /** 'dominant-core' = largestBasinRatio > 0.5, periphery filtered before scoring.
      *  'parallel-cores' = no dominant basin, full corpus scored, basin membership annotated.

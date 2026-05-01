@@ -28,10 +28,7 @@ import type {
 } from '../../shared/types';
 import type { PeripheryResult } from '../geometry';
 import type { ShadowParagraph } from '../shadow';
-import {
-  assertMeasurementConsumer,
-  type MeasurementViolation,
-} from '../../shared/measurement-registry';
+import type { MeasurementViolation } from '../../shared/measurement-registry';
 import { cosineSimilarity } from '../clustering/distance';
 import nlp from 'compromise';
 import { logInfraError } from '../errors';
@@ -107,6 +104,9 @@ function findHostClaim(
 
 type MassEligibilityDiagnostic = PassageClaimRouting['diagnostics']['massEligibility'][number];
 type ScalarMigrationDiagnostic = PassageClaimRouting['diagnostics']['scalarMigration'][number];
+type LabelExcisionDiagnostic = PassageClaimRouting['diagnostics']['labelExcision'][number];
+type PassageRoutePlan = PassageClaimRouting['routePlan'];
+type RoutePlanStructuralInputs = PassageRoutePlan['structuralInputsByClaim'][string];
 
 type SurfaceScalarMeasurements = {
   dominantModel: number | null;
@@ -291,6 +291,158 @@ export function buildMassEligibilityDiagnostic(
     changedEligibility,
     reason,
   };
+}
+
+function emptyRouteStructuralInputs(): RoutePlanStructuralInputs {
+  return {
+    presenceMass: 0,
+    territorialMass: 0,
+    sovereignMass: 0,
+    sovereignRatio: null,
+    contestedShareRatio: null,
+    dominantPresenceShare: null,
+    dominantPassageShare: null,
+    maxStatementRun: 0,
+    passageCount: 0,
+    modelSpread: 0,
+    modelsWithPassages: 0,
+    sustainedMass: 0,
+  };
+}
+
+function buildRouteStructuralInputs(profile: PassageClaimProfile | undefined): RoutePlanStructuralInputs {
+  if (!profile) return emptyRouteStructuralInputs();
+  return {
+    presenceMass: profile.presenceMass,
+    territorialMass: profile.territorialMass,
+    sovereignMass: profile.sovereignMass,
+    sovereignRatio: profile.sovereignRatio,
+    contestedShareRatio: profile.contestedShareRatio,
+    dominantPresenceShare: profile.dominantPresenceShare,
+    dominantPassageShare: profile.dominantPassageShare,
+    maxStatementRun: profile.maxStatementRun,
+    passageCount: profile.passageCount,
+    modelSpread: profile.modelSpread,
+    modelsWithPassages: profile.modelsWithPassages,
+    sustainedMass: profile.sustainedMass,
+  };
+}
+
+function compareRoutePlanInputs(
+  a: RoutePlanStructuralInputs,
+  b: RoutePlanStructuralInputs
+): number {
+  const sustainedDiff = b.sustainedMass - a.sustainedMass;
+  if (sustainedDiff !== 0) return sustainedDiff;
+
+  const contestedDiff = nullableScore(b.contestedShareRatio) - nullableScore(a.contestedShareRatio);
+  if (contestedDiff !== 0) return contestedDiff;
+
+  const sovereignDiff = b.sovereignMass - a.sovereignMass;
+  if (sovereignDiff !== 0) return sovereignDiff;
+
+  const passageDiff = nullableScore(b.dominantPassageShare) - nullableScore(a.dominantPassageShare);
+  if (passageDiff !== 0) return passageDiff;
+
+  const presenceShareDiff =
+    nullableScore(b.dominantPresenceShare) - nullableScore(a.dominantPresenceShare);
+  if (presenceShareDiff !== 0) return presenceShareDiff;
+
+  const maxRunDiff = b.maxStatementRun - a.maxStatementRun;
+  if (maxRunDiff !== 0) return maxRunDiff;
+
+  return b.presenceMass - a.presenceMass;
+}
+
+function buildOrderingReasons(inputs: RoutePlanStructuralInputs): string[] {
+  return [
+    `sustainedMass=${inputs.sustainedMass.toFixed(3)}`,
+    `contestedShareRatio=${inputs.contestedShareRatio == null ? 'null' : inputs.contestedShareRatio.toFixed(3)}`,
+    `sovereignMass=${inputs.sovereignMass.toFixed(3)}`,
+    `dominantPassageShare=${inputs.dominantPassageShare == null ? 'null' : inputs.dominantPassageShare.toFixed(3)}`,
+    `dominantPresenceShare=${inputs.dominantPresenceShare == null ? 'null' : inputs.dominantPresenceShare.toFixed(3)}`,
+    `maxStatementRun=${inputs.maxStatementRun}`,
+    `presenceMass=${inputs.presenceMass.toFixed(3)}`,
+  ];
+}
+
+function buildRoutePlan(
+  enrichedClaims: EnrichedClaim[],
+  claimProfiles: Record<string, PassageClaimProfile>
+): PassageRoutePlan {
+  const claimIds = enrichedClaims.map((claim) => String(claim.id));
+  const structuralInputsByClaim: PassageRoutePlan['structuralInputsByClaim'] = {};
+  const orderingReasonsByClaim: PassageRoutePlan['orderingReasonsByClaim'] = {};
+
+  for (const claimId of claimIds) {
+    const inputs = buildRouteStructuralInputs(claimProfiles[claimId]);
+    structuralInputsByClaim[claimId] = inputs;
+    orderingReasonsByClaim[claimId] = buildOrderingReasons(inputs);
+  }
+
+  const includedClaimIds = claimIds
+    .filter((claimId) => structuralInputsByClaim[claimId]?.presenceMass > 0)
+    .sort((a, b) => {
+      const diff = compareRoutePlanInputs(structuralInputsByClaim[a], structuralInputsByClaim[b]);
+      if (diff !== 0) return diff;
+      return a.localeCompare(b);
+    });
+  const includedSet = new Set(includedClaimIds);
+  const nonPrimaryClaimIds = claimIds.filter((claimId) => !includedSet.has(claimId));
+
+  return {
+    orderedClaimIds: [...includedClaimIds],
+    includedClaimIds,
+    nonPrimaryClaimIds,
+    orderingReasonsByClaim,
+    structuralInputsByClaim,
+  };
+}
+
+function projectLegacyLandscapeCompatibility(
+  routePlan: PassageRoutePlan
+): PassageClaimRouting['legacyCompatibility'] {
+  const landscapePositionByClaim: PassageClaimRouting['legacyCompatibility']['landscapePositionByClaim'] = {};
+  routePlan.includedClaimIds.forEach((claimId, index) => {
+    landscapePositionByClaim[claimId] =
+      index === 0 ? 'northStar' : index === 1 ? 'leadMinority' : 'mechanism';
+  });
+  for (const claimId of routePlan.nonPrimaryClaimIds) {
+    landscapePositionByClaim[claimId] = 'floor';
+  }
+  return { landscapePositionByClaim };
+}
+
+function buildLabelExcisionDiagnostics(
+  routePlan: PassageRoutePlan,
+  legacyCompatibility: PassageClaimRouting['legacyCompatibility']
+): LabelExcisionDiagnostic[] {
+  const includedSet = new Set(routePlan.includedClaimIds);
+  const orderIndex = new Map(routePlan.orderedClaimIds.map((claimId, index) => [claimId, index]));
+  return Object.keys(routePlan.structuralInputsByClaim).map((claimId) => {
+    const legacyPosition = legacyCompatibility.landscapePositionByClaim[claimId] ?? 'floor';
+    const newRoutePlanInclusion = includedSet.has(claimId);
+    const changedRoutingOutcome = (legacyPosition !== 'floor') !== newRoutePlanInclusion;
+    return {
+      claimId,
+      oldLegacyLandscapePosition: legacyPosition,
+      newRoutePlanInclusion,
+      routeOrderIndex: orderIndex.get(claimId) ?? null,
+      structuralValuesUsed: routePlan.structuralInputsByClaim[claimId],
+      changedRoutingOutcome,
+      reason: newRoutePlanInclusion
+        ? 'included by canonical footprint presence and ordered by mass-native structural keys'
+        : 'not included because canonical footprint presence mass is zero',
+      consumersRemoved: [
+        'routing',
+        'route ordering',
+        'load-bearing inclusion',
+        'passthrough derivation',
+        'floorCount derivation',
+        'editorial prompt input',
+      ],
+    };
+  });
 }
 
 export function computeNounSurvivalRatio(text: string): number {
@@ -592,24 +744,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   const profiles = claimDensityResult.profiles;
   const measurementGuardViolations: MeasurementViolation[] = [];
-  const collectRoutingMeasurement = (key: string, context: string) => {
-    assertMeasurementConsumer(key, 'routing', {
-      mode: 'collect',
-      context,
-      collector: measurementGuardViolations,
-    });
-  };
-
-  if (periphery.corpusMode === 'dominant-core' && periphery.peripheralNodeIds.size > 0) {
-    collectRoutingMeasurement(
-      'corpusMode',
-      'computeTopologicalSurface peripheral filtering'
-    );
-    collectRoutingMeasurement(
-      'peripheralNodeIds',
-      'computeTopologicalSurface peripheral filtering'
-    );
-  }
 
   const filterPeripheral =
     periphery.corpusMode === 'dominant-core' && periphery.peripheralNodeIds.size > 0;
@@ -655,6 +789,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         sustainedMass: 0,
         sustainedMassCohort: 'balanced',
         modelSpread: 0,
+        passageCount: 0,
         modelsWithPassages: 0,
         isLoadBearing: null,
         dominantModel: null,
@@ -676,9 +811,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       continue;
     }
 
-    const activeCoverage = filterPeripheral
-      ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
-      : profile.paragraphCoverage;
+    const activeCoverage = profile.paragraphCoverage;
 
     const scalars = computeSurfaceScalarMeasurements(profile, activeCoverage);
 
@@ -711,6 +844,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       sustainedMass: 0,
       sustainedMassCohort: 'balanced',
       modelSpread: profile.modelSpread,
+      passageCount: profile.passageCount,
       modelsWithPassages: profile.modelsWithPassages,
       isLoadBearing: null,
       dominantModel: scalars.dominantModel,
@@ -759,7 +893,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   for (const p of Object.values(claimProfiles)) {
     const profile = profiles[p.claimId];
     if (!profile) {
-      p.landscapePosition = 'floor';
       p.routingMeasurements = null;
       continue;
     }
@@ -767,7 +900,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const footprintParagraphIds = getFootprintPresenceParagraphIds(profile);
 
     if (!isFootprintEligible(profile)) {
-      p.landscapePosition = 'floor';
       p.routingMeasurements = null;
       continue;
     }
@@ -778,21 +910,21 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     });
   }
 
-  // Assign floor status to non-candidates
+  // Non-candidates remain outside the structural route plan.
   const candidateIds = new Set(candidates.map((c) => c.claimId));
   for (const [id, p] of Object.entries(claimProfiles)) {
     if (!candidateIds.has(id)) {
-      p.landscapePosition = 'floor';
       p.routingMeasurements = null;
     }
   }
 
   if (candidates.length === 0) {
-    // All claims are floor
-    let floorCount = 0;
-    for (const p of Object.values(claimProfiles)) {
-      if (p.landscapePosition === 'floor') floorCount++;
+    const routePlan = buildRoutePlan(enrichedClaims, claimProfiles);
+    const legacyCompatibility = projectLegacyLandscapeCompatibility(routePlan);
+    for (const [claimId, position] of Object.entries(legacyCompatibility.landscapePositionByClaim)) {
+      if (claimProfiles[claimId]) claimProfiles[claimId].landscapePosition = position;
     }
+    const labelExcision = buildLabelExcisionDiagnostics(routePlan, legacyCompatibility);
 
     const passageRoutingResult: PassageRoutingResult = {
       claimProfiles,
@@ -805,16 +937,19 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       },
       routing: {
         conflictClusters: [],
+        routePlan,
+        legacyCompatibility,
         loadBearingClaims: [],
-        passthrough: enrichedClaims.map((c) => String(c.id)),
-        routedClaimIds: [],
+        passthrough: routePlan.nonPrimaryClaimIds,
+        routedClaimIds: routePlan.includedClaimIds,
         diagnostics: {
           concentrationDistribution: [],
           densityRatioDistribution: [],
           massEligibility,
           scalarMigration: Array.from(scalarMigrationByClaimId.values()),
+          labelExcision,
           totalClaims: enrichedClaims.length,
-          floorCount,
+          floorCount: routePlan.nonPrimaryClaimIds.length,
           corpusMode: periphery.corpusMode,
           peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
           peripheralRatio: periphery.peripheralRatio,
@@ -859,18 +994,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       paragraphToAllClaims.get(entry.paragraphId)!.add(c.claimId);
     }
   }
-
-  // Compute totalCorpusParagraphs: the total deduplicated paragraph pool across all candidates
-  const totalCorpusParagraphs = new Set(
-    candidates.flatMap((c) => {
-      const profile = profiles[c.claimId];
-      if (!profile) return [];
-      const activeCoverage = filterPeripheral
-        ? profile.paragraphCoverage.filter((pc) => !periphery.peripheralNodeIds.has(pc.paragraphId))
-        : profile.paragraphCoverage;
-      return activeCoverage.map((pc) => pc.paragraphId);
-    })
-  ).size;
 
   // Compute maxSupporterCount from enrichedClaims
   let maxSupporterCount = 0;
@@ -1011,98 +1134,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     claimProfiles[c.claimId].sustainedMassCohort = sustainedMassCohort;
   }
 
-  // ── Block D: Phase 1 — Minority classification
+  // Phase 4 route planning: active inclusion and ordering are structural only.
+  // Fixed landscape labels are projected later into legacyCompatibility.
   for (const c of extendedCandidates) {
     c.isMinority = c.supporters.length < maxSupporterCount / 2;
-  }
-
-  // ── Block E: Phase 2 — Minority ranking
-
-  const minorityPool: ExtendedCandidate[] = extendedCandidates.filter((c) => c.isMinority);
-
-  // Stage 1: Group by cohort
-  const byCohort = new Map<string, ExtendedCandidate[]>();
-  for (const cohort of ['maj-breadth', 'balanced', 'passage-heavy']) {
-    byCohort.set(
-      cohort,
-      minorityPool.filter((c) => c.sustainedMassCohort === cohort)
-    );
-  }
-
-  // Stage 2: Within each cohort, seed-sort by MAXLEN DESC, then footprint mass DESC
-  for (const cohortClaims of byCohort.values()) {
-    cohortClaims.sort((a, b) => {
-      const maxLenDiff =
-        b.maxStatementRun - a.maxStatementRun;
-      if (maxLenDiff !== 0) return maxLenDiff;
-      // presenceMass replaces MAJ count as breadth tiebreaker
-      return (
-        (profiles[b.claimId]?.footprint.totals.presenceMass ?? 0) -
-        (profiles[a.claimId]?.footprint.totals.presenceMass ?? 0)
-      );
-    });
-  }
-
-  // Stage 3 & 4: Keep the old bucket as a diagnostic, but route on continuous
-  // mass-native values. Phase 3 intentionally removes the bucket floor.
-  const sortedMinorityPool: ExtendedCandidate[] = [];
-  const cohortOrder = ['maj-breadth', 'balanced', 'passage-heavy'];
-
-  const sortedLegacyContested = minorityPool
-    .map((c) => c.contestedDominance ?? 0)
-    .sort((a, b) => a - b);
-  const sortedExclusivity = minorityPool.map((c) => c.sovereignMass).sort((a, b) => a - b);
-  for (const c of minorityPool) {
-    const contestedPerc = percentileFromSortedAsc(c.contestedDominance ?? 0, sortedLegacyContested);
-    const exclusivityPerc = percentileFromSortedAsc(c.sovereignMass, sortedExclusivity);
-    const highC = contestedPerc >= 0.5;
-    const highE = exclusivityPerc >= 0.5;
-    const bucket = highC && highE ? 1 : !highC && highE ? 2 : highC && !highE ? 3 : 4;
-    const diagnostic = scalarMigrationByClaimId.get(c.claimId);
-    if (diagnostic) {
-      diagnostic.legacyMinorityBucket = bucket;
-      diagnostic.legacyWouldFloorByScalarBucket = bucket === 4;
-    }
-  }
-
-  for (const cohortName of cohortOrder) {
-    const cohortClaims = byCohort.get(cohortName) ?? [];
-
-    cohortClaims.sort((a, b) => {
-      const contDiff = nullableScore(b.contestedShareRatio) - nullableScore(a.contestedShareRatio);
-      if (contDiff !== 0) return contDiff;
-
-      const exclDiff = b.sovereignMass - a.sovereignMass;
-      if (exclDiff !== 0) return exclDiff;
-
-      return b.supporters.length - a.supporters.length;
-    });
-
-    sortedMinorityPool.push(...cohortClaims);
-  }
-
-  // ── Block F: Phase 3 — Minority peeling
-  const assignedSet = new Set<string>();
-  if (sortedMinorityPool.length > 0) {
-    collectRoutingMeasurement('claimNoveltyRatio', 'minority peeling assignment');
-    collectRoutingMeasurement('corpusNoveltyRatio', 'minority peeling assignment');
-    collectRoutingMeasurement('novelParagraphCount', 'minority peeling assignment');
-  }
-
-  for (let i = 0; i < sortedMinorityPool.length; i++) {
-    const c = sortedMinorityPool[i];
-    const footprintParagraphs = getFootprintParagraphs(c.claimId);
-    const novelIds = footprintParagraphs.filter((pid) => !assignedSet.has(pid));
-    c.landscapePosition = i === 0 ? 'leadMinority' : 'mechanism';
-
-    const claimNoveltyRatio =
-      footprintParagraphs.length > 0 ? novelIds.length / footprintParagraphs.length : 0;
-    const corpusNoveltyRatio =
-      totalCorpusParagraphs - assignedSet.size > 0
-        ? novelIds.length / (totalCorpusParagraphs - assignedSet.size)
-        : 0;
-
-    c.routingMeasurements = {
+    const profile = claimProfiles[c.claimId];
+    if (!profile) continue;
+    profile.isMinority = c.isMinority;
+    profile.routingMeasurements = {
       contestedShareRatio: c.contestedShareRatio,
       presenceMass: c.presenceMass,
       territorialMass: c.territorialMass,
@@ -1113,173 +1152,11 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       dominantPresenceShare: c.dominantPresenceShare,
       dominantPassageShare: c.dominantPassageShare,
       maxStatementRun: c.maxStatementRun,
-      claimNoveltyRatio,
-      corpusNoveltyRatio,
-      novelParagraphCount: novelIds.length,
+      claimNoveltyRatio: 0,
+      corpusNoveltyRatio: 0,
+      novelParagraphCount: 0,
       majorityGateSnapshot: null,
     };
-
-    for (const pid of footprintParagraphs) {
-      assignedSet.add(pid);
-    }
-  }
-
-  // ── Block G: Phase 4 — Majority mechanism assignment
-
-  const majorityPool = extendedCandidates.filter(
-    (c) => !c.isMinority && getFootprintParagraphs(c.claimId).length > 0
-  );
-
-  // Extract NorthStar before cohort sorting: largest by sustainedMass overall
-  let northStarCandidate: ExtendedCandidate | null = null;
-  if (majorityPool.length > 0) {
-    let maxMass = -1;
-    let nsIndex = -1;
-    for (let i = 0; i < majorityPool.length; i++) {
-      if (majorityPool[i].sustainedMass > maxMass) {
-        maxMass = majorityPool[i].sustainedMass;
-        nsIndex = i;
-      }
-    }
-    northStarCandidate = majorityPool.splice(nsIndex, 1)[0];
-  }
-
-  // Sort remaining majority candidates by cohort (maj-breadth → balanced → passage-heavy)
-  const sortedMajorityPool: ExtendedCandidate[] = [];
-  const majorityCohortOrder = ['maj-breadth', 'balanced', 'passage-heavy'];
-
-  for (const cohortName of majorityCohortOrder) {
-    const cohortClaims = majorityPool.filter((c) => c.sustainedMassCohort === cohortName);
-
-    // Inside cohorts, tiebreakers: inverted supporter count (ASC), exclusivity (DESC)
-    cohortClaims.sort((a, b) => {
-      if (a.supporters.length !== b.supporters.length)
-        return a.supporters.length - b.supporters.length;
-      if (b.sovereignMass !== a.sovereignMass) return b.sovereignMass - a.sovereignMass;
-
-      const maxLenDiff =
-        b.maxStatementRun - a.maxStatementRun;
-      if (maxLenDiff !== 0) return maxLenDiff;
-
-      // presenceMass replaces MAJ count as final breadth tiebreaker
-      return (
-        (profiles[b.claimId]?.footprint.totals.presenceMass ?? 0) -
-        (profiles[a.claimId]?.footprint.totals.presenceMass ?? 0)
-      );
-    });
-
-    sortedMajorityPool.push(...cohortClaims);
-  }
-
-  // Iterate remaining majority candidates
-  for (let i = 0; i < sortedMajorityPool.length; i++) {
-    const c = sortedMajorityPool[i];
-    const footprintParagraphs = getFootprintParagraphs(c.claimId);
-    const nsIds = northStarCandidate ? getFootprintParagraphs(northStarCandidate.claimId) : [];
-    const currentNSNovel = nsIds.filter((pid) => !assignedSet.has(pid)).length;
-    const projectedNSNovel = nsIds.filter(
-      (pid) => !assignedSet.has(pid) && !footprintParagraphs.includes(pid)
-    ).length;
-    const delta = currentNSNovel - projectedNSNovel;
-    const candidateContribution = footprintParagraphs.filter((pid) => !assignedSet.has(pid))
-      .length;
-
-    collectRoutingMeasurement('claimNoveltyRatio', 'majority novelty gate');
-    collectRoutingMeasurement('corpusNoveltyRatio', 'majority novelty gate');
-    collectRoutingMeasurement('majorityGateSnapshot', 'majority novelty gate');
-
-    if (candidateContribution === 0) {
-      c.landscapePosition = 'floor';
-      c.routingMeasurements = null;
-      continue;
-    }
-
-    if (delta > candidateContribution) {
-      // Floor remaining candidates
-      for (let j = i; j < sortedMajorityPool.length; j++) {
-        const remaining = sortedMajorityPool[j];
-        remaining.landscapePosition = 'floor';
-        remaining.routingMeasurements = null;
-      }
-      break;
-    }
-
-    c.landscapePosition = 'mechanism';
-
-    c.routingMeasurements = {
-      contestedShareRatio: c.contestedShareRatio,
-      presenceMass: c.presenceMass,
-      territorialMass: c.territorialMass,
-      sovereignMass: c.sovereignMass,
-      sovereignRatio: c.sovereignRatio,
-      sustainedMassCohort: c.sustainedMassCohort,
-      modelSpread: c.modelSpread,
-      dominantPresenceShare: c.dominantPresenceShare,
-      dominantPassageShare: c.dominantPassageShare,
-      maxStatementRun: c.maxStatementRun,
-      claimNoveltyRatio:
-        footprintParagraphs.length > 0 ? candidateContribution / footprintParagraphs.length : 0,
-      corpusNoveltyRatio:
-        totalCorpusParagraphs - assignedSet.size > 0
-          ? candidateContribution / (totalCorpusParagraphs - assignedSet.size)
-          : 0,
-      novelParagraphCount: candidateContribution,
-      majorityGateSnapshot: { delta, currentNSNovel, projectedNSNovel, candidateContribution },
-    };
-
-    for (const pid of footprintParagraphs) {
-      assignedSet.add(pid);
-    }
-  }
-
-  // ── Block H: Phase 5 — NorthStar
-  if (northStarCandidate) {
-    northStarCandidate.landscapePosition = 'northStar';
-    const nsFootprintParagraphs = getFootprintParagraphs(northStarCandidate.claimId);
-    const nsNovel = nsFootprintParagraphs.filter((pid) => !assignedSet.has(pid)).length;
-    const nsTotal = nsFootprintParagraphs.length;
-
-    northStarCandidate.routingMeasurements = {
-      contestedShareRatio: northStarCandidate.contestedShareRatio,
-      presenceMass: northStarCandidate.presenceMass,
-      territorialMass: northStarCandidate.territorialMass,
-      sovereignMass: northStarCandidate.sovereignMass,
-      sovereignRatio: northStarCandidate.sovereignRatio,
-      sustainedMassCohort: northStarCandidate.sustainedMassCohort,
-      modelSpread: northStarCandidate.modelSpread,
-      dominantPresenceShare: northStarCandidate.dominantPresenceShare,
-      dominantPassageShare: northStarCandidate.dominantPassageShare,
-      maxStatementRun: northStarCandidate.maxStatementRun,
-      claimNoveltyRatio: nsTotal > 0 ? nsNovel / nsTotal : 0,
-      corpusNoveltyRatio:
-        totalCorpusParagraphs - assignedSet.size > 0
-          ? nsNovel / (totalCorpusParagraphs - assignedSet.size)
-          : 0,
-      novelParagraphCount: nsNovel,
-      majorityGateSnapshot: null,
-    };
-
-    for (const pid of nsFootprintParagraphs) {
-      assignedSet.add(pid);
-    }
-  }
-
-  // ── Block I: Phase 6 — Floor (defensive sweep)
-  for (const c of extendedCandidates) {
-    if (!c.landscapePosition || c.landscapePosition === 'floor') {
-      c.landscapePosition = 'floor';
-      c.routingMeasurements = null;
-    }
-  }
-
-  // Update claimProfiles with routing results from extended candidates
-  for (const c of extendedCandidates) {
-    const id = c.claimId;
-    if (claimProfiles[id]) {
-      claimProfiles[id].landscapePosition = c.landscapePosition;
-      claimProfiles[id].isMinority = c.isMinority;
-      claimProfiles[id].routingMeasurements = c.routingMeasurements;
-    }
   }
 
   // Instrumentation: keep the legacy gate shape, but feed it the replacement
@@ -1290,22 +1167,20 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   const sigmaConcentration = sigma(concentrationValues, muConcentration);
   const concentrationThreshold = muConcentration + sigmaConcentration;
 
-  let loadBearingCount = 0;
-  for (const p of Object.values(claimProfiles)) {
-    if (p.landscapePosition !== 'floor') loadBearingCount++;
+  const routePlan = buildRoutePlan(enrichedClaims, claimProfiles);
+  const legacyCompatibility = projectLegacyLandscapeCompatibility(routePlan);
+  for (const [claimId, position] of Object.entries(legacyCompatibility.landscapePositionByClaim)) {
+    if (claimProfiles[claimId]) claimProfiles[claimId].landscapePosition = position;
   }
+  const labelExcision = buildLabelExcisionDiagnostics(routePlan, legacyCompatibility);
+  const loadBearingCount = routePlan.includedClaimIds.length;
 
-  // Conflict clusters
+  // Conflict clusters remain compatibility/debug context only. They do not feed routePlan.
   const routingConflictEdges = validatedConflicts.filter(
     (c) => c.validated && c.mapperLabeledConflict
   );
-  if (routingConflictEdges.length > 0) {
-    collectRoutingMeasurement('validatedConflict', 'conflict cluster routing');
-    collectRoutingMeasurement('crossPoolProximity', 'conflict cluster routing');
-  }
 
   const conflictClusters: PassageClaimRouting['conflictClusters'] = [];
-  const claimsInRoutedConflict = new Set<string>();
 
   if (routingConflictEdges.length > 0) {
     const adj = new Map<string, Set<string>>();
@@ -1341,32 +1216,16 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
             crossPoolProximity: e.crossPoolProximity,
           })),
       });
-      for (const id of component) claimsInRoutedConflict.add(id);
     }
   }
 
-  // Routing assembly — landscape position is the single source of truth (floor = passthrough)
+  // Compatibility assembly is derived from routePlan, not from landscape labels.
   const claimMap = new Map<string, EnrichedClaim>();
   for (const c of enrichedClaims) claimMap.set(String(c.id), c);
 
-  // Define priority order for sorting (not for routing — routing is determined by landscapePosition)
-  const priorityOrder: Record<string, number> = {
-    northStar: 0,
-    leadMinority: 1,
-    mechanism: 2,
-    floor: 3,
-  };
-
-  for (const profile of Object.values(claimProfiles)) {
-    collectRoutingMeasurement(
-      profile.landscapePosition,
-      'landscapePosition route assembly'
-    );
-  }
-
   for (const diagnostic of scalarMigrationByClaimId.values()) {
     const newLandscapePosition =
-      claimProfiles[diagnostic.claimId]?.landscapePosition ?? 'floor';
+      legacyCompatibility.landscapePositionByClaim[diagnostic.claimId] ?? 'floor';
     diagnostic.newLandscapePosition = newLandscapePosition;
     if (diagnostic.legacyWouldFloorByScalarBucket !== null) {
       const newFloored = newLandscapePosition === 'floor';
@@ -1381,21 +1240,16 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   }
   const scalarMigration = Array.from(scalarMigrationByClaimId.values());
 
-  const loadBearingClaims: PassageRoutedClaim[] = Object.values(claimProfiles)
-    .filter((p) => p.landscapePosition !== 'floor' && !claimsInRoutedConflict.has(p.claimId))
-    .sort((a, b) => {
-      const priorityDiff =
-        (priorityOrder[a.landscapePosition] ?? 99) - (priorityOrder[b.landscapePosition] ?? 99);
-      if (priorityDiff !== 0) return priorityDiff;
-      return nullableScore(b.dominantPresenceShare) - nullableScore(a.dominantPresenceShare);
-    })
+  const loadBearingClaims: PassageRoutedClaim[] = routePlan.includedClaimIds
+    .map((claimId) => claimProfiles[claimId])
+    .filter((p): p is PassageClaimProfile => Boolean(p))
     .map((p) => {
       const c = claimMap.get(p.claimId);
       return {
         claimId: p.claimId,
         claimLabel: String((c as any)?.label ?? p.claimId),
         claimText: String((c as any)?.text ?? ''),
-        landscapePosition: p.landscapePosition,
+        landscapePosition: legacyCompatibility.landscapePositionByClaim[p.claimId] ?? 'floor',
         contestedShareRatio: p.contestedShareRatio,
         dominantPresenceShare: p.dominantPresenceShare,
         dominantPassageShare: p.dominantPassageShare,
@@ -1410,21 +1264,20 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       };
     });
 
-  const routedClaimIds = [...claimsInRoutedConflict, ...loadBearingClaims.map((c) => c.claimId)];
-  const routedSet = new Set(routedClaimIds);
-  // Passthrough is exactly the floor claims (not routed in conflict, not load-bearing)
-  const passthroughClaims = enrichedClaims
-    .map((c) => String(c.id))
-    .filter((id) => claimProfiles[id]?.landscapePosition === 'floor' && !routedSet.has(id));
+  const routedClaimIds = [...routePlan.includedClaimIds];
+  const passthroughClaims = [...routePlan.nonPrimaryClaimIds];
 
   const routing: PassageClaimRouting = {
     conflictClusters,
+    routePlan,
+    legacyCompatibility,
     loadBearingClaims,
     passthrough: passthroughClaims,
     routedClaimIds,
     diagnostics: {
       massEligibility,
       scalarMigration,
+      labelExcision,
       concentrationDistribution: Object.values(claimProfiles).map(
         (p) => p.dominantPresenceShare ?? 0
       ),
@@ -1432,8 +1285,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         (p) => p.dominantPassageShare ?? 0
       ),
       totalClaims: enrichedClaims.length,
-      floorCount: Object.values(claimProfiles).filter((p) => p.landscapePosition === 'floor')
-        .length,
+      floorCount: routePlan.nonPrimaryClaimIds.length,
       corpusMode: periphery.corpusMode,
       peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
       peripheralRatio: periphery.peripheralRatio,
@@ -1496,15 +1348,11 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       nounSurvivalRatio: number;
       cost: number;
     }> = [];
-    let deletionDamage = 0;
-    let degradationDamage = 0;
-
     for (const sid of claimExclusive) {
       if (sid.startsWith('tc_')) continue;
       const twin = twinMap.perClaim[id]?.[sid] ?? null;
       if (twin) {
         deletionIds.push(sid);
-        deletionDamage += 1 - twin.similarity;
         const twinId = twin.twinStatementId;
         let certainty: '2a' | '2b' | '2c';
         let hostClaim: string | null;
@@ -1532,7 +1380,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
           .split(/\s+/)
           .filter((w) => w.length > 0);
         const originalWordCount = words.length;
-        degradationDamage += 1 - nounRatio;
         degradationDetails.push({
           statementId: sid,
           originalWordCount,

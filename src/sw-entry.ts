@@ -2061,24 +2061,17 @@ function doRegenerateEmbeddings(
           const validPassageKeys = new Set(idxPassages.map((p: { passageKey: string }) => p.passageKey));
           const validUnclaimedKeys = new Set(idxUnclaimed.map((u: { groupKey: string }) => u.groupKey));
 
-          const concentrations = idxPassages.map((p: { concentrationRatio: number }) => p.concentrationRatio);
-          const landscapeComp: { northStar: number; leadMinority: number; mechanism: number; floor: number } = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
-          idxPassages.forEach((p: { landscapePosition: string }) => {
-            landscapeComp[p.landscapePosition as keyof typeof landscapeComp]++;
-          });
+          const routePlan = (mapperArtifact.passageRouting as PassageRoutingResult | undefined)
+            ?.routing?.routePlan;
 
           const editorialPrompt = buildEditorialPrompt(queryText, idxPassages, idxUnclaimed, {
             passageCount: idxPassages.length,
             claimCount: enrichedClaims.length,
             conflictCount: (mapperArtifact.passageRouting as { routing?: { conflictClusters?: unknown[] } } | undefined)?.routing?.conflictClusters?.length ?? 0,
-            concentrationSpread: {
-              min: concentrations.length ? Math.min(...concentrations) : 0,
-              max: concentrations.length ? Math.max(...concentrations) : 0,
-              mean: concentrations.length
-                ? concentrations.reduce((a: number, b: number) => a + b, 0) / concentrations.length
-                : 0,
+            routePlanSummary: {
+              includedCount: routePlan?.includedClaimIds?.length ?? 0,
+              nonPrimaryCount: routePlan?.nonPrimaryClaimIds?.length ?? 0,
             },
-            landscapeComposition: landscapeComp,
           });
 
           // Thread continuation: prefer mapping cursor (semantic mapper's thread),
