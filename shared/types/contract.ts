@@ -3,6 +3,7 @@
 // ============================================================================
 import type { Claim, Edge, EnrichedClaim } from './graph';
 import type { SecondaryPattern } from './editorial';
+import type { MeasurementViolation } from '../measurement-registry';
 import type { ProviderKey, ProviderError } from './provider';
 import type { AiTurn } from './turns';
 
@@ -366,6 +367,28 @@ export interface ParagraphCoverageEntry {
 
 
 /** Statement-level passage: a contiguous run of ≥2 canonical claim statements in document order within a single model. */
+export interface ParagraphMassVectorEntry {
+  paragraphId: string;
+  value: number;
+}
+
+export interface ClaimFootprintMeasurement {
+  vectors: {
+    presenceByParagraph: ParagraphMassVectorEntry[];
+    territorialByParagraph: ParagraphMassVectorEntry[];
+    sovereignByParagraph: ParagraphMassVectorEntry[];
+  };
+  totals: {
+    presenceMass: number;
+    territorialMass: number;
+    sovereignMass: number;
+  };
+  derived: {
+    sovereignRatio: number | null;
+    contestedShareRatio: number | null;
+  };
+}
+
 export interface StatementPassageEntry {
   modelIndex: number;
   /** Statement IDs forming this contiguous run, in document order */
@@ -403,7 +426,9 @@ export interface ClaimDensityProfile {
   /** Derived on demand: presenceMass / paragraphCount */
   meanCoverage: number;
   /** Per-paragraph presence contribution vector: [paragraphId → claimStmts/paraTotal] */
-  presenceVector: Array<{ paragraphId: string; value: number }>;
+  presenceVector: ParagraphMassVectorEntry[];
+  /** Canonical assignment-derived paragraph mass vectors. Vectors are source of truth; totals derive from them. */
+  footprint: ClaimFootprintMeasurement;
   /** Per-paragraph detail */
   paragraphCoverage: ParagraphCoverageEntry[];
 
@@ -489,11 +514,11 @@ export interface MajorityGateSnapshot {
 
 export interface RoutingMeasurements {
   /**
-   * Continuous contested dominance: territorialMass / (presenceMass - sovereignMass).
-   * Measures the yield rate of fractional exclusivity credit relative to shared territory.
-   * Returns null when presenceMass - sovereignMass = 0 (fully sovereign or empty claim).
+   * Canonical shared-footprint ratio:
+   * (territorialMass - sovereignMass) / (presenceMass - sovereignMass).
+   * Returns null when presenceMass = sovereignMass.
    */
-  contestedDominance: number | null;
+  contestedShareRatio: number | null;
   /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
   presenceMass: number;
   /** Σ(Σ(1/k)/paraTotal) across paragraphs — fractional-credit exclusivity (k = sharing claims) */
@@ -509,6 +534,14 @@ export interface RoutingMeasurements {
   sustainedMassCohort: SustainedMassCohort;
   /** Distinct models with ≥1 paragraph for this claim (used as tiebreaker) */
   modelSpread: number;
+  /** modelTreatment.derived.dominantPresenceShare */
+  dominantPresenceShare: number | null;
+  /** modelTreatment.derived.dominantPassageShare */
+  dominantPassageShare: number | null;
+  /** passageShape.derived.maxStatementRun */
+  maxStatementRun: number;
+  /** Legacy compatibility only. Not consumed by active routing after Phase 3. */
+  contestedDominance?: number | null;
   /**
    * Novel majority paragraphs (coverage > 0.5) / this claim's majority paragraph count.
    * TODO: Redefine against presenceMass once novelty ratios are migrated off MAJ.
@@ -531,10 +564,10 @@ export interface PassageClaimProfile {
   landscapePosition: LandscapePosition;
   /** True if this claim is classified as minority (lower cumulative coverage) */
   isMinority: boolean;
-  /** Routing measurements (contestedDominance, territorialMass, novelty ratios, gate snapshot) — null if floor */
+  /** Routing measurements (mass-native footprint/model/passage values plus legacy compatibility payload) — null if floor */
   routingMeasurements: RoutingMeasurements | null;
 
-  /** Majority paragraphs (coverage > 0.5) C wins where ≥1 other claim has any presence (≠ majority). */
+  /** Footprint paragraphs where ≥1 other claim also has any presence. */
   dominatedParagraphCount: number;
   /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
   presenceMass: number;
@@ -544,6 +577,8 @@ export interface PassageClaimProfile {
   sovereignMass: number;
   /** Derived: sovereignMass / presenceMass. Null when presenceMass = 0. */
   sovereignRatio: number | null;
+  /** Derived: footprint.derived.contestedShareRatio. Null when presenceMass = sovereignMass. */
+  contestedShareRatio: number | null;
   /** sqrt(normMAXLEN × normPresenceMass) — percentile rank within current run. */
   sustainedMass: number;
   /** Cohort derived from sustainedMass. */
@@ -558,6 +593,14 @@ export interface PassageClaimProfile {
   /** Instrumentation only — not consumed by routing */
   /** Model index of the structural contributor with the highest presence mass */
   dominantModel: number | null;
+  /** modelTreatment.derived.dominantPresenceShare */
+  dominantPresenceShare: number | null;
+  /** modelTreatment.derived.dominantPassageShare */
+  dominantPassageShare: number | null;
+  /** passageShape.derived.maxStatementRun */
+  maxStatementRun: number;
+  /** Legacy compatibility only. Not consumed by active routing after Phase 3. */
+  contestedDominance?: number | null;
   /** presenceMass(dominant) / presenceMass(total) — how replaceable is the dominant model? */
   concentrationRatio: number;
   /** MAXLEN(dominant) / presenceMass(dominant) — contiguity relative to presence footprint */
@@ -579,6 +622,10 @@ export interface PassageRoutedClaim {
   claimLabel: string;
   claimText: string;
   landscapePosition: LandscapePosition;
+  contestedShareRatio: number | null;
+  dominantPresenceShare: number | null;
+  dominantPassageShare: number | null;
+  maxStatementRun: number;
   concentrationRatio: number;
   densityRatio: number;
   meanCoverageInLongestRun: number;
@@ -594,13 +641,41 @@ export interface PassageClaimRouting {
     claimIds: string[];
     edges: Array<{ from: string; to: string; crossPoolProximity: number | null }>;
   }>;
-  /** Load-bearing claims (concentration ≥ μ+σ OR MAXLEN ≥ 2) — no ceiling cap */
+  /** Load-bearing claims from the routing surface. Legacy labels remain compatibility output. */
   loadBearingClaims: PassageRoutedClaim[];
   /** Claims not included in routedClaimIds (neither conflict nor load-bearing) */
   passthrough: string[];
   /** All routed claim IDs (conflicts + load-bearing) */
   routedClaimIds: string[];
   diagnostics: {
+    massEligibility: Array<{
+      claimId: string;
+      oldMajorityEligible: boolean;
+      newFootprintEligible: boolean;
+      presenceMass: number;
+      territorialMass: number;
+      sovereignMass: number;
+      sovereignRatio: number | null;
+      contestedShareRatio: number | null;
+      changedEligibility: boolean;
+      reason: string | null;
+    }>;
+    scalarMigration: Array<{
+      claimId: string;
+      legacyContestedDominance: number | null;
+      contestedShareRatio: number | null;
+      legacyConcentrationRatio: number;
+      dominantPresenceShare: number | null;
+      legacyDensityRatio: number;
+      dominantPassageShare: number | null;
+      legacyMeanCoverageInLongestRun: number;
+      maxStatementRun: number;
+      legacyMinorityBucket: number | null;
+      legacyWouldFloorByScalarBucket: boolean | null;
+      newLandscapePosition: LandscapePosition;
+      changedRoutingOutcome: boolean;
+      reason: string | null;
+    }>;
     concentrationDistribution: number[];
     densityRatioDistribution: number[];
     totalClaims: number;
@@ -615,6 +690,8 @@ export interface PassageClaimRouting {
     peripheralRatio: number;
     /** Basin ratio that drove the decision */
     largestBasinRatio: number | null;
+    /** Collected legacy/quarantined measurement use. Routing output remains legacy-compatible. */
+    measurementGuardViolations?: MeasurementViolation[];
   };
 }
 
@@ -626,7 +703,7 @@ export interface PassageRoutingResult {
     sigmaConcentration: number;
     /** μ + σ — distributional threshold for concentration outlier */
     concentrationThreshold: number;
-    /** Claims with ≥1 paragraph where coverage > 0.5 — precondition pass */
+    /** Claims with canonical footprint mass > 0 — precondition pass */
     preconditionPassCount: number;
     /** Claims passing at least one gate */
     loadBearingCount: number;
@@ -657,7 +734,7 @@ export interface UnclaimedParagraphEntry {
 
 export interface UnclaimedGroup {
   nearestClaimId: string;
-  nearestClaimLandscapePosition: LandscapePosition;
+  nearestClaimDistance: number;
   paragraphs: UnclaimedParagraphEntry[];
   meanClaimSimilarity: number;
   meanQueryRelevance: number;

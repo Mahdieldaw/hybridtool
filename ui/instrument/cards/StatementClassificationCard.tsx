@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import clsx from 'clsx';
 import {
   fmt,
   fmtInt,
@@ -9,8 +8,6 @@ import {
   InterpretiveCallout,
   SortableTable,
   StatRow,
-  LANDSCAPE_COLORS,
-  LANDSCAPE_LABELS,
 } from './CardBase';
 
 // ============================================================================
@@ -150,18 +147,11 @@ export function StatementClassificationCard({ artifact }: { artifact: any }) {
                 ),
               },
               {
-                key: 'landscape',
-                header: 'Pos',
-                cell: (r: any) => (
-                  <span
-                    className={clsx(
-                      'text-[10px] font-mono',
-                      LANDSCAPE_COLORS[r.landscape] ?? 'text-text-muted'
-                    )}
-                  >
-                    {LANDSCAPE_LABELS[r.landscape] ?? r.landscape}
-                  </span>
-                ),
+                key: 'distance',
+                header: 'Dist',
+                title: 'Distance to nearest claim profile',
+                sortValue: (r: any) => r.nearestClaimDistance,
+                cell: (r: any) => <span className="font-mono">{fmt(r.nearestClaimDistance, 3)}</span>,
               },
               {
                 key: 'paragraphs',
@@ -209,7 +199,10 @@ export function StatementClassificationCard({ artifact }: { artifact: any }) {
                 nearestClaimLabel:
                   claimLabelById.get(g.nearestClaimId ?? '') ??
                   String(g.nearestClaimId ?? '').slice(0, 12),
-                landscape: g.nearestClaimLandscapePosition ?? 'floor',
+                nearestClaimDistance:
+                  typeof g.nearestClaimDistance === 'number'
+                    ? g.nearestClaimDistance
+                    : 1 - (g.meanClaimSimilarity ?? 0),
                 paragraphCount: safeArr(g.paragraphs).length,
                 unclaimedCount: uc,
                 meanClaimSimilarity: g.meanClaimSimilarity ?? 0,

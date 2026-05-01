@@ -1,0 +1,399 @@
+import type { ClaimDensityProfile, ClaimDensityResult } from '../../shared/types';
+import type { ShadowParagraph } from '../shadow';
+import {
+  buildMassEligibilityDiagnostic,
+  computeTopologicalSurface,
+} from './surface';
+
+function makeProfile(
+  overrides: Partial<ClaimDensityProfile> = {}
+): ClaimDensityProfile {
+  const profile: ClaimDensityProfile = {
+    claimId: 'c1',
+    paragraphCount: 1,
+    passageCount: 0,
+    maxPassageLength: 1,
+    meanCoverageInLongestRun: 0.25,
+    modelSpread: 1,
+    modelsWithPassages: 0,
+    totalClaimStatements: 1,
+    presenceMass: 99,
+    meanCoverage: 0.25,
+    presenceVector: [{ paragraphId: 'p1', value: 0.25 }],
+    footprint: {
+      vectors: {
+        presenceByParagraph: [{ paragraphId: 'p1', value: 1 }],
+        territorialByParagraph: [{ paragraphId: 'p1', value: 1 }],
+        sovereignByParagraph: [{ paragraphId: 'p1', value: 1 }],
+      },
+      totals: {
+        presenceMass: 1,
+        territorialMass: 1,
+        sovereignMass: 1,
+      },
+      derived: {
+        sovereignRatio: 1,
+        contestedShareRatio: null,
+      },
+    },
+    paragraphCoverage: [
+      {
+        paragraphId: 'p1',
+        modelIndex: 0,
+        paragraphIndex: 0,
+        totalStatements: 4,
+        claimStatements: 1,
+        coverage: 0.25,
+      },
+    ],
+    statementPassages: [],
+  };
+
+  return {
+    ...profile,
+    ...overrides,
+  };
+}
+
+function makeShadowParagraphs(ids: string[] = ['p1']): ShadowParagraph[] {
+  return [
+    ...ids.map((id, index) => ({
+      id,
+      modelIndex: index,
+      paragraphIndex: index,
+      statementIds: [`s${index + 1}`],
+      dominantStance: 'assertive',
+      stanceHints: ['assertive'],
+      contested: false,
+      confidence: 1,
+      signals: { sequence: false, tension: false, conditional: false },
+      statements: [
+        {
+          id: `s${index + 1}`,
+          text: `Statement s${index + 1}`,
+          stance: 'assertive',
+          signals: [],
+        },
+      ],
+      _fullParagraph: `Statement s${index + 1}`,
+    })),
+  ];
+}
+
+function runSurfaceWithProfiles(
+  profiles: Record<string, ClaimDensityProfile>,
+  enrichedClaims: any[]
+) {
+  const claimDensityResult: ClaimDensityResult = {
+    profiles,
+    meta: {
+      totalParagraphs: Object.values(profiles).reduce(
+        (max, profile) => Math.max(max, profile.paragraphCount),
+        0
+      ),
+      totalModels: 2,
+      processingTimeMs: 0,
+    },
+  };
+
+  return computeTopologicalSurface({
+    enrichedClaims,
+    claimDensityResult,
+    validatedConflicts: [],
+    modelCount: 2,
+    periphery: {
+      corpusMode: 'no-geometry',
+      peripheralNodeIds: new Set(),
+      peripheralRatio: 0,
+      largestBasinRatio: null,
+      basinByNodeId: {},
+    },
+    statementEmbeddings: new Map(),
+    totalCorpusStatements: Object.keys(profiles).length,
+    canonicalSets: new Map(
+      Object.keys(profiles).map((claimId, index) => [
+        claimId,
+        new Set([`s${index + 1}`]),
+      ])
+    ),
+    exclusiveIds: new Map(
+      Object.keys(profiles).map((claimId, index) => [claimId, [`s${index + 1}`]])
+    ),
+    shadowParagraphs: makeShadowParagraphs(['p1', 'p2', 'p3']),
+  });
+}
+
+function runSurface(profile: ClaimDensityProfile) {
+  return runSurfaceWithProfiles(
+    { c1: profile },
+    [
+      {
+        id: 'c1',
+        label: 'Claim 1',
+        text: 'Claim text',
+        supporters: [0],
+      } as any,
+    ]
+  );
+}
+
+describe('surface mass eligibility', () => {
+  test('mass diagnostics read canonical footprint totals rather than legacy presenceMass', () => {
+    const diagnostic = buildMassEligibilityDiagnostic('c1', makeProfile(), false);
+
+    expect(diagnostic).toEqual(
+      expect.objectContaining({
+        oldMajorityEligible: false,
+        newFootprintEligible: true,
+        presenceMass: 1,
+        territorialMass: 1,
+        sovereignMass: 1,
+        sovereignRatio: 1,
+        contestedShareRatio: null,
+        changedEligibility: true,
+      })
+    );
+  });
+
+  test('footprint eligibility does not require a legacy majority paragraph', () => {
+    const result = runSurface(makeProfile());
+    const routing = result.passageRoutingResult.routing;
+
+    expect(result.passageRoutingResult.gate.preconditionPassCount).toBe(1);
+    expect(result.passageRoutingResult.claimProfiles.c1.presenceMass).toBe(1);
+    expect(routing.diagnostics.massEligibility).toEqual([
+      expect.objectContaining({
+        oldMajorityEligible: false,
+        newFootprintEligible: true,
+        changedEligibility: true,
+      }),
+    ]);
+    expect(routing.diagnostics.measurementGuardViolations?.map((v) => v.key)).not.toContain(
+      'MAJ'
+    );
+  });
+
+  test('zero canonical presence mass is not footprint-eligible even if legacy coverage is high', () => {
+    const result = runSurface(
+      makeProfile({
+        paragraphCoverage: [
+          {
+            paragraphId: 'p1',
+            modelIndex: 0,
+            paragraphIndex: 0,
+            totalStatements: 1,
+            claimStatements: 1,
+            coverage: 1,
+          },
+        ],
+        footprint: {
+          vectors: {
+            presenceByParagraph: [],
+            territorialByParagraph: [],
+            sovereignByParagraph: [],
+          },
+          totals: {
+            presenceMass: 0,
+            territorialMass: 0,
+            sovereignMass: 0,
+          },
+          derived: {
+            sovereignRatio: null,
+            contestedShareRatio: null,
+          },
+        },
+      })
+    );
+
+    expect(result.passageRoutingResult.gate.preconditionPassCount).toBe(0);
+    expect(result.passageRoutingResult.routing.diagnostics.massEligibility).toEqual([
+      expect.objectContaining({
+        oldMajorityEligible: true,
+        newFootprintEligible: false,
+        changedEligibility: true,
+      }),
+    ]);
+  });
+
+  test('routes expose replacement scalar fields and do not guard deprecated scalar reads', () => {
+    const result = runSurface(
+      makeProfile({
+        paragraphCount: 2,
+        maxPassageLength: 4,
+        meanCoverageInLongestRun: 0.2,
+        footprint: {
+          vectors: {
+            presenceByParagraph: [
+              { paragraphId: 'p1', value: 1 },
+              { paragraphId: 'p2', value: 4 },
+            ],
+            territorialByParagraph: [
+              { paragraphId: 'p1', value: 1 },
+              { paragraphId: 'p2', value: 3 },
+            ],
+            sovereignByParagraph: [
+              { paragraphId: 'p1', value: 1 },
+              { paragraphId: 'p2', value: 2 },
+            ],
+          },
+          totals: {
+            presenceMass: 5,
+            territorialMass: 4,
+            sovereignMass: 3,
+          },
+          derived: {
+            sovereignRatio: 0.6,
+            contestedShareRatio: 0.5,
+          },
+        },
+        paragraphCoverage: [
+          {
+            paragraphId: 'p1',
+            modelIndex: 0,
+            paragraphIndex: 0,
+            totalStatements: 1,
+            claimStatements: 1,
+            coverage: 1,
+          },
+          {
+            paragraphId: 'p2',
+            modelIndex: 1,
+            paragraphIndex: 1,
+            totalStatements: 10,
+            claimStatements: 1,
+            coverage: 0.1,
+          },
+        ],
+        statementPassages: [
+          {
+            modelIndex: 0,
+            statementIds: ['s1', 's2'],
+            statementLength: 2,
+            startParagraphIndex: 0,
+            endParagraphIndex: 0,
+            avgCoverage: 1,
+            spanParagraphCount: 1,
+          },
+          {
+            modelIndex: 1,
+            statementIds: ['s3', 's4', 's5', 's6'],
+            statementLength: 4,
+            startParagraphIndex: 1,
+            endParagraphIndex: 1,
+            avgCoverage: 0.1,
+            spanParagraphCount: 1,
+          },
+        ],
+      })
+    );
+    const profile = result.passageRoutingResult.claimProfiles.c1;
+    const routed = result.passageRoutingResult.routing.loadBearingClaims[0];
+    const scalarDiagnostic = result.passageRoutingResult.routing.diagnostics.scalarMigration[0];
+
+    expect(profile.contestedShareRatio).toBe(0.5);
+    expect(profile.dominantPresenceShare).toBe(0.8);
+    expect(profile.dominantPassageShare).toBeCloseTo(4 / 6);
+    expect(profile.maxStatementRun).toBe(4);
+    expect(routed).toEqual(
+      expect.objectContaining({
+        contestedShareRatio: 0.5,
+        dominantPresenceShare: 0.8,
+        dominantPassageShare: expect.any(Number),
+        maxStatementRun: 4,
+      })
+    );
+    expect(scalarDiagnostic).toEqual(
+      expect.objectContaining({
+        legacyContestedDominance: 2,
+        contestedShareRatio: 0.5,
+        dominantPresenceShare: 0.8,
+        legacyMeanCoverageInLongestRun: 0.2,
+        maxStatementRun: 4,
+      })
+    );
+    expect(scalarDiagnostic.legacyConcentrationRatio).toBeCloseTo(1 / 1.1);
+    expect(
+      result.passageRoutingResult.routing.diagnostics.measurementGuardViolations?.map(
+        (violation) => violation.key
+      )
+    ).toEqual(
+      expect.not.arrayContaining([
+        'contestedDominance',
+        'concentrationRatio',
+        'densityRatio',
+        'meanCoverageInLongestRun',
+      ])
+    );
+  });
+
+  test('legacy contested bucket routing differences are reported diagnostically', () => {
+    const c1 = makeProfile({
+      claimId: 'c1',
+      footprint: {
+        vectors: {
+          presenceByParagraph: [{ paragraphId: 'p1', value: 2 }],
+          territorialByParagraph: [{ paragraphId: 'p1', value: 2 }],
+          sovereignByParagraph: [{ paragraphId: 'p1', value: 2 }],
+        },
+        totals: {
+          presenceMass: 2,
+          territorialMass: 2,
+          sovereignMass: 2,
+        },
+        derived: {
+          sovereignRatio: 1,
+          contestedShareRatio: null,
+        },
+      },
+    });
+    const c2 = makeProfile({
+      claimId: 'c2',
+      footprint: {
+        vectors: {
+          presenceByParagraph: [{ paragraphId: 'p2', value: 1 }],
+          territorialByParagraph: [{ paragraphId: 'p2', value: 0.5 }],
+          sovereignByParagraph: [{ paragraphId: 'p2', value: 0 }],
+        },
+        totals: {
+          presenceMass: 1,
+          territorialMass: 0.5,
+          sovereignMass: 0,
+        },
+        derived: {
+          sovereignRatio: 0,
+          contestedShareRatio: 0.5,
+        },
+      },
+      paragraphCoverage: [
+        {
+          paragraphId: 'p2',
+          modelIndex: 0,
+          paragraphIndex: 1,
+          totalStatements: 1,
+          claimStatements: 1,
+          coverage: 1,
+        },
+      ],
+    });
+
+    const result = runSurfaceWithProfiles(
+      { c1, c2 },
+      [
+        { id: 'c1', label: 'Claim 1', text: 'Claim text', supporters: [0, 1] },
+        { id: 'c2', label: 'Claim 2', text: 'Claim text', supporters: [] },
+      ]
+    );
+    const c2Diagnostic = result.passageRoutingResult.routing.diagnostics.scalarMigration.find(
+      (diagnostic) => diagnostic.claimId === 'c2'
+    );
+
+    expect(c2Diagnostic).toEqual(
+      expect.objectContaining({
+        legacyMinorityBucket: 4,
+        legacyWouldFloorByScalarBucket: true,
+        newLandscapePosition: 'leadMinority',
+        changedRoutingOutcome: true,
+      })
+    );
+  });
+});

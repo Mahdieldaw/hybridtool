@@ -13,6 +13,7 @@
 // ===========================================================================
 
 import type { StructuralAnalysis, EnrichedClaim, Edge } from '../../shared/types';
+import { assertMeasurementConsumer } from '../../shared/measurement-registry';
 
 // ===========================================================================
 // UTILITIES
@@ -116,6 +117,7 @@ export function buildPositionBrief(analysis: StructuralAnalysis): string {
   if (allClaims.length === 0) return '';
 
   // 1. Sort claims by support ratio (DESC - highest support first)
+  assertMeasurementConsumer('supportRatio', 'synthesis', 'position brief claim ordering');
   const sorted = [...allClaims].sort((a, b) => b.supportRatio - a.supportRatio);
 
   // 2. Split at midpoint: top half = mainstream, bottom half = anchors (outliers)

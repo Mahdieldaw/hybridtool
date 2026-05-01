@@ -60,7 +60,7 @@ export interface EvidenceRow {
   sc_claimed: boolean; // owned by at least one claim
   sc_inPassage: boolean; // claimed + inside a detected passage boundary
   sc_groupIdx: number | null; // 1-based unclaimed group index (null if claimed)
-  sc_landscapePos: string | null; // landscape position of nearest claim (unclaimed only)
+  sc_nearestClaimDistance: number | null; // group distance to nearest claim (unclaimed only)
   sc_nearestClaimSim: number | null; // paragraph cosine to nearest claim (unclaimed only)
   sc_queryRelevance: number | null; // per-statement query relevance from classification (unclaimed only)
 
@@ -163,7 +163,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
     const scClaimed = new Set<string>();
     const scInPassage = new Set<string>();
     const scGroupByStmt = new Map<string, number>(); // stmtId → 1-based group index
-    const scLandscapeByStmt = new Map<string, string>(); // stmtId → landscape position
+    const scNearestDistanceByStmt = new Map<string, number>(); // stmtId → group distance to nearest claim
     const scNearestSimByStmt = new Map<string, number>(); // stmtId → paragraph best cosine to claim
     const scQrByStmt = new Map<string, number>(); // stmtId → query relevance
 
@@ -182,7 +182,12 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       for (let gi = 0; gi < groups.length; gi++) {
         const g = groups[gi];
         const groupIdx = gi + 1;
-        const landscape = String(g?.nearestClaimLandscapePosition ?? 'floor');
+        const groupDistance =
+          typeof g?.nearestClaimDistance === 'number'
+            ? g.nearestClaimDistance
+            : typeof g?.meanClaimSimilarity === 'number'
+              ? 1 - g.meanClaimSimilarity
+              : null;
         const paragraphs: any[] = Array.isArray(g?.paragraphs) ? g.paragraphs : [];
         for (const para of paragraphs) {
           const bestSim = (() => {
@@ -200,7 +205,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
             : [];
           for (const sid of unclaimed) {
             scGroupByStmt.set(sid, groupIdx);
-            scLandscapeByStmt.set(sid, landscape);
+            if (groupDistance != null) scNearestDistanceByStmt.set(sid, groupDistance);
             if (bestSim != null) scNearestSimByStmt.set(sid, bestSim);
             if (typeof stmtQr[sid] === 'number') scQrByStmt.set(sid, stmtQr[sid]);
           }
@@ -218,7 +223,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       scClaimed,
       scInPassage,
       scGroupByStmt,
-      scLandscapeByStmt,
+      scNearestDistanceByStmt,
       scNearestSimByStmt,
       scQrByStmt,
       claimLabelMap: new Map<string, string>(
@@ -452,7 +457,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         sc_claimed: globalMaps?.scClaimed.has(stmtId) ?? false,
         sc_inPassage: globalMaps?.scInPassage.has(stmtId) ?? false,
         sc_groupIdx: globalMaps?.scGroupByStmt.get(stmtId) ?? null,
-        sc_landscapePos: globalMaps?.scLandscapeByStmt.get(stmtId) ?? null,
+        sc_nearestClaimDistance: globalMaps?.scNearestDistanceByStmt.get(stmtId) ?? null,
         sc_nearestClaimSim: globalMaps?.scNearestSimByStmt.get(stmtId) ?? null,
         sc_queryRelevance: globalMaps?.scQrByStmt.get(stmtId) ?? null,
 

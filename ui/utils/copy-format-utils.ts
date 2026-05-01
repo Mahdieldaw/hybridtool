@@ -941,7 +941,10 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
           return {
             index: i + 1,
             nearestClaimId: g.nearestClaimId ?? null,
-            landscape: g.nearestClaimLandscapePosition ?? 'floor',
+            nearestClaimDistance:
+              typeof g.nearestClaimDistance === 'number'
+                ? g.nearestClaimDistance
+                : 1 - (g.meanClaimSimilarity ?? 0),
             paragraphCount: safeArr(g.paragraphs).length,
             unclaimedCount: uc,
             meanClaimSimilarity: g.meanClaimSimilarity ?? 0,

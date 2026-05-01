@@ -19,6 +19,7 @@ import type { CorpusTree } from '../../shared/types/corpus-tree';
 import type { SourceContinuityEntry } from '../provenance/surface';
 import { extractJsonFromContent } from '../../shared/parsing-utils';
 import { resolveModelDisplayName } from '../../shared/citation-utils';
+import { assertMeasurementConsumer } from '../../shared/measurement-registry';
 
 // -------------------------------------------------------------------------
 // Passage Index types
@@ -217,6 +218,27 @@ export function buildEditorialPrompt(
   }
 ): string {
   const sections: string[] = [];
+
+  if (passages.length > 0) {
+    assertMeasurementConsumer('concentrationRatio', 'synthesis', 'editorial passage prompt');
+    assertMeasurementConsumer('densityRatio', 'synthesis', 'editorial passage prompt');
+    assertMeasurementConsumer('meanCoverageInLongestRun', 'synthesis', 'editorial passage prompt');
+
+    const landscapePositions = new Set(passages.map((p) => p.landscapePosition));
+    for (const position of landscapePositions) {
+      assertMeasurementConsumer(position, 'synthesis', 'editorial passage prompt');
+    }
+  }
+
+  for (const [position, count] of Object.entries(corpusShape.landscapeComposition)) {
+    if (count > 0) {
+      assertMeasurementConsumer(position, 'synthesis', 'editorial corpus shape prompt');
+    }
+  }
+
+  if (corpusShape.conflictCount > 0 || passages.some((p) => p.conflictClusterIndex !== null)) {
+    assertMeasurementConsumer('validatedConflict', 'synthesis', 'editorial conflict prompt');
+  }
 
   // -- Role --
   sections.push(`You are an editorial arranger. You receive a set of pre-extracted passages from multiple AI models responding to a user query. Your job is to arrange these passages into a threaded reading document.

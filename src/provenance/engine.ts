@@ -25,6 +25,7 @@ import type {
   ValidatedConflict,
   ProvenanceRefinementResult,
   StatementClassificationResult,
+  ClaimStructuralFingerprintResult,
 } from '../../shared/types';
 import type { ShadowParagraph, ShadowStatement } from '../shadow';
 import type { MeasuredRegion, PeripheryResult } from '../geometry';
@@ -36,6 +37,7 @@ import { validateEdgesAndAllegiance } from './validate';
 import { computeTopologicalSurface } from './surface';
 import { runStructurePhase } from './structure';
 import { computeStatementClassification } from './classify';
+import { buildClaimStructuralFingerprints } from './claim-structural-fingerprint';
 
 // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -74,6 +76,7 @@ export interface ProvenancePipelineOutput {
   provenanceRefinement: ProvenanceRefinementResult;
   passageRoutingResult: PassageRoutingResult;
   blastSurfaceResult: BlastSurfaceResult;
+  claimStructuralFingerprints: ClaimStructuralFingerprintResult;
   structuralAnalysis: StructurePhaseOutput;
   statementClassification: StatementClassificationResult;
 }
@@ -183,6 +186,17 @@ export async function buildProvenancePipeline(
     claimDensityResult: measure.claimDensity,
   });
 
+  // Phase 2.5: read-only claim structural fingerprint adapter.
+  const claimStructuralFingerprints = buildClaimStructuralFingerprints({
+    claimIds: claimsForDownstream.map((claim) => String(claim.id)),
+    claimDensityResult: measure.claimDensity,
+    mixedProvenanceResult: measure.mixedProvenance,
+    canonicalSets: safeCanonicalSets,
+    shadowParagraphs: measurementSafeParagraphs,
+    shadowStatements: measurementSafeStatements,
+    provenanceRefinement: validate.provenanceRefinement,
+  });
+
   // ── Phase 3: Surface ─────────────────────────────────────────────────
   const surface = computeTopologicalSurface({
     enrichedClaims: claimsForDownstream,
@@ -236,6 +250,7 @@ export async function buildProvenancePipeline(
     provenanceRefinement: validate.provenanceRefinement,
     passageRoutingResult: surface.passageRoutingResult,
     blastSurfaceResult: surface.blastSurfaceResult,
+    claimStructuralFingerprints,
     structuralAnalysis,
     statementClassification,
   };

@@ -6,11 +6,11 @@
 
 ## Scale
 
-84 UI components · 121 library files · 4 middleware layers · 6 environment variables
+84 UI components · 123 library files · 4 middleware layers · 6 environment variables
 
 **UI:** 84 components (react) — see [ui.md](./ui.md)
 
-**Libraries:** 121 files — see [libraries.md](./libraries.md)
+**Libraries:** 123 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
@@ -33,4 +33,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `NODE_ENV` — `scripts\build-common.js`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-04-30_
+_Back to [index.md](./index.md) · Generated 2026-05-01_

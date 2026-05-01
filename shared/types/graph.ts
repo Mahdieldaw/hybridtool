@@ -2,6 +2,8 @@
 // GRAPH TYPES — graph computation layer (pure src-side)
 // ============================================================================
 
+import type { ClaimStructuralFingerprint } from './structural-fingerprint';
+
 export interface Claim {
   id: string;
   label: string;
@@ -20,6 +22,7 @@ export interface Claim {
   role?: 'anchor' | 'branch' | 'challenger' | 'supplement';
   quote?: string;
   sourceCoherence?: number;
+  structuralFingerprint?: ClaimStructuralFingerprint;
 }
 
 export interface Edge {

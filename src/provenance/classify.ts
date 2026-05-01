@@ -18,7 +18,6 @@ import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type {
   ClaimDensityResult,
   PassageRoutingResult,
-  LandscapePosition,
   StatementClassificationResult,
   ClaimedStatementEntry,
   UnclaimedGroup,
@@ -61,7 +60,6 @@ export function computeStatementClassification(
     shadowParagraphs,
     enrichedClaims,
     claimDensityResult,
-    passageRoutingResult,
     paragraphEmbeddings,
     claimEmbeddings,
     queryRelevanceScores,
@@ -198,14 +196,13 @@ export function computeStatementClassification(
     groupMap.get(sp.bestClaimId)!.push(sp);
   }
 
-  const claimProfiles = passageRoutingResult?.claimProfiles ?? {};
-
   const unclaimedGroups: UnclaimedGroup[] = [];
   for (const [nearestClaimId, members] of groupMap) {
     const paragraphs = members.map((m) => m.entry);
 
     const sims = members.map((m) => m.bestSim);
     const meanClaimSimilarity = sims.length > 0 ? sims.reduce((a, b) => a + b, 0) / sims.length : 0;
+    const nearestClaimDistance = 1 - meanClaimSimilarity;
 
     const allQr: number[] = [];
     for (const m of members) {
@@ -217,12 +214,9 @@ export function computeStatementClassification(
       allQr.length > 0 ? allQr.reduce((a, b) => a + b, 0) / allQr.length : 0;
     const maxQueryRelevance = allQr.length > 0 ? Math.max(...allQr) : 0;
 
-    const landscape: LandscapePosition =
-      (claimProfiles[nearestClaimId]?.landscapePosition as LandscapePosition) ?? 'floor';
-
     unclaimedGroups.push({
       nearestClaimId,
-      nearestClaimLandscapePosition: landscape,
+      nearestClaimDistance,
       paragraphs,
       meanClaimSimilarity,
       meanQueryRelevance,

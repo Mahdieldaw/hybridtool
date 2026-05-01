@@ -19,6 +19,14 @@
   - function getModelsForClaim: (index, claimId) => number[]
   - function getBasinsForClaim: (index, claimId) => (number | null)[]
   - _...6 more_
+- `shared\measurement-registry.ts`
+  - function assertMeasurementConsumer: (key, consumer, contextOrOptions?) => void
+  - function collectMeasurementViolation: (key, consumer, context?, collector) => MeasurementViolation | null
+  - function getCollectedMeasurementViolations: () => MeasurementViolation[]
+  - function clearCollectedMeasurementViolations: () => void
+  - type Consumer
+  - type MeasurementStatus
+  - _...5 more_
 - `shared\parsing-utils.ts`
   - function repairJson: (text) => string
   - function extractJsonObject: (text) => void
@@ -225,12 +233,22 @@
   - function multiStoreTransaction: (db, storeNames, operations, IDBObjectStore>) => void
   - function promisifyRequest: (request) => Promise<T>
   - _...3 more_
+- `src\provenance\claim-structural-fingerprint.ts`
+  - function computeContestedShareRatio: (presenceMass, territorialMass, sovereignMass) => number | null
+  - function buildClaimStructuralFingerprints: (input) => ClaimStructuralFingerprintResult
+  - interface ClaimStructuralFingerprintInput
 - `src\provenance\classify.ts` — function computeStatementClassification: (input) => StatementClassificationResult, interface ClassifyPhaseInput
 - `src\provenance\engine.ts`
   - function buildProvenancePipeline: (input) => Promise<ProvenancePipelineOutput>
   - interface ProvenancePipelineInput
   - interface ProvenancePipelineOutput
 - `src\provenance\measure.ts`
+  - function emptyClaimFootprintMeasurement: () => ClaimFootprintMeasurement
+  - function computeClaimFootprintMeasurement: ({...}, canonicalStatementIds, ownershipMap, stmtToParagraphId, statementsById, paragraphOrder, }, Set<string>>;
+  stmtToParagraphId, string>;
+  statementsById, ShadowStatement>;
+  paragraphOrder, number>;
+}) => ClaimFootprintMeasurement
   - function measureProvenance: (input) => Promise<MeasurePhaseOutput>
   - interface ClaimExclusivity
   - interface MeasurePhaseInput
@@ -245,12 +263,13 @@
   - const computeStructuralAnalysis
   - const runStructurePhase
 - `src\provenance\surface.ts`
+  - function buildMassEligibilityDiagnostic: (claimId, profile, oldMajorityEligible) => MassEligibilityDiagnostic
   - function computeNounSurvivalRatio: (text) => number
   - function computeTopologicalSurface: (input) => SurfaceOutput
   - function buildSourceContinuityMap: (claimDensity) => Map<string, SourceContinuityEntry>
   - interface SurfaceInput
   - interface SurfaceOutput
-  - interface SourceContinuityEntry
+  - _...1 more_
 - `src\provenance\validate.ts`
   - function validateEdgesAndAllegiance: (input) => ValidateOutput
   - interface ValidateInput

@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**121 library files** across 12 modules
+**123 library files** across 12 modules
 
 ## Ui (37 files)
 
@@ -70,6 +70,19 @@
 - `src\providers\grok-adapter.js` — GrokAdapter
 - `src\providers\qwen-adapter.js` — QwenAdapter
 
+## Shared (10 files)
+
+- `shared\corpus-utils.ts` — deriveArtifactIndex, buildCorpusTree, buildCorpusIndex, getParagraphsForClaim, getModelsForClaim, getBasinsForClaim, …
+- `shared\measurement-registry.ts` — assertMeasurementConsumer, collectMeasurementViolation, getCollectedMeasurementViolations, clearCollectedMeasurementViolations, Consumer, MeasurementStatus, …
+- `shared\parsing-utils.ts` — repairJson, extractJsonObject, extractJsonFromContent, parseConciergeOutput, parseHandoffResponse, hasHandoffContent, …
+- `shared\types\turns.ts` — isUserTurn, isAiTurn, ProbeResult, ProbeCorpusHit, ProbeSessionResponse, ProbeSession, …
+- `shared\provider-config.ts` — canonicalCitationOrder, buildCitationSourceOrder, selectBestProvider, isProviderAuthorized, ProviderRole, CANONICAL_PROVIDER_ORDER, …
+- `shared\types\provider.ts` — HTOSError, ProviderAuthError, ProviderError, ProviderKey, ProviderErrorType, HTOSErrorCode
+- `shared\citation-utils.ts` — normalizeProviderId, normalizeCitationSourceOrder, resolveProviderId, resolveModelDisplayName, getCitationSourceOrder
+- `shared\artifact-processor.ts` — ArtifactProcessor, Artifact, ProcessedResponse
+- `shared\think-utils.ts` — computeThinkFlag, ComputeThinkFlagArgs, AI_THINK_FLAG
+- `shared\cognitive-artifact.ts` — buildCognitiveArtifact
+
 ## Geometry (9 files)
 
 - `src\geometry\types.ts` — isDegenerate, ExtendedSimilarityStats, NodeLocalStats, PairwiseFieldStats, PairwiseField, MutualRankEdge, …
@@ -82,18 +95,6 @@
 - `src\geometry\algorithms\basin-inversion-bayesian.ts` — computeBasinInversion
 - `src\geometry\algorithms\basin-inversion.ts` — computeBasinInversion
 
-## Shared (9 files)
-
-- `shared\corpus-utils.ts` — deriveArtifactIndex, buildCorpusTree, buildCorpusIndex, getParagraphsForClaim, getModelsForClaim, getBasinsForClaim, …
-- `shared\parsing-utils.ts` — repairJson, extractJsonObject, extractJsonFromContent, parseConciergeOutput, parseHandoffResponse, hasHandoffContent, …
-- `shared\types\turns.ts` — isUserTurn, isAiTurn, ProbeResult, ProbeCorpusHit, ProbeSessionResponse, ProbeSession, …
-- `shared\provider-config.ts` — canonicalCitationOrder, buildCitationSourceOrder, selectBestProvider, isProviderAuthorized, ProviderRole, CANONICAL_PROVIDER_ORDER, …
-- `shared\types\provider.ts` — HTOSError, ProviderAuthError, ProviderError, ProviderKey, ProviderErrorType, HTOSErrorCode
-- `shared\citation-utils.ts` — normalizeProviderId, normalizeCitationSourceOrder, resolveProviderId, resolveModelDisplayName, getCitationSourceOrder
-- `shared\artifact-processor.ts` — ArtifactProcessor, Artifact, ProcessedResponse
-- `shared\think-utils.ts` — computeThinkFlag, ComputeThinkFlagArgs, AI_THINK_FLAG
-- `shared\cognitive-artifact.ts` — buildCognitiveArtifact
-
 ## Persistence (8 files)
 
 - `src\persistence\transactions.ts` — withTransaction, batchWrite, batchDelete, updateWithVersionCheck, multiStoreTransaction, promisifyRequest, …
@@ -105,11 +106,12 @@
 - `src\persistence\index.ts` — initializePersistenceLayer
 - `src\persistence\session-manager.ts` — SessionManager
 
-## Provenance (7 files)
+## Provenance (8 files)
 
-- `src\provenance\surface.ts` — computeNounSurvivalRatio, computeTopologicalSurface, buildSourceContinuityMap, SurfaceInput, SurfaceOutput, SourceContinuityEntry
-- `src\provenance\measure.ts` — measureProvenance, ClaimExclusivity, MeasurePhaseInput, MeasurePhaseOutput
+- `src\provenance\surface.ts` — buildMassEligibilityDiagnostic, computeNounSurvivalRatio, computeTopologicalSurface, buildSourceContinuityMap, SurfaceInput, SurfaceOutput, …
+- `src\provenance\measure.ts` — emptyClaimFootprintMeasurement, computeClaimFootprintMeasurement, measureProvenance, ClaimExclusivity, MeasurePhaseInput, MeasurePhaseOutput
 - `src\provenance\structure.ts` — analyzeGlobalStructure, StructurePhaseOutput, computeStructuralAnalysis, runStructurePhase
+- `src\provenance\claim-structural-fingerprint.ts` — computeContestedShareRatio, buildClaimStructuralFingerprints, ClaimStructuralFingerprintInput
 - `src\provenance\engine.ts` — buildProvenancePipeline, ProvenancePipelineInput, ProvenancePipelineOutput
 - `src\provenance\semantic-mapper.ts` — buildSemanticMapperPrompt, parseSemanticMapperOutput, ParseResult
 - `src\provenance\validate.ts` — validateEdgesAndAllegiance, ValidateInput, ValidateOutput

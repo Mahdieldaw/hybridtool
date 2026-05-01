@@ -21,6 +21,7 @@ import type {
   BasinInversionResult,
   StructuralAnalysis,
   ValidatedConflict,
+  ClaimStructuralFingerprintResult,
 } from '../../shared/types';
 import type { GeometricSubstrate, SubstrateInterpretation, PeripheryResult, MeasuredRegion } from '../geometry/index.js';
 import type { ShadowStatement, ShadowParagraph } from '../shadow/index.js';
@@ -95,6 +96,7 @@ interface DerivedFields {
   provenanceRefinement: ProvenanceRefinementResult | null;
   statementClassification: StatementClassificationResult | null;
   conflictValidation: ValidatedConflict[] | null;
+  claimStructuralFingerprints: ClaimStructuralFingerprintResult | null;
 }
 
 
@@ -150,6 +152,7 @@ export async function computeDerivedFields({
     provenanceRefinement: null,
     statementClassification: null,
     conflictValidation: null,
+    claimStructuralFingerprints: null,
   };
 
   // ── Group A: Independent steps (no cross-dependencies) ─────────────
@@ -250,6 +253,7 @@ export async function computeDerivedFields({
       result.provenanceRefinement = provenanceOutput.provenanceRefinement;
       result.statementClassification = provenanceOutput.statementClassification;
       result.conflictValidation = provenanceOutput.validatedConflicts;
+      result.claimStructuralFingerprints = provenanceOutput.claimStructuralFingerprints;
       result.statementOwnership = provenanceOutput.claimProvenance.ownershipMap;
       result.claimProvenanceExclusivity = provenanceOutput.claimProvenance.exclusivityMap;
 
@@ -385,6 +389,7 @@ export async function assembleMapperArtifact({
     derivedSupportEdges,
     passageRoutingResult,
     claimDensityResult,
+    claimStructuralFingerprints,
     provenanceRefinement,
     statementClassification,
     conflictValidation,
@@ -404,13 +409,20 @@ export async function assembleMapperArtifact({
     ...(Array.isArray(derivedSupportEdges) ? derivedSupportEdges : []),
   ];
 
+  const claimsWithStructuralFingerprint = (enrichedClaims as any[]).map((claim) => {
+    const claimId = String(claim?.id ?? '');
+    const structuralFingerprint = (claimStructuralFingerprints as ClaimStructuralFingerprintResult | null | undefined)
+      ?.byClaimId?.[claimId];
+    return structuralFingerprint ? { ...claim, structuralFingerprint } : claim;
+  });
+
   return {
     id: generateMapperArtifactId(),
     query: queryText,
     ...(turn != null ? { turn } : {}),
     timestamp: new Date().toISOString(),
     model_count: modelCount,
-    claims: enrichedClaims,
+    claims: claimsWithStructuralFingerprint,
     edges,
     narrative: String(parsedNarrative || '').trim(),
 
@@ -421,6 +433,7 @@ export async function assembleMapperArtifact({
     ...(mixedProvenanceResult ? { mixedProvenance: mixedProvenanceResult } : {}),
     ...(passageRoutingResult ? { passageRouting: passageRoutingResult } : {}),
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
+    ...(claimStructuralFingerprints ? { claimStructuralFingerprints } : {}),
     ...(provenanceRefinement ? { provenanceRefinement } : {}),
     ...(statementClassification ? { statementClassification } : {}),
     ...(conflictValidation ? { conflictValidation } : {}),

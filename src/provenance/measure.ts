@@ -18,6 +18,8 @@ import type {
   EnrichedClaim,
   ClaimDensityProfile,
   ClaimDensityResult,
+  ClaimFootprintMeasurement,
+  ParagraphMassVectorEntry,
   ParagraphCoverageEntry,
   StatementPassageEntry,
 } from '../../shared/types';
@@ -55,6 +57,112 @@ export interface MeasurePhaseOutput {
   competitiveWeights: Map<string, Map<string, number>>;
   competitiveExcess: Map<string, Map<string, number>>;
   competitiveThresholds: Map<string, number>;
+}
+
+export function emptyClaimFootprintMeasurement(): ClaimFootprintMeasurement {
+  return {
+    vectors: {
+      presenceByParagraph: [],
+      territorialByParagraph: [],
+      sovereignByParagraph: [],
+    },
+    totals: {
+      presenceMass: 0,
+      territorialMass: 0,
+      sovereignMass: 0,
+    },
+    derived: {
+      sovereignRatio: null,
+      contestedShareRatio: null,
+    },
+  };
+}
+
+function contestedShareRatio(
+  presenceMass: number,
+  territorialMass: number,
+  sovereignMass: number
+): number | null {
+  if (Math.abs(presenceMass - sovereignMass) <= Number.EPSILON) return null;
+  return (territorialMass - sovereignMass) / (presenceMass - sovereignMass);
+}
+
+function sumVector(vector: ParagraphMassVectorEntry[]): number {
+  return vector.reduce((sum, entry) => sum + entry.value, 0);
+}
+
+function vectorFromParagraphs(
+  paragraphIds: string[],
+  values: Map<string, number>
+): ParagraphMassVectorEntry[] {
+  return paragraphIds.map((paragraphId) => ({
+    paragraphId,
+    value: values.get(paragraphId) ?? 0,
+  }));
+}
+
+export function computeClaimFootprintMeasurement({
+  claimId,
+  canonicalStatementIds,
+  ownershipMap,
+  stmtToParagraphId,
+  statementsById,
+  paragraphOrder,
+}: {
+  claimId: string;
+  canonicalStatementIds: Iterable<string>;
+  ownershipMap: Map<string, Set<string>>;
+  stmtToParagraphId: Map<string, string>;
+  statementsById: Map<string, ShadowStatement>;
+  paragraphOrder: Map<string, number>;
+}): ClaimFootprintMeasurement {
+  const presence = new Map<string, number>();
+  const territorial = new Map<string, number>();
+  const sovereign = new Map<string, number>();
+
+  for (const statementId of canonicalStatementIds) {
+    const statement = statementsById.get(statementId);
+    if (statement?.isTableCell) continue;
+
+    const paragraphId = stmtToParagraphId.get(statementId);
+    if (!paragraphId) continue;
+
+    const owners = ownershipMap.get(statementId);
+    const ownerCount = Math.max(owners?.size ?? 1, 1);
+
+    presence.set(paragraphId, (presence.get(paragraphId) ?? 0) + 1);
+    territorial.set(paragraphId, (territorial.get(paragraphId) ?? 0) + 1 / ownerCount);
+    if (owners?.size === 1 && owners.has(claimId)) {
+      sovereign.set(paragraphId, (sovereign.get(paragraphId) ?? 0) + 1);
+    }
+  }
+
+  const paragraphIds = Array.from(presence.keys()).sort(
+    (a, b) => (paragraphOrder.get(a) ?? Number.MAX_SAFE_INTEGER) - (paragraphOrder.get(b) ?? Number.MAX_SAFE_INTEGER)
+  );
+  const presenceByParagraph = vectorFromParagraphs(paragraphIds, presence);
+  const territorialByParagraph = vectorFromParagraphs(paragraphIds, territorial);
+  const sovereignByParagraph = vectorFromParagraphs(paragraphIds, sovereign);
+  const presenceMass = sumVector(presenceByParagraph);
+  const territorialMass = sumVector(territorialByParagraph);
+  const sovereignMass = sumVector(sovereignByParagraph);
+
+  return {
+    vectors: {
+      presenceByParagraph,
+      territorialByParagraph,
+      sovereignByParagraph,
+    },
+    totals: {
+      presenceMass,
+      territorialMass,
+      sovereignMass,
+    },
+    derived: {
+      sovereignRatio: presenceMass > 0 ? sovereignMass / presenceMass : null,
+      contestedShareRatio: contestedShareRatio(presenceMass, territorialMass, sovereignMass),
+    },
+  };
 }
 
 export async function measureProvenance(input: MeasurePhaseInput): Promise<MeasurePhaseOutput> {
@@ -492,6 +600,7 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
         paragraphId: pc.paragraphId,
         value: pc.coverage,
       })),
+      footprint: emptyClaimFootprintMeasurement(),
       paragraphCoverage,
 
       statementPassages,
@@ -574,6 +683,24 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     }
     canonicalSets.set(id, new Set(sourceIds));
     exclusiveIdsMap.set(id, exclusiveIds);
+  }
+
+  const paragraphOrder = new Map<string, number>();
+  for (let i = 0; i < shadowParagraphs.length; i++) {
+    paragraphOrder.set(shadowParagraphs[i].id, i);
+  }
+  for (const claim of claims) {
+    const id = String(claim.id);
+    const profile = densityProfiles[id];
+    if (!profile) continue;
+    profile.footprint = computeClaimFootprintMeasurement({
+      claimId: id,
+      canonicalStatementIds: canonicalStatementIds.get(id) ?? [],
+      ownershipMap,
+      stmtToParagraphId,
+      statementsById,
+      paragraphOrder,
+    });
   }
 
   return {
