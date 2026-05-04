@@ -20,8 +20,8 @@
 - `shared\citation-utils.ts` — imported by **7** files
 - `src\errors\handler.ts` — imported by **7** files
 - `src\geometry\annotate.ts` — imported by **7** files
-- `shared\parsing-utils.ts` — imported by **6** files
 - `src\concierge-service\editorial-mapper.ts` — imported by **6** files
+- `src\persistence\types.ts` — imported by **6** files
 
 ## Import Map (who imports what)
 

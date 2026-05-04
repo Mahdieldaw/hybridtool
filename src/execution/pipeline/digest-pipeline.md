@@ -171,7 +171,6 @@ Transforms batch outputs into a structured cognitive artifact via a deterministi
 
 ## singularity-phase.ts
 
-**Phase 3: Concierge-Driven Synthesis** (handoff V2 aware)
 
 Transforms mapping artifacts into natural language via concierge prompts + optional editorial AST.
 
@@ -186,15 +185,11 @@ Also exports: `runSingularityLLM(step, context, options)` for use by recompute-h
 
 **Concierge Service Integration:**
 
-1. **Handoff V2 Feature Flag** — `HANDOFF_V2_ENABLED`
    - Turn 1 (fresh spawn): Standard `buildConciergePrompt(userMsg, evidenceSubstrate)`
-   - Turn 2: Optimized `buildTurn2Message(userMsg)` (no structural analysis)
-   - Turn 3+: Dynamic `buildTurn3PlusMessage(userMsg, pendingHandoff)`
 
 2. **Fresh Instance Detection**
    - First concierge run for this session
    - Provider changed from last run
-   - COMMIT signal detected in prior response (handoff V2 only)
    - Triggers: `continueThread: false` (request new chatId/cursor)
 
 3. **Evidence Substrate Building** (Turn 1 only)
@@ -205,7 +200,6 @@ Also exports: `runSingularityLLM(step, context, options)` for use by recompute-h
 
 4. **Concierge Prompt Construction**
    - Embeds evidence substrate
-   - Includes prior handoff (if COMMIT detected)
    - Activates appropriate turn variant (1, 2, 3+)
 
 5. **Provider Context Threading**
@@ -213,22 +207,16 @@ Also exports: `runSingularityLLM(step, context, options)` for use by recompute-h
    - Continuation turns: use persisted provider context (cursor, chatId)
    - Enables multi-turn conversations with stateful providers
 
-6. **Handoff V2 Parsing** (Turn 2+ only)
-   - Extract structured handoff (analysis, commit, etc.) from response
    - Detect COMMIT signal → next turn gets prior context
-   - Strip handoff from user-facing text before sending to UI
    - Update concierge phase state
 
 7. **Concierge Phase State Persistence**
-   - Track `lastSingularityProviderId`, `hasRunConcierge`, `turnInCurrentInstance`
-   - Store `pendingHandoff` + `commitPending` for next turn (handoff V2)
    - Idempotency guard: `lastProcessedTurnId` prevents double-processing
 
 **Output: `singularityOutput`**
 
 ```javascript
 {
-  text: userFacingText,  // handoff-stripped
   providerId,
   timestamp,
   leakageDetected,
@@ -239,10 +227,8 @@ Also exports: `runSingularityLLM(step, context, options)` for use by recompute-h
 
 **Key Features:**
 
-- **Multi-Turn Concierge:** Handoff V2 enables stateful, iterative refinement (Turn 1 → Turn 2 followup → Turn 3+ dynamic)
 - **Evidence Synthesis:** Editorial AST + mapping claims embedded in concierge context
 - **Provider Threading:** Maintains conversation state across turns via provider contexts
-- **Handoff Stripping:** User sees clean response; internal handoff (for framework) invisible
 - **Idempotency:** `lastProcessedTurnId` guard prevents re-processing same turn if handler invoked twice
 
 ---
@@ -276,7 +262,6 @@ Handles recompute requests — rebuilds mapping artifacts from persisted embeddi
 3. **Gather Prior Responses**
    - Load all persisted provider responses (batch, mapping, singularity, editorial)
    - Latest mapping text + metadata
-   - Preserved singularity prompt data (for handoff V2 continuations)
 
 4. **Artifact Rebuild** (Tier 3: artifact is ephemeral)
    - Use `buildArtifactForProvider()` — single source of truth
@@ -380,7 +365,6 @@ Handles recompute requests — rebuilds mapping artifacts from persisted embeddi
 
 **Graceful Degradation:** Geometry failures, editorial failures don't block turn completion; diagnostics captured in meta.
 
-**Handoff V2 Aware:** Singularity phase natively supports multi-turn concierge workflows with structured handoff signals.
 
 ---
 
@@ -390,7 +374,6 @@ The pipeline directory implements the **core execution workflow** for the singul
 
 1. **Batch Phase** — Parallel multi-provider LLM calls with health gating and reactive context injection
 2. **Mapping Phase** — Full semantic pipeline: shadow extraction → geometry → semantic mapping → editorial synthesis
-3. **Singularity Phase** — Concierge-driven response synthesis with handoff V2 support
 4. **Recompute Handler** — Non-destructive artifact rebuilds from persisted embeddings, enabling efficient continuations
 
 **Key Artifacts:**
@@ -398,7 +381,6 @@ The pipeline directory implements the **core execution workflow** for the singul
 - **Embedding Cache:** Persisted statement/paragraph vectors enable deterministic recomputes
 - **Cognitive Artifact:** Structured claims, edges, density, editorial AST — passed between phases via `mapping.artifact`
 - **Provider Contexts:** Thread state (chatId, cursor) managed per provider per session
-- **Concierge Phase State:** Tracks multi-turn concierge workflows (fresh instance, handoff, commit signals)
 
 **Entry Points:**
 

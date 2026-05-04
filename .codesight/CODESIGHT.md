@@ -3,8 +3,8 @@
 > **Stack:** raw-http | none | react | typescript
 
 > 0 routes | 0 models | 84 components | 123 lib files | 6 env vars | 4 middleware | 0% test coverage
-> **Token savings:** this file is ~11,000 tokens. Without it, AI exploration would cost ~70,200 tokens. **Saves ~59,200 tokens per conversation.**
-> **Last scanned:** 2026-05-01 13:18 — re-run after significant changes
+> **Token savings:** this file is ~10,900 tokens. Without it, AI exploration would cost ~70,200 tokens. **Saves ~59,300 tokens per conversation.**
+> **Last scanned:** 2026-05-04 20:28 — re-run after significant changes
 
 ---
 
@@ -130,10 +130,7 @@
   - function repairJson: (text) => string
   - function extractJsonObject: (text) => void
   - function extractJsonFromContent: (content) => any | null
-  - function parseConciergeOutput: (rawResponse) => ConciergeOutput
-  - function parseHandoffResponse: (raw) => ParsedHandoffResponse
-  - function hasHandoffContent: (delta) => boolean
-  - _...3 more_
+  - function parseSemanticMapperOutput: (rawResponse) => SemanticMapperParseResult
 - `shared\provider-config.ts`
   - function canonicalCitationOrder: (activeProviderIds) => string[]
   - function buildCitationSourceOrder: (orderedProviderIds) => Record<number, string>
@@ -178,13 +175,9 @@
   - function generateStatementEmbeddings: (statements, config) => Promise<StatementEmbeddingResult>
   - _...4 more_
 - `src\concierge-service\concierge-service.ts`
-  - function buildTurn2Message: (userMessage) => string
-  - function buildTurn3PlusMessage: (userMessage, pendingHandoff) => string
   - function buildConciergePrompt: (userMessage, options?) => string
-  - interface PriorContext
   - interface ConciergePromptOptions
-  - const HANDOFF_V2_ENABLED
-  - _...2 more_
+  - const ConciergeService
 - `src\concierge-service\editorial-mapper.ts`
   - function buildPassageIndex: (claimDensity, passageRouting, statementClassification, corpus, claims, citationSourceOrder, string>, continuityMap, SourceContinuityEntry>) => void
   - function buildEditorialPrompt: (userQuery, passages, unclaimed, corpusShape) => string
@@ -588,8 +581,8 @@
 - `shared\citation-utils.ts` — imported by **7** files
 - `src\errors\handler.ts` — imported by **7** files
 - `src\geometry\annotate.ts` — imported by **7** files
-- `shared\parsing-utils.ts` — imported by **6** files
 - `src\concierge-service\editorial-mapper.ts` — imported by **6** files
+- `src\persistence\types.ts` — imported by **6** files
 
 ## Import Map (who imports what)
 

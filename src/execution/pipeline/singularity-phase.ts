@@ -1,13 +1,11 @@
 import { ArtifactProcessor } from '../../../shared/artifact-processor.js';
 import { getErrorMessage } from '../../errors/handler.js';
 import { executeGenericSingleStep } from '../utils/llm-runner.js';
-import { ConciergeService, HANDOFF_V2_ENABLED } from '../../concierge-service/concierge-service.js';
+import { ConciergeService } from '../../concierge-service/concierge-service.js';
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
-import { parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils.js';
 import { logInfraError } from '../../errors';
 import type { WorkflowStep } from '../../../shared/types/contract.js';
 
-const handoffV2Enabled = !!HANDOFF_V2_ENABLED;
 
 // Exported for use by recompute-handler
 export async function runSingularityLLM(
@@ -55,24 +53,7 @@ export async function runSingularityLLM(
   const parseSingularityOutput = (text: string) => {
     const rawText = String(text || '');
 
-    let cleanedText = rawText;
-    let signal = null;
-
-    try {
-      if (
-        handoffV2Enabled &&
-        ConciergeService &&
-        typeof ConciergeService.parseConciergeOutput === 'function'
-      ) {
-        const parsed = ConciergeService.parseConciergeOutput(rawText);
-        if (parsed) {
-          cleanedText = parsed.userResponse || cleanedText;
-          signal = parsed.signal || null;
-        }
-      }
-    } catch (err) {
-      console.warn('[SingularityPhase] Failed to parse concierge output:', err);
-    }
+    const cleanedText = rawText;
 
     // Strip <document> artifact tags from prose and collect them for separate rendering
     const processed = artifactProcessor.process(cleanedText);
@@ -81,7 +62,6 @@ export async function runSingularityLLM(
       userMessage: payload.originalPrompt,
       prompt: singularityPrompt,
       parsed: {
-        signal,
         rawText,
       },
     };
@@ -93,7 +73,6 @@ export async function runSingularityLLM(
       timestamp: Date.now(),
       pipeline,
       parsed: {
-        signal,
         rawText,
       },
     };
@@ -211,18 +190,11 @@ export async function executeSingularityPhase(
         const lastProvider = conciergeState?.lastSingularityProviderId;
         const providerChanged = lastProvider && lastProvider !== singularityProviderId;
 
-        // Fresh instance triggers:
-        // 1. First time concierge runs
-        // 2. Provider changed
-        // 3. COMMIT was detected in previous turn (only when handoff V2 is enabled)
-        const needsFreshInstance =
-          !conciergeState?.hasRunConcierge ||
-          providerChanged ||
-          (handoffV2Enabled && conciergeState?.commitPending);
+        const needsFreshInstance = !conciergeState?.hasRunConcierge || providerChanged;
 
         if (needsFreshInstance) {
           console.log(
-            `[SingularityPhase] Fresh instance needed: first=${!conciergeState?.hasRunConcierge}, providerChanged=${providerChanged}, commitPending=${handoffV2Enabled && conciergeState?.commitPending}`
+            `[SingularityPhase] Fresh instance needed: first=${!conciergeState?.hasRunConcierge}, providerChanged=${providerChanged}`
           );
         }
 
@@ -238,23 +210,10 @@ export async function executeSingularityPhase(
           return true;
         }
 
-        let turnInCurrentInstance = conciergeState?.turnInCurrentInstance || 0;
-
-        if (needsFreshInstance) {
-          // Fresh spawn - reset to Turn 1
-          turnInCurrentInstance = 1;
-        } else {
-          // Same instance - increment turn
-          turnInCurrentInstance = (turnInCurrentInstance || 0) + 1;
-        }
-
-        console.log(`[SingularityPhase] Turn in current instance: ${turnInCurrentInstance}`);
-
         // ══════════════════════════════════════════════════════════════════
-        // Build concierge prompt (handoff V2 turn variants gated by flag)
+        // Build concierge prompt
         // ══════════════════════════════════════════════════════════════════
         let conciergePrompt: string | null = null;
-        let conciergePromptType = 'standard';
         let conciergePromptSeed: any = null;
 
         try {
@@ -262,9 +221,7 @@ export async function executeSingularityPhase(
             throw new Error('ConciergeService not found in module');
           }
 
-          if (!handoffV2Enabled || turnInCurrentInstance === 1) {
-            // Default path (flag off) OR Turn 1: plain buildConciergePrompt
-            conciergePromptType = 'full';
+          {
 
             // Build evidence substrate: editorial threads + mapping response
             let evidenceSubstrate = '';
@@ -289,24 +246,9 @@ export async function executeSingularityPhase(
             const conciergePromptSeedBase = {
               isFirstTurn: true,
               activeWorkflow: conciergeState?.activeWorkflow || undefined,
-              priorContext: undefined,
               ...(evidenceSubstrate ? { evidenceSubstrate } : {}),
             };
-
-            conciergePromptSeed =
-              handoffV2Enabled && conciergeState?.commitPending && conciergeState?.pendingHandoff
-                ? {
-                  ...conciergePromptSeedBase,
-                  priorContext: {
-                    handoff: conciergeState.pendingHandoff,
-                    committed: conciergeState.pendingHandoff?.commit || null,
-                  },
-                }
-                : conciergePromptSeedBase;
-
-            if (conciergePromptSeed.priorContext) {
-              console.log(`[SingularityPhase] Fresh spawn with prior context from COMMIT`);
-            }
+            conciergePromptSeed = conciergePromptSeedBase;
 
             if (typeof ConciergeService.buildConciergePrompt === 'function') {
               conciergePrompt = ConciergeService.buildConciergePrompt(
@@ -315,34 +257,6 @@ export async function executeSingularityPhase(
               );
             } else {
               console.warn('[SingularityPhase] ConciergeService.buildConciergePrompt missing');
-            }
-          } else if (turnInCurrentInstance === 2) {
-            // Handoff V2 only — Turn 2: Optimized followup (No structural analysis)
-            conciergePromptType = 'followup_optimized';
-            if (typeof ConciergeService.buildTurn2Message === 'function') {
-              conciergePrompt = ConciergeService.buildTurn2Message(userMessageForSingularity);
-              console.log(`[SingularityPhase] Turn 2: using optimized followup message`);
-            } else {
-              console.warn(
-                '[SingularityPhase] ConciergeService.buildTurn2Message missing, falling back to standard prompt'
-              );
-            }
-          } else {
-            // Handoff V2 only — Turn 3+: Dynamic optimized followup
-            conciergePromptType = 'handoff_echo';
-            const pendingHandoff = conciergeState?.pendingHandoff || null;
-            if (typeof ConciergeService.buildTurn3PlusMessage === 'function') {
-              conciergePrompt = ConciergeService.buildTurn3PlusMessage(
-                userMessageForSingularity,
-                pendingHandoff
-              );
-              console.log(
-                `[SingularityPhase] Turn ${turnInCurrentInstance}: using optimized handoff echo`
-              );
-            } else {
-              console.warn(
-                '[SingularityPhase] ConciergeService.buildTurn3PlusMessage missing, falling back to standard prompt'
-              );
             }
           }
         } catch (err) {
@@ -353,10 +267,9 @@ export async function executeSingularityPhase(
         if (!conciergePrompt) {
           // Fallback to standard prompt
           console.warn('[SingularityPhase] Prompt building failed, using fallback');
-          conciergePromptType = 'standard_fallback';
           if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
             conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, {
-              isFirstTurn: turnInCurrentInstance === 1,
+              isFirstTurn: true,
             });
           } else {
             logInfraError('SingularityPhase/CRITICAL: ConciergeService.buildConciergePrompt unavailable for fallback', new Error('buildConciergePrompt unavailable'));
@@ -389,7 +302,6 @@ export async function executeSingularityPhase(
             mappingText: mappingResult?.text || '',
             mappingMeta: mappingResult?.meta || {},
             conciergePrompt,
-            conciergePromptType,
             conciergePromptSeed,
             useThinking: request?.useThinking || false,
             providerContexts,
@@ -402,56 +314,19 @@ export async function executeSingularityPhase(
           try {
             singularityProviderId = (singularityResult as any)?.providerId || singularityProviderId;
 
-            // ══════════════════════════════════════════════════════════════════
-            // HANDOFF V2: Parse handoff from response (Turn 2+)
-            // Only active when HANDOFF_V2_ENABLED flag is true
-            // ══════════════════════════════════════════════════════════════════
-            let parsedHandoff: any = null;
-            let commitPending = false;
             let userFacingText = (singularityResult as any)?.text || '';
-
-            if (handoffV2Enabled && turnInCurrentInstance >= 2) {
-              try {
-                const parsed = parseHandoffResponse((singularityResult as any)?.text || '');
-
-                if (parsed.handoff && hasHandoffContent(parsed.handoff)) {
-                  parsedHandoff = parsed.handoff;
-
-                  // Check for COMMIT signal
-                  if (parsed.handoff.commit) {
-                    commitPending = true;
-                    console.log(
-                      `[SingularityPhase] COMMIT detected (length: ${parsed.handoff.commit.length})`
-                    );
-                  }
-                }
-
-                // Use user-facing version (handoff stripped)
-                userFacingText = parsed.userFacing;
-              } catch (e) {
-                console.warn('[SingularityPhase] Handoff parsing failed:', e);
-              }
-            }
-
-            // ══════════════════════════════════════════════════════════════════
-            // HANDOFF V2: Update concierge phase state
-            // ══════════════════════════════════════════════════════════════════
             const next = {
               ...(conciergeState || {}),
               lastSingularityProviderId: singularityProviderId,
               hasRunConcierge: true,
               lastProcessedTurnId: context.canonicalAiTurnId, // Idempotency guard
-              // Handoff V2 fields
-              turnInCurrentInstance,
-              pendingHandoff: parsedHandoff || conciergeState?.pendingHandoff || null,
-              commitPending,
             };
 
             await sessionManager.setConciergePhaseState(context.sessionId, next);
 
             const effectiveProviderId = (singularityResult as any)?.providerId || singularityProviderId;
             singularityOutput = {
-              text: userFacingText, // Use handoff-stripped text
+              text: userFacingText, 
               prompt: conciergePrompt || null, // Actual concierge prompt for debug
               providerId: effectiveProviderId,
               timestamp: Date.now(),
@@ -474,18 +349,13 @@ export async function executeSingularityPhase(
                 0,
                 {
                   ...((singularityResult as any).output || {}),
-                  text: userFacingText, // Persist handoff-stripped text
+                  text: userFacingText,
                   status: 'completed',
                   meta: {
                     ...((singularityResult as any).output?.meta || {}),
                     singularityOutput,
-                    frozenSingularityPromptType: conciergePromptType,
                     frozenSingularityPromptSeed: conciergePromptSeed,
                     frozenSingularityPrompt: conciergePrompt,
-                    // Handoff V2 metadata
-                    turnInCurrentInstance,
-                    handoffDetected: !!parsedHandoff,
-                    commitDetected: commitPending,
                   },
                 }
               );
@@ -501,7 +371,7 @@ export async function executeSingularityPhase(
                 status: 'completed',
                 result: {
                   ...singularityResult,
-                  text: userFacingText, // Send handoff-stripped to UI
+                  text: userFacingText,
                 },
               });
             } catch (err) {

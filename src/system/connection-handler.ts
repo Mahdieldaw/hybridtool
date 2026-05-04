@@ -97,7 +97,6 @@ interface ExecuteRequest {
   sourceTurnId?: string;
   stepType?: string;
   targetProvider?: string;
-  frozenSingularityPromptType?: string;
   frozenSingularityPromptSeed?: unknown;
 }
 

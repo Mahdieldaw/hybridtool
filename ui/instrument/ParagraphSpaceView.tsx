@@ -237,7 +237,7 @@ export function ParagraphSpaceView({
   highlightedParagraphId,
   onParagraphClick,
 }: Props) {
-  const nodes = graph?.nodes ?? [];
+  const nodes = useMemo(() => graph?.nodes ?? [], [graph]);
   const svgRef = useRef<SVGSVGElement>(null);
   const { transform, onWheel, onMouseDown, fitToScreen, isPanning } = useZoomPan(svgRef);
 
@@ -438,7 +438,7 @@ export function ParagraphSpaceView({
         colorStyle: { fill: string; stroke: string; label: string };
         isVisible: boolean;
       }>;
-  }, [claimCentroids, nodes, toX, toY]);
+  }, [claimCentroids, nodes, nodeById, toX, toY]);
 
   // Source paragraph IDs for the selected claim
   const selectedClaimSourceIds = useMemo(() => {

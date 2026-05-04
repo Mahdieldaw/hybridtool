@@ -339,7 +339,6 @@ export class ContextResolver {
 
     // Extract frozen prompt metadata for singularity recomputes
     const singularityResponse = responses.find((r) => r.responseType === 'singularity');
-    const frozenSingularityPromptType = (singularityResponse?.meta as Record<string, unknown>)?.frozenSingularityPromptType;
     const frozenSingularityPromptSeed = (singularityResponse?.meta as Record<string, unknown>)?.frozenSingularityPromptSeed;
 
     return {
@@ -352,7 +351,6 @@ export class ContextResolver {
       stepType: stepType!,
       targetProvider: targetProvider!,
       sourceUserMessage,
-      frozenSingularityPromptType,
       frozenSingularityPromptSeed,
     };
   }

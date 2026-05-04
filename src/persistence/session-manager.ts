@@ -1776,9 +1776,6 @@ export class SessionManager {
       hasRunConcierge: false,
       lastSingularityProviderId: null,
       activeWorkflow: null,
-      turnInCurrentInstance: 0,
-      pendingHandoff: null,
-      commitPending: false,
     };
   }
 

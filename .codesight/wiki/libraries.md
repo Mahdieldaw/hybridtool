@@ -74,11 +74,11 @@
 
 - `shared\corpus-utils.ts` — deriveArtifactIndex, buildCorpusTree, buildCorpusIndex, getParagraphsForClaim, getModelsForClaim, getBasinsForClaim, …
 - `shared\measurement-registry.ts` — assertMeasurementConsumer, collectMeasurementViolation, getCollectedMeasurementViolations, clearCollectedMeasurementViolations, Consumer, MeasurementStatus, …
-- `shared\parsing-utils.ts` — repairJson, extractJsonObject, extractJsonFromContent, parseConciergeOutput, parseHandoffResponse, hasHandoffContent, …
 - `shared\types\turns.ts` — isUserTurn, isAiTurn, ProbeResult, ProbeCorpusHit, ProbeSessionResponse, ProbeSession, …
 - `shared\provider-config.ts` — canonicalCitationOrder, buildCitationSourceOrder, selectBestProvider, isProviderAuthorized, ProviderRole, CANONICAL_PROVIDER_ORDER, …
 - `shared\types\provider.ts` — HTOSError, ProviderAuthError, ProviderError, ProviderKey, ProviderErrorType, HTOSErrorCode
 - `shared\citation-utils.ts` — normalizeProviderId, normalizeCitationSourceOrder, resolveProviderId, resolveModelDisplayName, getCitationSourceOrder
+- `shared\parsing-utils.ts` — repairJson, extractJsonObject, extractJsonFromContent, parseSemanticMapperOutput
 - `shared\artifact-processor.ts` — ArtifactProcessor, Artifact, ProcessedResponse
 - `shared\think-utils.ts` — computeThinkFlag, ComputeThinkFlagArgs, AI_THINK_FLAG
 - `shared\cognitive-artifact.ts` — buildCognitiveArtifact
@@ -126,8 +126,8 @@
 
 ## Concierge-service (4 files)
 
-- `src\concierge-service\concierge-service.ts` — buildTurn2Message, buildTurn3PlusMessage, buildConciergePrompt, PriorContext, ConciergePromptOptions, HANDOFF_V2_ENABLED, …
 - `src\concierge-service\editorial-mapper.ts` — buildPassageIndex, buildEditorialPrompt, parseEditorialOutput, IndexedPassage, IndexedUnclaimedGroup, EditorialParseResult
+- `src\concierge-service\concierge-service.ts` — buildConciergePrompt, ConciergePromptOptions, ConciergeService
 - `src\concierge-service\evidence-substrate.ts` — buildLookupCacheFromIndex, buildEvidenceSubstrate
 - `src\concierge-service\position-brief.ts` — buildPositionBriefFromClaims, buildPositionBrief
 

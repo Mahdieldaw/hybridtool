@@ -31,10 +31,7 @@
   - function repairJson: (text) => string
   - function extractJsonObject: (text) => void
   - function extractJsonFromContent: (content) => any | null
-  - function parseConciergeOutput: (rawResponse) => ConciergeOutput
-  - function parseHandoffResponse: (raw) => ParsedHandoffResponse
-  - function hasHandoffContent: (delta) => boolean
-  - _...3 more_
+  - function parseSemanticMapperOutput: (rawResponse) => SemanticMapperParseResult
 - `shared\provider-config.ts`
   - function canonicalCitationOrder: (activeProviderIds) => string[]
   - function buildCitationSourceOrder: (orderedProviderIds) => Record<number, string>
@@ -79,13 +76,9 @@
   - function generateStatementEmbeddings: (statements, config) => Promise<StatementEmbeddingResult>
   - _...4 more_
 - `src\concierge-service\concierge-service.ts`
-  - function buildTurn2Message: (userMessage) => string
-  - function buildTurn3PlusMessage: (userMessage, pendingHandoff) => string
   - function buildConciergePrompt: (userMessage, options?) => string
-  - interface PriorContext
   - interface ConciergePromptOptions
-  - const HANDOFF_V2_ENABLED
-  - _...2 more_
+  - const ConciergeService
 - `src\concierge-service\editorial-mapper.ts`
   - function buildPassageIndex: (claimDensity, passageRouting, statementClassification, corpus, claims, citationSourceOrder, string>, continuityMap, SourceContinuityEntry>) => void
   - function buildEditorialPrompt: (userQuery, passages, unclaimed, corpusShape) => string
