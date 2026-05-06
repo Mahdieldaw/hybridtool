@@ -296,6 +296,20 @@ export function useChat() {
         // Replace Map + IDs atomically
         setTurnsMap(newMap);
         setTurnIds(newIds);
+        const pausedTurnId = [...newIds]
+          .reverse()
+          .find(
+            (id) =>
+              newMap.get(id)?.type === 'ai' &&
+              (newMap.get(id) as any)?.pipelineStatus === 'paused'
+          );
+        if (pausedTurnId) {
+          setActiveAiTurnId(pausedTurnId);
+          setUiPhase('paused');
+        } else {
+          setActiveAiTurnId(null);
+          setUiPhase('awaiting_action');
+        }
 
         await api.ensurePort({ sessionId });
       } catch (error) {
@@ -318,6 +332,8 @@ export function useChat() {
       setIsLoading,
       setIsHistoryPanelOpen,
       setActiveTarget,
+      setActiveAiTurnId,
+      setUiPhase,
     ]
   );
 

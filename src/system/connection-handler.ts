@@ -1,7 +1,9 @@
 import { WorkflowEngine } from '../execution/workflow-engine.js';
 import { runPreflight, createAuthErrorMessage } from '../execution/preflight-validator.js';
+import { aggregateBatchOutputs } from '../execution/io/context-resolver.js';
 import { authManager } from '../providers/auth-manager.js';
-import { DEFAULT_THREAD, PROBE_SESSION_START } from '../../shared/messaging.js';
+import { getHealthTracker } from '../providers/health/provider-health-tracker.js';
+import { DEFAULT_THREAD, PROBE_SESSION_START, RESUME_WORKFLOW } from '../../shared/messaging.js';
 import { getArtifactParagraphs } from '../../shared/corpus-utils.js';
 import { computeProbeGeometry } from '../execution/deterministic-pipeline.js';
 import { logInfraError } from '../errors';
@@ -353,6 +355,8 @@ export class ConnectionHandler {
             ...(finalSingularity ? { singularity: finalSingularity } : {}),
             meta: aiTurn['meta'] ?? {},
             pipelineStatus: aiTurn['pipelineStatus'],
+            pauseReason: aiTurn['pauseReason'],
+            resumePoint: aiTurn['resumePoint'],
           },
         },
       });
@@ -395,6 +399,9 @@ export class ConnectionHandler {
             break;
           case 'RETRY_PROVIDERS':
             await this._handleRetryProviders(msg as RetryProvidersMessage);
+            break;
+          case RESUME_WORKFLOW:
+            await this._handleResumeWorkflow(msg as ResumeWorkflowMessage);
             break;
           case 'reconnect':
             try {
@@ -1006,6 +1013,7 @@ export class ConnectionHandler {
     }
 
     const scope = retryScope === 'mapping' ? 'mapping' : 'batch';
+    const tracker = getHealthTracker();
 
     try {
       if (this.workflowEngine && typeof this.workflowEngine.handleRetryRequest === 'function') {
@@ -1017,6 +1025,28 @@ export class ConnectionHandler {
 
     for (const providerId of providerIds) {
       if (!providerId || typeof providerId !== 'string') continue;
+
+      const state = tracker.peekProviderState(providerId);
+      if (state?.authInvalid) {
+        const valid = await authManager.verifyProvider(providerId);
+        if (!valid) {
+          this._postRetryRefused(sessionId, aiTurnId, providerId, scope, 'auth_required');
+          continue;
+        }
+      } else if (state?.rateLimitUntil && Date.now() < state.rateLimitUntil) {
+        this._postRetryRefused(
+          sessionId,
+          aiTurnId,
+          providerId,
+          scope,
+          'rate_limited',
+          Math.max(0, state.rateLimitUntil - Date.now())
+        );
+        continue;
+      } else {
+        tracker.resetCircuit(providerId);
+      }
+
       await this._handleExecuteWorkflow({
         payload: {
           type: 'recompute',
@@ -1026,6 +1056,104 @@ export class ConnectionHandler {
           targetProvider: providerId,
         },
       });
+      if (scope === 'batch') {
+        await this._postPausedStateFromPersistence(sessionId, aiTurnId);
+      }
+    }
+  }
+
+  private _postRetryRefused(
+    sessionId: string,
+    aiTurnId: string,
+    providerId: string,
+    scope: 'batch' | 'mapping',
+    reason: 'auth_required' | 'rate_limited',
+    retryAfterMs?: number
+  ): void {
+    try {
+      this.port?.postMessage({
+        type: 'WORKFLOW_PROGRESS',
+        sessionId,
+        aiTurnId,
+        phase: scope,
+        providerStatuses: [
+          {
+            providerId,
+            status: 'failed',
+            error: {
+              type: reason === 'auth_required' ? 'auth_expired' : 'rate_limit',
+              message:
+                reason === 'auth_required'
+                  ? 'Re-authentication still required.'
+                  : 'Provider still rate-limited.',
+              retryable: reason !== 'auth_required',
+              retryAfterMs,
+              requiresReauth: reason === 'auth_required',
+            },
+          },
+        ],
+        completedCount: 0,
+        totalCount: 1,
+      });
+    } catch (err) {
+      console.warn('[ConnectionHandler] _postRetryRefused: postMessage failed', err);
+    }
+  }
+
+  private async _handleResumeWorkflow(message: ResumeWorkflowMessage): Promise<void> {
+    const aiTurnId = message?.aiTurnId;
+    const mode = message?.mode;
+    if (!aiTurnId || mode !== 'continue_degraded') {
+      console.warn('[ConnectionHandler] Invalid RESUME_WORKFLOW payload', message);
+      return;
+    }
+    if (!this.workflowEngine || typeof this.workflowEngine.resumeFromPause !== 'function') {
+      console.warn('[ConnectionHandler] Cannot resume workflow: engine unavailable');
+      return;
+    }
+    await this.workflowEngine.resumeFromPause(aiTurnId, mode);
+  }
+
+  private async _postPausedStateFromPersistence(sessionId: string, aiTurnId: string): Promise<void> {
+    try {
+      const adapter = this.services?.sessionManager?.adapter;
+      if (!adapter?.get || !adapter?.getResponsesByTurnId) return;
+      const aiTurn = await adapter.get('turns', aiTurnId);
+      if (!aiTurn || aiTurn.pipelineStatus !== 'paused') return;
+
+      const responses = await adapter.getResponsesByTurnId(aiTurnId);
+      const frozen = aggregateBatchOutputs((responses || []) as any);
+      const successfulProviders = Object.entries(frozen)
+        .filter(([, r]: [string, any]) => r?.status === 'completed' && String(r?.text || '').trim().length > 0)
+        .map(([pid]) => pid);
+      const failedProviderIds = Object.entries(frozen)
+        .filter(([, r]: [string, any]) => r?.status !== 'completed' || !String(r?.text || '').trim())
+        .map(([pid]) => pid);
+      const resumePoint = {
+        ...(aiTurn.resumePoint || {}),
+        failedProviderIds,
+      };
+
+      try {
+        aiTurn.resumePoint = resumePoint;
+        await adapter.put('turns', aiTurn);
+      } catch (err) {
+        console.warn('[ConnectionHandler] Failed to refresh paused resumePoint', err);
+      }
+
+      this.port?.postMessage({
+        type: 'WORKFLOW_PAUSED',
+        sessionId,
+        aiTurnId,
+        phase: 'batch',
+        pauseReason: aiTurn.pauseReason || 'insufficient_witnesses',
+        successfulProviders,
+        failedProviderIds,
+        canContinueDegraded: successfulProviders.length >= 2,
+        resumePoint,
+      });
+    } catch (err) {
+      console.warn('[ConnectionHandler] Failed to refresh paused workflow state', err);
     }
   }
 
@@ -1422,4 +1550,9 @@ interface RetryProvidersMessage {
   aiTurnId?: string;
   providerIds?: string[];
   retryScope?: string;
+}
+
+interface ResumeWorkflowMessage {
+  aiTurnId?: string;
+  mode?: 'continue_degraded' | string;
 }

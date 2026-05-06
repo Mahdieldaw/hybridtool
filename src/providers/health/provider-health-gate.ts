@@ -36,7 +36,7 @@ function createBlockedError(providerId: string, stage: string, check: HealthChec
   return error;
 }
 
-function mapReasonToErrorType(reason?: string): string {
+export function mapReasonToErrorType(reason?: string): string {
   if (reason === 'auth_invalid') return 'auth_expired';
   if (reason === 'rate_limited') return 'rate_limit';
   return 'circuit_open';

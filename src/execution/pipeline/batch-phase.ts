@@ -6,6 +6,7 @@ import { buildReactiveBridge } from '../utils/reactive-bridge';
 import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
 import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
 import { logInfraError } from '../../errors';
+import { mapReasonToErrorType } from '../../providers/health/provider-health-gate';
 
 // Types (re-exported or defined locally)
 type ProviderKey = string;
@@ -74,15 +75,22 @@ export async function executeBatchPhase(
     for (const pid of (providers as ProviderKey[])) {
       const check = healthTracker?.shouldAttempt?.(pid) || { allowed: true };
       if (!check.allowed) {
+        const reason = check.reason || 'circuit_open';
         providerStatuses.push({
           providerId: pid,
           status: 'skipped',
-          skippedReason: check.reason || 'circuit_open',
+          skippedReason: reason,
           error: {
-            type: 'circuit_open',
-            message: 'Provider temporarily unavailable due to recent failures',
-            retryable: true,
+            type: mapReasonToErrorType(reason),
+            message:
+              reason === 'auth_invalid'
+                ? 'Provider authentication is invalid. Reauthorization required.'
+                : reason === 'rate_limited'
+                  ? 'Provider rate-limited.'
+                  : 'Provider temporarily unavailable due to recent failures.',
+            retryable: reason !== 'auth_invalid',
             retryAfterMs: check.retryAfterMs,
+            requiresReauth: check.requiresReauth === true,
           },
         });
       } else {

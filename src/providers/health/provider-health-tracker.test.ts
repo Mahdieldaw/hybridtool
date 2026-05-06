@@ -264,4 +264,22 @@ describe('error type differentiation', () => {
     expect(report['claude'].circuit).toBe('open');
     expect(report['chatgpt'].authInvalid).toBe(true);
   });
+
+  test('peekProviderState reads state without initializing a provider', () => {
+    const t = makeTracker();
+
+    expect((t as any).peekProviderState?.('claude')).toBeNull();
+    expect(Object.keys(t.getHealthReport())).toEqual([]);
+
+    t.recordFailure('claude', rateLimitError);
+    const state = (t as any).peekProviderState?.('claude');
+
+    expect(state).toMatchObject({
+      circuit: 'closed',
+      authInvalid: false,
+      rateLimitCount: 1,
+      recentFailures: 0,
+    });
+    expect(typeof state.rateLimitUntil).toBe('number');
+  });
 });

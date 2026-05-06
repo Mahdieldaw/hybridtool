@@ -1,6 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentSessionIdAtom, turnIdsAtom, turnsMapAtom, uiPhaseAtom } from '../../state';
+import {
+  activeAiTurnIdAtom,
+  currentSessionIdAtom,
+  turnIdsAtom,
+  turnsMapAtom,
+  uiPhaseAtom,
+} from '../../state';
 import api from '../../services/extension-api';
 import { parseSessionTurns } from '../../utils/parse-session-turns';
 
@@ -16,6 +22,7 @@ export function useSessionSync(isInitialized: boolean) {
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const setTurnIds = useSetAtom(turnIdsAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
+  const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const hasSyncedRef = useRef(false);
 
   useEffect(() => {
@@ -34,7 +41,15 @@ export function useSessionSync(isInitialized: boolean) {
         if (ids.length > 0) {
           setTurnsMap(map);
           setTurnIds(ids);
-          setUiPhase('awaiting_action');
+          const pausedTurnId = [...ids]
+            .reverse()
+            .find((id) => map.get(id)?.type === 'ai' && (map.get(id) as any)?.pipelineStatus === 'paused');
+          if (pausedTurnId) {
+            setActiveAiTurnId(pausedTurnId);
+            setUiPhase('paused');
+          } else {
+            setUiPhase('awaiting_action');
+          }
           console.log(
             '[SessionSync] Rehydrated',
             ids.length,
@@ -46,5 +61,13 @@ export function useSessionSync(isInitialized: boolean) {
         console.warn('[SessionSync] Failed to rehydrate session:', e);
       }
     })();
-  }, [isInitialized, currentSessionId, turnIds.length, setTurnsMap, setTurnIds, setUiPhase]);
+  }, [
+    isInitialized,
+    currentSessionId,
+    turnIds.length,
+    setTurnsMap,
+    setTurnIds,
+    setUiPhase,
+    setActiveAiTurnId,
+  ]);
 }

@@ -99,6 +99,8 @@ export interface AiTurnRecord extends BaseTurnRecord {
   // Storage metadata
   lastContextSummary?: string;
   pipelineStatus?: string;
+  pauseReason?: string;
+  resumePoint?: object | string;
 
   // Foreign keys (NOT embedded objects)
   providerResponseIds?: string[];

@@ -149,6 +149,8 @@ export function parseSessionTurns(fullSession: any): {
         ...(probeSessions.length > 0 ? { probeSessions } : {}),
         ...(round.meta ? { meta: round.meta } : {}),
         pipelineStatus: round.pipelineStatus || undefined,
+        pauseReason: round.pauseReason || undefined,
+        resumePoint: round.resumePoint || undefined,
       };
       if (mappingRaw && Object.keys(mappingRaw).length > 0) {
         (aiTurn as any).mappingResponses = mappingRaw;

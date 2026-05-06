@@ -41,7 +41,7 @@ export interface AiTurnWithUI extends AiTurn {
 
 export type TurnMessage = UserTurn | AiTurnWithUI;
 
-export type UiPhase = 'idle' | 'streaming' | 'awaiting_action';
+export type UiPhase = 'idle' | 'streaming' | 'awaiting_action' | 'paused';
 
 export type AppStep = 'initial' | 'cognitive';
 

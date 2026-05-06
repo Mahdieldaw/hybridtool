@@ -880,6 +880,51 @@ export function usePortMessageHandler(enabled: boolean = true) {
           break;
         }
 
+        case 'WORKFLOW_PAUSED': {
+          try {
+            const pausedMsg = message as any;
+            const successfulProviders = Array.isArray(pausedMsg.successfulProviders)
+              ? pausedMsg.successfulProviders.map((p: any) => String(p))
+              : [];
+            const failedProviderIds = Array.isArray(pausedMsg.failedProviderIds)
+              ? pausedMsg.failedProviderIds.map((p: any) => String(p))
+              : [];
+
+            setIsLoading(false);
+            setUiPhase('paused');
+            setLastActivityAt(Date.now());
+            if (pausedMsg.aiTurnId) {
+              setActiveAiTurnId(String(pausedMsg.aiTurnId));
+            }
+
+            setWorkflowDegraded({
+              isDegraded: failedProviderIds.length > 0,
+              successCount: successfulProviders.length,
+              totalCount: successfulProviders.length + failedProviderIds.length,
+              failedProviders: failedProviderIds,
+              canContinueDegraded: pausedMsg.canContinueDegraded === true,
+              pauseReason: pausedMsg.pauseReason,
+              resumePoint: pausedMsg.resumePoint,
+            });
+
+            if (pausedMsg.aiTurnId) {
+              setTurnsMap((draft: Map<string, TurnMessage>) => {
+                const existing = draft.get(String(pausedMsg.aiTurnId));
+                if (!existing || existing.type !== 'ai') return;
+                draft.set(String(pausedMsg.aiTurnId), {
+                  ...(existing as AiTurnWithUI),
+                  pipelineStatus: 'paused',
+                  pauseReason: pausedMsg.pauseReason,
+                  resumePoint: pausedMsg.resumePoint,
+                } as AiTurnWithUI);
+              });
+            }
+          } catch (e) {
+            console.warn('[Port] Failed to process WORKFLOW_PAUSED', e);
+          }
+          break;
+        }
+
         case 'WORKFLOW_COMPLETE': {
           streamingBufferRef.current?.flushImmediate();
           // Fallback finalization is no longer needed.

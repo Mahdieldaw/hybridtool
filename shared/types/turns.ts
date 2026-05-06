@@ -85,6 +85,16 @@ export interface ProviderResponse {
   };
 }
 
+export type PipelineStatus = 'in_progress' | 'paused' | 'complete' | 'error';
+export type PauseReason = 'insufficient_witnesses' | 'auth_required' | 'rate_limited';
+
+export interface WorkflowResumePoint {
+  phase: 'batch';
+  nextStep: any;
+  completedStepIds: string[];
+  failedProviderIds: string[];
+}
+
 // Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
 export interface AiTurn {
   id: string;
@@ -111,7 +121,9 @@ export interface AiTurn {
 
   probeSessions?: ProbeSession[];
 
-  pipelineStatus?: any;
+  pipelineStatus?: PipelineStatus;
+  pauseReason?: PauseReason;
+  resumePoint?: WorkflowResumePoint;
 
   meta?: {
     mapper?: string;

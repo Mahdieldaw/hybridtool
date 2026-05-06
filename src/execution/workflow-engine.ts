@@ -4,6 +4,7 @@ import { executeBatchPhase } from './pipeline/batch-phase.js';
 import { executeMappingPhase } from './pipeline/mapping-phase.js';
 import { executeSingularityPhase } from './pipeline/singularity-phase.js';
 import { handleRecompute } from './pipeline/recompute-handler.js';
+import { aggregateBatchOutputs } from './io/context-resolver.js';
 import { StreamingManager } from './io/streaming-manager.js';
 import { ContextManager } from './io/context-manager.js';
 import { PersistenceCoordinator } from './io/persistence-coordinator.js';
@@ -131,7 +132,8 @@ export class WorkflowEngine {
       this._seedContexts(resolvedContext, stepResults, workflowContexts);
 
       // ✅ SINGLE LOOP - Steps are already ordered by WorkflowCompiler
-      for (const step of steps) {
+      for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+        const step = steps[stepIndex];
         // Execute the step
         const result = await this._executeStep(
           step,
@@ -142,7 +144,7 @@ export class WorkflowEngine {
         );
 
         // Check for halt conditions
-        const haltReason = await this._checkHaltConditions(
+        const controlDecision = await this._checkHaltConditions(
           step,
           result,
           request,
@@ -152,14 +154,27 @@ export class WorkflowEngine {
           resolvedContext
         );
 
-        if (haltReason) {
+        if (controlDecision?.kind === 'halt') {
           await this._haltWorkflow(
             request,
             context,
             steps,
             stepResults,
             resolvedContext,
-            haltReason
+            controlDecision.reason
+          );
+          return;
+        }
+
+        if (controlDecision?.kind === 'pause') {
+          await this._pauseWorkflow(
+            request,
+            context,
+            steps,
+            stepResults,
+            resolvedContext,
+            controlDecision.reason,
+            stepIndex
           );
           return;
         }
@@ -392,15 +407,21 @@ export class WorkflowEngine {
   // CONTROL FLOW
   // ═══════════════════════════════════════════════════════════════════════════
 
-  async _checkHaltConditions(step: any, result: any, _request: any, _context: any, steps: any[], _stepResults: any, resolvedContext: any): Promise<string | null> {
+  async _checkHaltConditions(step: any, result: any, _request: any, _context: any, steps: any[], _stepResults: any, resolvedContext: any): Promise<{ kind: 'halt' | 'pause'; reason: string } | null> {
     if (step.type === 'prompt') {
       const resultsObj = result?.results || {};
       const successfulCount = Object.values(resultsObj).filter(
-        (r: any) => r.status === 'completed'
+        (r: any) => r.status === 'completed' && String(r.text || '').trim().length > 0
       ).length;
+      const totalCount = Object.keys(resultsObj).length;
       const mappingPlanned = Array.isArray(steps) && steps.some((s) => s && s.type === 'mapping');
-      if (mappingPlanned && resolvedContext?.type !== 'recompute' && successfulCount < 2) {
-        return 'insufficient_witnesses';
+      if (mappingPlanned && resolvedContext?.type !== 'recompute') {
+        if (successfulCount === 0) {
+          return { kind: 'halt', reason: 'no_witnesses' };
+        }
+        if (successfulCount === 1 && totalCount > successfulCount) {
+          return { kind: 'pause', reason: 'insufficient_witnesses' };
+        }
       }
     }
 
@@ -408,6 +429,7 @@ export class WorkflowEngine {
   }
 
   async _haltWorkflow(request: any, context: any, steps: any[], stepResults: any, resolvedContext: any, haltReason: string): Promise<void> {
+    context.pipelineStatus = 'error';
     await this._persistAndFinalize(
       request,
       context,
@@ -416,6 +438,71 @@ export class WorkflowEngine {
       resolvedContext,
       haltReason
     );
+  }
+
+  async _pauseWorkflow(
+    request: any,
+    context: any,
+    steps: any[],
+    stepResults: any,
+    resolvedContext: any,
+    pauseReason: string,
+    currentStepIndex: number
+  ): Promise<void> {
+    const currentStep = steps[currentStepIndex];
+    const nextStep = steps[currentStepIndex + 1];
+    const currentStepResult = stepResults.get(currentStep.stepId);
+    const resultsObj = currentStepResult?.result?.results || {};
+    const completedStepIds = steps.slice(0, currentStepIndex + 1).map((s) => s.stepId);
+    const successfulProviders = Object.entries(resultsObj)
+      .filter(([, r]: [string, any]) => r?.status === 'completed' && String(r?.text || '').trim().length > 0)
+      .map(([pid]) => pid);
+    const failedProviderIds = Object.entries(resultsObj)
+      .filter(([, r]: [string, any]) => r?.status !== 'completed' || !String(r?.text || '').trim())
+      .map(([pid]) => pid);
+    const resumePoint = {
+      phase: 'batch',
+      nextStep: this._buildPauseNextStep(nextStep, context),
+      completedStepIds,
+      failedProviderIds,
+    };
+
+    await this._persistPauseCheckpoint(
+      request,
+      context,
+      steps,
+      stepResults,
+      resolvedContext,
+      pauseReason,
+      resumePoint
+    );
+
+    this._safePostMessage({
+      type: 'WORKFLOW_PAUSED',
+      sessionId: context.sessionId,
+      aiTurnId: context.canonicalAiTurnId,
+      workflowId: request.workflowId,
+      phase: currentStep.type,
+      pauseReason,
+      successfulProviders,
+      failedProviderIds,
+      canContinueDegraded: successfulProviders.length >= 2,
+      resumePoint,
+    });
+  }
+
+  _buildPauseNextStep(nextStep: any, context: any): any {
+    if (!nextStep) return null;
+    const payload = { ...(nextStep.payload || {}) };
+    delete payload.sourceStepIds;
+    payload.sourceHistorical = {
+      turnId: context.canonicalAiTurnId,
+      responseType: 'batch',
+    };
+    return {
+      ...nextStep,
+      payload,
+    };
   }
 
   // --- HELPERS ---
@@ -531,6 +618,7 @@ export class WorkflowEngine {
             targetProvider: resolvedContext.targetProvider as any,
           }
         : {}),
+      ...(haltReason ? { pipelineStatus: 'error' } : {}),
       ...(context?.canonicalUserTurnId ? { canonicalUserTurnId: context.canonicalUserTurnId } : {}),
       ...(context?.canonicalAiTurnId ? { canonicalAiTurnId: context.canonicalAiTurnId } : {}),
     };
@@ -591,16 +679,157 @@ export class WorkflowEngine {
     );
   }
 
+  async _persistPauseCheckpoint(
+    request: any,
+    context: any,
+    steps: any[],
+    stepResults: any,
+    resolvedContext: any,
+    pauseReason: string,
+    resumePoint: any
+  ): Promise<void> {
+    if (!resolvedContext || resolvedContext.type === 'recompute') return;
+    if (!context?.canonicalUserTurnId || !context?.canonicalAiTurnId) return;
+
+    const result = this.persistenceCoordinator.buildPersistenceResultFromStepResults(
+      steps,
+      stepResults
+    );
+    const batchPhase =
+      Object.keys(result.batchOutputs || {}).length > 0
+        ? {
+            responses: Object.fromEntries(
+              Object.entries(result.batchOutputs || {}).map(([pid, data]: [string, any]) => [
+                pid,
+                {
+                  text: data.text || '',
+                  modelIndex: data.meta?.modelIndex ?? 0,
+                  status: data.status || 'completed',
+                  meta: data.meta,
+                },
+              ])
+            ),
+            timestamp: Date.now(),
+          }
+        : undefined;
+
+    await this.persistenceCoordinator.persistWorkflowResult(
+      {
+        type: resolvedContext.type,
+        sessionId: context.sessionId,
+        userMessage: this.currentUserMessage,
+        canonicalUserTurnId: context.canonicalUserTurnId,
+        canonicalAiTurnId: context.canonicalAiTurnId,
+        partial: true,
+        pipelineStatus: 'paused',
+        pauseReason,
+        resumePoint,
+        ...(batchPhase ? { batch: batchPhase } : {}),
+        runId: context?.runId || request?.context?.runId,
+      },
+      resolvedContext,
+      result
+    );
+  }
+
+  async resumeFromPause(aiTurnId: string, mode: 'continue_degraded'): Promise<void> {
+    if (mode !== 'continue_degraded') {
+      throw new Error(`[WorkflowEngine] Unsupported resume mode: ${mode}`);
+    }
+
+    const adapter = this.sessionManager?.adapter;
+    if (!adapter) throw new Error('[WorkflowEngine] Cannot resume: persistence adapter unavailable');
+
+    const aiTurn = await adapter.get('turns', aiTurnId);
+    if (!aiTurn) throw new Error(`[WorkflowEngine] Cannot resume: turn ${aiTurnId} not found`);
+    if (aiTurn.pipelineStatus !== 'paused') {
+      throw new Error(`[WorkflowEngine] Cannot resume: turn ${aiTurnId} is not paused`);
+    }
+
+    const resumePoint = aiTurn.resumePoint;
+    const nextStep = resumePoint?.nextStep;
+    if (!nextStep || nextStep.type !== 'mapping') {
+      throw new Error(`[WorkflowEngine] Cannot resume: missing mapping resume point`);
+    }
+
+    const responses = await adapter.getResponsesByTurnId(aiTurnId);
+    const frozenBatchOutputs = aggregateBatchOutputs(responses || []);
+    const successfulCount = Object.values(frozenBatchOutputs).filter(
+      (r: any) => r?.status === 'completed' && String(r?.text || '').trim().length > 0
+    ).length;
+    if (successfulCount < 2) {
+      throw new Error(`Mapping requires at least 2 valid sources, but found ${successfulCount}.`);
+    }
+
+    const userTurnId = aiTurn.userTurnId;
+    const userTurn = userTurnId ? await adapter.get('turns', userTurnId) : null;
+    const userMessage =
+      String(userTurn?.text || userTurn?.content || '') ||
+      String(nextStep?.payload?.originalPrompt || '');
+
+    this.currentUserMessage = userMessage;
+    const context = {
+      sessionId: aiTurn.sessionId,
+      canonicalAiTurnId: aiTurnId,
+      canonicalUserTurnId: userTurnId,
+      userMessage,
+    };
+    const resolvedContext = {
+      type: 'extend',
+      sessionId: aiTurn.sessionId,
+      lastTurnId: aiTurnId,
+      providerContexts: {},
+      previousContext: null,
+      previousAnalysis: null,
+    };
+
+    const batchStep = {
+      stepId: `batch-resume-${Date.now()}`,
+      type: 'prompt',
+      payload: {
+        prompt: userMessage,
+        providers: Object.keys(frozenBatchOutputs),
+      },
+    };
+    const mappingStep = {
+      ...nextStep,
+      stepId: nextStep.stepId || `mapping-resume-${Date.now()}`,
+      payload: {
+        ...(nextStep.payload || {}),
+        originalPrompt: nextStep?.payload?.originalPrompt || userMessage,
+        sourceHistorical: {
+          turnId: aiTurnId,
+          responseType: 'batch',
+        },
+      },
+    };
+    delete mappingStep.payload.sourceStepIds;
+
+    const steps = [batchStep, mappingStep];
+    const request = {
+      workflowId: `resume-${Date.now()}`,
+      context,
+      steps,
+    };
+    this.currentRequest = request;
+
+    const stepResults = new Map();
+    const workflowContexts = {};
+    stepResults.set(batchStep.stepId, {
+      status: 'completed',
+      result: { results: frozenBatchOutputs },
+    });
+
+    await this._executeStep(mappingStep, context, stepResults, workflowContexts, resolvedContext);
+    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+  }
+
   async handleRetryRequest(message: any): Promise<void> {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
       console.log(
         `[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} `
       );
-
-      try {
-        (providerIds || []).forEach((pid: string) => this.healthTracker.resetCircuit(pid));
-      } catch (e) { console.warn('[WorkflowEngine] Failed to reset circuit breakers:', e); }
 
       try {
         this.port.postMessage({

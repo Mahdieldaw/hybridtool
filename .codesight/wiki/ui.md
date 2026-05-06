@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Component inventory and prop signatures extracted via AST. Read the source files before adding props or modifying component logic.
 
-**84 components** (react)
+**85 components** (react)
 
 ## Components
 
@@ -84,6 +84,7 @@
 - **HistoryPanel** — `ui\shell\chrome\HistoryPanel.tsx`
 - **PipelineErrorBanner** — props: type, failedProviderId, onRetry, onExplore, onContinue, compact, errorMessage, requiresReauth, retryable — `ui\shell\chrome\PipelineErrorBanner.tsx`
 - **ReconnectOverlay** — props: visible, onReconnect — `ui\shell\chrome\ReconnectOverlay.tsx`
+- **RecoveryBanner** — `ui\shell\chrome\RecoveryBanner.tsx`
 - **RenameDialog** — props: isOpen, onClose, onRename, defaultTitle, isRenaming — `ui\shell\chrome\RenameDialog.tsx`
 - **SettingsPanel** — `ui\shell\chrome\SettingsPanel.tsx`
 - **ArtifactOverlay** — props: artifact, onClose — `ui\shell\layout\ArtifactOverlay.tsx`

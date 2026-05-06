@@ -368,6 +368,9 @@ export class SessionManager {
     const pipelineStatus = request?.partial
       ? request?.pipelineStatus
       : request?.pipelineStatus || 'complete';
+    const pauseReason = request?.pauseReason;
+    const resumePoint =
+      request?.resumePoint !== undefined ? this._safePhasePayload(request.resumePoint) : undefined;
     const runId = request?.runId;
     let existingUserTurnId: string | null = null;
     const adapter = this._requireAdapter();
@@ -424,7 +427,13 @@ export class SessionManager {
           ...(singularity !== undefined ? { singularity } : {}),
           lastContextSummary: contextSummary,
           ...(pipelineStatus ? { pipelineStatus } : {}),
+          ...(pauseReason ? { pauseReason } : {}),
+          ...(resumePoint !== undefined ? { resumePoint } : {}),
         };
+        if (pipelineStatus !== 'paused') {
+          delete updatedAi.pauseReason;
+          delete updatedAi.resumePoint;
+        }
         await adapter.put('turns', updatedAi);
 
         await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId ?? null);
@@ -538,6 +547,8 @@ export class SessionManager {
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId, result),
       ...(pipelineStatus ? { pipelineStatus } : {}),
+      ...(pauseReason ? { pauseReason } : {}),
+      ...(resumePoint !== undefined ? { resumePoint } : {}),
     };
     await adapter.put('turns', aiTurnRecord);
 
@@ -570,6 +581,9 @@ export class SessionManager {
     const pipelineStatus = request?.partial
       ? request?.pipelineStatus
       : request?.pipelineStatus || 'complete';
+    const pauseReason = request?.pauseReason;
+    const resumePoint =
+      request?.resumePoint !== undefined ? this._safePhasePayload(request.resumePoint) : undefined;
     const runId = request?.runId;
     const adapter = this._requireAdapter();
 
@@ -620,7 +634,13 @@ export class SessionManager {
           ...(singularity !== undefined ? { singularity } : {}),
           lastContextSummary: contextSummary,
           ...(pipelineStatus ? { pipelineStatus } : {}),
+          ...(pauseReason ? { pauseReason } : {}),
+          ...(resumePoint !== undefined ? { resumePoint } : {}),
         };
+        if (pipelineStatus !== 'paused') {
+          delete updatedAi.pauseReason;
+          delete updatedAi.resumePoint;
+        }
         await adapter.put('turns', updatedAi);
 
         await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId ?? null);
@@ -714,6 +734,8 @@ export class SessionManager {
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId, result),
       ...(pipelineStatus ? { pipelineStatus } : {}),
+      ...(pauseReason ? { pauseReason } : {}),
+      ...(resumePoint !== undefined ? { resumePoint } : {}),
     };
     await adapter.put('turns', aiTurnRecord);
 

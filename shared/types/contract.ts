@@ -1409,6 +1409,8 @@ export type PersistRequest = {
   canonicalAiTurnId?: string;
   partial?: boolean;
   pipelineStatus?: any;
+  pauseReason?: any;
+  resumePoint?: any;
   runId?: string | null;
 
   // Phase fields

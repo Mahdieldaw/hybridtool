@@ -5,6 +5,7 @@ import type { AiTurn, ProviderResponse, ProviderError } from '../../shared/types
 import type { AppStep } from '../types';
 import { activeAiTurnIdAtom, turnsMapAtom } from './chat';
 import { isLoadingAtom, currentAppStepAtom } from './ui';
+import type { PauseReason, WorkflowResumePoint } from '../../shared/types/turns';
 
 // =============================================================================
 // Helpers
@@ -169,11 +170,15 @@ export const workflowDegradedAtom = atom<{
   successCount: number;
   totalCount: number;
   failedProviders: string[];
+  canContinueDegraded?: boolean;
+  pauseReason?: PauseReason;
+  resumePoint?: WorkflowResumePoint;
 }>({
   isDegraded: false,
   successCount: 0,
   totalCount: 0,
   failedProviders: [],
+  canContinueDegraded: false,
 });
 
 // -----------------------------

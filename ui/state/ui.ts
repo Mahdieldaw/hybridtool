@@ -27,7 +27,11 @@ export const latestCompletedAiTurnIdAtom = atom((get) => {
   for (let i = turnIds.length - 1; i >= 0; i -= 1) {
     const turn = turnsMap.get(turnIds[i]);
     if (!turn || turn.type !== 'ai') continue;
-    if (turn.pipelineStatus === 'in_progress' || turn.pipelineStatus === 'error') {
+    if (
+      turn.pipelineStatus === 'in_progress' ||
+      turn.pipelineStatus === 'paused' ||
+      turn.pipelineStatus === 'error'
+    ) {
       return null;
     }
     return turn.id;

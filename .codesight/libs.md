@@ -65,7 +65,7 @@
   - interface ProbeCorpusHit
   - interface ProbeSessionResponse
   - interface ProbeSession
-  - _...3 more_
+  - _...6 more_
 - `src\clustering\corpus-search.ts` — function searchCorpus: (queryEmbedding, paragraphEmbeddings, Float32Array>, paragraphMeta, maxResults) => CorpusSearchHit[], interface CorpusSearchHit
 - `src\clustering\distance.ts`
   - function getCosineSimilarityDimensionMismatchCount: () => number
@@ -305,6 +305,7 @@
   - class GrokProviderController
   - const GrokModels
 - `src\providers\health\provider-health-gate.ts`
+  - function mapReasonToErrorType: (reason?) => string
   - function runWithProviderHealth: (tracker, providerId, stage, fn) => void
   - interface RunWithHealthOptions
   - type HealthTrackerLike

@@ -59,9 +59,9 @@
 - `src\providers\chatgpt.js` — ChatGPTProviderError, ChatGPTProviderController, ChatGPTSessionApi, ChatGPTModels
 - `src\providers\claude.js` — ClaudeProviderError, ClaudeSessionApi, ClaudeProviderController, ClaudeModels
 - `src\providers\grok.js` — GrokProviderError, GrokSessionApi, GrokProviderController, GrokModels
+- `src\providers\health\provider-health-gate.ts` — mapReasonToErrorType, runWithProviderHealth, RunWithHealthOptions, HealthTrackerLike
 - `src\providers\provider-locks.ts` — getProviderLocks, setProviderLock, subscribeToLockChanges, ProviderLocks
 - `src\providers\qwen.js` — QwenProviderError, ServerTransientError, QwenSessionApi, QwenProviderController
-- `src\providers\health\provider-health-gate.ts` — runWithProviderHealth, RunWithHealthOptions, HealthTrackerLike
 - `src\providers\grok-crypto.js` — generateKeys, signChallenge
 - `src\providers\health\provider-health-tracker.js` — getHealthTracker, ProviderHealthTracker
 - `src\providers\chatgpt-adapter.js` — ChatGPTAdapter
@@ -73,8 +73,8 @@
 ## Shared (12 files)
 
 - `shared\corpus-utils.ts` — deriveArtifactIndex, buildCorpusTree, buildCorpusIndex, getParagraphsForClaim, getModelsForClaim, getBasinsForClaim, …
-- `shared\measurement-registry.ts` — assertMeasurementConsumer, collectMeasurementViolation, getCollectedMeasurementViolations, clearCollectedMeasurementViolations, Consumer, MeasurementStatus, …
 - `shared\types\turns.ts` — isUserTurn, isAiTurn, ProbeResult, ProbeCorpusHit, ProbeSessionResponse, ProbeSession, …
+- `shared\measurement-registry.ts` — assertMeasurementConsumer, collectMeasurementViolation, getCollectedMeasurementViolations, clearCollectedMeasurementViolations, Consumer, MeasurementStatus, …
 - `shared\provider-config.ts` — canonicalCitationOrder, buildCitationSourceOrder, selectBestProvider, isProviderAuthorized, ProviderRole, CANONICAL_PROVIDER_ORDER, …
 - `shared\types\provider.ts` — HTOSError, ProviderAuthError, ProviderError, ProviderKey, ProviderErrorType, HTOSErrorCode
 - `shared\citation-utils.ts` — normalizeProviderId, normalizeCitationSourceOrder, resolveProviderId, resolveModelDisplayName, getCitationSourceOrder

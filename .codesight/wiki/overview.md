@@ -6,9 +6,9 @@
 
 ## Scale
 
-84 UI components · 124 library files · 4 middleware layers · 6 environment variables
+85 UI components · 124 library files · 4 middleware layers · 6 environment variables
 
-**UI:** 84 components (react) — see [ui.md](./ui.md)
+**UI:** 85 components (react) — see [ui.md](./ui.md)
 
 **Libraries:** 124 files — see [libraries.md](./libraries.md)
 
@@ -17,9 +17,9 @@
 Changes to these files have the widest blast radius across the codebase:
 
 - `shared\corpus-utils.ts` — imported by **16** files
-- `ui\services\extension-api.ts` — imported by **15** files
-- `ui\config\constants.ts` — imported by **15** files
-- `shared\messaging.ts` — imported by **13** files
+- `ui\services\extension-api.ts` — imported by **16** files
+- `ui\config\constants.ts` — imported by **16** files
+- `shared\messaging.ts` — imported by **14** files
 - `src\shadow\shadow-paragraph-projector.ts` — imported by **11** files
 - `src\shadow\shadow-extractor.ts` — imported by **10** files
 

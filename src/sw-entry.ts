@@ -1374,6 +1374,12 @@ async function handleUnifiedMessage(
                 : typeof (primaryAi?.meta as Record<string, unknown> | undefined)?.pipelineStatus === 'string'
                   ? (primaryAi.meta as Record<string, unknown>).pipelineStatus as string
                   : undefined;
+            const pauseReason =
+              typeof primaryAi?.pauseReason === 'string' ? primaryAi.pauseReason : undefined;
+            const resumePoint =
+              primaryAi?.resumePoint && typeof primaryAi.resumePoint === 'object'
+                ? primaryAi.resumePoint
+                : undefined;
 
             let providers: Record<string, ResponseBucket[]> = {};
             let mappingResponses: Record<string, ResponseBucket[]> = {};
@@ -1410,6 +1416,8 @@ async function handleUnifiedMessage(
               ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
               ...(Object.keys(singularityResponses).length > 0 ? { singularityResponses } : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
+              ...(pauseReason ? { pauseReason } : {}),
+              ...(resumePoint ? { resumePoint } : {}),
               createdAt: (user.createdAt as number) || 0,
               completedAt: (primaryAi!.updatedAt as number) || 0,
             });

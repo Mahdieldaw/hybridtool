@@ -9,6 +9,7 @@ const ChatView = safeLazy(() => import('./chat/ChatView'));
 import Header from './shell/chrome/Header';
 const HistoryPanel = safeLazy(() => import('./shell/chrome/HistoryPanel'));
 import Banner from './shell/chrome/Banner';
+import { RecoveryBanner } from './shell/chrome/RecoveryBanner';
 import { ReconnectOverlay } from './shell/chrome/ReconnectOverlay'; // Import Overlay
 import api from './services/extension-api'; // Import API
 
@@ -67,6 +68,7 @@ export default function App() {
     <div className="flex flex-col h-screen w-screen bg-app-gradient min-h-0">
       <Header />
       <Banner />
+      <RecoveryBanner />
 
       {/* Main content area */}
       <div className="flex flex-1 relative min-h-0">

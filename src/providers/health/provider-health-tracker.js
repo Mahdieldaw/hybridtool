@@ -179,6 +179,22 @@ export class ProviderHealthTracker {
   }
 
   /**
+   * Read a provider state snapshot without creating state for unseen providers.
+   */
+  peekProviderState(providerId) {
+    const s = this._state.get(providerId);
+    if (!s) return null;
+    return {
+      circuit: s.circuit,
+      authInvalid: s.authInvalid,
+      rateLimitUntil: s.rateLimitUntil,
+      rateLimitCount: s.rateLimitCount,
+      recentFailures: s.failures.length,
+      lastSuccess: s.lastSuccess,
+    };
+  }
+
+  /**
    * Manually reset a provider's circuit (admin / test action).
    */
   resetCircuit(providerId) {
