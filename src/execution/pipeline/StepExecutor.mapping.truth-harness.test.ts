@@ -69,6 +69,6 @@ describe('StepExecutor mapping truth harness', () => {
     expect(res.meta?.citationSourceOrder).toEqual({ 1: 'openai', 2: 'grok' });
 
     expect(res.mapping?.artifact).toBeTruthy();
-    expect(res.mapping.artifact.shadow?.statements?.length).toBeGreaterThan(0);
+    expect(res.mapping?.artifact?.shadow?.statements?.length).toBeGreaterThan(0);
   });
 });
