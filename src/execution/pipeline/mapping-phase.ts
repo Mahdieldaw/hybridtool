@@ -9,7 +9,6 @@ import { canonicalCitationOrder, buildCitationSourceOrder } from '../../../share
 import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
 import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from '../../provenance/semantic-mapper.js';
 import { executeArtifactPipeline } from '../deterministic-pipeline.js';
-import { getCanonicalStatementsForClaim } from '../../../shared/corpus-utils.js';
 import { buildSourceContinuityMap } from '../../provenance/surface.js';
 import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
 import { buildLookupCacheFromIndex } from '../../concierge-service/evidence-substrate.js';
@@ -399,47 +398,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                     }
                   })();
 
-                  // Stamp sourceCoherence per claim (pairwise cosine similarity of source statement embeddings)
-                  if (mapperArtifact) {
-                    try {
-                      const embMap = statementEmbeddingResult?.embeddings;
-                      if (embMap && mapperArtifact.index) {
-                        for (const c of mapperArtifact.claims ?? []) {
-                          const sids = getCanonicalStatementsForClaim(mapperArtifact.index, c.id);
-                          const vecs = [];
-                          for (const sid of sids) {
-                            const v = embMap.get(String(sid || '').trim());
-                            if (v) vecs.push(v);
-                          }
-                          if (vecs.length >= 2) {
-                            const sims = [];
-                            for (let i = 0; i < vecs.length; i++) {
-                              for (let j = i + 1; j < vecs.length; j++) {
-                                const a = vecs[i],
-                                  b = vecs[j];
-                                const n = Math.min(a.length, b.length);
-                                let dot = 0,
-                                  na2 = 0,
-                                  nb2 = 0;
-                                for (let k = 0; k < n; k++) {
-                                  dot += a[k] * b[k];
-                                  na2 += a[k] * a[k];
-                                  nb2 += b[k] * b[k];
-                                }
-                                if (na2 > 0 && nb2 > 0)
-                                  sims.push(dot / (Math.sqrt(na2) * Math.sqrt(nb2)));
-                              }
-                            }
-                            if (sims.length > 0) {
-                              c.sourceCoherence = sims.reduce((s, x) => s + x, 0) / sims.length;
-                            }
-                          }
-                        }
-                      }
-                    } catch (err) {
-                      logInfraError('executeMappingPhase: sourceCoherence stamp failed', err);
-                    }
-                  }
                   // Signal UI with semantic artifact before awaiting editorial LLM
                   if (cognitiveArtifact && context.canonicalAiTurnId) {
                     try {

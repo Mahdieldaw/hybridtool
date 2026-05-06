@@ -19,6 +19,12 @@
   - function getModelsForClaim: (index, claimId) => number[]
   - function getBasinsForClaim: (index, claimId) => (number | null)[]
   - _...6 more_
+- `shared\embedding-models.ts`
+  - function getConfigForModel: (modelId) => EmbeddingConfig
+  - interface EmbeddingConfig
+  - interface EmbeddingModelEntry
+  - const EMBEDDING_MODELS: EmbeddingModelEntry[]
+  - const DEFAULT_CONFIG: EmbeddingConfig
 - `shared\measurement-registry.ts`
   - function assertMeasurementConsumer: (key, consumer, contextOrOptions?) => void
   - function collectMeasurementViolation: (key, consumer, context?, collector) => MeasurementViolation | null
@@ -40,6 +46,7 @@
   - type ProviderRole
   - const CANONICAL_PROVIDER_ORDER: readonly string[]
   - _...1 more_
+- `shared\text-prep.ts` — function structuredTruncate: (text, maxChars) => string, function stripInlineMarkdown: (text) => string
 - `shared\think-utils.ts`
   - function computeThinkFlag: ({...}, input, inputFlags }) => boolean
   - interface ComputeThinkFlagArgs
@@ -59,22 +66,19 @@
   - interface ProbeSessionResponse
   - interface ProbeSession
   - _...3 more_
-- `src\clustering\config.ts`
-  - function getConfigForModel: (modelId) => EmbeddingConfig
-  - interface EmbeddingConfig
-  - interface EmbeddingModelEntry
-  - const EMBEDDING_MODELS: EmbeddingModelEntry[]
-  - const DEFAULT_CONFIG: EmbeddingConfig
 - `src\clustering\corpus-search.ts` — function searchCorpus: (queryEmbedding, paragraphEmbeddings, Float32Array>, paragraphMeta, maxResults) => CorpusSearchHit[], interface CorpusSearchHit
-- `src\clustering\distance.ts` — function cosineSimilarity: (a, b) => number
+- `src\clustering\distance.ts`
+  - function getCosineSimilarityDimensionMismatchCount: () => number
+  - function resetCosineSimilarityDimensionMismatchCount: () => void
+  - function cosineSimilarity: (a, b) => number
 - `src\clustering\embeddings.ts`
-  - function structuredTruncate: (text, maxChars) => string
-  - function stripInlineMarkdown: (text) => string
   - function cleanupPendingEmbeddingsBuffers: () => Promise<void>
   - function generateEmbeddings: (paragraphs, shadowStatements, config) => Promise<EmbeddingResult>
   - function generateTextEmbeddings: (texts, config) => Promise<TextEmbeddingResult>
   - function generateStatementEmbeddings: (statements, config) => Promise<StatementEmbeddingResult>
-  - _...4 more_
+  - function getEmbeddingStatus: () => Promise<
+  - interface EmbeddingResult
+  - _...2 more_
 - `src\concierge-service\concierge-service.ts`
   - function buildConciergePrompt: (userMessage, options?) => string
   - interface ConciergePromptOptions
@@ -227,7 +231,7 @@
   - function promisifyRequest: (request) => Promise<T>
   - _...3 more_
 - `src\provenance\claim-structural-fingerprint.ts`
-  - function computeContestedShareRatio: (presenceMass, territorialMass, sovereignMass) => number | null
+  - function computeContestedShareRatio: (sharedTerritorialMass, sharedStatementCount) => number | null
   - function buildClaimStructuralFingerprints: (input) => ClaimStructuralFingerprintResult
   - interface ClaimStructuralFingerprintInput
 - `src\provenance\classify.ts` — function computeStatementClassification: (input) => StatementClassificationResult, interface ClassifyPhaseInput
@@ -237,15 +241,16 @@
   - interface ProvenancePipelineOutput
 - `src\provenance\measure.ts`
   - function emptyClaimFootprintMeasurement: () => ClaimFootprintMeasurement
-  - function computeClaimFootprintMeasurement: ({...}, canonicalStatementIds, ownershipMap, stmtToParagraphId, statementsById, paragraphOrder, }, Set<string>>;
+  - function computeClaimFootprintMeasurement: ({...}, canonicalStatementIds, ownershipMap, stmtToParagraphId, statementsById, paragraphOrder, paragraphMeta, }, Set<string>>;
   stmtToParagraphId, string>;
   statementsById, ShadowStatement>;
   paragraphOrder, number>;
-}) => ClaimFootprintMeasurement
+  paragraphMeta?, {...}) => ClaimFootprintMeasurement
+  - function buildClaimConcordance: (canonicalSets, Set<string>>) => ClaimConcordanceResult
   - function measureProvenance: (input) => Promise<MeasurePhaseOutput>
   - interface ClaimExclusivity
   - interface MeasurePhaseInput
-  - interface MeasurePhaseOutput
+  - _...1 more_
 - `src\provenance\semantic-mapper.ts`
   - function buildSemanticMapperPrompt: (userQuery, responses) => string
   - function parseSemanticMapperOutput: (rawResponse, _shadowStatements?) => ParseResult

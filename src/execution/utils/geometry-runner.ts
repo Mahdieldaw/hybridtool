@@ -289,9 +289,7 @@ export async function buildGeometryAsync(
       }
     })();
 
-    await queryEmbeddingPromise;
-    await paragraphEmbeddingPromise;
-    await statementEmbeddingPromise;
+    await Promise.all([queryEmbeddingPromise, paragraphEmbeddingPromise, statementEmbeddingPromise]);
 
     const firstParagraphEmbedding = results.geometryParagraphEmbeddings?.values?.().next?.().value;
     if (

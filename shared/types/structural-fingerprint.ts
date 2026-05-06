@@ -25,9 +25,14 @@ export interface ClaimStructuralFingerprintPassage {
 }
 
 export interface ClaimStructuralFingerprintModelTreatment {
-  presenceMass: number;
+  claimPresenceCount: number;
   territorialMass: number;
-  sovereignMass: number;
+  sharedTerritorialMass: number;
+  sovereignStatementCount: number;
+  sharedStatementCount: number;
+  paragraphPresenceCount: number;
+  contestedParagraphCount: number;
+  dominantParagraphCount: number;
   passageRuns: number;
   passageStatementMass: number;
   boundaryCrossingCount: number;
@@ -37,19 +42,41 @@ export interface ClaimStructuralFingerprintModelTreatment {
 
 export interface ClaimStructuralFingerprint {
   footprint: {
-    vectors: {
-      presenceByParagraph: ClaimFingerprintVector;
-      territorialByParagraph: ClaimFingerprintVector;
-      sovereignByParagraph: ClaimFingerprintVector;
-    };
-    totals: {
-      presenceMass: number;
-      territorialMass: number;
-      sovereignMass: number;
-    };
-    derived: {
-      sovereignRatio: number | null;
-      contestedShareRatio: number | null;
+    schemaVersion: 2;
+    atoms: Array<{
+      claimId: string;
+      statementId: string;
+      paragraphId: string;
+      modelIndex: number;
+      ownerCount: number;
+      ownershipShare: number;
+      isSovereign: boolean;
+      isShared: boolean;
+    }>;
+    rollups: {
+      byParagraph: ClaimFingerprintVector;
+      byModel: Record<string, {
+        claimPresenceCount: number;
+        territorialMass: number;
+        sharedTerritorialMass: number;
+        sovereignStatementCount: number;
+        sharedStatementCount: number;
+        paragraphPresenceCount: number;
+        contestedParagraphCount: number;
+        dominantParagraphCount: number;
+      }>;
+      byClaim: {
+        claimPresenceCount: number;
+        territorialMass: number;
+        sharedTerritorialMass: number;
+        sovereignStatementCount: number;
+        sharedStatementCount: number;
+        paragraphPresenceCount: number;
+        contestedParagraphCount: number;
+        dominantParagraphCount: number;
+        sovereignRatio: number | null;
+        contestedShareRatio: number | null;
+      };
     };
   };
   passageShape: {

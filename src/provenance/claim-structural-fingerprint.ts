@@ -30,20 +30,11 @@ const ORIGIN_TO_KEY: Record<ParagraphOrigin, OriginKey> = {
 };
 
 export function computeContestedShareRatio(
-  presenceMass: number,
-  territorialMass: number,
-  sovereignMass: number
+  sharedTerritorialMass: number,
+  sharedStatementCount: number
 ): number | null {
-  if (Math.abs(presenceMass - sovereignMass) <= Number.EPSILON) return null;
-  return (territorialMass - sovereignMass) / (presenceMass - sovereignMass);
-}
-
-function vectorToRecord(vector: Array<{ paragraphId: string; value: number }> | undefined): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const entry of vector ?? []) {
-    out[entry.paragraphId] = entry.value;
-  }
-  return out;
+  if (sharedStatementCount <= 0) return null;
+  return sharedTerritorialMass / sharedStatementCount;
 }
 
 function ensureModel(
@@ -53,9 +44,14 @@ function ensureModel(
   const existing = vector[modelId];
   if (existing) return existing;
   const created: ClaimStructuralFingerprintModelTreatment = {
-    presenceMass: 0,
+    claimPresenceCount: 0,
     territorialMass: 0,
-    sovereignMass: 0,
+    sharedTerritorialMass: 0,
+    sovereignStatementCount: 0,
+    sharedStatementCount: 0,
+    paragraphPresenceCount: 0,
+    contestedParagraphCount: 0,
+    dominantParagraphCount: 0,
     passageRuns: 0,
     passageStatementMass: 0,
     boundaryCrossingCount: 0,
@@ -160,14 +156,29 @@ export function buildClaimStructuralFingerprints(
     const mixed = mixedProvenanceResult.perClaim[claimId];
     const canonicalStatementIds = canonicalSets.get(claimId) ?? new Set<string>();
     const footprint = profile?.footprint;
-    const presenceByParagraph = vectorToRecord(footprint?.vectors.presenceByParagraph);
-    const territorialByParagraph = vectorToRecord(footprint?.vectors.territorialByParagraph);
-    const sovereignByParagraph = vectorToRecord(footprint?.vectors.sovereignByParagraph);
-    const presenceMass = footprint?.totals.presenceMass ?? 0;
-    const territorialMass = footprint?.totals.territorialMass ?? 0;
-    const sovereignMass = footprint?.totals.sovereignMass ?? 0;
-    const sovereignRatio = footprint?.derived.sovereignRatio ?? null;
-    const contestedShareRatio = footprint?.derived.contestedShareRatio ?? null;
+    const footprintRollup = footprint?.rollups.byClaim ?? {
+      claimId,
+      claimPresenceCount: 0,
+      territorialMass: 0,
+      sharedTerritorialMass: 0,
+      sovereignStatementCount: 0,
+      sharedStatementCount: 0,
+      paragraphPresenceCount: 0,
+      contestedParagraphCount: 0,
+      dominantParagraphCount: 0,
+      sovereignRatio: null,
+      contestedShareRatio: null,
+    };
+    const claimPresenceCount = footprintRollup.claimPresenceCount;
+    const territorialMass = footprintRollup.territorialMass;
+    const sharedTerritorialMass = footprintRollup.sharedTerritorialMass;
+    const sovereignStatementCount = footprintRollup.sovereignStatementCount;
+    const sharedStatementCount = footprintRollup.sharedStatementCount;
+    const paragraphPresenceCount = footprintRollup.paragraphPresenceCount;
+    const contestedParagraphCount = footprintRollup.contestedParagraphCount;
+    const dominantParagraphCount = footprintRollup.dominantParagraphCount;
+    const sovereignRatio = footprintRollup.sovereignRatio;
+    const contestedShareRatio = footprintRollup.contestedShareRatio;
 
     const passages: ClaimStructuralFingerprintPassage[] = (profile?.statementPassages ?? []).map(
       (passage) => {
@@ -202,11 +213,16 @@ export function buildClaimStructuralFingerprints(
     );
 
     const modelVector: Record<string, ClaimStructuralFingerprintModelTreatment> = {};
-    for (const coverage of profile?.paragraphCoverage ?? []) {
-      const model = ensureModel(modelVector, String(coverage.modelIndex));
-      model.presenceMass += coverage.coverage;
-      model.territorialMass += territorialByParagraph[coverage.paragraphId] ?? 0;
-      model.sovereignMass += sovereignByParagraph[coverage.paragraphId] ?? 0;
+    for (const rollup of footprint?.rollups.byModel ?? []) {
+      const model = ensureModel(modelVector, String(rollup.modelIndex));
+      model.claimPresenceCount += rollup.claimPresenceCount;
+      model.territorialMass += rollup.territorialMass;
+      model.sharedTerritorialMass += rollup.sharedTerritorialMass;
+      model.sovereignStatementCount += rollup.sovereignStatementCount;
+      model.sharedStatementCount += rollup.sharedStatementCount;
+      model.paragraphPresenceCount += rollup.paragraphPresenceCount;
+      model.contestedParagraphCount += rollup.contestedParagraphCount;
+      model.dominantParagraphCount += rollup.dominantParagraphCount;
     }
 
     for (const passage of passages) {
@@ -236,8 +252,8 @@ export function buildClaimStructuralFingerprints(
       }
     }
 
-    const modelPresenceValues = Object.values(modelVector).map((model) => model.presenceMass);
-    const modelSovereignValues = Object.values(modelVector).map((model) => model.sovereignMass);
+    const modelPresenceValues = Object.values(modelVector).map((model) => model.claimPresenceCount);
+    const modelSovereignValues = Object.values(modelVector).map((model) => model.sovereignStatementCount);
     const modelPassageValues = Object.values(modelVector).map(
       (model) => model.passageStatementMass
     );
@@ -267,19 +283,51 @@ export function buildClaimStructuralFingerprints(
 
     const fingerprint: ClaimStructuralFingerprint = {
       footprint: {
-        vectors: {
-          presenceByParagraph,
-          territorialByParagraph,
-          sovereignByParagraph,
-        },
-        totals: {
-          presenceMass,
-          territorialMass,
-          sovereignMass,
-        },
-        derived: {
-          sovereignRatio,
-          contestedShareRatio,
+        schemaVersion: 2,
+        atoms: (footprint?.atoms ?? []).map((atom) => ({
+          claimId: atom.claimId,
+          statementId: atom.statementId,
+          paragraphId: atom.paragraphId,
+          modelIndex: atom.modelIndex,
+          ownerCount: atom.ownerCount,
+          ownershipShare: atom.ownershipShare,
+          isSovereign: atom.isSovereign,
+          isShared: atom.isShared,
+        })),
+        rollups: {
+          byParagraph: Object.fromEntries(
+            (footprint?.rollups.byParagraph ?? []).map((rollup) => [
+              rollup.paragraphId,
+              rollup.claimPresenceCount,
+            ])
+          ),
+          byModel: Object.fromEntries(
+            (footprint?.rollups.byModel ?? []).map((rollup) => [
+              String(rollup.modelIndex),
+              {
+                claimPresenceCount: rollup.claimPresenceCount,
+                territorialMass: rollup.territorialMass,
+                sharedTerritorialMass: rollup.sharedTerritorialMass,
+                sovereignStatementCount: rollup.sovereignStatementCount,
+                sharedStatementCount: rollup.sharedStatementCount,
+                paragraphPresenceCount: rollup.paragraphPresenceCount,
+                contestedParagraphCount: rollup.contestedParagraphCount,
+                dominantParagraphCount: rollup.dominantParagraphCount,
+              },
+            ])
+          ),
+          byClaim: {
+            claimPresenceCount,
+            territorialMass,
+            sharedTerritorialMass,
+            sovereignStatementCount,
+            sharedStatementCount,
+            paragraphPresenceCount,
+            contestedParagraphCount,
+            dominantParagraphCount,
+            sovereignRatio,
+            contestedShareRatio,
+          },
         },
       },
       passageShape: {
@@ -295,13 +343,13 @@ export function buildClaimStructuralFingerprints(
       modelTreatment: {
         vector: modelVector,
         derived: {
-          dominantPresenceShare: share(maxOrNull(modelPresenceValues), presenceMass),
-          dominantSovereignShare: share(maxOrNull(modelSovereignValues), sovereignMass),
+          dominantPresenceShare: share(maxOrNull(modelPresenceValues), claimPresenceCount),
+          dominantSovereignShare: share(maxOrNull(modelSovereignValues), sovereignStatementCount),
           dominantPassageShare: share(maxOrNull(modelPassageValues), totalPassageStatementMass),
           modelEntropy: entropy(modelPresenceValues),
-          top2Gap: top2Gap(modelPresenceValues, presenceMass),
+          top2Gap: top2Gap(modelPresenceValues, claimPresenceCount),
           modelsWithEvidence: Object.values(modelVector).filter(
-            (model) => model.presenceMass > 0 || model.statementCount > 0
+            (model) => model.claimPresenceCount > 0 || model.statementCount > 0
           ).length,
           modelsWithSustainedTreatment: Object.values(modelVector).filter(
             (model) => model.passageRuns > 0
@@ -339,8 +387,8 @@ export function buildClaimStructuralFingerprints(
           compactSovereign: sovereignRatio != null && sovereignRatio >= 0.67,
           broadShared: contestedShareRatio != null && contestedShareRatio >= 0.5,
           modelConcentrated:
-            share(maxOrNull(modelPresenceValues), presenceMass) != null &&
-            (share(maxOrNull(modelPresenceValues), presenceMass) ?? 0) >= 0.67,
+            share(maxOrNull(modelPresenceValues), claimPresenceCount) != null &&
+            (share(maxOrNull(modelPresenceValues), claimPresenceCount) ?? 0) >= 0.67,
           crossModelSustained: Object.values(modelVector).filter((model) => model.passageRuns > 0).length >= 2,
           fragmented: passages.length > 1 && maxStatementRun <= 2,
           boundaryCrossing: boundaryCrossingCount > 0,

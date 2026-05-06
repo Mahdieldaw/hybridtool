@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | react | typescript
 
-> 0 routes | 0 models | 84 components | 123 lib files | 6 env vars | 4 middleware | 0% test coverage
-> **Token savings:** this file is ~10,900 tokens. Without it, AI exploration would cost ~70,200 tokens. **Saves ~59,300 tokens per conversation.**
-> **Last scanned:** 2026-05-04 20:28 — re-run after significant changes
+> 0 routes | 0 models | 84 components | 124 lib files | 6 env vars | 4 middleware | 0% test coverage
+> **Token savings:** this file is ~11,000 tokens. Without it, AI exploration would cost ~70,500 tokens. **Saves ~59,400 tokens per conversation.**
+> **Last scanned:** 2026-05-06 07:10 — re-run after significant changes
 
 ---
 
@@ -118,6 +118,12 @@
   - function getModelsForClaim: (index, claimId) => number[]
   - function getBasinsForClaim: (index, claimId) => (number | null)[]
   - _...6 more_
+- `shared\embedding-models.ts`
+  - function getConfigForModel: (modelId) => EmbeddingConfig
+  - interface EmbeddingConfig
+  - interface EmbeddingModelEntry
+  - const EMBEDDING_MODELS: EmbeddingModelEntry[]
+  - const DEFAULT_CONFIG: EmbeddingConfig
 - `shared\measurement-registry.ts`
   - function assertMeasurementConsumer: (key, consumer, contextOrOptions?) => void
   - function collectMeasurementViolation: (key, consumer, context?, collector) => MeasurementViolation | null
@@ -139,6 +145,7 @@
   - type ProviderRole
   - const CANONICAL_PROVIDER_ORDER: readonly string[]
   - _...1 more_
+- `shared\text-prep.ts` — function structuredTruncate: (text, maxChars) => string, function stripInlineMarkdown: (text) => string
 - `shared\think-utils.ts`
   - function computeThinkFlag: ({...}, input, inputFlags }) => boolean
   - interface ComputeThinkFlagArgs
@@ -158,22 +165,19 @@
   - interface ProbeSessionResponse
   - interface ProbeSession
   - _...3 more_
-- `src\clustering\config.ts`
-  - function getConfigForModel: (modelId) => EmbeddingConfig
-  - interface EmbeddingConfig
-  - interface EmbeddingModelEntry
-  - const EMBEDDING_MODELS: EmbeddingModelEntry[]
-  - const DEFAULT_CONFIG: EmbeddingConfig
 - `src\clustering\corpus-search.ts` — function searchCorpus: (queryEmbedding, paragraphEmbeddings, Float32Array>, paragraphMeta, maxResults) => CorpusSearchHit[], interface CorpusSearchHit
-- `src\clustering\distance.ts` — function cosineSimilarity: (a, b) => number
+- `src\clustering\distance.ts`
+  - function getCosineSimilarityDimensionMismatchCount: () => number
+  - function resetCosineSimilarityDimensionMismatchCount: () => void
+  - function cosineSimilarity: (a, b) => number
 - `src\clustering\embeddings.ts`
-  - function structuredTruncate: (text, maxChars) => string
-  - function stripInlineMarkdown: (text) => string
   - function cleanupPendingEmbeddingsBuffers: () => Promise<void>
   - function generateEmbeddings: (paragraphs, shadowStatements, config) => Promise<EmbeddingResult>
   - function generateTextEmbeddings: (texts, config) => Promise<TextEmbeddingResult>
   - function generateStatementEmbeddings: (statements, config) => Promise<StatementEmbeddingResult>
-  - _...4 more_
+  - function getEmbeddingStatus: () => Promise<
+  - interface EmbeddingResult
+  - _...2 more_
 - `src\concierge-service\concierge-service.ts`
   - function buildConciergePrompt: (userMessage, options?) => string
   - interface ConciergePromptOptions
@@ -326,7 +330,7 @@
   - function promisifyRequest: (request) => Promise<T>
   - _...3 more_
 - `src\provenance\claim-structural-fingerprint.ts`
-  - function computeContestedShareRatio: (presenceMass, territorialMass, sovereignMass) => number | null
+  - function computeContestedShareRatio: (sharedTerritorialMass, sharedStatementCount) => number | null
   - function buildClaimStructuralFingerprints: (input) => ClaimStructuralFingerprintResult
   - interface ClaimStructuralFingerprintInput
 - `src\provenance\classify.ts` — function computeStatementClassification: (input) => StatementClassificationResult, interface ClassifyPhaseInput
@@ -336,15 +340,16 @@
   - interface ProvenancePipelineOutput
 - `src\provenance\measure.ts`
   - function emptyClaimFootprintMeasurement: () => ClaimFootprintMeasurement
-  - function computeClaimFootprintMeasurement: ({...}, canonicalStatementIds, ownershipMap, stmtToParagraphId, statementsById, paragraphOrder, }, Set<string>>;
+  - function computeClaimFootprintMeasurement: ({...}, canonicalStatementIds, ownershipMap, stmtToParagraphId, statementsById, paragraphOrder, paragraphMeta, }, Set<string>>;
   stmtToParagraphId, string>;
   statementsById, ShadowStatement>;
   paragraphOrder, number>;
-}) => ClaimFootprintMeasurement
+  paragraphMeta?, {...}) => ClaimFootprintMeasurement
+  - function buildClaimConcordance: (canonicalSets, Set<string>>) => ClaimConcordanceResult
   - function measureProvenance: (input) => Promise<MeasurePhaseOutput>
   - interface ClaimExclusivity
   - interface MeasurePhaseInput
-  - interface MeasurePhaseOutput
+  - _...1 more_
 - `src\provenance\semantic-mapper.ts`
   - function buildSemanticMapperPrompt: (userQuery, responses) => string
   - function parseSemanticMapperOutput: (rawResponse, _shadowStatements?) => ParseResult
@@ -563,7 +568,7 @@
 
 ## Most Imported Files (change these carefully)
 
-- `shared\corpus-utils.ts` — imported by **17** files
+- `shared\corpus-utils.ts` — imported by **16** files
 - `ui\services\extension-api.ts` — imported by **15** files
 - `ui\config\constants.ts` — imported by **15** files
 - `shared\messaging.ts` — imported by **13** files
@@ -571,22 +576,22 @@
 - `src\shadow\shadow-extractor.ts` — imported by **10** files
 - `shared\types\contract.ts` — imported by **9** files
 - `src\geometry\types.ts` — imported by **9** files
-- `src\clustering\distance.ts` — imported by **8** files
+- `src\geometry\annotate.ts` — imported by **8** files
 - `src\shadow\index.ts` — imported by **8** files
 - `src\providers\auth-manager.js` — imported by **8** files
 - `src\shadow\statement-types.ts` — imported by **8** files
 - `ui\utils\provider-helpers.ts` — imported by **8** files
 - `ui\shared\CopyButton.tsx` — imported by **8** files
 - `shared\types\provider.ts` — imported by **7** files
+- `src\clustering\distance.ts` — imported by **7** files
 - `shared\citation-utils.ts` — imported by **7** files
 - `src\errors\handler.ts` — imported by **7** files
-- `src\geometry\annotate.ts` — imported by **7** files
 - `src\concierge-service\editorial-mapper.ts` — imported by **6** files
 - `src\persistence\types.ts` — imported by **6** files
 
 ## Import Map (who imports what)
 
-- `shared\corpus-utils.ts` ← `src\execution\deterministic-pipeline.ts`, `src\execution\pipeline\mapping-phase.ts`, `src\system\connection-handler.ts`, `ui\chat\TurnOutputRouter.tsx`, `ui\hooks\chat\usePortMessageHandler.ts` +12 more
+- `shared\corpus-utils.ts` ← `src\execution\deterministic-pipeline.ts`, `src\system\connection-handler.ts`, `ui\chat\TurnOutputRouter.tsx`, `ui\hooks\chat\usePortMessageHandler.ts`, `ui\hooks\instrument\useClaimCentroids.ts` +11 more
 - `ui\services\extension-api.ts` ← `ui\App.tsx`, `ui\chat\ChatInput.tsx`, `ui\hooks\chat\useChat.ts`, `ui\hooks\chat\usePortMessageHandler.ts`, `ui\hooks\chat\useRoundActions.ts` +10 more
 - `ui\config\constants.ts` ← `ui\chat\ChatInput.tsx`, `ui\chat\CouncilOrbs.tsx`, `ui\chat\CouncilOrbsVertical.tsx`, `ui\chat\SingularityOutputView.tsx`, `ui\chat\TurnOutputRouter.tsx` +10 more
 - `shared\messaging.ts` ← `src\execution\io\context-manager.ts`, `src\execution\io\context-resolver.ts`, `src\execution\io\turn-emitter.ts`, `src\execution\pipeline\mapping-phase.ts`, `src\execution\pipeline\recompute-handler.ts` +8 more
@@ -594,7 +599,7 @@
 - `src\shadow\shadow-extractor.ts` ← `shared\corpus-utils.ts`, `src\clustering\embeddings.ts`, `src\execution\utils\geometry-runner.ts`, `src\geometry\annotate.ts`, `src\geometry\engine.ts` +5 more
 - `shared\types\contract.ts` ← `shared\types\index.ts`, `shared\types\turns.ts`, `src\execution\io\context-manager.ts`, `src\execution\io\context-resolver.ts`, `src\execution\pipeline\singularity-phase.ts` +4 more
 - `src\geometry\types.ts` ← `src\execution\utils\geometry-runner.ts`, `src\geometry\algorithms\basin-inversion-bayesian.ts`, `src\geometry\annotate.ts`, `src\geometry\engine.ts`, `src\geometry\index.ts` +4 more
-- `src\clustering\distance.ts` ← `src\clustering\corpus-search.ts`, `src\clustering\index.ts`, `src\geometry\annotate.ts`, `src\geometry\interpret.ts`, `src\provenance\classify.ts` +3 more
+- `src\geometry\annotate.ts` ← `src\execution\deterministic-pipeline.h1.test.ts`, `src\execution\deterministic-pipeline.ts`, `src\execution\deterministic-pipeline.ts`, `src\execution\utils\geometry-runner.ts`, `src\geometry\engine.ts` +3 more
 - `src\shadow\index.ts` ← `src\execution\deterministic-pipeline.ts`, `src\execution\deterministic-pipeline.ts`, `src\execution\pipeline\mapping-phase.ts`, `src\execution\pipeline\recompute-handler.ts`, `src\shadow\test.ts` +3 more
 
 ---
@@ -602,7 +607,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 17 test files found
+> 23 test files found
 
 ---
 

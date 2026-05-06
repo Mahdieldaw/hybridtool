@@ -19,7 +19,11 @@ import type {
   ClaimDensityProfile,
   ClaimDensityResult,
   ClaimFootprintMeasurement,
-  ParagraphMassVectorEntry,
+  ClaimFootprintAtom,
+  ClaimFootprintClaimRollup,
+  ClaimFootprintModelRollup,
+  ClaimFootprintParagraphRollup,
+  ClaimConcordanceResult,
   ParagraphCoverageEntry,
   StatementPassageEntry,
 } from '../../shared/types';
@@ -57,48 +61,58 @@ export interface MeasurePhaseOutput {
   competitiveWeights: Map<string, Map<string, number>>;
   competitiveExcess: Map<string, Map<string, number>>;
   competitiveThresholds: Map<string, number>;
+  claimConcordance: ClaimConcordanceResult;
 }
 
 export function emptyClaimFootprintMeasurement(): ClaimFootprintMeasurement {
+  const byClaim: ClaimFootprintClaimRollup = {
+    claimId: '',
+    claimPresenceCount: 0,
+    territorialMass: 0,
+    sharedTerritorialMass: 0,
+    sovereignStatementCount: 0,
+    sharedStatementCount: 0,
+    paragraphPresenceCount: 0,
+    contestedParagraphCount: 0,
+    dominantParagraphCount: 0,
+    sovereignRatio: null,
+    contestedShareRatio: null,
+  };
   return {
-    vectors: {
-      presenceByParagraph: [],
-      territorialByParagraph: [],
-      sovereignByParagraph: [],
-    },
-    totals: {
-      presenceMass: 0,
-      territorialMass: 0,
-      sovereignMass: 0,
-    },
-    derived: {
-      sovereignRatio: null,
-      contestedShareRatio: null,
-    },
+    schemaVersion: 2,
+    atoms: [],
+    rollups: { byParagraph: [], byModel: [], byClaim },
   };
 }
 
-function contestedShareRatio(
-  presenceMass: number,
-  territorialMass: number,
-  sovereignMass: number
-): number | null {
-  if (Math.abs(presenceMass - sovereignMass) <= Number.EPSILON) return null;
-  return (territorialMass - sovereignMass) / (presenceMass - sovereignMass);
+function emptyClaimRollup(claimId: string): ClaimFootprintClaimRollup {
+  return {
+    claimId,
+    claimPresenceCount: 0,
+    territorialMass: 0,
+    sharedTerritorialMass: 0,
+    sovereignStatementCount: 0,
+    sharedStatementCount: 0,
+    paragraphPresenceCount: 0,
+    contestedParagraphCount: 0,
+    dominantParagraphCount: 0,
+    sovereignRatio: null,
+    contestedShareRatio: null,
+  };
 }
 
-function sumVector(vector: ParagraphMassVectorEntry[]): number {
-  return vector.reduce((sum, entry) => sum + entry.value, 0);
-}
-
-function vectorFromParagraphs(
-  paragraphIds: string[],
-  values: Map<string, number>
-): ParagraphMassVectorEntry[] {
-  return paragraphIds.map((paragraphId) => ({
-    paragraphId,
-    value: values.get(paragraphId) ?? 0,
-  }));
+function finalizeClaimRollup(rollup: ClaimFootprintClaimRollup): ClaimFootprintClaimRollup {
+  return {
+    ...rollup,
+    sovereignRatio:
+      rollup.claimPresenceCount > 0
+        ? rollup.sovereignStatementCount / rollup.claimPresenceCount
+        : null,
+    contestedShareRatio:
+      rollup.sharedStatementCount > 0
+        ? rollup.sharedTerritorialMass / rollup.sharedStatementCount
+        : null,
+  };
 }
 
 export function computeClaimFootprintMeasurement({
@@ -108,6 +122,7 @@ export function computeClaimFootprintMeasurement({
   stmtToParagraphId,
   statementsById,
   paragraphOrder,
+  paragraphMeta,
 }: {
   claimId: string;
   canonicalStatementIds: Iterable<string>;
@@ -115,10 +130,21 @@ export function computeClaimFootprintMeasurement({
   stmtToParagraphId: Map<string, string>;
   statementsById: Map<string, ShadowStatement>;
   paragraphOrder: Map<string, number>;
+  paragraphMeta?: Map<string, { modelIndex: number; paragraphIndex: number; totalStatements: number }>;
 }): ClaimFootprintMeasurement {
-  const presence = new Map<string, number>();
-  const territorial = new Map<string, number>();
-  const sovereign = new Map<string, number>();
+  const atoms: ClaimFootprintAtom[] = [];
+  const claimsByParagraph = new Map<string, Set<string>>();
+
+  for (const [statementId, ownerSet] of ownershipMap) {
+    const paragraphId = stmtToParagraphId.get(statementId);
+    if (!paragraphId) continue;
+    let paragraphOwners = claimsByParagraph.get(paragraphId);
+    if (!paragraphOwners) {
+      paragraphOwners = new Set<string>();
+      claimsByParagraph.set(paragraphId, paragraphOwners);
+    }
+    for (const owner of ownerSet) paragraphOwners.add(String(owner));
+  }
 
   for (const statementId of canonicalStatementIds) {
     const statement = statementsById.get(statementId);
@@ -127,40 +153,182 @@ export function computeClaimFootprintMeasurement({
     const paragraphId = stmtToParagraphId.get(statementId);
     if (!paragraphId) continue;
 
-    const owners = ownershipMap.get(statementId);
-    const ownerCount = Math.max(owners?.size ?? 1, 1);
+    const ownerSet = ownershipMap.get(statementId);
+    const owners = Array.from(new Set([claimId, ...Array.from(ownerSet ?? [])]))
+      .map(String)
+      .sort();
+    const ownerCount = Math.max(owners.length, 1);
+    const isSovereign = ownerCount === 1 && owners[0] === claimId;
+    const isShared = ownerCount > 1;
 
-    presence.set(paragraphId, (presence.get(paragraphId) ?? 0) + 1);
-    territorial.set(paragraphId, (territorial.get(paragraphId) ?? 0) + 1 / ownerCount);
-    if (owners?.size === 1 && owners.has(claimId)) {
-      sovereign.set(paragraphId, (sovereign.get(paragraphId) ?? 0) + 1);
+    atoms.push({
+      claimId,
+      statementId,
+      paragraphId,
+      modelIndex: statement?.modelIndex ?? paragraphMeta?.get(paragraphId)?.modelIndex ?? 0,
+      owners,
+      ownerCount,
+      claimPresence: 1,
+      ownershipShare: 1 / ownerCount,
+      isSovereign,
+      isShared,
+    });
+  }
+
+  atoms.sort(
+    (a, b) =>
+      (paragraphOrder.get(a.paragraphId) ?? Number.MAX_SAFE_INTEGER) -
+        (paragraphOrder.get(b.paragraphId) ?? Number.MAX_SAFE_INTEGER) ||
+      a.statementId.localeCompare(b.statementId)
+  );
+
+  const byParagraphMap = new Map<string, ClaimFootprintParagraphRollup>();
+  const byModelMap = new Map<number, ClaimFootprintModelRollup>();
+  const byClaim = emptyClaimRollup(claimId);
+
+  const ensureParagraph = (atom: ClaimFootprintAtom): ClaimFootprintParagraphRollup => {
+    let rollup = byParagraphMap.get(atom.paragraphId);
+    if (!rollup) {
+      const meta = paragraphMeta?.get(atom.paragraphId);
+      rollup = {
+        paragraphId: atom.paragraphId,
+        modelIndex: meta?.modelIndex ?? atom.modelIndex,
+        paragraphIndex: meta?.paragraphIndex ?? paragraphOrder.get(atom.paragraphId) ?? 0,
+        claimPresenceCount: 0,
+        territorialMass: 0,
+        sharedTerritorialMass: 0,
+        sovereignStatementCount: 0,
+        sharedStatementCount: 0,
+        contested: false,
+        dominant: false,
+      };
+      byParagraphMap.set(atom.paragraphId, rollup);
+    }
+    return rollup;
+  };
+
+  const ensureModel = (modelIndex: number): ClaimFootprintModelRollup => {
+    let rollup = byModelMap.get(modelIndex);
+    if (!rollup) {
+      rollup = {
+        modelIndex,
+        claimPresenceCount: 0,
+        territorialMass: 0,
+        sharedTerritorialMass: 0,
+        sovereignStatementCount: 0,
+        sharedStatementCount: 0,
+        paragraphPresenceCount: 0,
+        contestedParagraphCount: 0,
+        dominantParagraphCount: 0,
+      };
+      byModelMap.set(modelIndex, rollup);
+    }
+    return rollup;
+  };
+
+  for (const atom of atoms) {
+    const para = ensureParagraph(atom);
+    para.claimPresenceCount += atom.claimPresence;
+    para.territorialMass += atom.ownershipShare;
+    if (atom.isShared) {
+      para.sharedTerritorialMass += atom.ownershipShare;
+      para.sharedStatementCount += 1;
+    }
+    if (atom.isSovereign) para.sovereignStatementCount += 1;
+
+    byClaim.claimPresenceCount += atom.claimPresence;
+    byClaim.territorialMass += atom.ownershipShare;
+    if (atom.isShared) {
+      byClaim.sharedTerritorialMass += atom.ownershipShare;
+      byClaim.sharedStatementCount += 1;
+    }
+    if (atom.isSovereign) byClaim.sovereignStatementCount += 1;
+  }
+
+  const byParagraph = Array.from(byParagraphMap.values()).sort(
+    (a, b) => (paragraphOrder.get(a.paragraphId) ?? Number.MAX_SAFE_INTEGER) - (paragraphOrder.get(b.paragraphId) ?? Number.MAX_SAFE_INTEGER)
+  );
+
+  for (const para of byParagraph) {
+    const totalStatements = Math.max(
+      paragraphMeta?.get(para.paragraphId)?.totalStatements ??
+        Array.from(stmtToParagraphId.values()).filter((pid) => pid === para.paragraphId).length,
+      1
+    );
+    para.dominant = para.claimPresenceCount > totalStatements / 2;
+
+    byClaim.paragraphPresenceCount += 1;
+    const paragraphOwners = claimsByParagraph.get(para.paragraphId) ?? new Set([claimId]);
+    const isContestedParagraph = Array.from(paragraphOwners).some((owner) => owner !== claimId);
+    para.contested = isContestedParagraph;
+    if (isContestedParagraph) byClaim.contestedParagraphCount += 1;
+    if (para.dominant) byClaim.dominantParagraphCount += 1;
+
+    const model = ensureModel(para.modelIndex);
+    model.claimPresenceCount += para.claimPresenceCount;
+    model.territorialMass += para.territorialMass;
+    model.sharedTerritorialMass += para.sharedTerritorialMass;
+    model.sovereignStatementCount += para.sovereignStatementCount;
+    model.sharedStatementCount += para.sharedStatementCount;
+    model.paragraphPresenceCount += 1;
+    if (isContestedParagraph) model.contestedParagraphCount += 1;
+    if (para.dominant) model.dominantParagraphCount += 1;
+  }
+
+  return {
+    schemaVersion: 2,
+    atoms,
+    rollups: {
+      byParagraph,
+      byModel: Array.from(byModelMap.values()).sort((a, b) => a.modelIndex - b.modelIndex),
+      byClaim: finalizeClaimRollup(byClaim),
+    },
+  };
+}
+
+export function buildClaimConcordance(
+  canonicalSets: Map<string, Set<string>>
+): ClaimConcordanceResult {
+  const claimIds = Array.from(canonicalSets.keys()).sort();
+  const pairs: ClaimConcordanceResult['pairs'] = [];
+
+  for (let i = 0; i < claimIds.length; i++) {
+    for (let j = i + 1; j < claimIds.length; j++) {
+      const claimAId = claimIds[i];
+      const claimBId = claimIds[j];
+      const aSet = canonicalSets.get(claimAId) ?? new Set<string>();
+      const bSet = canonicalSets.get(claimBId) ?? new Set<string>();
+      const sharedStatementIds = Array.from(aSet)
+        .filter((sid) => bSet.has(sid))
+        .sort();
+      const unionStatementCount = new Set([...Array.from(aSet), ...Array.from(bSet)]).size;
+      const overlapCount = sharedStatementIds.length;
+
+      pairs.push({
+        claimAId,
+        claimBId,
+        sharedStatementIds,
+        overlapCount,
+        aStatementCount: aSet.size,
+        bStatementCount: bSet.size,
+        unionStatementCount,
+        jaccard: unionStatementCount > 0 ? overlapCount / unionStatementCount : null,
+        aContainedInB: aSet.size > 0 ? overlapCount / aSet.size : null,
+        bContainedInA: bSet.size > 0 ? overlapCount / bSet.size : null,
+        aUniqueCount: Math.max(0, aSet.size - overlapCount),
+        bUniqueCount: Math.max(0, bSet.size - overlapCount),
+      });
     }
   }
 
-  const paragraphIds = Array.from(presence.keys()).sort(
-    (a, b) => (paragraphOrder.get(a) ?? Number.MAX_SAFE_INTEGER) - (paragraphOrder.get(b) ?? Number.MAX_SAFE_INTEGER)
-  );
-  const presenceByParagraph = vectorFromParagraphs(paragraphIds, presence);
-  const territorialByParagraph = vectorFromParagraphs(paragraphIds, territorial);
-  const sovereignByParagraph = vectorFromParagraphs(paragraphIds, sovereign);
-  const presenceMass = sumVector(presenceByParagraph);
-  const territorialMass = sumVector(territorialByParagraph);
-  const sovereignMass = sumVector(sovereignByParagraph);
-
   return {
-    vectors: {
-      presenceByParagraph,
-      territorialByParagraph,
-      sovereignByParagraph,
-    },
-    totals: {
-      presenceMass,
-      territorialMass,
-      sovereignMass,
-    },
-    derived: {
-      sovereignRatio: presenceMass > 0 ? sovereignMass / presenceMass : null,
-      contestedShareRatio: contestedShareRatio(presenceMass, territorialMass, sovereignMass),
+    schemaVersion: 1,
+    consumerStatus: 'diagnostic-foundational',
+    pairs,
+    meta: {
+      currentConsumers: [],
+      note:
+        'claimConcordance has no current consumers by design; it is the first matrix primitive and remains diagnostic/foundational until concordance lands.',
     },
   };
 }
@@ -686,8 +854,16 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
   }
 
   const paragraphOrder = new Map<string, number>();
+  const paragraphMeta = new Map<string, { modelIndex: number; paragraphIndex: number; totalStatements: number }>();
   for (let i = 0; i < shadowParagraphs.length; i++) {
     paragraphOrder.set(shadowParagraphs[i].id, i);
+    paragraphMeta.set(shadowParagraphs[i].id, {
+      modelIndex: shadowParagraphs[i].modelIndex,
+      paragraphIndex: shadowParagraphs[i].paragraphIndex,
+      totalStatements: shadowParagraphs[i].statementIds.filter(
+        (sid) => !statementsById.get(sid)?.isTableCell
+      ).length,
+    });
   }
   for (const claim of claims) {
     const id = String(claim.id);
@@ -700,8 +876,11 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       stmtToParagraphId,
       statementsById,
       paragraphOrder,
+      paragraphMeta,
     });
   }
+
+  const claimConcordance = buildClaimConcordance(canonicalSets);
 
   return {
     enrichedClaims,
@@ -722,5 +901,6 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     competitiveWeights: normalizedWeights,
     competitiveExcess: rawExcess,
     competitiveThresholds: thresholdByParagraph,
+    claimConcordance,
   };
 }

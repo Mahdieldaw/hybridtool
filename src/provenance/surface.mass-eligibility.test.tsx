@@ -20,22 +20,16 @@ function makeProfile(
     presenceMass: 99,
     meanCoverage: 0.25,
     presenceVector: [{ paragraphId: 'p1', value: 0.25 }],
-    footprint: {
-      vectors: {
-        presenceByParagraph: [{ paragraphId: 'p1', value: 1 }],
-        territorialByParagraph: [{ paragraphId: 'p1', value: 1 }],
-        sovereignByParagraph: [{ paragraphId: 'p1', value: 1 }],
-      },
-      totals: {
-        presenceMass: 1,
+    footprint: makeFootprint('c1', [
+      {
+        paragraphId: 'p1',
+        modelIndex: 0,
+        paragraphIndex: 0,
+        claimPresenceCount: 1,
         territorialMass: 1,
-        sovereignMass: 1,
+        sovereignStatementCount: 1,
       },
-      derived: {
-        sovereignRatio: 1,
-        contestedShareRatio: null,
-      },
-    },
+    ]),
     paragraphCoverage: [
       {
         paragraphId: 'p1',
@@ -78,6 +72,91 @@ function makeShadowParagraphs(ids: string[] = ['p1']): ShadowParagraph[] {
       _fullParagraph: `Statement s${index + 1}`,
     })),
   ];
+}
+
+function makeFootprint(
+  claimId: string,
+  paragraphs: Array<{
+    paragraphId: string;
+    modelIndex?: number;
+    paragraphIndex?: number;
+    claimPresenceCount: number;
+    territorialMass: number;
+    sharedTerritorialMass?: number;
+    sovereignStatementCount: number;
+    sharedStatementCount?: number;
+    contested?: boolean;
+    dominant?: boolean;
+  }>
+): ClaimDensityProfile['footprint'] {
+  const byParagraph = paragraphs.map((p, index) => ({
+    paragraphId: p.paragraphId,
+    modelIndex: p.modelIndex ?? index,
+    paragraphIndex: p.paragraphIndex ?? index,
+    claimPresenceCount: p.claimPresenceCount,
+    territorialMass: p.territorialMass,
+    sharedTerritorialMass: p.sharedTerritorialMass ?? 0,
+    sovereignStatementCount: p.sovereignStatementCount,
+    sharedStatementCount: p.sharedStatementCount ?? 0,
+    contested: p.contested ?? (p.sharedStatementCount ?? 0) > 0,
+    dominant: p.dominant ?? true,
+  }));
+  const claimPresenceCount = byParagraph.reduce((sum, p) => sum + p.claimPresenceCount, 0);
+  const territorialMass = byParagraph.reduce((sum, p) => sum + p.territorialMass, 0);
+  const sharedTerritorialMass = byParagraph.reduce((sum, p) => sum + p.sharedTerritorialMass, 0);
+  const sovereignStatementCount = byParagraph.reduce((sum, p) => sum + p.sovereignStatementCount, 0);
+  const sharedStatementCount = byParagraph.reduce((sum, p) => sum + p.sharedStatementCount, 0);
+  const paragraphPresenceCount = byParagraph.filter((p) => p.claimPresenceCount > 0).length;
+  const contestedParagraphCount = byParagraph.filter((p) => p.contested).length;
+  const dominantParagraphCount = byParagraph.filter((p) => p.dominant).length;
+  const byModel = Array.from(
+    byParagraph.reduce((acc, p) => {
+      const existing = acc.get(p.modelIndex) ?? {
+        modelIndex: p.modelIndex,
+        claimPresenceCount: 0,
+        territorialMass: 0,
+        sharedTerritorialMass: 0,
+        sovereignStatementCount: 0,
+        sharedStatementCount: 0,
+        paragraphPresenceCount: 0,
+        contestedParagraphCount: 0,
+        dominantParagraphCount: 0,
+      };
+      existing.claimPresenceCount += p.claimPresenceCount;
+      existing.territorialMass += p.territorialMass;
+      existing.sharedTerritorialMass += p.sharedTerritorialMass;
+      existing.sovereignStatementCount += p.sovereignStatementCount;
+      existing.sharedStatementCount += p.sharedStatementCount;
+      existing.paragraphPresenceCount += p.claimPresenceCount > 0 ? 1 : 0;
+      existing.contestedParagraphCount += p.contested ? 1 : 0;
+      existing.dominantParagraphCount += p.dominant ? 1 : 0;
+      acc.set(p.modelIndex, existing);
+      return acc;
+    }, new Map<number, ClaimDensityProfile['footprint']['rollups']['byModel'][number]>()).values()
+  ).sort((a, b) => a.modelIndex - b.modelIndex);
+
+  return {
+    schemaVersion: 2,
+    atoms: [],
+    rollups: {
+      byParagraph,
+      byModel,
+      byClaim: {
+        claimId,
+        claimPresenceCount,
+        territorialMass,
+        sharedTerritorialMass,
+        sovereignStatementCount,
+        sharedStatementCount,
+        paragraphPresenceCount,
+        contestedParagraphCount,
+        dominantParagraphCount,
+        sovereignRatio: claimPresenceCount > 0 ? sovereignStatementCount / claimPresenceCount : null,
+        contestedShareRatio:
+          sharedStatementCount > 0 ? sharedTerritorialMass / sharedStatementCount : null,
+      },
+    },
+  };
 }
 
 function runSurfaceWithProfiles(
@@ -138,16 +217,21 @@ function runSurface(profile: ClaimDensityProfile) {
 }
 
 describe('surface mass eligibility', () => {
-  test('mass diagnostics read canonical footprint totals rather than legacy presenceMass', () => {
+  test('mass diagnostics read canonical atom rollups rather than legacy presenceMass', () => {
     const diagnostic = buildMassEligibilityDiagnostic('c1', makeProfile(), false);
 
     expect(diagnostic).toEqual(
       expect.objectContaining({
         oldMajorityEligible: false,
         newFootprintEligible: true,
-        presenceMass: 1,
+        claimPresenceCount: 1,
         territorialMass: 1,
-        sovereignMass: 1,
+        sharedTerritorialMass: 0,
+        sovereignStatementCount: 1,
+        sharedStatementCount: 0,
+        paragraphPresenceCount: 1,
+        contestedParagraphCount: 0,
+        dominantParagraphCount: 1,
         sovereignRatio: 1,
         contestedShareRatio: null,
         changedEligibility: true,
@@ -160,7 +244,8 @@ describe('surface mass eligibility', () => {
     const routing = result.passageRoutingResult.routing;
 
     expect(result.passageRoutingResult.gate.preconditionPassCount).toBe(1);
-    expect(result.passageRoutingResult.claimProfiles.c1.presenceMass).toBe(1);
+    expect((result.passageRoutingResult.claimProfiles.c1 as any).claimPresenceCount).toBe(1);
+    expect((result.passageRoutingResult.claimProfiles.c1 as any).paragraphPresenceCount).toBe(1);
     expect(routing.diagnostics.massEligibility).toEqual([
       expect.objectContaining({
         oldMajorityEligible: false,
@@ -191,22 +276,7 @@ describe('surface mass eligibility', () => {
             coverage: 1,
           },
         ],
-        footprint: {
-          vectors: {
-            presenceByParagraph: [],
-            territorialByParagraph: [],
-            sovereignByParagraph: [],
-          },
-          totals: {
-            presenceMass: 0,
-            territorialMass: 0,
-            sovereignMass: 0,
-          },
-          derived: {
-            sovereignRatio: null,
-            contestedShareRatio: null,
-          },
-        },
+        footprint: makeFootprint('c1', []),
       })
     );
 
@@ -230,31 +300,26 @@ describe('surface mass eligibility', () => {
         paragraphCount: 2,
         maxPassageLength: 4,
         meanCoverageInLongestRun: 0.2,
-        footprint: {
-          vectors: {
-            presenceByParagraph: [
-              { paragraphId: 'p1', value: 1 },
-              { paragraphId: 'p2', value: 4 },
-            ],
-            territorialByParagraph: [
-              { paragraphId: 'p1', value: 1 },
-              { paragraphId: 'p2', value: 3 },
-            ],
-            sovereignByParagraph: [
-              { paragraphId: 'p1', value: 1 },
-              { paragraphId: 'p2', value: 2 },
-            ],
+        footprint: makeFootprint('c1', [
+          {
+            paragraphId: 'p1',
+            modelIndex: 0,
+            paragraphIndex: 0,
+            claimPresenceCount: 1,
+            territorialMass: 1,
+            sovereignStatementCount: 1,
           },
-          totals: {
-            presenceMass: 5,
-            territorialMass: 4,
-            sovereignMass: 3,
+          {
+            paragraphId: 'p2',
+            modelIndex: 1,
+            paragraphIndex: 1,
+            claimPresenceCount: 4,
+            territorialMass: 3,
+            sharedTerritorialMass: 1,
+            sovereignStatementCount: 2,
+            sharedStatementCount: 2,
           },
-          derived: {
-            sovereignRatio: 0.6,
-            contestedShareRatio: 0.5,
-          },
-        },
+        ]),
         paragraphCoverage: [
           {
             paragraphId: 'p1',
@@ -303,10 +368,16 @@ describe('surface mass eligibility', () => {
     expect(profile.dominantPresenceShare).toBe(0.8);
     expect(profile.dominantPassageShare).toBeCloseTo(4 / 6);
     expect(profile.maxStatementRun).toBe(4);
+    expect((profile as any).claimPresenceCount).toBe(5);
+    expect((profile as any).paragraphPresenceCount).toBe(2);
+    expect((profile as any).contestedParagraphCount).toBe(0);
+    expect((profile as any).sharedTerritorialMass).toBe(1);
+    expect((profile as any).sovereignStatementCount).toBe(3);
     expect(result.passageRoutingResult.routing.routePlan.structuralInputsByClaim.c1).toEqual(
       expect.objectContaining({
-        presenceMass: 5,
-        sovereignMass: 3,
+        claimPresenceCount: 5,
+        sharedTerritorialMass: 1,
+        sovereignStatementCount: 3,
         contestedShareRatio: 0.5,
         dominantPresenceShare: 0.8,
         dominantPassageShare: expect.any(Number),
@@ -348,41 +419,31 @@ describe('surface mass eligibility', () => {
   test('routePlan, compatibility fields, and counts are structurally derived', () => {
     const c1 = makeProfile({
       claimId: 'c1',
-      footprint: {
-        vectors: {
-          presenceByParagraph: [{ paragraphId: 'p1', value: 2 }],
-          territorialByParagraph: [{ paragraphId: 'p1', value: 2 }],
-          sovereignByParagraph: [{ paragraphId: 'p1', value: 2 }],
-        },
-        totals: {
-          presenceMass: 2,
+      footprint: makeFootprint('c1', [
+        {
+          paragraphId: 'p1',
+          modelIndex: 0,
+          paragraphIndex: 0,
+          claimPresenceCount: 2,
           territorialMass: 2,
-          sovereignMass: 2,
+          sovereignStatementCount: 2,
         },
-        derived: {
-          sovereignRatio: 1,
-          contestedShareRatio: null,
-        },
-      },
+      ]),
     });
     const c2 = makeProfile({
       claimId: 'c2',
-      footprint: {
-        vectors: {
-          presenceByParagraph: [{ paragraphId: 'p2', value: 1 }],
-          territorialByParagraph: [{ paragraphId: 'p2', value: 0.5 }],
-          sovereignByParagraph: [{ paragraphId: 'p2', value: 0 }],
-        },
-        totals: {
-          presenceMass: 1,
+      footprint: makeFootprint('c2', [
+        {
+          paragraphId: 'p2',
+          modelIndex: 0,
+          paragraphIndex: 1,
+          claimPresenceCount: 1,
           territorialMass: 0.5,
-          sovereignMass: 0,
+          sharedTerritorialMass: 0.5,
+          sovereignStatementCount: 0,
+          sharedStatementCount: 1,
         },
-        derived: {
-          sovereignRatio: 0,
-          contestedShareRatio: 0.5,
-        },
-      },
+      ]),
       paragraphCoverage: [
         {
           paragraphId: 'p2',
@@ -396,22 +457,7 @@ describe('surface mass eligibility', () => {
     });
     const c3 = makeProfile({
       claimId: 'c3',
-      footprint: {
-        vectors: {
-          presenceByParagraph: [],
-          territorialByParagraph: [],
-          sovereignByParagraph: [],
-        },
-        totals: {
-          presenceMass: 0,
-          territorialMass: 0,
-          sovereignMass: 0,
-        },
-        derived: {
-          sovereignRatio: null,
-          contestedShareRatio: null,
-        },
-      },
+      footprint: makeFootprint('c3', []),
       paragraphCoverage: [],
       statementPassages: [],
     });

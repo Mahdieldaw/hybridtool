@@ -41,8 +41,9 @@ export interface IndexedPassage {
   meanCoverageInLongestRun?: any;
   /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
   landscapePosition?: any;
-  presenceMass: number;
-  sovereignMass: number;
+  claimPresenceCount: number;
+  sovereignStatementCount: number;
+  sharedTerritorialMass: number;
   contestedShareRatio: number | null;
   maxStatementRun: number;
   dominantPresenceShare: number | null;
@@ -136,8 +137,9 @@ export function buildPassageIndex(
         routeOrderIndex: routeOrderIndexByClaim.get(claimId) ?? null,
         routeIncluded: routeIncludedClaimIds.has(claimId),
         routeOrderingReasons: routePlan?.orderingReasonsByClaim?.[claimId] ?? [],
-        presenceMass: claimProfile.presenceMass,
-        sovereignMass: claimProfile.sovereignMass,
+        claimPresenceCount: claimProfile.claimPresenceCount,
+        sovereignStatementCount: claimProfile.sovereignStatementCount,
+        sharedTerritorialMass: claimProfile.sharedTerritorialMass,
         contestedShareRatio: claimProfile.contestedShareRatio,
         maxStatementRun: claimProfile.maxStatementRun,
         dominantPresenceShare: claimProfile.dominantPresenceShare,
@@ -251,7 +253,7 @@ ${userQuery}`);
 - Model: ${p.modelName} (index ${p.modelIndex})
 - Claim: "${p.claimLabel}" (${p.claimId})
 - Route: ${route}
-- Structural: presenceMass=${fmt(p.presenceMass)}, sovereignMass=${fmt(p.sovereignMass)}, contestedShareRatio=${fmt(p.contestedShareRatio)}, maxStatementRun=${p.maxStatementRun}, dominantPresenceShare=${fmt(p.dominantPresenceShare)}, dominantPassageShare=${fmt(p.dominantPassageShare)}${reasons}
+- Structural: claimPresenceCount=${p.claimPresenceCount}, sovereignStatementCount=${p.sovereignStatementCount}, sharedTerritorialMass=${fmt(p.sharedTerritorialMass)}, contestedShareRatio=${fmt(p.contestedShareRatio)}, maxStatementRun=${p.maxStatementRun}, dominantPresenceShare=${fmt(p.dominantPresenceShare)}, dominantPassageShare=${fmt(p.dominantPassageShare)}${reasons}
 - Passage: statementLength=${p.statementLength}${sole}${conflict}${extent}${contStr}
 
 ${p.text}`;

@@ -9,7 +9,7 @@ interface CrossSignalComparePanelProps {
 
 // Default axes vary by selected layer
 const layerDefaults: Record<string, [string, string]> = {
-  'competitive-provenance': ['provenanceBulk', 'sovereignMass'],
+  'competitive-provenance': ['provenanceBulk', 'sovereignStatementCount'],
   'blast-radius': ['provenanceBulk', 'blastRadius'],
   'query-relevance': ['avgStatementRelevance', 'provenanceBulk'],
 };
@@ -19,13 +19,9 @@ export function CrossSignalComparePanel({
   selectedLayer,
 }: CrossSignalComparePanelProps) {
   const claims = useMemo(() => safeArr<any>(artifact?.semantic?.claims), [artifact]);
-  const claimProvenance = artifact?.claimProvenance ?? null;
-  const exclusivityObj = useMemo(
-    () =>
-      (claimProvenance && typeof claimProvenance === 'object'
-        ? (claimProvenance as any).claimExclusivity
-        : null) ?? {},
-    [claimProvenance]
+  const routingProfiles = useMemo(
+    () => (artifact?.passageRouting?.claimProfiles ?? {}) as Record<string, any>,
+    [artifact]
   );
   const blastScores = useMemo(() => safeArr<any>(artifact?.blastSurface?.scores), [artifact]);
   const blastByClaimId = useMemo(
@@ -62,13 +58,14 @@ export function CrossSignalComparePanel({
             : null,
       },
       {
-        key: 'sovereignMass',
-        label: 'Sovereignty %',
+        key: 'sovereignStatementCount',
+        label: 'Sovereign Statements',
         get: (c) => {
           const id = String(c?.id ?? '');
-          const ex = exclusivityObj?.[id];
-          return typeof (ex as any)?.sovereignMass === 'number' && Number.isFinite((ex as any).sovereignMass)
-            ? (ex as any).sovereignMass * 100
+          const profile = routingProfiles[id];
+          return typeof profile?.sovereignStatementCount === 'number' &&
+            Number.isFinite(profile.sovereignStatementCount)
+            ? profile.sovereignStatementCount
             : null;
         },
       },
@@ -103,7 +100,7 @@ export function CrossSignalComparePanel({
         },
       },
     ];
-  }, [blastByClaimId, exclusivityObj, statementScoreById]);
+  }, [artifact, blastByClaimId, routingProfiles, statementScoreById]);
 
   const defaults = layerDefaults[selectedLayer ?? ''] ?? ['provenanceBulk', 'blastRadius'];
   const [xKey, setXKey] = useState<string>(defaults[0]);

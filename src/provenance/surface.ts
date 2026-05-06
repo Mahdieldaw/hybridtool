@@ -25,6 +25,7 @@ import type {
   MixedStatementResolution,
   MixedDirectionProbe,
   ClaimDensityProfile,
+  ClaimFootprintClaimRollup,
 } from '../../shared/types';
 import type { PeripheryResult } from '../geometry';
 import type { ShadowParagraph } from '../shadow';
@@ -118,14 +119,34 @@ type SurfaceScalarMeasurements = {
   legacyMeanCoverageInLongestRun: number;
 };
 
+function emptyFootprintRollup(claimId = ''): ClaimFootprintClaimRollup {
+  return {
+    claimId,
+    claimPresenceCount: 0,
+    territorialMass: 0,
+    sharedTerritorialMass: 0,
+    sovereignStatementCount: 0,
+    sharedStatementCount: 0,
+    paragraphPresenceCount: 0,
+    contestedParagraphCount: 0,
+    dominantParagraphCount: 0,
+    sovereignRatio: null,
+    contestedShareRatio: null,
+  };
+}
+
+function getFootprintRollup(profile: ClaimDensityProfile | undefined): ClaimFootprintClaimRollup {
+  return profile?.footprint?.rollups?.byClaim ?? emptyFootprintRollup(profile?.claimId);
+}
+
 function getFootprintPresenceParagraphIds(profile: ClaimDensityProfile | undefined): string[] {
-  return (profile?.footprint?.vectors.presenceByParagraph ?? [])
-    .filter((entry) => entry.value > 0)
+  return (profile?.footprint?.rollups?.byParagraph ?? [])
+    .filter((entry) => entry.claimPresenceCount > 0)
     .map((entry) => entry.paragraphId);
 }
 
 function isFootprintEligible(profile: ClaimDensityProfile | undefined): boolean {
-  return (profile?.footprint?.totals.presenceMass ?? 0) > 0;
+  return getFootprintRollup(profile).claimPresenceCount > 0;
 }
 
 function nullableScore(value: number | null): number {
@@ -140,16 +161,9 @@ function computeSurfaceScalarMeasurements(
   profile: ClaimDensityProfile,
   activeCoverage: ClaimDensityProfile['paragraphCoverage']
 ): SurfaceScalarMeasurements {
-  const paragraphModel = new Map<string, number>();
-  for (const coverage of profile.paragraphCoverage) {
-    paragraphModel.set(coverage.paragraphId, coverage.modelIndex);
-  }
-
   const presenceByModel = new Map<number, number>();
-  for (const entry of profile.footprint.vectors.presenceByParagraph) {
-    const modelIndex = paragraphModel.get(entry.paragraphId);
-    if (modelIndex == null) continue;
-    presenceByModel.set(modelIndex, (presenceByModel.get(modelIndex) ?? 0) + entry.value);
+  for (const entry of profile.footprint.rollups.byModel) {
+    presenceByModel.set(entry.modelIndex, entry.claimPresenceCount);
   }
 
   let dominantModel: number | null = null;
@@ -162,7 +176,7 @@ function computeSurfaceScalarMeasurements(
   }
   const dominantPresenceShare = share(
     dominantPresenceMass,
-    profile.footprint.totals.presenceMass
+    getFootprintRollup(profile).claimPresenceCount
   );
 
   const passageStatementMassByModel = new Map<number, number>();
@@ -265,29 +279,30 @@ export function buildMassEligibilityDiagnostic(
   profile: ClaimDensityProfile | undefined,
   oldMajorityEligible: boolean
 ): MassEligibilityDiagnostic {
-  const presenceMass = profile?.footprint?.totals.presenceMass ?? 0;
-  const territorialMass = profile?.footprint?.totals.territorialMass ?? 0;
-  const sovereignMass = profile?.footprint?.totals.sovereignMass ?? 0;
-  const sovereignRatio = profile?.footprint?.derived.sovereignRatio ?? null;
-  const contestedShareRatio = profile?.footprint?.derived.contestedShareRatio ?? null;
-  const newFootprintEligible = presenceMass > 0;
+  const rollup = getFootprintRollup(profile);
+  const newFootprintEligible = rollup.claimPresenceCount > 0;
   const changedEligibility = oldMajorityEligible !== newFootprintEligible;
   let reason: string | null = null;
   if (changedEligibility) {
     reason = newFootprintEligible
       ? 'canonical footprint exists but no paragraph passed the legacy majority threshold'
-      : 'legacy majority threshold passed but canonical footprint has zero presence mass';
+      : 'legacy majority threshold passed but canonical footprint has zero claim presence';
   }
 
   return {
     claimId,
     oldMajorityEligible,
     newFootprintEligible,
-    presenceMass,
-    territorialMass,
-    sovereignMass,
-    sovereignRatio,
-    contestedShareRatio,
+    claimPresenceCount: rollup.claimPresenceCount,
+    territorialMass: rollup.territorialMass,
+    sharedTerritorialMass: rollup.sharedTerritorialMass,
+    sovereignStatementCount: rollup.sovereignStatementCount,
+    sharedStatementCount: rollup.sharedStatementCount,
+    paragraphPresenceCount: rollup.paragraphPresenceCount,
+    contestedParagraphCount: rollup.contestedParagraphCount,
+    dominantParagraphCount: rollup.dominantParagraphCount,
+    sovereignRatio: rollup.sovereignRatio,
+    contestedShareRatio: rollup.contestedShareRatio,
     changedEligibility,
     reason,
   };
@@ -295,9 +310,14 @@ export function buildMassEligibilityDiagnostic(
 
 function emptyRouteStructuralInputs(): RoutePlanStructuralInputs {
   return {
-    presenceMass: 0,
+    claimPresenceCount: 0,
     territorialMass: 0,
-    sovereignMass: 0,
+    sharedTerritorialMass: 0,
+    sovereignStatementCount: 0,
+    sharedStatementCount: 0,
+    paragraphPresenceCount: 0,
+    contestedParagraphCount: 0,
+    dominantParagraphCount: 0,
     sovereignRatio: null,
     contestedShareRatio: null,
     dominantPresenceShare: null,
@@ -313,9 +333,14 @@ function emptyRouteStructuralInputs(): RoutePlanStructuralInputs {
 function buildRouteStructuralInputs(profile: PassageClaimProfile | undefined): RoutePlanStructuralInputs {
   if (!profile) return emptyRouteStructuralInputs();
   return {
-    presenceMass: profile.presenceMass,
+    claimPresenceCount: profile.claimPresenceCount,
     territorialMass: profile.territorialMass,
-    sovereignMass: profile.sovereignMass,
+    sharedTerritorialMass: profile.sharedTerritorialMass,
+    sovereignStatementCount: profile.sovereignStatementCount,
+    sharedStatementCount: profile.sharedStatementCount,
+    paragraphPresenceCount: profile.paragraphPresenceCount,
+    contestedParagraphCount: profile.contestedParagraphCount,
+    dominantParagraphCount: profile.dominantParagraphCount,
     sovereignRatio: profile.sovereignRatio,
     contestedShareRatio: profile.contestedShareRatio,
     dominantPresenceShare: profile.dominantPresenceShare,
@@ -338,7 +363,7 @@ function compareRoutePlanInputs(
   const contestedDiff = nullableScore(b.contestedShareRatio) - nullableScore(a.contestedShareRatio);
   if (contestedDiff !== 0) return contestedDiff;
 
-  const sovereignDiff = b.sovereignMass - a.sovereignMass;
+  const sovereignDiff = b.sovereignStatementCount - a.sovereignStatementCount;
   if (sovereignDiff !== 0) return sovereignDiff;
 
   const passageDiff = nullableScore(b.dominantPassageShare) - nullableScore(a.dominantPassageShare);
@@ -351,18 +376,18 @@ function compareRoutePlanInputs(
   const maxRunDiff = b.maxStatementRun - a.maxStatementRun;
   if (maxRunDiff !== 0) return maxRunDiff;
 
-  return b.presenceMass - a.presenceMass;
+  return b.claimPresenceCount - a.claimPresenceCount;
 }
 
 function buildOrderingReasons(inputs: RoutePlanStructuralInputs): string[] {
   return [
     `sustainedMass=${inputs.sustainedMass.toFixed(3)}`,
     `contestedShareRatio=${inputs.contestedShareRatio == null ? 'null' : inputs.contestedShareRatio.toFixed(3)}`,
-    `sovereignMass=${inputs.sovereignMass.toFixed(3)}`,
+    `sovereignStatementCount=${inputs.sovereignStatementCount}`,
     `dominantPassageShare=${inputs.dominantPassageShare == null ? 'null' : inputs.dominantPassageShare.toFixed(3)}`,
     `dominantPresenceShare=${inputs.dominantPresenceShare == null ? 'null' : inputs.dominantPresenceShare.toFixed(3)}`,
     `maxStatementRun=${inputs.maxStatementRun}`,
-    `presenceMass=${inputs.presenceMass.toFixed(3)}`,
+    `claimPresenceCount=${inputs.claimPresenceCount}`,
   ];
 }
 
@@ -381,7 +406,7 @@ function buildRoutePlan(
   }
 
   const includedClaimIds = claimIds
-    .filter((claimId) => structuralInputsByClaim[claimId]?.presenceMass > 0)
+    .filter((claimId) => structuralInputsByClaim[claimId]?.claimPresenceCount > 0)
     .sort((a, b) => {
       const diff = compareRoutePlanInputs(structuralInputsByClaim[a], structuralInputsByClaim[b]);
       if (diff !== 0) return diff;
@@ -780,10 +805,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         landscapePosition: 'floor',
         isMinority: false,
         routingMeasurements: null,
-        dominatedParagraphCount: 0,
-        presenceMass: 0,
+        paragraphPresenceCount: 0,
+        claimPresenceCount: 0,
         territorialMass: 0,
-        sovereignMass: 0,
+        sharedTerritorialMass: 0,
+        sovereignStatementCount: 0,
+        sharedStatementCount: 0,
+        contestedParagraphCount: 0,
+        dominantParagraphCount: 0,
         sovereignRatio: null,
         contestedShareRatio: null,
         sustainedMass: 0,
@@ -835,10 +864,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       landscapePosition: 'floor',
       isMinority: false,
       routingMeasurements: null,
-      dominatedParagraphCount: 0,
-      presenceMass: 0,
+      paragraphPresenceCount: 0,
+      claimPresenceCount: 0,
       territorialMass: 0,
-      sovereignMass: 0,
+      sharedTerritorialMass: 0,
+      sovereignStatementCount: 0,
+      sharedStatementCount: 0,
+      contestedParagraphCount: 0,
+      dominantParagraphCount: 0,
       sovereignRatio: null,
       contestedShareRatio: null,
       sustainedMass: 0,
@@ -865,7 +898,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         id,
         scalars,
         null,
-        profile.footprint.derived.contestedShareRatio
+        getFootprintRollup(profile).contestedShareRatio
       )
     );
   }
@@ -1009,14 +1042,19 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   // Extended candidate interface with computed fields
   interface ExtendedCandidate extends CandidateProfile {
-    /** Canonical footprint.derived.contestedShareRatio. Null when denominator is 0. */
+    /** Canonical sharedTerritorialMass / sharedStatementCount. Null when denominator is 0. */
     contestedShareRatio: number | null;
     /** Legacy compatibility diagnostic. Not consumed by active routing after Phase 3. */
     contestedDominance: number | null;
-    presenceMass: number;
+    claimPresenceCount: number;
     territorialMass: number;
-    sovereignMass: number;
-    /** Derived: sovereignMass / presenceMass. Null when presenceMass = 0. */
+    sharedTerritorialMass: number;
+    sovereignStatementCount: number;
+    sharedStatementCount: number;
+    paragraphPresenceCount: number;
+    contestedParagraphCount: number;
+    dominantParagraphCount: number;
+    /** Derived: sovereignStatementCount / claimPresenceCount. Null when claimPresenceCount = 0. */
     sovereignRatio: number | null;
     sustainedMass: number;
     sustainedMassCohort: 'passage-heavy' | 'balanced' | 'maj-breadth';
@@ -1044,13 +1082,13 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   const getFootprintParagraphs = (claimId: string) =>
     footprintParagraphsByClaimId.get(claimId) ?? [];
 
-  // Hoisted: percentile inputs sorted once, ascending. Used for normMAXLEN / normPresenceMass.
+  // Hoisted: percentile inputs sorted once, ascending. Used for normMAXLEN / normClaimPresence.
   const sortedMaxLen = candidates
     .map((c2) => profiles[c2.claimId]?.maxPassageLength ?? 0)
     .sort((a, b) => a - b);
-  // presenceMass replaces MAJ count as the breadth signal in sustainedMass.
-  const sortedPresenceMass = candidates
-    .map((c2) => profiles[c2.claimId]?.footprint.totals.presenceMass ?? 0)
+  // claimPresenceCount replaces MAJ count as the breadth signal in sustainedMass.
+  const sortedClaimPresence = candidates
+    .map((c2) => getFootprintRollup(profiles[c2.claimId]).claimPresenceCount)
     .sort((a, b) => a - b);
 
   for (const c of candidates) {
@@ -1058,44 +1096,49 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     if (!profile) continue;
     const footprintParagraphIds = getFootprintParagraphs(c.claimId);
 
-    // dominatedParagraphCount: footprint paragraphs where another claim also has presence.
-    let dominatedCount = 0;
+    // contestedParagraphCount: footprint paragraphs where another claim also has presence.
+    let contestedParagraphCount = 0;
     for (const pid of footprintParagraphIds) {
       const claimsInPara = paragraphToAllClaims.get(pid) ?? new Set();
-      if (claimsInPara.size > 1) dominatedCount++;
+      if (claimsInPara.size > 1) contestedParagraphCount++;
     }
 
-    const presenceMass = profile.footprint.totals.presenceMass;
-    const territorialMass = profile.footprint.totals.territorialMass;
-    const sovereignMass = profile.footprint.totals.sovereignMass;
-    const sovereignRatio = profile.footprint.derived.sovereignRatio;
+    const rollup = getFootprintRollup(profile);
+    const claimPresenceCount = rollup.claimPresenceCount;
+    const territorialMass = rollup.territorialMass;
+    const sharedTerritorialMass = rollup.sharedTerritorialMass;
+    const sovereignStatementCount = rollup.sovereignStatementCount;
+    const sharedStatementCount = rollup.sharedStatementCount;
+    const paragraphPresenceCount = rollup.paragraphPresenceCount;
+    const dominantParagraphCount = rollup.dominantParagraphCount;
+    const sovereignRatio = rollup.sovereignRatio;
     const allParaSet = new Set<string>(footprintParagraphIds);
 
-    // sustainedMass cohort computation: percentile ranks for MAXLEN and presenceMass.
-    // presenceMass replaces the old MAJ-paragraph-count breadth signal — it is a
+    // sustainedMass cohort computation: percentile ranks for MAXLEN and claimPresenceCount.
+    // claimPresenceCount replaces the old MAJ-paragraph-count breadth signal; it is a
     // continuous analog that does not require a 0.5 threshold.
     const MAXLEN = profile.maxPassageLength;
 
     const normMAXLEN = percentileFromSortedAsc(MAXLEN, sortedMaxLen);
-    const normPresenceMass = percentileFromSortedAsc(presenceMass, sortedPresenceMass);
-    const sustainedMass = Math.sqrt(normMAXLEN * normPresenceMass);
+    const normClaimPresence = percentileFromSortedAsc(claimPresenceCount, sortedClaimPresence);
+    const sustainedMass = Math.sqrt(normMAXLEN * normClaimPresence);
 
     // Cohort assignment: passage-heavy ↔ depth-dominant, maj-breadth ↔ breadth-dominant.
-    // Semantics unchanged; only the breadth axis is now presenceMass not MAJ count.
+    // Semantics unchanged; only the breadth axis is now claimPresenceCount, not MAJ count.
     let sustainedMassCohort: 'passage-heavy' | 'balanced' | 'maj-breadth';
-    if (normMAXLEN >= 2 / 3 && normPresenceMass < 1 / 3) {
+    if (normMAXLEN >= 2 / 3 && normClaimPresence < 1 / 3) {
       sustainedMassCohort = 'passage-heavy';
-    } else if (normPresenceMass >= 2 / 3 && normMAXLEN < 1 / 3) {
+    } else if (normClaimPresence >= 2 / 3 && normMAXLEN < 1 / 3) {
       sustainedMassCohort = 'maj-breadth';
     } else {
       sustainedMassCohort = 'balanced';
     }
 
-    const contestedShareRatio = profile.footprint.derived.contestedShareRatio;
+    const contestedShareRatio = rollup.contestedShareRatio;
 
     // Legacy compatibility diagnostic only. Active routing uses contestedShareRatio.
-    const sharedPresence = presenceMass - sovereignMass;
-    const contestedDominance: number | null = sharedPresence > 0 ? territorialMass / sharedPresence : null;
+    const contestedDominance: number | null =
+      sharedStatementCount > 0 ? territorialMass / sharedStatementCount : null;
     const scalarDiagnostic = scalarMigrationByClaimId.get(c.claimId);
     if (scalarDiagnostic) {
       scalarDiagnostic.legacyContestedDominance = contestedDominance;
@@ -1107,9 +1150,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       ...(c as any),
       contestedShareRatio,
       contestedDominance,
-      presenceMass,
+      claimPresenceCount,
       territorialMass,
-      sovereignMass,
+      sharedTerritorialMass,
+      sovereignStatementCount,
+      sharedStatementCount,
+      paragraphPresenceCount,
+      contestedParagraphCount,
+      dominantParagraphCount,
       sovereignRatio,
       sustainedMass,
       sustainedMassCohort,
@@ -1123,10 +1171,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     extendedCandidates.push(extCand);
 
     // Persist static fields on claimProfiles
-    claimProfiles[c.claimId].dominatedParagraphCount = dominatedCount;
-    claimProfiles[c.claimId].presenceMass = presenceMass;
+    claimProfiles[c.claimId].paragraphPresenceCount = paragraphPresenceCount;
+    claimProfiles[c.claimId].claimPresenceCount = claimPresenceCount;
     claimProfiles[c.claimId].territorialMass = territorialMass;
-    claimProfiles[c.claimId].sovereignMass = sovereignMass;
+    claimProfiles[c.claimId].sharedTerritorialMass = sharedTerritorialMass;
+    claimProfiles[c.claimId].sovereignStatementCount = sovereignStatementCount;
+    claimProfiles[c.claimId].sharedStatementCount = sharedStatementCount;
+    claimProfiles[c.claimId].contestedParagraphCount = contestedParagraphCount;
+    claimProfiles[c.claimId].dominantParagraphCount = dominantParagraphCount;
     claimProfiles[c.claimId].sovereignRatio = sovereignRatio;
     claimProfiles[c.claimId].contestedShareRatio = contestedShareRatio;
     claimProfiles[c.claimId].contestedDominance = contestedDominance;
@@ -1143,9 +1195,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     profile.isMinority = c.isMinority;
     profile.routingMeasurements = {
       contestedShareRatio: c.contestedShareRatio,
-      presenceMass: c.presenceMass,
+      claimPresenceCount: c.claimPresenceCount,
       territorialMass: c.territorialMass,
-      sovereignMass: c.sovereignMass,
+      sharedTerritorialMass: c.sharedTerritorialMass,
+      sovereignStatementCount: c.sovereignStatementCount,
+      sharedStatementCount: c.sharedStatementCount,
+      paragraphPresenceCount: c.paragraphPresenceCount,
+      contestedParagraphCount: c.contestedParagraphCount,
+      dominantParagraphCount: c.dominantParagraphCount,
       sovereignRatio: c.sovereignRatio,
       sustainedMassCohort: c.sustainedMassCohort,
       modelSpread: c.modelSpread,

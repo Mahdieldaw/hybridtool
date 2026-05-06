@@ -6,17 +6,17 @@
 
 ## Scale
 
-84 UI components · 123 library files · 4 middleware layers · 6 environment variables
+84 UI components · 124 library files · 4 middleware layers · 6 environment variables
 
 **UI:** 84 components (react) — see [ui.md](./ui.md)
 
-**Libraries:** 123 files — see [libraries.md](./libraries.md)
+**Libraries:** 124 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `shared\corpus-utils.ts` — imported by **17** files
+- `shared\corpus-utils.ts` — imported by **16** files
 - `ui\services\extension-api.ts` — imported by **15** files
 - `ui\config\constants.ts` — imported by **15** files
 - `shared\messaging.ts` — imported by **13** files
@@ -33,4 +33,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `NODE_ENV` — `scripts\build-common.js`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-05-04_
+_Back to [index.md](./index.md) · Generated 2026-05-06_

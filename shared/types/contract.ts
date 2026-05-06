@@ -351,20 +351,65 @@ export interface ParagraphMassVectorEntry {
   value: number;
 }
 
+export interface ClaimFootprintAtom {
+  claimId: string;
+  statementId: string;
+  paragraphId: string;
+  modelIndex: number;
+  owners: string[];
+  ownerCount: number;
+  claimPresence: 1;
+  ownershipShare: number;
+  isSovereign: boolean;
+  isShared: boolean;
+}
+
+export interface ClaimFootprintParagraphRollup {
+  paragraphId: string;
+  modelIndex: number;
+  paragraphIndex: number;
+  claimPresenceCount: number;
+  territorialMass: number;
+  sharedTerritorialMass: number;
+  sovereignStatementCount: number;
+  sharedStatementCount: number;
+  contested: boolean;
+  dominant: boolean;
+}
+
+export interface ClaimFootprintModelRollup {
+  modelIndex: number;
+  claimPresenceCount: number;
+  territorialMass: number;
+  sharedTerritorialMass: number;
+  sovereignStatementCount: number;
+  sharedStatementCount: number;
+  paragraphPresenceCount: number;
+  contestedParagraphCount: number;
+  dominantParagraphCount: number;
+}
+
+export interface ClaimFootprintClaimRollup {
+  claimId: string;
+  claimPresenceCount: number;
+  territorialMass: number;
+  sharedTerritorialMass: number;
+  sovereignStatementCount: number;
+  sharedStatementCount: number;
+  paragraphPresenceCount: number;
+  contestedParagraphCount: number;
+  dominantParagraphCount: number;
+  sovereignRatio: number | null;
+  contestedShareRatio: number | null;
+}
+
 export interface ClaimFootprintMeasurement {
-  vectors: {
-    presenceByParagraph: ParagraphMassVectorEntry[];
-    territorialByParagraph: ParagraphMassVectorEntry[];
-    sovereignByParagraph: ParagraphMassVectorEntry[];
-  };
-  totals: {
-    presenceMass: number;
-    territorialMass: number;
-    sovereignMass: number;
-  };
-  derived: {
-    sovereignRatio: number | null;
-    contestedShareRatio: number | null;
+  schemaVersion: 2;
+  atoms: ClaimFootprintAtom[];
+  rollups: {
+    byParagraph: ClaimFootprintParagraphRollup[];
+    byModel: ClaimFootprintModelRollup[];
+    byClaim: ClaimFootprintClaimRollup;
   };
 }
 
@@ -406,7 +451,7 @@ export interface ClaimDensityProfile {
   meanCoverage: number;
   /** Per-paragraph presence contribution vector: [paragraphId → claimStmts/paraTotal] */
   presenceVector: ParagraphMassVectorEntry[];
-  /** Canonical assignment-derived paragraph mass vectors. Vectors are source of truth; totals derive from them. */
+  /** Canonical assignment-derived statement atoms and rollups. */
   footprint: ClaimFootprintMeasurement;
   /** Per-paragraph detail */
   paragraphCoverage: ParagraphCoverageEntry[];
@@ -494,19 +539,29 @@ export interface MajorityGateSnapshot {
 export interface RoutingMeasurements {
   /**
    * Canonical shared-footprint ratio:
-   * (territorialMass - sovereignMass) / (presenceMass - sovereignMass).
-   * Returns null when presenceMass = sovereignMass.
+   * sharedTerritorialMass / sharedStatementCount.
+   * Returns null when sharedStatementCount = 0.
    */
   contestedShareRatio: number | null;
-  /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
-  presenceMass: number;
-  /** Σ(Σ(1/k)/paraTotal) across paragraphs — fractional-credit exclusivity (k = sharing claims) */
+  /** Count of claim-statement atoms assigned to this claim. */
+  claimPresenceCount: number;
+  /** Sum of ownershipShare over all claim-statement atoms. */
   territorialMass: number;
-  /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
-  sovereignMass: number;
+  /** Sum of ownershipShare over shared claim-statement atoms. */
+  sharedTerritorialMass: number;
+  /** Count of claim-statement atoms held by this claim alone. */
+  sovereignStatementCount: number;
+  /** Count of claim-statement atoms shared with at least one other claim. */
+  sharedStatementCount: number;
+  /** Count of paragraphs where this claim has at least one atom. */
+  paragraphPresenceCount: number;
+  /** Count of claim-present paragraphs where another claim is also present. */
+  contestedParagraphCount: number;
+  /** Count of claim-present paragraphs where this claim has strict local majority. */
+  dominantParagraphCount: number;
   /**
-   * Derived: sovereignMass / presenceMass. Fraction of presence volume held exclusively.
-   * Returns null when presenceMass = 0.
+   * Derived: sovereignStatementCount / claimPresenceCount.
+   * Returns null when claimPresenceCount = 0.
    */
   sovereignRatio: number | null;
   /** Cohort assignment from sustainedMass = sqrt(normMAXLEN × normPresenceMass) */
@@ -523,12 +578,12 @@ export interface RoutingMeasurements {
   contestedDominance?: number | null;
   /**
    * Novel majority paragraphs (coverage > 0.5) / this claim's majority paragraph count.
-   * TODO: Redefine against presenceMass once novelty ratios are migrated off MAJ.
+   * TODO: Redefine against claimPresenceCount once novelty ratios are migrated off MAJ.
    */
   claimNoveltyRatio: number;
   /**
    * Novel majority paragraphs (coverage > 0.5) / remaining unassigned corpus paragraphs.
-   * TODO: Redefine against presenceMass once novelty ratios are migrated off MAJ.
+   * TODO: Redefine against claimPresenceCount once novelty ratios are migrated off MAJ.
    */
   corpusNoveltyRatio: number;
   /** Count of novel majority paragraphs (coverage > 0.5) assigned at decision time */
@@ -546,17 +601,25 @@ export interface PassageClaimProfile {
   /** Mass-native footprint/model/passage values plus legacy compatibility payload. */
   routingMeasurements: RoutingMeasurements | null;
 
-  /** Footprint paragraphs where ≥1 other claim also has any presence. */
-  dominatedParagraphCount: number;
-  /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
-  presenceMass: number;
-  /** Σ(Σ(1/k)/paraTotal) across paragraphs — fractional-credit exclusivity */
+  /** Count of paragraphs where this claim has at least one atom. */
+  paragraphPresenceCount: number;
+  /** Count of claim-statement atoms assigned to this claim. */
+  claimPresenceCount: number;
+  /** Sum of ownershipShare over all claim-statement atoms. */
   territorialMass: number;
-  /** Σ(exclusiveStmts/paraTotal) across paragraphs — sole-holder statements only */
-  sovereignMass: number;
-  /** Derived: sovereignMass / presenceMass. Null when presenceMass = 0. */
+  /** Sum of ownershipShare over shared claim-statement atoms. */
+  sharedTerritorialMass: number;
+  /** Count of claim-statement atoms held by this claim alone. */
+  sovereignStatementCount: number;
+  /** Count of claim-statement atoms shared with at least one other claim. */
+  sharedStatementCount: number;
+  /** Count of claim-present paragraphs where another claim is also present. */
+  contestedParagraphCount: number;
+  /** Count of claim-present paragraphs where this claim has strict local majority. */
+  dominantParagraphCount: number;
+  /** Derived: sovereignStatementCount / claimPresenceCount. Null when claimPresenceCount = 0. */
   sovereignRatio: number | null;
-  /** Derived: footprint.derived.contestedShareRatio. Null when presenceMass = sovereignMass. */
+  /** Derived: sharedTerritorialMass / sharedStatementCount. Null when sharedStatementCount = 0. */
   contestedShareRatio: number | null;
   /** sqrt(normMAXLEN × normPresenceMass) — percentile rank within current run. */
   sustainedMass: number;
@@ -572,7 +635,7 @@ export interface PassageClaimProfile {
   isLoadBearing: boolean | null;
 
   /** Instrumentation only — not consumed by routing */
-  /** Model index of the structural contributor with the highest presence mass */
+  /** Model index of the structural contributor with the highest claimPresenceCount. */
   dominantModel: number | null;
   /** modelTreatment.derived.dominantPresenceShare */
   dominantPresenceShare: number | null;
@@ -582,9 +645,9 @@ export interface PassageClaimProfile {
   maxStatementRun: number;
   /** Legacy compatibility only. Not consumed by active routing after Phase 3. */
   contestedDominance?: number | null;
-  /** presenceMass(dominant) / presenceMass(total) — how replaceable is the dominant model? */
+  /** claimPresenceCount(dominant) / claimPresenceCount(total) */
   concentrationRatio: number;
-  /** MAXLEN(dominant) / presenceMass(dominant) — contiguity relative to presence footprint */
+  /** MAXLEN(dominant) / claimPresenceCount(dominant) */
   densityRatio: number;
   /** Longest passage across all models (from density profile) */
   maxPassageLength: number;
@@ -619,9 +682,14 @@ export interface PassageRoutedClaim {
 }
 
 export interface RoutePlanStructuralInputs {
-  presenceMass: number;
+  claimPresenceCount: number;
   territorialMass: number;
-  sovereignMass: number;
+  sharedTerritorialMass: number;
+  sovereignStatementCount: number;
+  sharedStatementCount: number;
+  paragraphPresenceCount: number;
+  contestedParagraphCount: number;
+  dominantParagraphCount: number;
   sovereignRatio: number | null;
   contestedShareRatio: number | null;
   dominantPresenceShare: number | null;
@@ -665,9 +733,14 @@ export interface PassageClaimRouting {
       claimId: string;
       oldMajorityEligible: boolean;
       newFootprintEligible: boolean;
-      presenceMass: number;
+      claimPresenceCount: number;
       territorialMass: number;
-      sovereignMass: number;
+      sharedTerritorialMass: number;
+      sovereignStatementCount: number;
+      sharedStatementCount: number;
+      paragraphPresenceCount: number;
+      contestedParagraphCount: number;
+      dominantParagraphCount: number;
       sovereignRatio: number | null;
       contestedShareRatio: number | null;
       changedEligibility: boolean;
@@ -780,6 +853,31 @@ export interface StatementClassificationResult {
   meta: { processingTimeMs: number };
 }
 
+export interface ClaimConcordancePair {
+  claimAId: string;
+  claimBId: string;
+  sharedStatementIds: string[];
+  overlapCount: number;
+  aStatementCount: number;
+  bStatementCount: number;
+  unionStatementCount: number;
+  jaccard: number | null;
+  aContainedInB: number | null;
+  bContainedInA: number | null;
+  aUniqueCount: number;
+  bUniqueCount: number;
+}
+
+export interface ClaimConcordanceResult {
+  schemaVersion: 1;
+  consumerStatus: 'diagnostic-foundational';
+  pairs: ClaimConcordancePair[];
+  meta: {
+    currentConsumers: [];
+    note: string;
+  };
+}
+
 export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
@@ -791,6 +889,15 @@ export interface MapperArtifact {
   claims: Claim[];
   edges: Edge[];
   id?: string;
+  artifactSchemaVersion?: 2;
+  measurementSchemas?: {
+    claimFootprint: 'claim-footprint-ledger-v2';
+    claimConcordance: 'diagnostic-foundational-v1';
+  };
+  transitionPolicy?: {
+    dbMigrationRequired: false;
+    oldPersistedArtifacts: 'rebuild-or-guarded-ui-fallback';
+  };
   query?: string;
   turn?: number;
   timestamp?: string;
@@ -805,6 +912,7 @@ export interface MapperArtifact {
   preSemantic?: PreSemanticInterpretation | null;
   structuralValidation?: any | null;
   conflictValidation?: ValidatedConflict[] | null;
+  claimConcordance?: ClaimConcordanceResult | null;
 
   // Blast Surface — provenance-derived damage assessment (instrumentation, runs alongside old filter)
   blastSurface?: BlastSurfaceResult | null;

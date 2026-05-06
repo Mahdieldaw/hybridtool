@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**123 library files** across 12 modules
+**124 library files** across 12 modules
 
 ## Ui (37 files)
 
@@ -70,7 +70,7 @@
 - `src\providers\grok-adapter.js` — GrokAdapter
 - `src\providers\qwen-adapter.js` — QwenAdapter
 
-## Shared (10 files)
+## Shared (12 files)
 
 - `shared\corpus-utils.ts` — deriveArtifactIndex, buildCorpusTree, buildCorpusIndex, getParagraphsForClaim, getModelsForClaim, getBasinsForClaim, …
 - `shared\measurement-registry.ts` — assertMeasurementConsumer, collectMeasurementViolation, getCollectedMeasurementViolations, clearCollectedMeasurementViolations, Consumer, MeasurementStatus, …
@@ -78,9 +78,11 @@
 - `shared\provider-config.ts` — canonicalCitationOrder, buildCitationSourceOrder, selectBestProvider, isProviderAuthorized, ProviderRole, CANONICAL_PROVIDER_ORDER, …
 - `shared\types\provider.ts` — HTOSError, ProviderAuthError, ProviderError, ProviderKey, ProviderErrorType, HTOSErrorCode
 - `shared\citation-utils.ts` — normalizeProviderId, normalizeCitationSourceOrder, resolveProviderId, resolveModelDisplayName, getCitationSourceOrder
+- `shared\embedding-models.ts` — getConfigForModel, EmbeddingConfig, EmbeddingModelEntry, EMBEDDING_MODELS, DEFAULT_CONFIG
 - `shared\parsing-utils.ts` — repairJson, extractJsonObject, extractJsonFromContent, parseSemanticMapperOutput
 - `shared\artifact-processor.ts` — ArtifactProcessor, Artifact, ProcessedResponse
 - `shared\think-utils.ts` — computeThinkFlag, ComputeThinkFlagArgs, AI_THINK_FLAG
+- `shared\text-prep.ts` — structuredTruncate, stripInlineMarkdown
 - `shared\cognitive-artifact.ts` — buildCognitiveArtifact
 
 ## Geometry (9 files)
@@ -108,21 +110,14 @@
 
 ## Provenance (8 files)
 
+- `src\provenance\measure.ts` — emptyClaimFootprintMeasurement, computeClaimFootprintMeasurement, buildClaimConcordance, measureProvenance, ClaimExclusivity, MeasurePhaseInput, …
 - `src\provenance\surface.ts` — buildMassEligibilityDiagnostic, computeNounSurvivalRatio, computeTopologicalSurface, buildSourceContinuityMap, SurfaceInput, SurfaceOutput, …
-- `src\provenance\measure.ts` — emptyClaimFootprintMeasurement, computeClaimFootprintMeasurement, measureProvenance, ClaimExclusivity, MeasurePhaseInput, MeasurePhaseOutput
 - `src\provenance\structure.ts` — analyzeGlobalStructure, StructurePhaseOutput, computeStructuralAnalysis, runStructurePhase
 - `src\provenance\claim-structural-fingerprint.ts` — computeContestedShareRatio, buildClaimStructuralFingerprints, ClaimStructuralFingerprintInput
 - `src\provenance\engine.ts` — buildProvenancePipeline, ProvenancePipelineInput, ProvenancePipelineOutput
 - `src\provenance\semantic-mapper.ts` — buildSemanticMapperPrompt, parseSemanticMapperOutput, ParseResult
 - `src\provenance\validate.ts` — validateEdgesAndAllegiance, ValidateInput, ValidateOutput
 - `src\provenance\classify.ts` — computeStatementClassification, ClassifyPhaseInput
-
-## Clustering (4 files)
-
-- `src\clustering\embeddings.ts` — structuredTruncate, stripInlineMarkdown, cleanupPendingEmbeddingsBuffers, generateEmbeddings, generateTextEmbeddings, generateStatementEmbeddings, …
-- `src\clustering\config.ts` — getConfigForModel, EmbeddingConfig, EmbeddingModelEntry, EMBEDDING_MODELS, DEFAULT_CONFIG
-- `src\clustering\corpus-search.ts` — searchCorpus, CorpusSearchHit
-- `src\clustering\distance.ts` — cosineSimilarity
 
 ## Concierge-service (4 files)
 
@@ -151,6 +146,12 @@
 - `src\system\service-registry.ts` — ServiceRegistry, services
 - `src\system\connection-handler.ts` — ConnectionHandler
 - `src\system\lifecycle-manager.ts` — LifecycleManager
+
+## Clustering (3 files)
+
+- `src\clustering\embeddings.ts` — cleanupPendingEmbeddingsBuffers, generateEmbeddings, generateTextEmbeddings, generateStatementEmbeddings, getEmbeddingStatus, EmbeddingResult, …
+- `src\clustering\distance.ts` — getCosineSimilarityDimensionMismatchCount, resetCosineSimilarityDimensionMismatchCount, cosineSimilarity
+- `src\clustering\corpus-search.ts` — searchCorpus, CorpusSearchHit
 
 ---
 _Back to [overview.md](./overview.md)_

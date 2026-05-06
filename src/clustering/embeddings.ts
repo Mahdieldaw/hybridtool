@@ -1,6 +1,6 @@
-// ═══════════════════════════════════════════════════════════════════════════
+﻿// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // EMBEDDING CLIENT - SERVICE WORKER SIDE
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //
 // Communicates with offscreen document for embedding generation.
 //
@@ -8,16 +8,18 @@
 // - Accepts shadowStatements to build embedding text from unclipped sources
 // - Rehydrates Float32Array from JSON-serialized number[][]
 // - Renormalizes embeddings after pooling for determinism
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 import type { ShadowParagraph } from '../shadow/shadow-paragraph-projector';
 import type { ShadowStatement } from '../shadow/shadow-extractor';
 import { EmbeddingConfig, DEFAULT_CONFIG } from './config';
 import { logInfraError } from '../errors';
+import { stripInlineMarkdown } from '../../shared/text-prep';
+export { stripInlineMarkdown, structuredTruncate } from '../../shared/text-prep';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // EMBEDDING RESULT TYPES
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 export interface EmbeddingResult {
   embeddings: Map<string, Float32Array>; // paragraphId -> embedding
@@ -34,85 +36,6 @@ export interface StatementEmbeddingResult {
 
 export interface TextEmbeddingResult {
   embeddings: Map<string, Float32Array>;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// STRUCTURED TRUNCATION (query relevance embedding path)
-// ═══════════════════════════════════════════════════════════════════════════
-
-const STRUCTURAL_LINE_RE =
-  /^\s*(?:[-*•]\s+|\d+[.)]\s+|#{1,6}\s+|(?:you must|ensure that|do not|always|never|important|note|warning|requirement)[:\s])/i;
-
-interface TextRange {
-  start: number;
-  end: number;
-}
-
-/**
- * Intelligently truncate long text to fit within a character budget while
- * preserving the highest-signal content for embedding quality.
- *
- * Strategy:
- * 1. Extract structural elements (bullets, numbered lists, headers, directives)
- *    — cap at 60% of budget
- * 2. Split remaining budget 50/50 between head (framing/context) and tail
- *    (closing instructions)
- * 3. Deduplicate overlapping ranges
- * 4. Reassemble in original document order (local coherence matters)
- */
-export function structuredTruncate(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-
-  const lines = text.split('\n');
-  const structuralRanges: TextRange[] = [];
-  let offset = 0;
-
-  for (const line of lines) {
-    if (STRUCTURAL_LINE_RE.test(line)) {
-      structuralRanges.push({ start: offset, end: offset + line.length });
-    }
-    offset += line.length + 1; // +1 for newline
-  }
-
-  // Cap structural content at 60% of budget
-  const structuralBudget = Math.floor(maxChars * 0.6);
-  let structuralChars = 0;
-  const keptStructural: TextRange[] = [];
-  for (const range of structuralRanges) {
-    const len = range.end - range.start;
-    const joinCost = keptStructural.length > 0 ? 1 : 0;
-    if (structuralChars + joinCost + len > structuralBudget) break;
-    keptStructural.push(range);
-    structuralChars += joinCost + len;
-  }
-
-  // Remaining budget split 50/50 head/tail
-  const newlineBudget = keptStructural.length + 1;
-  const remaining = Math.max(0, maxChars - structuralChars - newlineBudget);
-  const headBudget = Math.floor(remaining * 0.5);
-  const tailBudget = remaining - headBudget;
-
-  const headRange: TextRange = { start: 0, end: Math.min(headBudget, text.length) };
-  const tailRange: TextRange = {
-    start: Math.max(0, text.length - tailBudget),
-    end: text.length,
-  };
-
-  // Merge all ranges, deduplicate overlaps, sort by start position
-  const allRanges = [...keptStructural, headRange, tailRange].sort((a, b) => a.start - b.start);
-
-  const merged: TextRange[] = [];
-  for (const r of allRanges) {
-    const last = merged[merged.length - 1];
-    if (last && r.start <= last.end) {
-      last.end = Math.max(last.end, r.end);
-    } else {
-      merged.push({ start: r.start, end: r.end });
-    }
-  }
-
-  const assembled = merged.map((r) => text.slice(r.start, r.end)).join('\n');
-  return assembled.length > maxChars ? assembled.slice(0, maxChars) : assembled;
 }
 
 /**
@@ -154,35 +77,6 @@ function normalizeEmbedding(vec: Float32Array): Float32Array {
   }
 
   return vec;
-}
-
-export function stripInlineMarkdown(text: string): string {
-  let out = text;
-
-  out = out.replace(/`{1,3}([^`]+?)`{1,3}/g, '$1');
-
-  for (let i = 0; i < 3; i++) {
-    const prev = out;
-    out = out.replace(/(\*\*|__)([^\n]+?)\1/g, '$2');
-    out = out.replace(
-      /(\*|_)([^\n]+?)\1/g,
-      (match, marker: string, inner: string, offset: number, full: string) => {
-        const before = offset > 0 ? full[offset - 1] : '';
-        const afterIndex = offset + match.length;
-        const after = afterIndex < full.length ? full[afterIndex] : '';
-        const beforeOk = before === '' || /[\s([{"'.,;:!?]/.test(before);
-        const afterOk = after === '' || /[\s)\]}'".,;:!?]/.test(after);
-        if (!beforeOk || !afterOk) return match;
-        if (inner.trim().length === 0) return match;
-        if (marker === '_' && /[A-Za-z0-9]$/.test(before) && /^[A-Za-z0-9]/.test(after))
-          return match;
-        return inner;
-      }
-    );
-    if (out === prev) break;
-  }
-
-  return out.replace(/\s{2,}/g, ' ').trim();
 }
 
 function openEmbeddingsDb(): Promise<IDBDatabase> {
@@ -461,15 +355,15 @@ export async function generateTextEmbeddings(
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // STATEMENT-LEVEL EMBEDDINGS + PARAGRAPH POOLING
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * Embed individual statements and return a map keyed by statement ID.
  *
- * This is the foundation for the statement→paragraph pooling pipeline:
- *   embed(statements) → pool into paragraph reps → geometry/substrate
+ * This is the foundation for the statementâ†’paragraph pooling pipeline:
+ *   embed(statements) â†’ pool into paragraph reps â†’ geometry/substrate
  */
 export async function generateStatementEmbeddings(
   statements: ShadowStatement[],

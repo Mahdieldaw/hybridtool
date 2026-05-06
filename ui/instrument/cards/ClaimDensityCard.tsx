@@ -128,15 +128,36 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
         density: typeof p.densityRatio === 'number' ? p.densityRatio : 0,
         meanCoverageInLongestRun:
           typeof p.meanCoverageInLongestRun === 'number' ? p.meanCoverageInLongestRun : 0,
-        presenceMass: p.presenceMass ?? 0,
+        claimPresenceCount:
+          typeof p.claimPresenceCount === 'number'
+            ? p.claimPresenceCount
+            : typeof p.presenceMass === 'number'
+              ? p.presenceMass
+              : 0,
+        paragraphPresenceCount:
+          typeof p.paragraphPresenceCount === 'number' ? p.paragraphPresenceCount : null,
+        contestedParagraphCount:
+          typeof p.contestedParagraphCount === 'number'
+            ? p.contestedParagraphCount
+            : typeof p.dominatedParagraphCount === 'number'
+              ? p.dominatedParagraphCount
+              : null,
+        dominantParagraphCount:
+          typeof p.dominantParagraphCount === 'number' ? p.dominantParagraphCount : null,
+        sharedTerritorialMass:
+          typeof p.sharedTerritorialMass === 'number' ? p.sharedTerritorialMass : null,
         maxPassageLength: p.maxPassageLength ?? 0,
         structContrib: p.structuralContributors?.length ?? 0,
         supporterCount: supportersById.get(String(p.claimId ?? '')) ?? 0,
         queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
         sustainedMassCohort: String(p.sustainedMassCohort ?? rm?.sustainedMassCohort ?? '–'),
         contestedDominance: rm?.contestedDominance ?? null,
-        dominatedParagraphCount: p.dominatedParagraphCount ?? null,
-        sovereignMass: p.sovereignMass ?? null,
+        sovereignStatementCount:
+          typeof p.sovereignStatementCount === 'number'
+            ? p.sovereignStatementCount
+            : typeof p.sovereignMass === 'number'
+              ? p.sovereignMass
+              : null,
         novelParagraphCount: rm?.novelParagraphCount ?? null,
         claimNoveltyRatio: rm?.claimNoveltyRatio ?? null,
         corpusNoveltyRatio: rm?.corpusNoveltyRatio ?? null,
@@ -539,11 +560,11 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 sortValue: (r: any) => r.meanCoverageInLongestRun,
               },
               {
-                key: 'presenceMass',
-                header: 'mass',
-                title: 'Continuous presence mass: Σ(claimStmts / paragraphTotal) across paragraphs',
-                cell: (r: any) => fmt(r.presenceMass, 2),
-                sortValue: (r: any) => r.presenceMass ?? 0,
+                key: 'claimPresenceCount',
+                header: 'atoms',
+                title: 'Claim-statement atoms assigned to this claim.',
+                cell: (r: any) => fmtInt(r.claimPresenceCount),
+                sortValue: (r: any) => r.claimPresenceCount ?? 0,
               },
               {
                 key: 'maxPassageLength',
@@ -589,22 +610,22 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 sortValue: (r: any) => r.contestedDominance ?? -1,
               },
               {
-                key: 'dominatedParagraphCount',
-                header: 'DOM#',
+                key: 'contestedParagraphCount',
+                header: 'cont#',
                 title:
-                  'Dominated Paragraph Count: How many contested paragraphs this claim dominates.',
+                  'Contested paragraphs: footprint paragraphs where at least one other claim is also present.',
                 cell: (r: any) =>
-                  r.dominatedParagraphCount == null ? <span className="text-text-muted">–</span> : r.dominatedParagraphCount,
-                sortValue: (r: any) => r.dominatedParagraphCount ?? -1,
+                  r.contestedParagraphCount == null ? <span className="text-text-muted">-</span> : r.contestedParagraphCount,
+                sortValue: (r: any) => r.contestedParagraphCount ?? -1,
               },
               {
-                key: 'sovereignMass',
-                header: 'SM',
+                key: 'sovereignStatementCount',
+                header: 'sov#',
                 title:
-                  'Sovereign Mass: Σ(exclusive-stmts/paraTotal) — sole-holder statements only.',
+                  'Sovereign statements: claim-statement atoms held by this claim alone.',
                 cell: (r: any) =>
-                  r.sovereignMass == null ? <span className="text-text-muted">–</span> : fmt(r.sovereignMass, 2),
-                sortValue: (r: any) => r.sovereignMass ?? -1,
+                  r.sovereignStatementCount == null ? <span className="text-text-muted">-</span> : fmtInt(r.sovereignStatementCount),
+                sortValue: (r: any) => r.sovereignStatementCount ?? -1,
               },
               {
                 key: 'novelParagraphCount',

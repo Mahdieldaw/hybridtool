@@ -1,7 +1,7 @@
 import { useAtom } from 'jotai';
 import { EXAMPLE_PROMPT } from '../config/constants';
 import { embeddingModelIdAtom } from '../state';
-import { EMBEDDING_MODELS } from '../../src/clustering/config';
+import { EMBEDDING_MODELS } from '../../shared/embedding-models';
 import logoIcon from '../assets/brand/logo-icon.png';
 
 interface WelcomeScreenProps {

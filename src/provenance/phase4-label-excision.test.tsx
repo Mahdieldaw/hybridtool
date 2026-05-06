@@ -26,19 +26,49 @@ function makeProfile(overrides: Partial<ClaimDensityProfile> = {}): ClaimDensity
     meanCoverage: 1,
     presenceVector: [{ paragraphId: 'p1', value: 3 }],
     footprint: {
-      vectors: {
-        presenceByParagraph: [{ paragraphId: 'p1', value: 3 }],
-        territorialByParagraph: [{ paragraphId: 'p1', value: 3 }],
-        sovereignByParagraph: [{ paragraphId: 'p1', value: 3 }],
-      },
-      totals: {
-        presenceMass: 3,
-        territorialMass: 3,
-        sovereignMass: 3,
-      },
-      derived: {
-        sovereignRatio: 1,
-        contestedShareRatio: null,
+      schemaVersion: 2,
+      atoms: [],
+      rollups: {
+        byParagraph: [
+          {
+            paragraphId: 'p1',
+            modelIndex: 0,
+            paragraphIndex: 0,
+            claimPresenceCount: 3,
+            territorialMass: 3,
+            sharedTerritorialMass: 0,
+            sovereignStatementCount: 3,
+            sharedStatementCount: 0,
+            contested: false,
+            dominant: true,
+          },
+        ],
+        byModel: [
+          {
+            modelIndex: 0,
+            claimPresenceCount: 3,
+            territorialMass: 3,
+            sharedTerritorialMass: 0,
+            sovereignStatementCount: 3,
+            sharedStatementCount: 0,
+            paragraphPresenceCount: 1,
+            contestedParagraphCount: 0,
+            dominantParagraphCount: 1,
+          },
+        ],
+        byClaim: {
+          claimId: 'c1',
+          claimPresenceCount: 3,
+          territorialMass: 3,
+          sharedTerritorialMass: 0,
+          sovereignStatementCount: 3,
+          sharedStatementCount: 0,
+          paragraphPresenceCount: 1,
+          contestedParagraphCount: 0,
+          dominantParagraphCount: 1,
+          sovereignRatio: 1,
+          contestedShareRatio: null,
+        },
       },
     },
     paragraphCoverage: [
@@ -182,9 +212,10 @@ describe('Phase 4 label excision', () => {
         text: 'Evidence text.',
         routeOrderIndex: 0,
         routeIncluded: true,
-        routeOrderingReasons: ['presenceMass=3.000'],
-        presenceMass: 3,
-        sovereignMass: 3,
+        routeOrderingReasons: ['claimPresenceCount=3'],
+        claimPresenceCount: 3,
+        sovereignStatementCount: 3,
+        sharedTerritorialMass: 0,
         contestedShareRatio: null,
         maxStatementRun: 3,
         dominantPresenceShare: 1,
@@ -203,7 +234,7 @@ describe('Phase 4 label excision', () => {
 
     expect(prompt).not.toContain('Landscape:');
     expect(prompt).not.toMatch(/northStar|eastStar|mechanism|floor|leadMinority/);
-    expect(prompt).toContain('presenceMass=3.000');
+    expect(prompt).toContain('claimPresenceCount=3');
     expect(prompt).toContain('Route: included, order=0');
   });
 });

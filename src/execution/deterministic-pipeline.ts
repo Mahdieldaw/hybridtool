@@ -22,6 +22,7 @@ import type {
   StructuralAnalysis,
   ValidatedConflict,
   ClaimStructuralFingerprintResult,
+  ClaimConcordanceResult,
 } from '../../shared/types';
 import type { GeometricSubstrate, SubstrateInterpretation, PeripheryResult, MeasuredRegion } from '../geometry/index.js';
 import type { ShadowStatement, ShadowParagraph } from '../shadow/index.js';
@@ -77,6 +78,68 @@ function resolvePeriphery(preSemantic: SubstrateInterpretation | null | undefine
   };
 }
 
+function computeSourceCoherence(
+  statementIds: string[],
+  statementEmbeddings: Map<string, Float32Array> | null
+): number | undefined {
+  if (!statementEmbeddings || statementIds.length < 2) return undefined;
+
+  const vecs: Float32Array[] = [];
+  for (const statementId of statementIds) {
+    const vector = statementEmbeddings.get(String(statementId || '').trim());
+    if (vector) vecs.push(vector);
+  }
+  if (vecs.length < 2) return undefined;
+
+  const sims: number[] = [];
+  for (let i = 0; i < vecs.length; i++) {
+    for (let j = i + 1; j < vecs.length; j++) {
+      const a = vecs[i];
+      const b = vecs[j];
+      const n = Math.min(a.length, b.length);
+      let dot = 0;
+      let na2 = 0;
+      let nb2 = 0;
+      for (let k = 0; k < n; k++) {
+        dot += a[k] * b[k];
+        na2 += a[k] * a[k];
+        nb2 += b[k] * b[k];
+      }
+      if (na2 > 0 && nb2 > 0) {
+        sims.push(dot / (Math.sqrt(na2) * Math.sqrt(nb2)));
+      }
+    }
+  }
+
+  return sims.length > 0 ? sims.reduce((sum, sim) => sum + sim, 0) / sims.length : undefined;
+}
+
+function buildSourceCoherenceByClaimId(
+  canonicalStatementIds: Map<string, string[]> | null | undefined,
+  statementEmbeddings: Map<string, Float32Array> | null
+): Record<string, number> | null {
+  if (!canonicalStatementIds || canonicalStatementIds.size === 0) return null;
+
+  const out: Record<string, number> = {};
+  for (const [claimId, statementIds] of canonicalStatementIds) {
+    const coherence = computeSourceCoherence(statementIds, statementEmbeddings);
+    if (typeof coherence === 'number') out[claimId] = coherence;
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function getCanonicalStatementIdsFromMixedProvenance(
+  mixedProvenanceResult: MixedProvenanceResult | null | undefined
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [claimId, entry] of Object.entries(mixedProvenanceResult?.perClaim ?? {})) {
+    const ids = entry?.canonicalStatementIds;
+    if (Array.isArray(ids)) out.set(claimId, ids);
+  }
+  return out;
+}
+
 interface DerivedFields {
   claimProvenance: {
     statementOwnership: Record<string, string[]>;
@@ -97,6 +160,8 @@ interface DerivedFields {
   statementClassification: StatementClassificationResult | null;
   conflictValidation: ValidatedConflict[] | null;
   claimStructuralFingerprints: ClaimStructuralFingerprintResult | null;
+  claimConcordanceResult: ClaimConcordanceResult | null;
+  sourceCoherenceByClaimId: Record<string, number> | null;
 }
 
 
@@ -153,6 +218,8 @@ export async function computeDerivedFields({
     statementClassification: null,
     conflictValidation: null,
     claimStructuralFingerprints: null,
+    claimConcordanceResult: null,
+    sourceCoherenceByClaimId: null,
   };
 
   // ── Group A: Independent steps (no cross-dependencies) ─────────────
@@ -254,6 +321,11 @@ export async function computeDerivedFields({
       result.statementClassification = provenanceOutput.statementClassification;
       result.conflictValidation = provenanceOutput.validatedConflicts;
       result.claimStructuralFingerprints = provenanceOutput.claimStructuralFingerprints;
+      result.claimConcordanceResult = provenanceOutput.claimConcordance;
+      result.sourceCoherenceByClaimId = buildSourceCoherenceByClaimId(
+        getCanonicalStatementIdsFromMixedProvenance(provenanceOutput.mixedProvenanceResult),
+        statementEmbeddings
+      );
       result.statementOwnership = provenanceOutput.claimProvenance.ownershipMap;
       result.claimProvenanceExclusivity = provenanceOutput.claimProvenance.exclusivityMap;
 
@@ -390,6 +462,8 @@ export async function assembleMapperArtifact({
     passageRoutingResult,
     claimDensityResult,
     claimStructuralFingerprints,
+    claimConcordanceResult,
+    sourceCoherenceByClaimId,
     provenanceRefinement,
     statementClassification,
     conflictValidation,
@@ -413,11 +487,27 @@ export async function assembleMapperArtifact({
     const claimId = String(claim?.id ?? '');
     const structuralFingerprint = (claimStructuralFingerprints as ClaimStructuralFingerprintResult | null | undefined)
       ?.byClaimId?.[claimId];
-    return structuralFingerprint ? { ...claim, structuralFingerprint } : claim;
+    const sourceCoherence = (sourceCoherenceByClaimId as Record<string, number> | null | undefined)
+      ?.[claimId];
+    if (!structuralFingerprint && typeof sourceCoherence !== 'number') return claim;
+    return {
+      ...claim,
+      ...(structuralFingerprint ? { structuralFingerprint } : {}),
+      ...(typeof sourceCoherence === 'number' ? { sourceCoherence } : {}),
+    };
   });
 
   return {
     id: generateMapperArtifactId(),
+    artifactSchemaVersion: 2,
+    measurementSchemas: {
+      claimFootprint: 'claim-footprint-ledger-v2',
+      claimConcordance: 'diagnostic-foundational-v1',
+    },
+    transitionPolicy: {
+      dbMigrationRequired: false,
+      oldPersistedArtifacts: 'rebuild-or-guarded-ui-fallback',
+    },
     query: queryText,
     ...(turn != null ? { turn } : {}),
     timestamp: new Date().toISOString(),
@@ -434,6 +524,7 @@ export async function assembleMapperArtifact({
     ...(passageRoutingResult ? { passageRouting: passageRoutingResult } : {}),
     ...(claimDensityResult ? { claimDensity: claimDensityResult } : {}),
     ...(claimStructuralFingerprints ? { claimStructuralFingerprints } : {}),
+    ...(claimConcordanceResult ? { claimConcordance: claimConcordanceResult } : {}),
     ...(provenanceRefinement ? { provenanceRefinement } : {}),
     ...(statementClassification ? { statementClassification } : {}),
     ...(conflictValidation ? { conflictValidation } : {}),

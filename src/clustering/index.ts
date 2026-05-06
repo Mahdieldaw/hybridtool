@@ -6,7 +6,11 @@
 export { type EmbeddingConfig, type EmbeddingModelEntry, DEFAULT_CONFIG, EMBEDDING_MODELS, getConfigForModel } from './config';
 
 // Similarity utilities
-export { cosineSimilarity } from './distance';
+export {
+  cosineSimilarity,
+  getCosineSimilarityDimensionMismatchCount,
+  resetCosineSimilarityDimensionMismatchCount,
+} from './distance';
 
 // Embedding service
 export {

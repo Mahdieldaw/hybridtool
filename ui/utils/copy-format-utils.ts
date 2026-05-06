@@ -791,6 +791,15 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
     case 'competitive-provenance':
       return ser({
         claimProvenance: artifact?.claimProvenance,
+        claimConcordance: artifact?.claimConcordance ?? null,
+        claimFootprints: artifact?.claimDensity?.profiles
+          ? Object.fromEntries(
+              Object.entries(artifact.claimDensity.profiles).map(([claimId, profile]: [string, any]) => [
+                claimId,
+                profile?.footprint ?? null,
+              ])
+            )
+          : null,
         statementAllocation: artifact?.statementAllocation,
       });
     case 'provenance-comparison': {

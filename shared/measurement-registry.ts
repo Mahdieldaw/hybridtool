@@ -97,7 +97,7 @@ export const MEASUREMENT_REGISTRY: Record<string, MeasurementRule> = {
     'deprecated',
     DEBUG_TRACE,
     POLICY_CONSUMERS,
-    'Deleted majority-paragraph measurement. Use decomposable footprint vectors instead.'
+    'Deleted majority-paragraph measurement. Use the decomposable footprint atom ledger instead.'
   ),
 
   northStar: deprecatedPolicyOutput('northStar'),
@@ -109,7 +109,7 @@ export const MEASUREMENT_REGISTRY: Record<string, MeasurementRule> = {
 
   meanCoverage: deprecatedVisibleMetric(
     'meanCoverage',
-    'Deleted scalar coverage summary. Prefer decomposable passage records or footprint vectors.'
+    'Deleted scalar coverage summary. Prefer decomposable passage records or the footprint atom ledger.'
   ),
   meanCoverageInLongestRun: legacyVisibleMetric(
     'meanCoverageInLongestRun',

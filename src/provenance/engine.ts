@@ -26,6 +26,7 @@ import type {
   ProvenanceRefinementResult,
   StatementClassificationResult,
   ClaimStructuralFingerprintResult,
+  ClaimConcordanceResult,
 } from '../../shared/types';
 import type { ShadowParagraph, ShadowStatement } from '../shadow';
 import type { MeasuredRegion, PeripheryResult } from '../geometry';
@@ -77,6 +78,7 @@ export interface ProvenancePipelineOutput {
   passageRoutingResult: PassageRoutingResult;
   blastSurfaceResult: BlastSurfaceResult;
   claimStructuralFingerprints: ClaimStructuralFingerprintResult;
+  claimConcordance: ClaimConcordanceResult;
   structuralAnalysis: StructurePhaseOutput;
   statementClassification: StatementClassificationResult;
 }
@@ -251,6 +253,7 @@ export async function buildProvenancePipeline(
     passageRoutingResult: surface.passageRoutingResult,
     blastSurfaceResult: surface.blastSurfaceResult,
     claimStructuralFingerprints,
+    claimConcordance: measure.claimConcordance,
     structuralAnalysis,
     statementClassification,
   };

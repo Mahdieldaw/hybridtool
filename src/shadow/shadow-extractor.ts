@@ -12,7 +12,7 @@
 
 import { Stance, classifyStance, detectSignals } from './statement-types';
 import { isExcluded } from './exclusion-rules';
-import { stripInlineMarkdown } from '../clustering/embeddings';
+import { stripInlineMarkdown } from '../../shared/text-prep';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES

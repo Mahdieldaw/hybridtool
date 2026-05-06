@@ -58,6 +58,30 @@ function makeFingerprint() {
     makeParagraph('p1', 0, 0, ['s1', 's2']),
     makeParagraph('p2', 1, 1, ['s3']),
   ];
+  const ownershipMap = new Map([
+    ['s1', new Set(['c1'])],
+    ['s2', new Set(['c1', 'c2'])],
+    ['s3', new Set(['c1'])],
+  ]);
+  const footprint = computeClaimFootprintMeasurement({
+    claimId: 'c1',
+    canonicalStatementIds: ['s1', 's2', 's3'],
+    ownershipMap,
+    stmtToParagraphId: new Map([
+      ['s1', 'p1'],
+      ['s2', 'p1'],
+      ['s3', 'p2'],
+    ]),
+    statementsById: new Map(shadowStatements.map((statement) => [statement.id, statement])),
+    paragraphOrder: new Map([
+      ['p1', 0],
+      ['p2', 1],
+    ]),
+    paragraphMeta: new Map([
+      ['p1', { modelIndex: 0, paragraphIndex: 0, totalStatements: 2 }],
+      ['p2', { modelIndex: 1, paragraphIndex: 1, totalStatements: 1 }],
+    ]),
+  });
   const claimDensityResult: ClaimDensityResult = {
     profiles: {
       c1: {
@@ -75,31 +99,7 @@ function makeFingerprint() {
           { paragraphId: 'p1', value: 1 },
           { paragraphId: 'p2', value: 1 },
         ],
-        footprint: {
-          vectors: {
-            presenceByParagraph: [
-              { paragraphId: 'p1', value: 2 },
-              { paragraphId: 'p2', value: 1 },
-            ],
-            territorialByParagraph: [
-              { paragraphId: 'p1', value: 1.5 },
-              { paragraphId: 'p2', value: 1 },
-            ],
-            sovereignByParagraph: [
-              { paragraphId: 'p1', value: 1 },
-              { paragraphId: 'p2', value: 1 },
-            ],
-          },
-          totals: {
-            presenceMass: 3,
-            territorialMass: 2.5,
-            sovereignMass: 2,
-          },
-          derived: {
-            sovereignRatio: 2 / 3,
-            contestedShareRatio: 0.5,
-          },
-        },
+        footprint,
         paragraphCoverage: [
           {
             paragraphId: 'p1',
@@ -195,7 +195,7 @@ function makeFingerprint() {
 }
 
 describe('claim structural fingerprint', () => {
-  test('canonical footprint vectors are produced from assignment ownership', () => {
+  test('canonical footprint atoms and rollups are produced from assignment ownership', () => {
     const statements = [
       makeStatement('s1', 0),
       makeStatement('s2', 0),
@@ -221,27 +221,80 @@ describe('claim structural fingerprint', () => {
       ]),
     });
 
-    expect(footprint.vectors.presenceByParagraph).toEqual([
-      { paragraphId: 'p1', value: 2 },
-      { paragraphId: 'p2', value: 1 },
+    expect(footprint.schemaVersion).toBe(2);
+    expect(footprint.atoms).toEqual([
+      expect.objectContaining({
+        statementId: 's1',
+        claimId: 'c1',
+        paragraphId: 'p1',
+        modelIndex: 0,
+        ownerCount: 1,
+        claimPresence: 1,
+        ownershipShare: 1,
+        isSovereign: true,
+        isShared: false,
+      }),
+      expect.objectContaining({
+        statementId: 's2',
+        claimId: 'c1',
+        paragraphId: 'p1',
+        modelIndex: 0,
+        owners: ['c1', 'c2'],
+        ownerCount: 2,
+        claimPresence: 1,
+        ownershipShare: 0.5,
+        isSovereign: false,
+        isShared: true,
+      }),
+      expect.objectContaining({
+        statementId: 's3',
+        claimId: 'c1',
+        paragraphId: 'p2',
+        modelIndex: 1,
+        ownerCount: 1,
+        claimPresence: 1,
+        ownershipShare: 1,
+        isSovereign: true,
+        isShared: false,
+      }),
     ]);
-    expect(footprint.vectors.territorialByParagraph).toEqual([
-      { paragraphId: 'p1', value: 1.5 },
-      { paragraphId: 'p2', value: 1 },
+    expect(footprint.rollups.byParagraph).toEqual([
+      expect.objectContaining({
+        paragraphId: 'p1',
+        modelIndex: 0,
+        claimPresenceCount: 2,
+        territorialMass: 1.5,
+        sharedTerritorialMass: 0.5,
+        sovereignStatementCount: 1,
+        sharedStatementCount: 1,
+      }),
+      expect.objectContaining({
+        paragraphId: 'p2',
+        modelIndex: 1,
+        claimPresenceCount: 1,
+        territorialMass: 1,
+        sharedTerritorialMass: 0,
+        sovereignStatementCount: 1,
+        sharedStatementCount: 0,
+      }),
     ]);
-    expect(footprint.vectors.sovereignByParagraph).toEqual([
-      { paragraphId: 'p1', value: 1 },
-      { paragraphId: 'p2', value: 1 },
-    ]);
-    expect(footprint.totals).toEqual({
-      presenceMass: 3,
+    expect(footprint.rollups.byClaim).toEqual({
+      claimId: 'c1',
+      claimPresenceCount: 3,
       territorialMass: 2.5,
-      sovereignMass: 2,
+      sharedTerritorialMass: 0.5,
+      sovereignStatementCount: 2,
+      sharedStatementCount: 1,
+      paragraphPresenceCount: 2,
+      contestedParagraphCount: 1,
+      dominantParagraphCount: 2,
+      sovereignRatio: 2 / 3,
+      contestedShareRatio: 0.5,
     });
-    expect(footprint.derived.contestedShareRatio).toBe(0.5);
+    expect(JSON.stringify(footprint)).not.toContain('presenceByParagraph');
   });
 
-  test('zero-presence claims have empty vectors and zero totals', () => {
+  test('zero-presence claims have empty atoms and zero rollups', () => {
     const footprint = computeClaimFootprintMeasurement({
       claimId: 'empty',
       canonicalStatementIds: [],
@@ -251,31 +304,77 @@ describe('claim structural fingerprint', () => {
       paragraphOrder: new Map(),
     });
 
-    expect(footprint.vectors.presenceByParagraph).toEqual([]);
-    expect(footprint.vectors.territorialByParagraph).toEqual([]);
-    expect(footprint.vectors.sovereignByParagraph).toEqual([]);
-    expect(footprint.totals).toEqual({
-      presenceMass: 0,
+    expect(footprint.atoms).toEqual([]);
+    expect(footprint.rollups.byParagraph).toEqual([]);
+    expect(footprint.rollups.byModel).toEqual([]);
+    expect(footprint.rollups.byClaim).toEqual({
+      claimId: 'empty',
+      claimPresenceCount: 0,
       territorialMass: 0,
-      sovereignMass: 0,
+      sharedTerritorialMass: 0,
+      sovereignStatementCount: 0,
+      sharedStatementCount: 0,
+      paragraphPresenceCount: 0,
+      contestedParagraphCount: 0,
+      dominantParagraphCount: 0,
+      sovereignRatio: null,
+      contestedShareRatio: null,
     });
-    expect(footprint.derived.contestedShareRatio).toBeNull();
   });
 
-  test('builds footprint vectors and does not require legacy routing fields', () => {
+  test('contested paragraphs count paragraph co-presence separately from shared atoms', () => {
+    const statements = [
+      makeStatement('s1', 0),
+      makeStatement('s2', 0),
+    ];
+    const footprint = computeClaimFootprintMeasurement({
+      claimId: 'c1',
+      canonicalStatementIds: ['s1'],
+      ownershipMap: new Map([
+        ['s1', new Set(['c1'])],
+        ['s2', new Set(['c2'])],
+      ]),
+      stmtToParagraphId: new Map([
+        ['s1', 'p1'],
+        ['s2', 'p1'],
+      ]),
+      statementsById: new Map(statements.map((statement) => [statement.id, statement])),
+      paragraphOrder: new Map([['p1', 0]]),
+    });
+
+    expect(footprint.rollups.byClaim).toEqual(
+      expect.objectContaining({
+        claimPresenceCount: 1,
+        sharedTerritorialMass: 0,
+        sharedStatementCount: 0,
+        paragraphPresenceCount: 1,
+        contestedParagraphCount: 1,
+        dominantParagraphCount: 0,
+        contestedShareRatio: null,
+      })
+    );
+  });
+
+  test('builds footprint rollups and does not require legacy routing fields', () => {
     const result = makeFingerprint();
     const fingerprint = result.byClaimId.c1;
 
-    expect(fingerprint.footprint.vectors.presenceByParagraph).toEqual({ p1: 2, p2: 1 });
-    expect(fingerprint.footprint.vectors.territorialByParagraph).toEqual({ p1: 1.5, p2: 1 });
-    expect(fingerprint.footprint.vectors.sovereignByParagraph).toEqual({ p1: 1, p2: 1 });
-    expect(fingerprint.footprint.derived.contestedShareRatio).toBe(0.5);
-    expect(result.missingSubstrate).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ field: 'footprint.vectors.territorialByParagraph' }),
-        expect.objectContaining({ field: 'footprint.vectors.sovereignByParagraph' }),
-      ])
+    expect(fingerprint.footprint.schemaVersion).toBe(2);
+    expect(fingerprint.footprint.rollups.byParagraph).toEqual({ p1: 2, p2: 1 });
+    expect(fingerprint.footprint.rollups.byClaim).toEqual(
+      expect.objectContaining({
+        claimPresenceCount: 3,
+        territorialMass: 2.5,
+        sharedTerritorialMass: 0.5,
+        sovereignStatementCount: 2,
+        sharedStatementCount: 1,
+        paragraphPresenceCount: 2,
+        contestedParagraphCount: 1,
+        dominantParagraphCount: 2,
+        contestedShareRatio: 0.5,
+      })
     );
+    expect(JSON.stringify(result.missingSubstrate)).not.toContain('footprint.vectors');
 
     const serialized = JSON.stringify(fingerprint);
     expect(serialized).not.toContain('MAJ');
@@ -285,9 +384,9 @@ describe('claim structural fingerprint', () => {
     expect(serialized).not.toContain('densityRatio');
   });
 
-  test('contestedShareRatio returns null when presence equals sovereign mass', () => {
-    expect(computeContestedShareRatio(2, 2, 2)).toBeNull();
-    expect(computeContestedShareRatio(2, 1.75, 1.5)).toBe(0.5);
+  test('contestedShareRatio is direct shared territorial mass over shared atoms', () => {
+    expect(computeContestedShareRatio(0, 0)).toBeNull();
+    expect(computeContestedShareRatio(0.5, 1)).toBe(0.5);
   });
 
   test('diagnostic flags are not licensed for routing', () => {
