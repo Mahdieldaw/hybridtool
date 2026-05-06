@@ -40,7 +40,6 @@ Singularity Model Input
 
 **Directory Organization:**
 
-- `concierge-service.ts` — **Main API:** Prompt builders (Turn 1, 2, 3+), handoff protocol, prior context seeding
 - `editorial-mapper.ts` — **Passage Indexing & Prompting:** Builds editorial prompt, parses LLM editorial output into EditorialAST
 - `evidence-substrate.ts` — **Text Resolution:** Resolves editorial thread item IDs to batch text, formats for singularity input
 - `position-brief.ts` — **Spatial Arrangement:** Bucket-anchor algorithm, tension visualization, geometric positioning for concierge context
@@ -50,7 +49,6 @@ Singularity Model Input
 
 - **No text generation**: Editorial mapper only arranges pre-extracted passages; singularity model fills the final answer
 - **Validation-first**: All editorial output validated before passing to concierge; hallucinated passage IDs dropped with error logging
-- **Prior context threading**: Fresh spawns inherit prior constraints, decisions, and preferences via structured handoff
 - **Spatial geometry**: Position brief uses visual arrangement (boxes, side-by-side) to convey tensions and structure without labels
 - **Role-driven thread assembly**: Passages tagged with roles (anchor, support, context, reframe, alternative) to guide editorial arrangement
 
@@ -60,18 +58,14 @@ Singularity Model Input
 
 **Main API — Prompt Construction, Handoff Protocol, Prior Context**
 
-Central point for building singularity/concierge prompts with multi-turn handoff support and prior context threading.
 
 **Feature Flag:**
 ```typescript
-export const HANDOFF_V2_ENABLED = false
 ```
-Controls whether to enable multi-turn handoff protocol (Turn 2+ prompt variants, COMMIT detection, fresh-spawn logic). When false, all turns use plain `buildConciergePrompt`.
 
 **Key Types:**
 
 - `PriorContext` — Handoff distilled from prior conversation + commit summary for fresh spawns
-  - `handoff: ConciergeDelta | null` — constraints, eliminated options, preferences, situational facts
   - `committed: string | null` — user's decision/commitment from prior interaction
   
 - `ConciergePromptOptions` — Configuration for prompt building
@@ -80,21 +74,17 @@ Controls whether to enable multi-turn handoff protocol (Turn 2+ prompt variants,
 
 **Handoff Protocol:**
 
-`HANDOFF_PROTOCOL` — Model learns this format on Turn 2; model uses it to signal decision points on Turn 2+ until fresh spawn:
 
 ```
----HANDOFF---
 constraints: [hard limits]
 eliminated: [ruled-out options]
 preferences: [trade-off signals]
 context: [situational facts]
 >>>COMMIT: [only if user commits]
----/HANDOFF---
 ```
 
 Rules:
 - Only include if meaningful context emerged
-- Each handoff is complete (carries forward prior state)
 - Terse per item (few words, semicolon-separated)
 - `>>>COMMIT` signals user is ready to execute
 - Never reference in visible response to user
@@ -121,29 +111,23 @@ User message escaped via `escapeUserMessage()` — wraps in code fence, defuses 
 
 **`buildTurn2Message(userMessage: string): string`**
 
-Turn 2 specific (HANDOFF_V2): Injects handoff protocol before user message.
 
 **Output:**
 ```
-[HANDOFF_PROTOCOL]
 
 User Message:
 ```...user message...```
 ```
 
-**`buildTurn3PlusMessage(userMessage: string, pendingHandoff: ConciergeDelta | null): string`**
 
-Turn 3+ specific (HANDOFF_V2): Echoes current handoff before user message.
 
 **Output:**
 ```
-[Formatted handoff echo with current constraints, eliminated, preferences, context]
 
 User Message:
 ```...user message...```
 ```
 
-Allows model to update or carry forward handoff state across turns.
 
 **Helper Functions:**
 
@@ -157,8 +141,6 @@ export const ConciergeService = {
   buildConciergePrompt,
   buildTurn2Message,
   buildTurn3PlusMessage,
-  HANDOFF_PROTOCOL,
-  parseConciergeOutput,  // re-export from shared/parsing-utils
 }
 ```
 
@@ -495,7 +477,6 @@ Wrapper: builds minimal StructuralAnalysis-like object from claims[], calls buil
 - **Singularity Model** → receives concierge prompt + evidence substrate
 - **UI Editorial Display** → renderEditorialAST (threads arranged in accordion/tabs)
 - **Turn Finalization** → evidence substrate persisted in aiTurn context
-- **Prior Context Threading** → handoff data carried to next session/fresh spawn
 
 **Key Relationships:**
 
@@ -503,7 +484,6 @@ Wrapper: builds minimal StructuralAnalysis-like object from claims[], calls buil
 - **Editorial Parser** → validates editorial LLM output, drops hallucinated IDs
 - **Evidence Substrate** → resolves editorial item IDs to actual text (bidirectional with UI's usePassageResolver)
 - **Position Brief** → spatial arrangement (no-label, geometric) sent to concierge alongside singularity prompt
-- **Concierge Service** → orchestrates prompt construction with handoff protocol + prior context seeding
 
 ---
 
@@ -513,7 +493,6 @@ Wrapper: builds minimal StructuralAnalysis-like object from claims[], calls buil
 
 **Validation-First:** All editorial output validated before downstream use; hallucinated passage IDs logged and dropped (graceful degradation).
 
-**Prior Context Threading:** Fresh spawns inherit prior constraints, decisions, preferences via structured handoff (ConciergeDelta); enables multi-turn coherence without full conversation history.
 
 **Spatial Geometry:** Position brief uses visual arrangement (boxes, dividers, randomization) to convey tensions and structure without explicit rankings or labels.
 
@@ -536,7 +515,6 @@ The concierge-service module orchestrates **final synthesis** for the singularit
 1. **Editorial Mapper** (editorial-mapper.ts) — Passage indexing, editorial prompting, AST parsing
 2. **Evidence Substrate** (evidence-substrate.ts) — Text resolution, editorial formatting, combined substrate assembly
 3. **Position Brief** (position-brief.ts) — Spatial claim arrangement via bucket-anchor algorithm
-4. **Concierge Prompting** (concierge-service.ts) — Prompt construction with handoff protocol and prior context threading
 
 **Key Properties:**
 
@@ -556,7 +534,6 @@ The concierge-service module orchestrates **final synthesis** for the singularit
 
 **File Checklist:**
 
-- concierge-service.ts — prompt builders, handoff protocol, prior context seeding
 - editorial-mapper.ts — passage indexing, editorial prompting, AST parsing
 - evidence-substrate.ts — text resolution, editorial formatting, substrate assembly
 - position-brief.ts — bucket-anchor algorithm, spatial arrangement

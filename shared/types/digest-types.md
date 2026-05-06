@@ -398,7 +398,6 @@ Comprehensive pipeline and workflow types (workflow state, mappers, substrate, i
 
 **Miscellaneous:**
 
-`ConciergeDelta` — conversational state carried between batch invocations (constraints, eliminated options, preferences, context, commit signal)
 
 `ProviderResponseType` — lifecycle stage: `'batch'` | `'mapping'` | `'editorial'` | `'singularity'` | `'probe'`
 

@@ -12,27 +12,6 @@ export type { Claim, Edge, EnrichedClaim };
 
 export type ProviderResponseType = 'batch' | 'mapping' | 'editorial' | 'singularity' | 'probe';
 
-/**
- * Concierge Handoff Delta
- * Captures conversational evolution between batch invocations.
- * The concierge appends invisible handoff blocks to responses, which are
- * parsed and stored. When batch is re-invoked, this context is injected
- * to inform batch models of constraints, eliminations, preferences, and
- * situational context that emerged during concierge-only turns.
- */
-export interface ConciergeDelta {
-  /** Hard limits: "2-person team", "budget under 5K/month" */
-  constraints: string[];
-  /** Ruled out options: "AWS Lambda (cold start concerns)" */
-  eliminated: string[];
-  /** Trade-off signals: "simplicity over performance" */
-  preferences: string[];
-  /** Situational facts: "early-stage startup", "pre-revenue" */
-  context: string[];
-  /** COMMIT signal - user committed to a plan, triggers fresh spawn. Null if not committed. */
-  commit: string | null;
-}
-
 export interface MapperClaim {
   id: string;
   label: string;
@@ -1238,8 +1217,6 @@ export interface RecomputeRequest {
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
-  /** Type of concierge prompt used (e.g. starter_1, explorer_1) */
-  frozenSingularityPromptType?: string;
   /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
   frozenSingularityPromptSeed?: any;
 }
@@ -1298,7 +1275,6 @@ export interface RecomputeContext {
   providerContextsAtSourceTurn: Record<string, unknown>;
   latestMappingOutput: { providerId: string; text: string; meta: Record<string, unknown> } | null;
   sourceUserMessage: string;
-  frozenSingularityPromptType?: unknown;
   frozenSingularityPromptSeed?: unknown;
 }
 
