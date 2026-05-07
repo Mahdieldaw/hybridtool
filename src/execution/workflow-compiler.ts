@@ -169,6 +169,7 @@ export class WorkflowCompiler {
         providerMeta: request.providerMeta || {},
         useThinking: !!request.useThinking,
         embeddingModelId: request.embeddingModelId,
+        attachmentIds: Array.isArray(request.attachmentIds) ? request.attachmentIds.slice() : [],
       },
     };
   }
@@ -277,6 +278,7 @@ export class WorkflowCompiler {
       sessionCreated,
       userMessage,
       workflowControl,
+      attachmentIds: Array.isArray(request.attachmentIds) ? request.attachmentIds.slice() : undefined,
     };
   }
 

@@ -19,6 +19,7 @@ import {
   activeProbeDraftFamily,
   cleanupTurnAtoms,
   messagesAtom,
+  pendingAttachmentsAtom,
 } from '../../state';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
@@ -58,6 +59,7 @@ export function useChat() {
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
+  const setPendingAttachments = useSetAtom(pendingAttachmentsAtom);
   const sendMessage = useCallback(
     async (prompt: string, mode: 'new' | 'continuation') => {
       if (!prompt || !prompt.trim()) return;
@@ -73,6 +75,12 @@ export function useChat() {
       const ts = Date.now();
       const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
 
+      // Snapshot any composer-staged attachments and clear so the next turn starts empty.
+      const stagedAttachments = store.get(pendingAttachmentsAtom) || [];
+      const attachmentIds = stagedAttachments
+        .filter((p: { status: string; id?: string }) => p.status === 'stored' && !!p.id)
+        .map((p: { id?: string }) => p.id as string);
+
       const userTurn: UserTurn = {
         type: 'user',
         id: userTurnId,
@@ -80,6 +88,7 @@ export function useChat() {
         createdAt: ts,
         sessionId: currentSessionId || null,
         threadId: DEFAULT_THREAD,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
       };
 
       // Write user turn to Map + IDs
@@ -134,6 +143,7 @@ export function useChat() {
               }),
               providerMeta: {},
               clientUserTurnId: userTurnId,
+              ...(attachmentIds.length ? { attachmentIds } : {}),
             }
           : {
               type: 'extend',
@@ -149,7 +159,24 @@ export function useChat() {
               }),
               providerMeta: {},
               clientUserTurnId: userTurnId,
+              ...(attachmentIds.length ? { attachmentIds } : {}),
             };
+
+        // Clear staged attachments now that they're persisted with the turn.
+        if (stagedAttachments.length) {
+          setPendingAttachments((draft: typeof stagedAttachments) => {
+            for (const p of draft) {
+              if (p.previewUrl) {
+                try {
+                  URL.revokeObjectURL(p.previewUrl);
+                } catch {
+                  /* noop */
+                }
+              }
+            }
+            draft.length = 0;
+          });
+        }
 
         // AI turn will be created upon TURN_CREATED from backend
         // Port is already ensured above for extend; for initialize, executeWorkflow ensures port

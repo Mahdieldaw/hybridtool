@@ -17,6 +17,7 @@ import {
   createProviderAuthError,
   normalizeError,
 } from '../errors/handler.js';
+import { detectAttachmentCapabilityStub } from './attachment-capability.js';
 
 // Provider-specific adapter debug flag (off by default)
 const GROK_ADAPTER_DEBUG = false;
@@ -38,6 +39,13 @@ export class GrokAdapter {
 
   async init() {
     return;
+  }
+
+  /**
+   * Runtime-aware attachment capability check. Stub today.
+   */
+  async detectAttachmentCapability(_ctx) {
+    return detectAttachmentCapabilityStub();
   }
 
   /**

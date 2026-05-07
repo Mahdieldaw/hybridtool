@@ -1,6 +1,6 @@
 // src/persistence/types.ts
 
-import type { ProviderResponseType } from '../../shared/types';
+import type { ProviderResponseType, TurnAttachmentState } from '../../shared/types';
 
 // Store configuration types
 export interface StoreConfig {
@@ -73,6 +73,8 @@ export interface BaseTurnRecord {
 export interface UserTurnRecord extends BaseTurnRecord {
   type: 'user';
   text: string;
+  /** Local attachment ids attached to this turn (resolved against the `attachments` store). */
+  attachmentIds?: string[];
 }
 
 export interface AiTurnRecord extends BaseTurnRecord {
@@ -103,6 +105,28 @@ export interface AiTurnRecord extends BaseTurnRecord {
   // Foreign keys (NOT embedded objects)
   providerResponseIds?: string[];
   providerContextIds?: string[];
+
+  /**
+   * Per-attachment, per-provider routing/upload outcome for this AI turn.
+   * Set by the batch phase before fanout; rendered by the UI as a chip row
+   * beneath the user turn.
+   */
+  turnAttachmentState?: TurnAttachmentState;
+}
+
+// 11. Attachments Store — local-first file storage.
+export interface LocalAttachmentRecord {
+  id: string;
+  sessionId: string | null;
+  userTurnId: string | null;
+  filename: string;
+  mimeType: string;
+  size: number;
+  /** Stored via putBinary() so structured clone preserves Blob contents. */
+  blob: Blob;
+  sha256?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type TurnRecord = UserTurnRecord | AiTurnRecord;

@@ -9,10 +9,14 @@ import {
   RENAME_SESSION,
   REFRESH_AUTH_STATUS,
   PROBE_QUERY,
+  UPLOAD_ATTACHMENT,
+  LIST_ATTACHMENTS,
+  GET_ATTACHMENT_BLOB,
+  DELETE_ATTACHMENT,
 } from '../../shared/messaging';
 
 import type { HistorySessionSummary, HistoryApiResponse } from '../types';
-import type { PrimitiveWorkflowRequest } from '../../shared/types';
+import type { PrimitiveWorkflowRequest, LocalAttachmentMeta } from '../../shared/types';
 import { PortHealthManager } from './port-health-manager';
 
 interface BackendApiResponse<T = any> {
@@ -354,6 +358,59 @@ class ExtensionAPI {
         probeSessionId,
       },
     });
+  }
+
+  // === ATTACHMENTS (local-first file storage) ===
+
+  async uploadAttachment(
+    file: File,
+    sessionId: string | null = null
+  ): Promise<LocalAttachmentMeta> {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)) as number[]);
+    }
+    const base64 = btoa(bin);
+    return this.queryBackend<LocalAttachmentMeta>({
+      type: UPLOAD_ATTACHMENT,
+      payload: {
+        filename: file.name || 'untitled',
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+        base64,
+        sessionId,
+      },
+    });
+  }
+
+  async listAttachments(filter: { sessionId?: string; userTurnId?: string } = {}): Promise<LocalAttachmentMeta[]> {
+    return this.queryBackend<LocalAttachmentMeta[]>({
+      type: LIST_ATTACHMENTS,
+      payload: filter,
+    });
+  }
+
+  async getAttachmentBlob(id: string): Promise<{ meta: LocalAttachmentMeta; blob: Blob }> {
+    const res = await this.queryBackend<{ meta: LocalAttachmentMeta; base64: string }>({
+      type: GET_ATTACHMENT_BLOB,
+      payload: { id },
+    });
+    const bin = atob(res.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes.buffer], { type: res.meta.mimeType || 'application/octet-stream' });
+    return { meta: res.meta, blob };
+  }
+
+  async deleteAttachment(id: string): Promise<boolean> {
+    const res = await this.queryBackend<{ removed: boolean }>({
+      type: DELETE_ATTACHMENT,
+      payload: { id },
+    });
+    return !!(res as unknown as { removed?: boolean })?.removed;
   }
 }
 

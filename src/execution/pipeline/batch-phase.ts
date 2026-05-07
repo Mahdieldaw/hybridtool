@@ -6,6 +6,8 @@ import { buildReactiveBridge } from '../utils/reactive-bridge';
 import { PROMPT_TEMPLATES } from '../utils/prompt-templates.js';
 import { isProviderAuthError, createMultiProviderAuthError } from '../../errors/handler';
 import { logInfraError } from '../../errors';
+import { processBatchAttachments } from './attachment-prestep';
+import type { TurnAttachmentState } from '../../../shared/types/attachment';
 
 // Types (re-exported or defined locally)
 type ProviderKey = string;
@@ -66,6 +68,67 @@ export async function executeBatchPhase(
     enhancedPrompt = PROMPT_TEMPLATES.withPriorOnly(prompt, previousContext);
   } else if (bridgeContext) {
     enhancedPrompt = PROMPT_TEMPLATES.withBridgeOnly(prompt, bridgeContext);
+  }
+
+  // Attachment pre-step: route each (file, provider) and inline text-fallback content.
+  // Local persistence of the file already happened in the UI->SW upload path; this step
+  // only decides how each provider sees the file (provider-upload / inline / unsupported).
+  let turnAttachmentState: TurnAttachmentState | undefined;
+  try {
+    const attachmentIds: string[] = Array.isArray(step.payload?.attachmentIds)
+      ? step.payload.attachmentIds
+      : [];
+    const attachmentService = options.attachmentService;
+    const providerRegistry = options.providerRegistry;
+    if (attachmentIds.length && attachmentService && providerRegistry) {
+      const result = await processBatchAttachments({
+        attachmentIds,
+        providers: providers as ProviderKey[],
+        basePrompt: enhancedPrompt,
+        attachmentService,
+        providerRegistry,
+        sessionId: context.sessionId,
+      });
+      enhancedPrompt = result.enhancedPrompt;
+      turnAttachmentState = result.turnAttachmentState;
+
+      // Emit per-(file,provider) events for live UI feedback.
+      for (const ev of result.events) {
+        try {
+          streamingManager.port.postMessage({
+            type: 'ATTACHMENT_STATUS_EVENT',
+            sessionId: context.sessionId,
+            aiTurnId: context.canonicalAiTurnId || 'unknown',
+            fileId: ev.fileId,
+            providerId: ev.providerId,
+            status: ev.status,
+          });
+        } catch (err) {
+          logInfraError('batch-phase/attachments: ATTACHMENT_STATUS_EVENT postMessage failed', err);
+        }
+      }
+
+      // Persist initial turnAttachmentState onto the AI turn record (best-effort).
+      try {
+        const adapter = options.persistenceCoordinator?.sessionManager?.adapter
+          ?? options.sessionManager?.adapter;
+        const aiTurnId = context.canonicalAiTurnId;
+        if (adapter && aiTurnId) {
+          const existing = await adapter.get('turns', aiTurnId);
+          if (existing) {
+            await adapter.put('turns', {
+              ...existing,
+              turnAttachmentState,
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      } catch (err) {
+        logInfraError('batch-phase/attachments: persist turnAttachmentState failed', err);
+      }
+    }
+  } catch (err) {
+    logInfraError('batch-phase/attachments: pre-step failed', err);
   }
 
   const providerStatuses: ProviderStatus[] = [];

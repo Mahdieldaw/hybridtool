@@ -1,10 +1,11 @@
 import React, { useCallback } from 'react';
-import { useAtom } from 'jotai';
-import { turnExpandedStateFamily } from '../state';
+import { useAtom, useAtomValue } from 'jotai';
+import { turnExpandedStateFamily, turnsMapAtom, turnIdsAtom } from '../state';
 import type { UserTurn } from '../../shared/types';
 import { UserIcon, ChevronDownIcon, ChevronUpIcon } from '../shared/Icons';
 import MarkdownDisplay from '../shared/MarkdownDisplay';
 import { CopyButton } from '../shared/CopyButton';
+import TurnAttachments from './TurnAttachments';
 import clsx from 'clsx';
 
 interface UserTurnBlockProps {
@@ -14,6 +15,19 @@ interface UserTurnBlockProps {
 const UserTurnBlock = ({ userTurn }: UserTurnBlockProps) => {
   const [isExpanded, setIsExpanded] = useAtom(turnExpandedStateFamily(userTurn.id));
   const onToggle = useCallback(() => setIsExpanded((prev) => !prev), [setIsExpanded]);
+
+  // Look up the matching AI turn (if any) so we can render per-provider routing status.
+  const turnsMap = useAtomValue(turnsMapAtom);
+  const turnIds = useAtomValue(turnIdsAtom);
+  const matchingAi = React.useMemo(() => {
+    for (const id of turnIds) {
+      const t = turnsMap.get(id) as { type?: string; userTurnId?: string; turnAttachmentState?: unknown } | undefined;
+      if (t?.type === 'ai' && t.userTurnId === userTurn.id) return t;
+    }
+    return undefined;
+  }, [turnIds, turnsMap, userTurn.id]);
+  const attachmentIds = userTurn.attachmentIds;
+  const turnAttachmentState = (matchingAi as { turnAttachmentState?: import('../../shared/types/attachment').TurnAttachmentState } | undefined)?.turnAttachmentState;
 
   const date = new Date(userTurn.createdAt);
   const isValidDate = !isNaN(date.getTime());
@@ -93,6 +107,12 @@ const UserTurnBlock = ({ userTurn }: UserTurnBlockProps) => {
             >
               <MarkdownDisplay content={String(userTurn.text || '')} />
             </div>
+          </div>
+        )}
+
+        {(attachmentIds?.length || turnAttachmentState) && (
+          <div className="mx-auto max-w-3xl w-full">
+            <TurnAttachments attachmentIds={attachmentIds} state={turnAttachmentState} />
           </div>
         )}
 

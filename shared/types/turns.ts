@@ -56,6 +56,8 @@ export interface UserTurn {
   updatedAt?: number;
   userId?: string | null;
   meta?: Record<string, any> | null;
+  /** Local attachment ids that travel with this user turn. */
+  attachmentIds?: string[];
 }
 
 export interface ProviderResponse {
@@ -125,6 +127,9 @@ export interface AiTurn {
     isOptimistic?: boolean;
     [key: string]: any;
   } | null;
+
+  /** Per-attachment, per-provider routing/upload outcome for this AI turn. */
+  turnAttachmentState?: import('./attachment').TurnAttachmentState;
 }
 
 // ============================================================================

@@ -1294,6 +1294,8 @@ export interface InitializeRequest {
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
   embeddingModelId?: string;
+  /** Local attachment ids (from the AttachmentService); routed per-provider in fanout. */
+  attachmentIds?: string[];
 }
 
 /**
@@ -1312,6 +1314,7 @@ export interface ExtendRequest {
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string;
   embeddingModelId?: string;
+  attachmentIds?: string[];
 }
 
 /**
@@ -1327,6 +1330,7 @@ export interface RecomputeRequest {
   useThinking?: boolean;
   /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
   frozenSingularityPromptSeed?: any;
+  attachmentIds?: string[];
 }
 
 // ============================================================================
@@ -1419,6 +1423,7 @@ export type PersistRequest = {
   sourceTurnId?: string;
   stepType?: ProviderResponseType;
   targetProvider?: ProviderKey;
+  attachmentIds?: string[];
 };
 
 export type PersistReturn = {

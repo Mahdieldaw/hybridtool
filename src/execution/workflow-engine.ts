@@ -311,6 +311,12 @@ export class WorkflowEngine {
   }
 
   _buildOptionsForStep(stepType: string): Record<string, any> {
+    // The orchestrator holds the service registry; pull adjacent services we need
+    // for cross-cutting concerns like attachments without widening the constructor.
+    const registry = (this.orchestrator as { registry?: { get?: (k: string) => unknown } } | undefined)?.registry;
+    const providerRegistry = registry?.get?.('providerRegistry');
+    const attachmentService = registry?.get?.('attachmentService');
+
     const baseOptions: Record<string, any> = {
       port: this.port,
       streamingManager: this.streamingManager,
@@ -318,6 +324,8 @@ export class WorkflowEngine {
       sessionManager: this.sessionManager,
       orchestrator: this.orchestrator,
       healthTracker: this.healthTracker,
+      providerRegistry,
+      attachmentService,
     };
 
     if (stepType === 'mapping') {
@@ -533,6 +541,11 @@ export class WorkflowEngine {
         : {}),
       ...(context?.canonicalUserTurnId ? { canonicalUserTurnId: context.canonicalUserTurnId } : {}),
       ...(context?.canonicalAiTurnId ? { canonicalAiTurnId: context.canonicalAiTurnId } : {}),
+      ...(Array.isArray(context?.attachmentIds) && context.attachmentIds.length
+        ? { attachmentIds: context.attachmentIds.slice() }
+        : Array.isArray(this.currentRequest?.context?.attachmentIds) && this.currentRequest.context.attachmentIds.length
+          ? { attachmentIds: this.currentRequest.context.attachmentIds.slice() }
+          : {}),
     };
 
     console.log(

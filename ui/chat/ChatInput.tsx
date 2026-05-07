@@ -22,11 +22,13 @@ import {
   probeProvidersEnabledAtom,
 } from '../state';
 import { useChat } from '../hooks/chat/useChat';
+import { useAttachments } from '../hooks/chat/useAttachments';
 import api from '../services/extension-api';
 import { LLM_PROVIDERS_CONFIG } from '../config/constants';
 import { getProviderName } from '../utils/provider-helpers';
 import { PROVIDER_LIMITS } from '../../shared/provider-limits';
 import { CouncilOrbs } from './CouncilOrbs';
+import AttachmentChipRow from './AttachmentChipRow';
 
 interface ChatInputProps {
   onStartMapping?: (prompt: string) => void;
@@ -67,6 +69,11 @@ const ChatInput = ({
   const setToast = useSetAtom(toastAtom);
 
   const { sendMessage, abort, probeTurn } = useChat();
+  const { pending: pendingAttachments, addFiles, removeAttachment } = useAttachments();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
+  const hasUploadingAttachments = pendingAttachments.some((p) => p.status === 'uploading');
 
   // Exploration mode: probe vs new-query routing
   const latestCompletedTurnId = useAtomValue(latestCompletedAiTurnIdAtom);
@@ -250,11 +257,77 @@ const ChatInput = ({
   const handleSubmit = (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     if (isLoading || !prompt.trim()) return;
+    if (hasUploadingAttachments) return;
     executeSend(prompt);
   };
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items?.length) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length) {
+        e.preventDefault();
+        void addFiles(files);
+      }
+    },
+    [addFiles]
+  );
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!e.dataTransfer?.files?.length) return;
+      e.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDragOver(false);
+      void addFiles(e.dataTransfer.files);
+    },
+    [addFiles]
+  );
+
+  const onPickFiles = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const onFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files?.length) void addFiles(files);
+      // Reset so the same file can be re-picked.
+      e.target.value = '';
+    },
+    [addFiles]
+  );
+
   const buttonText = isProbeMode ? 'Probe' : isContinuationMode ? 'Continue' : 'Send';
-  const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit;
+  const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit || hasUploadingAttachments;
   const showMappingBtn = canShowMapping && !!prompt.trim();
   const showAbortBtn = !!onAbort && isLoading;
 
@@ -298,7 +371,13 @@ const ChatInput = ({
         </div>
       )}
 
-      <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
+      <div
+        className={`flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border ${isDragOver ? 'border-brand-500 ring-2 ring-brand-500/40' : 'border-border-subtle/60'} rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         {/* === Exploration mode bar === */}
         {showExplorationBar && (
           <div className="w-full flex items-center gap-2 mb-1 animate-in slide-in-from-top-1 duration-150">
@@ -348,10 +427,14 @@ const ChatInput = ({
         )}
 
         <div className="flex-1 relative min-w-[200px] flex flex-col gap-2">
+          {pendingAttachments.length > 0 && (
+            <AttachmentChipRow items={pendingAttachments} onRemove={removeAttachment} />
+          )}
           <textarea
             ref={textareaRef}
             value={prompt}
             onChange={handleInputChange}
+            onPaste={handlePaste}
             placeholder={
               activeTarget
                 ? `Continue conversation with ${providerName}...`
@@ -393,6 +476,24 @@ const ChatInput = ({
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={onPickFiles}
+          disabled={isLoading || mappingActive}
+          title="Attach a file (drag & drop or paste also works)"
+          aria-label="Attach a file"
+          className={`px-2 h-[34px] rounded-2xl text-text-secondary font-semibold cursor-pointer flex items-center justify-center hover:bg-surface-highlight border border-border-subtle ${isLoading || mappingActive ? 'opacity-50' : 'opacity-100'}`}
+        >
+          <span className="text-base leading-none">📎</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={onFileInputChange}
+          className="hidden"
+        />
 
         <div className="relative">
           <button

@@ -12,6 +12,7 @@ import {
   createProviderAuthError,
   normalizeError,
 } from '../errors/handler.js';
+import { detectAttachmentCapabilityStub } from './attachment-capability.js';
 
 const QWEN_ADAPTER_DEBUG = false;
 const pad = (...args) => {
@@ -32,6 +33,13 @@ export class QwenAdapter {
 
   async init() {
     return;
+  }
+
+  /**
+   * Runtime-aware attachment capability check. Stub today.
+   */
+  async detectAttachmentCapability(_ctx) {
+    return detectAttachmentCapabilityStub();
   }
 
   async sendPrompt(req, onChunk, signal, _isRetry = false) {

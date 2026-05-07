@@ -4,8 +4,8 @@ import { logInfraError } from '../errors';
 import { StoreConfig, MetadataRecord } from './types';
 
 const DB_NAME = 'OpusDeusDB';
-const DB_VERSION = 10;
-export const SCHEMA_VERSION = 10;
+const DB_VERSION = 11;
+export const SCHEMA_VERSION = 11;
 
 // Store configurations - conversation-only architecture
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -119,6 +119,17 @@ export const STORE_CONFIGS: StoreConfig[] = [
     name: 'claim_embeddings',
     keyPath: 'id', // "{aiTurnId}:{providerId}"
     indices: [{ name: 'byAiTurnId', keyPath: 'aiTurnId', unique: false }],
+  },
+
+  // 10. Attachments Store (local-first file storage)
+  {
+    name: 'attachments',
+    keyPath: 'id',
+    indices: [
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
+      { name: 'byUserTurnId', keyPath: 'userTurnId', unique: false },
+      { name: 'byCreatedAt', keyPath: 'createdAt', unique: false },
+    ],
   },
 ];
 
@@ -292,6 +303,34 @@ export async function openDatabase(): Promise<IDBDatabase> {
           console.log('Completed v10 migration: Schema version updated in metadata');
         } catch (e) {
           console.warn('Failed to complete v10 migration:', e);
+        }
+      }
+
+      // Migration to v11: Add attachments store (local-first file storage)
+      if (oldVersion < 11) {
+        try {
+          if (!db.objectStoreNames.contains('attachments')) {
+            const attachmentsStore = db.createObjectStore('attachments', {
+              keyPath: 'id',
+            });
+            attachmentsStore.createIndex('bySessionId', 'sessionId', { unique: false });
+            attachmentsStore.createIndex('byUserTurnId', 'userTurnId', { unique: false });
+            attachmentsStore.createIndex('byCreatedAt', 'createdAt', { unique: false });
+            console.log('Created attachments store during v11 migration');
+          }
+
+          const metadataStore = transaction.objectStore('metadata');
+          const now = Date.now();
+          const rec: MetadataRecord = {
+            id: 'schema_version_record',
+            key: 'schema_version',
+            value: SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now,
+          };
+          metadataStore.put(rec);
+        } catch (e) {
+          console.warn('Failed to complete v11 migration:', e);
         }
       }
     };

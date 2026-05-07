@@ -26,4 +26,18 @@ ${previousAnswer || ''}
 </prior_context>
 
 ${basePrompt || ''}`.trim(),
+
+  withInlinedAttachments: (
+    basePrompt = '',
+    attachments: Array<{ filename: string; mimeType: string; text: string }> = []
+  ) => {
+    if (!attachments.length) return basePrompt || '';
+    const blocks = attachments
+      .map(
+        (a) =>
+          `<attachment filename="${a.filename}" mime="${a.mimeType}">\n${a.text}\n</attachment>`
+      )
+      .join('\n\n');
+    return `${blocks}\n\n${basePrompt || ''}`.trim();
+  },
 };

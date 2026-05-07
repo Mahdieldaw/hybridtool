@@ -15,6 +15,7 @@ import {
   getErrorMessage,
   normalizeError,
 } from '../errors/handler.js';
+import { detectAttachmentCapabilityStub } from './attachment-capability.js';
 
 // Provider-specific adapter debug flag (off by default)
 const CHATGPT_ADAPTER_DEBUG = false;
@@ -33,6 +34,14 @@ export class ChatGPTAdapter {
       supportsThinking: true, // new flag: supports Think-mode
     };
     this.controller = controller;
+  }
+
+  /**
+   * Runtime-aware attachment capability check. Stub today; real implementations
+   * should inspect the live ChatGPT tab (model, plan, workspace, region).
+   */
+  async detectAttachmentCapability(_ctx) {
+    return detectAttachmentCapabilityStub();
   }
 
   /**

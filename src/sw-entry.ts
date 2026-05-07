@@ -257,6 +257,17 @@ async function initializeSessionManager(pl: unknown): Promise<SessionManager> {
 
     await sm.initialize({ adapter: persistence?.adapter as import('./persistence/simple-indexeddb-adapter.js').SimpleIndexedDBAdapter | null | undefined });
     services.register('sessionManager', sm);
+
+    // Attachment service shares the same adapter — local-first file storage.
+    if (!services.get('attachmentService') && persistence?.adapter) {
+      const { AttachmentService } = await import('./persistence/attachment-service.js');
+      const attachmentService = new AttachmentService(
+        persistence.adapter as import('./persistence/simple-indexeddb-adapter.js').SimpleIndexedDBAdapter
+      );
+      services.register('attachmentService', attachmentService);
+      console.log('[SW] ✅ AttachmentService registered');
+    }
+
     console.log('[SW] ✅ SessionManager initialized');
     return sm;
   } catch (error) {
@@ -1397,6 +1408,9 @@ async function handleUnifiedMessage(
                 id: user.id,
                 text: (user.text as string) || (user.content as string) || '',
                 createdAt: (user.createdAt as number) || 0,
+                ...(Array.isArray((user as Record<string, unknown>).attachmentIds)
+                  ? { attachmentIds: (user as Record<string, unknown>).attachmentIds }
+                  : {}),
               },
               ...(primaryAi?.batch ? { batch: primaryAi.batch } : {}),
               // Tier 3: mapping.artifact is ephemeral — not sent in history payload.
@@ -1405,6 +1419,9 @@ async function handleUnifiedMessage(
               ...(primaryAi?.meta ? { meta: primaryAi.meta } : {}),
               ...(Array.isArray(primaryAi?.probeSessions) && (primaryAi!.probeSessions as unknown[]).length > 0
                 ? { probeSessions: primaryAi!.probeSessions }
+                : {}),
+              ...((primaryAi as Record<string, unknown> | undefined)?.turnAttachmentState
+                ? { turnAttachmentState: (primaryAi as Record<string, unknown>).turnAttachmentState }
                 : {}),
               ...(Object.keys(providers).length > 0 ? { providers } : {}),
               ...(Object.keys(mappingResponses).length > 0 ? { mappingResponses } : {}),
@@ -1587,6 +1604,134 @@ async function handleUnifiedMessage(
           });
         } catch (e) {
           logInfraError('SW: RENAME_SESSION failed', e);
+          sendResponse({ success: false, error: getErrorMessage(e) });
+        }
+        return true;
+      }
+
+      case 'UPLOAD_ATTACHMENT': {
+        try {
+          const payload = message.payload as
+            | { filename?: string; mimeType?: string; size?: number; base64?: string; sessionId?: string | null }
+            | undefined;
+          const filename = String(payload?.filename ?? '').trim() || 'untitled';
+          const mimeType = String(payload?.mimeType ?? 'application/octet-stream');
+          const base64 = String(payload?.base64 ?? '');
+          if (!base64) {
+            sendResponse({ success: false, error: 'Missing file data' });
+            return true;
+          }
+          // Decode base64 → ArrayBuffer in the SW (chrome.runtime messages don't carry binaries).
+          const bin = atob(base64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const data = bytes.buffer;
+          const size = typeof payload?.size === 'number' ? payload!.size : bytes.byteLength;
+          const attachmentService = services.get('attachmentService') as
+            | import('./persistence/attachment-service.js').AttachmentService
+            | undefined;
+          if (!attachmentService) {
+            sendResponse({ success: false, error: 'AttachmentService not ready' });
+            return true;
+          }
+          const meta = await attachmentService.put({
+            filename,
+            mimeType,
+            size,
+            data,
+            sessionId: payload?.sessionId ?? null,
+          });
+          sendResponse({ success: true, meta });
+        } catch (e) {
+          logInfraError('SW: UPLOAD_ATTACHMENT failed', e);
+          sendResponse({ success: false, error: getErrorMessage(e) });
+        }
+        return true;
+      }
+
+      case 'LIST_ATTACHMENTS': {
+        try {
+          const payload = message.payload as { sessionId?: string; userTurnId?: string } | undefined;
+          const attachmentService = services.get('attachmentService') as
+            | import('./persistence/attachment-service.js').AttachmentService
+            | undefined;
+          if (!attachmentService) {
+            sendResponse({ success: false, error: 'AttachmentService not ready' });
+            return true;
+          }
+          const items = await attachmentService.list(payload);
+          sendResponse({ success: true, items });
+        } catch (e) {
+          sendResponse({ success: false, error: getErrorMessage(e) });
+        }
+        return true;
+      }
+
+      case 'GET_ATTACHMENT_BLOB': {
+        try {
+          const id = String((message.payload as { id?: string } | undefined)?.id ?? '');
+          if (!id) {
+            sendResponse({ success: false, error: 'Missing attachment id' });
+            return true;
+          }
+          const attachmentService = services.get('attachmentService') as
+            | import('./persistence/attachment-service.js').AttachmentService
+            | undefined;
+          if (!attachmentService) {
+            sendResponse({ success: false, error: 'AttachmentService not ready' });
+            return true;
+          }
+          const record = await attachmentService.get(id);
+          if (!record) {
+            sendResponse({ success: false, error: 'Attachment not found' });
+            return true;
+          }
+          // Encode the blob as base64 for transport.
+          const buf = await record.blob.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let bin = '';
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)) as number[]);
+          }
+          const base64 = btoa(bin);
+          sendResponse({
+            success: true,
+            meta: {
+              id: record.id,
+              filename: record.filename,
+              mimeType: record.mimeType,
+              size: record.size,
+              sessionId: record.sessionId,
+              userTurnId: record.userTurnId,
+              createdAt: record.createdAt,
+              updatedAt: record.updatedAt,
+            },
+            base64,
+          });
+        } catch (e) {
+          sendResponse({ success: false, error: getErrorMessage(e) });
+        }
+        return true;
+      }
+
+      case 'DELETE_ATTACHMENT': {
+        try {
+          const id = String((message.payload as { id?: string } | undefined)?.id ?? '');
+          if (!id) {
+            sendResponse({ success: false, error: 'Missing attachment id' });
+            return true;
+          }
+          const attachmentService = services.get('attachmentService') as
+            | import('./persistence/attachment-service.js').AttachmentService
+            | undefined;
+          if (!attachmentService) {
+            sendResponse({ success: false, error: 'AttachmentService not ready' });
+            return true;
+          }
+          const removed = await attachmentService.delete(id);
+          sendResponse({ success: true, removed });
+        } catch (e) {
           sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;

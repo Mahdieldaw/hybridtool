@@ -5,3 +5,4 @@ export * from './editorial';
 export * from './structural-fingerprint';
 export * from './contract';
 export * from './corpus-tree';
+export * from './attachment';

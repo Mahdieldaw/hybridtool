@@ -51,3 +51,22 @@ export const lastActivityAtAtom = atom<number>(0);
 export const historySessionsAtom = atomWithImmer<HistorySessionSummary[]>([]);
 export const isHistoryLoadingAtom = atom<boolean>(false);
 
+// -----------------------------
+// Attachments (composer-staged, pre-send)
+// -----------------------------
+export interface PendingAttachment {
+  /** Local-only id while uploading; replaced by backend id once the SW responds. */
+  clientId: string;
+  /** Backend attachment id once UPLOAD_ATTACHMENT resolves. */
+  id?: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  status: 'uploading' | 'stored' | 'failed';
+  error?: string;
+  /** Object URL for image previews. */
+  previewUrl?: string;
+}
+
+export const pendingAttachmentsAtom = atomWithImmer<PendingAttachment[]>([]);
+

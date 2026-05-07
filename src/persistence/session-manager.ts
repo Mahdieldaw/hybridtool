@@ -499,6 +499,9 @@ export class SessionManager {
 
     // 3) User turn
     const userText = request.userMessage || '';
+    const requestAttachmentIds = Array.isArray((request as { attachmentIds?: string[] }).attachmentIds)
+      ? (request as { attachmentIds?: string[] }).attachmentIds!.slice()
+      : undefined;
     const userTurnRecord: Record<string, unknown> = {
       id: userTurnId,
       type: 'user',
@@ -510,6 +513,7 @@ export class SessionManager {
       text: userText,
       content: userText,
       sequence: 0,
+      ...(requestAttachmentIds ? { attachmentIds: requestAttachmentIds } : {}),
     };
     await adapter.put('turns', userTurnRecord);
 
@@ -671,6 +675,9 @@ export class SessionManager {
 
     // 1) User turn
     const userText = request.userMessage || '';
+    const requestAttachmentIds = Array.isArray((request as { attachmentIds?: string[] }).attachmentIds)
+      ? (request as { attachmentIds?: string[] }).attachmentIds!.slice()
+      : undefined;
     const userTurnRecord: Record<string, unknown> = {
       id: userTurnId,
       type: 'user',
@@ -682,6 +689,7 @@ export class SessionManager {
       text: userText,
       content: userText,
       sequence: nextSequence,
+      ...(requestAttachmentIds ? { attachmentIds: requestAttachmentIds } : {}),
     };
     await adapter.put('turns', userTurnRecord);
 

@@ -4,6 +4,7 @@ export * from './types';
 export * from './database';
 export * from './transactions';
 export * from './session-manager';
+export { AttachmentService } from './attachment-service';
 
 import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from './database';
 import { SimpleIndexedDBAdapter } from './simple-indexeddb-adapter';

@@ -13,6 +13,7 @@ import {
   createProviderAuthError,
   normalizeError,
 } from '../errors/handler.js';
+import { detectAttachmentCapabilityStub } from './attachment-capability.js';
 
 const GEMINI_ADAPTER_DEBUG = false;
 const pad = (...args) => {
@@ -43,6 +44,15 @@ export class GeminiAdapter {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Runtime-aware attachment capability check. Gemini Apps support uploads but
+   * the surface differs from the Gemini Files API; we keep this as a stub
+   * until a DOM-driven uploader is implemented.
+   */
+  async detectAttachmentCapability(_ctx) {
+    return detectAttachmentCapabilityStub();
   }
 
   async sendPrompt(req, onChunk, signal, _isRetry = false) {

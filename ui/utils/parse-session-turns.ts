@@ -19,6 +19,8 @@ export function parseSessionTurns(fullSession: any): {
   fullSession.turns.forEach((round: any, turnIndex: number) => {
     // 1. Extract UserTurn
     if (round.user && round.user.text) {
+      const rawIds = round.user.attachmentIds;
+      const attachmentIds = Array.isArray(rawIds) ? rawIds.filter((s: unknown): s is string => typeof s === 'string') : undefined;
       const userTurn: UserTurn = {
         type: 'user',
         id: round.userTurnId || round.user.id || `user-${fullSession.sessionId}-${turnIndex}`,
@@ -26,6 +28,7 @@ export function parseSessionTurns(fullSession: any): {
         createdAt: round.user.createdAt || round.createdAt || Date.now(),
         sessionId: fullSession.sessionId,
         threadId: DEFAULT_THREAD,
+        ...(attachmentIds && attachmentIds.length ? { attachmentIds } : {}),
       };
       newIds.push(userTurn.id);
       newMap.set(userTurn.id, userTurn);
@@ -155,6 +158,9 @@ export function parseSessionTurns(fullSession: any): {
       }
       if (singularityRaw && Object.keys(singularityRaw).length > 0) {
         (aiTurn as any).singularityResponses = singularityRaw;
+      }
+      if (round.turnAttachmentState && typeof round.turnAttachmentState === 'object') {
+        (aiTurn as any).turnAttachmentState = round.turnAttachmentState;
       }
       newIds.push(aiTurn.id);
       newMap.set(aiTurn.id, aiTurn);

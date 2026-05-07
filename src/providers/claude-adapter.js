@@ -14,6 +14,7 @@ import {
   isNetworkError,
   normalizeError,
 } from '../errors/handler.js';
+import { detectAttachmentCapabilityStub } from './attachment-capability.js';
 
 // Provider-specific adapter debug flag (off by default)
 const CLAUDE_ADAPTER_DEBUG = false;
@@ -38,6 +39,14 @@ export class ClaudeAdapter {
    */
   async init() {
     return;
+  }
+
+  /**
+   * Runtime-aware attachment capability check. Stub today; real implementations
+   * should inspect the live Claude tab (model, plan, visible upload controls).
+   */
+  async detectAttachmentCapability(_ctx) {
+    return detectAttachmentCapabilityStub();
   }
 
   /**
