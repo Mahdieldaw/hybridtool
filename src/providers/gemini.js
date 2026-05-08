@@ -83,6 +83,15 @@ function getGeminiStreamTimeoutConfig() {
   };
 }
 
+function isGeminiTransientFailureText(text) {
+  const normalized = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  return normalized === 'sorry, something went wrong. please try your request again.';
+}
+
 // =============================================================================
 // GEMINI MODELS CONFIGURATION
 // =============================================================================
@@ -583,9 +592,10 @@ export class GeminiSessionApi {
     // If none found, fall back to any chunk that looks like a valid payload (has t[4]),
     // ignoring simple keep-alives.
 
-    // Pass 1: Look for text
+    // Pass 1: Look for text. Gemini can emit multiple textual frames while
+    // streaming; keep the longest cumulative frame instead of the first prefix.
     for (const L of parsedLines) {
-      const found = L.find((entry) => {
+      L.forEach((entry) => {
         try {
           if (typeof entry[2] !== 'string') return false;
           const t = JSON.parse(entry[2]);
@@ -595,7 +605,9 @@ export class GeminiSessionApi {
             const baseCursor = Array.isArray(t?.[1]) ? t[1] : [];
             const tail = t?.[4]?.[0]?.[0];
             const cursor = tail !== undefined ? [...baseCursor, tail] : baseCursor;
-            u = { text, cursor };
+            if (!u || (typeof text === 'string' && text.length >= (u.text?.length || 0))) {
+              u = { text, cursor };
+            }
             return true;
           }
           return false;
@@ -603,7 +615,6 @@ export class GeminiSessionApi {
           return false;
         }
       });
-      if (found) break;
     }
 
     // Pass 2: Fallback (if no text found) - look for any valid payload structure
@@ -734,6 +745,14 @@ export class GeminiSessionApi {
         status: response?.status || 'unknown',
         model: modelConfig.name,
       });
+
+    if (isGeminiTransientFailureText(u?.text)) {
+      this._throw('unknown', {
+        message: 'Gemini returned a transient failure message instead of an answer.',
+        providerText: u.text,
+        model: modelConfig.name,
+      });
+    }
 
     return {
       text: u && u.text ? u.text : '',

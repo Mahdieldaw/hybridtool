@@ -84,27 +84,44 @@ export function parseSessionTurns(fullSession: any): {
             ) as Record<string, ProviderResponse[]>)
           : undefined;
 
-      const batchPhaseFromLegacy =
-        !round.batch && batchResponses
+      const batchPhaseFromProviderResponses = batchResponses
+        ? {
+            responses: Object.fromEntries(
+              Object.entries(batchResponses).flatMap(([pid, arr]) => {
+                if ((arr as any[]).length === 0) return [];
+                const last = (arr as any[])[(arr as any[]).length - 1] as any;
+                return [
+                  [
+                    pid,
+                    {
+                      text: String(last?.text || ''),
+                      modelIndex: Number(last?.meta?.modelIndex || 0),
+                      status: last?.status || 'completed',
+                      meta: last?.meta,
+                    },
+                  ],
+                ];
+              })
+            ),
+            timestamp: round.completedAt || round.createdAt || Date.now(),
+          }
+        : undefined;
+
+      const batchPhase =
+        round.batch || batchPhaseFromProviderResponses
           ? {
-              responses: Object.fromEntries(
-                Object.entries(batchResponses).flatMap(([pid, arr]) => {
-                  if ((arr as any[]).length === 0) return [];
-                  const last = (arr as any[])[(arr as any[]).length - 1] as any;
-                  return [
-                    [
-                      pid,
-                      {
-                        text: String(last?.text || ''),
-                        modelIndex: Number(last?.meta?.modelIndex || 0),
-                        status: last?.status || 'completed',
-                        meta: last?.meta,
-                      },
-                    ],
-                  ];
-                })
-              ),
-              timestamp: round.completedAt || round.createdAt || Date.now(),
+              ...(round.batch || {}),
+              ...(batchPhaseFromProviderResponses || {}),
+              responses: {
+                ...((round.batch as any)?.responses || {}),
+                ...(batchPhaseFromProviderResponses?.responses || {}),
+              },
+              timestamp:
+                (round.batch as any)?.timestamp ||
+                batchPhaseFromProviderResponses?.timestamp ||
+                round.completedAt ||
+                round.createdAt ||
+                Date.now(),
             }
           : undefined;
 
@@ -135,11 +152,7 @@ export function parseSessionTurns(fullSession: any): {
         sessionId: fullSession.sessionId,
         threadId: DEFAULT_THREAD,
         createdAt: round.completedAt || round.createdAt || Date.now(),
-        ...(round.batch
-          ? { batch: round.batch }
-          : batchPhaseFromLegacy
-            ? { batch: batchPhaseFromLegacy }
-            : {}),
+        ...(batchPhase ? { batch: batchPhase } : {}),
         // Tier 3: mapping.artifact is ephemeral — not in history payload
         ...(round.singularity
           ? { singularity: round.singularity }

@@ -30,6 +30,32 @@ function getMessage(error: ErrorCandidate | null): string | undefined {
   return typeof error?.message === 'string' ? error.message : undefined;
 }
 
+const PROVIDER_NATIVE_AUTH_TYPES: Record<string, readonly string[]> = {
+  ChatGPTProviderError: ['login', 'badAccessToken'],
+  ClaudeProviderError: ['login'],
+  GeminiProviderError: ['login', 'badToken', 'noGeminiAccess'],
+  QwenProviderError: ['login'],
+};
+
+function isProviderNativeAuthError(error: ErrorCandidate | null): boolean {
+  const name = typeof error?.name === 'string' ? error.name : '';
+  const type = typeof error?.type === 'string' ? error.type : '';
+  if (!name || !type) return false;
+  return PROVIDER_NATIVE_AUTH_TYPES[name]?.includes(type) === true;
+}
+
+function getAuthText(error: ErrorCandidate | null): string | undefined {
+  const message = getMessage(error);
+  if (message && !PROVIDER_NATIVE_AUTH_TYPES[String(error?.name)]?.includes(message)) {
+    return message;
+  }
+  if (typeof error?.details === 'string') return error.details;
+  if (isRecord(error?.details) && typeof error.details.message === 'string') {
+    return error.details.message;
+  }
+  return message;
+}
+
 function getStatus(error: ErrorCandidate | null): number | null {
   if (!error) return null;
   const statusRaw =
@@ -78,6 +104,15 @@ export function classifyError(error: unknown): ProviderError {
     return {
       type: 'auth_expired',
       message: getMessage(e) || 'Authentication expired. Please log in again.',
+      retryable: false,
+      requiresReauth: true,
+    };
+  }
+
+  if (isProviderNativeAuthError(e)) {
+    return {
+      type: 'auth_expired',
+      message: getAuthText(e) || 'Authentication expired. Please log in again.',
       retryable: false,
       requiresReauth: true,
     };
@@ -213,7 +248,7 @@ export function classifyError(error: unknown): ProviderError {
     };
   }
 
-  const authMessage = typeof e?.message === 'string' ? e.message : null;
+  const authMessage = getAuthText(e) || null;
   if (authMessage && AUTH_ERROR_PATTERNS.some((p) => p.test(authMessage))) {
     return {
       type: 'auth_expired',
@@ -380,6 +415,7 @@ export function isProviderAuthError(error: unknown): boolean {
   const e = asErrorCandidate(error);
   if (e?.name === 'ProviderAuthError') return true;
   if (e?.code === 'AUTH_REQUIRED') return true;
+  if (isProviderNativeAuthError(e)) return true;
   const status = getStatus(e);
   if (status === 401 || status === 403) return true;
   return classifyError(error).type === 'auth_expired';
@@ -394,12 +430,13 @@ export function isDefinitiveAuthError(error: unknown): boolean {
   const e = asErrorCandidate(error);
   if (e?.name === 'ProviderAuthError') return true;
   if (e?.code === 'AUTH_REQUIRED') return true;
+  if (isProviderNativeAuthError(e)) return true;
 
   const status = getStatus(e);
   if (status === 401) return true;
   // 403 deliberately excluded — ambiguous
 
-  const message = typeof e?.message === 'string' ? e.message : String(error);
+  const message = getAuthText(e) || String(error);
   return AUTH_ERROR_PATTERNS.some((p) => p.test(message));
 }
 

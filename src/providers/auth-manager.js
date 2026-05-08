@@ -407,6 +407,16 @@ class AuthManager {
 
         this._verificationCache.delete(match.provider.split('-')[0]);
 
+        if (nowAuthed) {
+          try {
+            const providerIds = match.provider === 'gemini' ? GEMINI_VARIANTS : [match.provider];
+            const tracker = getHealthTracker();
+            for (const providerId of providerIds) {
+              tracker.clearAuthInvalid(providerId);
+            }
+          } catch (_) {}
+        }
+
         await chrome.storage.local.set({
           provider_auth_status: this._cookieStatus,
         });

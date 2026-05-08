@@ -317,7 +317,18 @@ export class ConnectionHandler {
           }
         : undefined;
 
-    const finalBatch = aiTurn['batch'] ?? batchPhase;
+    const embeddedBatch = aiTurn['batch'] as Record<string, unknown> | undefined;
+    const finalBatch =
+      embeddedBatch || batchPhase
+        ? {
+            ...(embeddedBatch || {}),
+            ...(batchPhase || {}),
+            responses: {
+              ...((embeddedBatch?.['responses'] as Record<string, unknown> | undefined) || {}),
+              ...(batchPhase?.responses || {}),
+            },
+          }
+        : undefined;
     const finalMapping = aiTurn['mapping'];
     const finalSingularity = aiTurn['singularity'];
 

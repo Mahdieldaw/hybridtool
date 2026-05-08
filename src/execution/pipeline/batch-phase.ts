@@ -34,6 +34,12 @@ const wdbg = (...args: any[]) => {
   if (WORKFLOW_DEBUG) console.log(...args);
 };
 
+const SETTLED_PROVIDER_STATUSES = new Set(['completed', 'failed', 'skipped']);
+
+export function countSettledProviderStatuses(providerStatuses: ProviderStatus[]): number {
+  return providerStatuses.filter((p) => SETTLED_PROVIDER_STATUSES.has(String(p.status))).length;
+}
+
 export async function executeBatchPhase(
   step: WorkflowStep, 
   context: WorkflowContext, 
@@ -104,7 +110,7 @@ export async function executeBatchPhase(
       aiTurnId: context.canonicalAiTurnId || 'unknown',
       phase: 'batch',
       providerStatuses,
-      completedCount: 0,
+      completedCount: countSettledProviderStatuses(providerStatuses),
       totalCount: providers.length,
     });
   } catch (err) { logInfraError('batch-phase/providerStatus: WORKFLOW_PROGRESS postMessage failed', err); }
@@ -156,7 +162,7 @@ export async function executeBatchPhase(
           aiTurnId: context.canonicalAiTurnId || 'unknown',
           phase: 'batch',
           providerStatuses,
-          completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+          completedCount: countSettledProviderStatuses(providerStatuses),
           totalCount: providerStatuses.length,
         });
       } catch (err) {
@@ -198,7 +204,7 @@ export async function executeBatchPhase(
               aiTurnId: context.canonicalAiTurnId || 'unknown',
               phase: 'batch',
               providerStatuses,
-              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+              completedCount: countSettledProviderStatuses(providerStatuses),
               totalCount: providers.length,
             });
           }
@@ -243,7 +249,7 @@ export async function executeBatchPhase(
               aiTurnId: context.canonicalAiTurnId || 'unknown',
               phase: 'batch',
               providerStatuses,
-              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+              completedCount: countSettledProviderStatuses(providerStatuses),
               totalCount: providers.length,
             });
           } catch (err) {
@@ -273,7 +279,7 @@ export async function executeBatchPhase(
               aiTurnId: context.canonicalAiTurnId || 'unknown',
               phase: 'batch',
               providerStatuses,
-              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+              completedCount: countSettledProviderStatuses(providerStatuses),
               totalCount: providers.length,
             });
           } catch (err) {
@@ -445,7 +451,7 @@ export async function executeBatchPhase(
         }
 
         try {
-          const completedCount = providerStatuses.filter((p) => p.status === 'completed').length;
+          const completedCount = countSettledProviderStatuses(providerStatuses);
           streamingManager.port.postMessage({
             type: 'WORKFLOW_PROGRESS',
             sessionId: context.sessionId,

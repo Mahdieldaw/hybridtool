@@ -604,11 +604,17 @@ export class ChatGPTSessionApi {
       });
       if (res.status === 429) this._throw('tooManyRequests');
       if (res.status === 403) this._throw('cloudflare');
+      if (res.status === 401) return null;
+      if (!res.ok) {
+        this._throw('network', `Access token fetch failed with status ${res.status}`);
+      }
       const j = await res.json().catch(() => ({}));
       this._accessToken = j?.accessToken || null;
       return this._accessToken;
     } catch (e) {
-      return null;
+      if (this.isOwnError(e)) throw e;
+      const message = e instanceof Error ? e.message : String(e);
+      this._throw('network', `Failed to retrieve ChatGPT access token: ${message}`);
     }
   }
 
@@ -669,6 +675,7 @@ export class ChatGPTSessionApi {
     }
 
     if (res.status === 401) {
+      this._accessToken = null;
       await this._ensureAccessToken();
       if (!this._accessToken) this._throw('badAccessToken');
       try {

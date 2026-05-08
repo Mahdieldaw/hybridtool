@@ -4,7 +4,7 @@
 
 > 0 routes | 0 models | 85 components | 124 lib files | 6 env vars | 4 middleware | 0% test coverage
 > **Token savings:** this file is ~11,100 tokens. Without it, AI exploration would cost ~70,800 tokens. **Saves ~59,700 tokens per conversation.**
-> **Last scanned:** 2026-05-06 16:12 — re-run after significant changes
+> **Last scanned:** 2026-05-08 09:38 — re-run after significant changes
 
 ---
 
@@ -240,7 +240,7 @@
 - `src\execution\io\persistence-coordinator.ts` — class PersistenceCoordinator
 - `src\execution\io\streaming-manager.ts` — class StreamingManager
 - `src\execution\io\turn-emitter.ts` — class TurnEmitter
-- `src\execution\pipeline\batch-phase.ts` — function executeBatchPhase: (step, context, options) => void
+- `src\execution\pipeline\batch-phase.ts` — function countSettledProviderStatuses: (providerStatuses) => number, function executeBatchPhase: (step, context, options) => void
 - `src\execution\pipeline\mapping-phase.ts` — function executeMappingPhase: (step, context, stepResults, workflowContexts, options) => void
 - `src\execution\pipeline\recompute-handler.ts` — function handleRecompute: (payload, options) => void
 - `src\execution\pipeline\singularity-phase.ts` — function runSingularityLLM: (step, context, options) => Promise<any>, function executeSingularityPhase: (request, context, stepResults, any>, _resolvedContext, currentUserMessage, options) => void
@@ -589,7 +589,7 @@
 - `shared\citation-utils.ts` — imported by **7** files
 - `src\errors\handler.ts` — imported by **7** files
 - `src\concierge-service\editorial-mapper.ts` — imported by **6** files
-- `src\persistence\types.ts` — imported by **6** files
+- `src\errors\classifier.ts` — imported by **6** files
 
 ## Import Map (who imports what)
 
@@ -609,7 +609,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 23 test files found
+> 28 test files found
 
 ---
 

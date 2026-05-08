@@ -5,10 +5,10 @@ node_modules/
 /dist
 
 # Build analysis
-
+*.mjs
 # Data and large files
 digest*txt
-
+*.md
 # Assets (Root level only, source assets in ui/assets/ are tracked)
 *.svg
 *.png
@@ -27,6 +27,7 @@ yarn-error.log*
 
 # System Files
 .DS_Store
+
 Thumbs.db
 
 docs/
@@ -45,8 +46,11 @@ index.css
 ui/styles/index.css
 ui/styles
 cleanup/
+scratch/
+.claude/worktrees/
 
-
+*.test.ts
+.json
 # Model files
 models/
 onnx/
@@ -56,5 +60,5 @@ oi.js
 
 *.spec.js
 *.spec.ts
-.txt
+*.txt
 ui/hooks/reading/useCorpusSearch.test.tsx

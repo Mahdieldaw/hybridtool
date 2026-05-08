@@ -140,7 +140,7 @@
 - `src\execution\io\persistence-coordinator.ts` — class PersistenceCoordinator
 - `src\execution\io\streaming-manager.ts` — class StreamingManager
 - `src\execution\io\turn-emitter.ts` — class TurnEmitter
-- `src\execution\pipeline\batch-phase.ts` — function executeBatchPhase: (step, context, options) => void
+- `src\execution\pipeline\batch-phase.ts` — function countSettledProviderStatuses: (providerStatuses) => number, function executeBatchPhase: (step, context, options) => void
 - `src\execution\pipeline\mapping-phase.ts` — function executeMappingPhase: (step, context, stepResults, workflowContexts, options) => void
 - `src\execution\pipeline\recompute-handler.ts` — function handleRecompute: (payload, options) => void
 - `src\execution\pipeline\singularity-phase.ts` — function runSingularityLLM: (step, context, options) => Promise<any>, function executeSingularityPhase: (request, context, stepResults, any>, _resolvedContext, currentUserMessage, options) => void

@@ -39,12 +39,12 @@
 - `src\execution\io\context-resolver.ts` — aggregateBatchOutputs, findLatestMappingOutput, extractUserMessage, ContextResolver
 - `src\execution\utils\reactive-bridge.ts` — buildReactiveBridge, buildReactiveBridgeCached, ReactiveBridge, StoredAnalysis
 - `src\execution\preflight-validator.ts` — getProviderUrl, createAuthErrorMessage, runPreflight
+- `src\execution\pipeline\batch-phase.ts` — countSettledProviderStatuses, executeBatchPhase
 - `src\execution\pipeline\singularity-phase.ts` — runSingularityLLM, executeSingularityPhase
 - `src\execution\io\context-manager.ts` — ContextManager
 - `src\execution\io\persistence-coordinator.ts` — PersistenceCoordinator
 - `src\execution\io\streaming-manager.ts` — StreamingManager
 - `src\execution\io\turn-emitter.ts` — TurnEmitter
-- `src\execution\pipeline\batch-phase.ts` — executeBatchPhase
 - `src\execution\pipeline\mapping-phase.ts` — executeMappingPhase
 - `src\execution\pipeline\recompute-handler.ts` — handleRecompute
 - `src\execution\utils\geometry-runner.ts` — buildGeometryAsync
