@@ -8,7 +8,7 @@ import {
   CardSection,
   InterpretiveCallout,
   StatRow,
-  LANDSCAPE_LABELS,
+  CLAIM_ROLE_LABELS,
   SelectedEntity,
 } from './CardBase';
 import { getParagraphsForClaim } from '../../../shared/corpus-utils';
@@ -120,12 +120,12 @@ export function SubstrateSnapshotCard({
   }, [basins, regions, nodes]);
 
   // ── Semantic shape ──
-  const { landscapeCounts, mapperRan, validationRate } = useMemo(() => {
+  const { roleCounts, mapperRan, validationRate } = useMemo(() => {
     const claimProfiles = artifact?.passageRouting?.claimProfiles ?? {};
-    const counts = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
+    const counts = { anchor: 0, supporting: 0, mechanism: 0, passthrough: 0 };
     for (const [, profile] of Object.entries(claimProfiles) as Array<[string, any]>) {
-      const pos = profile?.landscapePosition;
-      if (pos && pos in counts) counts[pos as keyof typeof counts]++;
+      const role = profile?.claimStatus?.role;
+      if (role && role in counts) counts[role as keyof typeof counts]++;
     }
     const ran = claims.length > 0;
     const validatedConflicts = safeArr(artifact?.conflictValidation);
@@ -136,7 +136,7 @@ export function SubstrateSnapshotCard({
       if (c?.mapperLabeledConflict && c?.validated) both++;
     }
     return {
-      landscapeCounts: counts,
+      roleCounts: counts,
       mapperRan: ran,
       validationRate: ml > 0 ? both / ml : null,
     };
@@ -318,13 +318,13 @@ export function SubstrateSnapshotCard({
               )}
             </div>
             <div>
-              {(['northStar', 'leadMinority', 'mechanism', 'floor'] as const)
-                .filter((k) => landscapeCounts[k] > 0)
+              {(['anchor', 'supporting', 'mechanism', 'passthrough'] as const)
+                .filter((k) => roleCounts[k] > 0)
                 .map((k) => (
                   <StatRow
                     key={k}
-                    label={LANDSCAPE_LABELS[k]}
-                    value={fmtInt(landscapeCounts[k])}
+                    label={CLAIM_ROLE_LABELS[k]}
+                    value={fmtInt(roleCounts[k])}
                   />
                 ))}
             </div>

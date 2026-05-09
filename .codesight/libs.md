@@ -221,7 +221,10 @@
   - _...1 more_
 - `src\persistence\schema-verification.ts` — function verifySchemaAndRepair: (autoRepair) => Promise<, interface SchemaHealth
 - `src\persistence\session-manager.ts` — class SessionManager
-- `src\persistence\simple-indexeddb-adapter.ts` — class SimpleIndexedDBAdapter, interface SimpleRecord
+- `src\persistence\simple-indexeddb-adapter.ts`
+  - function stripDeprecatedPassageRoutingFieldsForRead: (record) => T
+  - class SimpleIndexedDBAdapter
+  - interface SimpleRecord
 - `src\persistence\transactions.ts`
   - function withTransaction: (db, storeNames, mode, work) => void
   - function batchWrite: (db, storeName, records) => Promise<BatchWriteResult>

@@ -245,7 +245,7 @@ export const BUILT_IN_COLUMNS: ColumnDef[] = [
     sortable: true,
     groupable: false,
     description:
-      'Cosine similarity between claim centroid and query embedding. Lower = claim introduces concepts far from what user asked about.',
+      'Diagnostic query distance: 1 - cosine similarity between claim centroid and query embedding. It does not steer primary route ordering.',
     source: 'built-in',
     category: 'blast',
   },

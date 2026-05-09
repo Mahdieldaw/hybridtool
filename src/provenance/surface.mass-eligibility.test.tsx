@@ -13,12 +13,10 @@ function makeProfile(
     paragraphCount: 1,
     passageCount: 0,
     maxPassageLength: 1,
-    meanCoverageInLongestRun: 0.25,
     modelSpread: 1,
     modelsWithPassages: 0,
     totalClaimStatements: 1,
     presenceMass: 99,
-    meanCoverage: 0.25,
     presenceVector: [{ paragraphId: 'p1', value: 0.25 }],
     footprint: makeFootprint('c1', [
       {
@@ -85,6 +83,7 @@ function makeFootprint(
     sharedTerritorialMass?: number;
     sovereignStatementCount: number;
     sharedStatementCount?: number;
+    totalStatementMass?: number;
     contested?: boolean;
     dominant?: boolean;
   }>
@@ -98,6 +97,11 @@ function makeFootprint(
     sharedTerritorialMass: p.sharedTerritorialMass ?? 0,
     sovereignStatementCount: p.sovereignStatementCount,
     sharedStatementCount: p.sharedStatementCount ?? 0,
+    totalStatementMass: p.totalStatementMass ?? p.claimPresenceCount,
+    paragraphTerritoryShare:
+      (p.totalStatementMass ?? p.claimPresenceCount) > 0
+        ? p.territorialMass / (p.totalStatementMass ?? p.claimPresenceCount)
+        : null,
     contested: p.contested ?? (p.sharedStatementCount ?? 0) > 0,
     dominant: p.dominant ?? true,
   }));
@@ -257,10 +261,8 @@ describe('surface mass eligibility', () => {
       'MAJ'
     );
     expect(routing.routePlan.includedClaimIds).toEqual(['c1']);
-    expect(routing.routedClaimIds).toEqual(routing.routePlan.includedClaimIds);
-    expect(routing.loadBearingClaims.map((claim) => claim.claimId)).toEqual(
-      routing.routePlan.includedClaimIds
-    );
+    expect(routing).not.toHaveProperty('routedClaimIds');
+    expect(routing).not.toHaveProperty('loadBearingClaims');
   });
 
   test('zero canonical presence mass is not footprint-eligible even if legacy coverage is high', () => {
@@ -290,8 +292,8 @@ describe('surface mass eligibility', () => {
     ]);
     expect(result.passageRoutingResult.routing.routePlan.includedClaimIds).toEqual([]);
     expect(result.passageRoutingResult.routing.routePlan.nonPrimaryClaimIds).toEqual(['c1']);
-    expect(result.passageRoutingResult.routing.passthrough).toEqual(['c1']);
-    expect(result.passageRoutingResult.routing.diagnostics.floorCount).toBe(1);
+    expect(result.passageRoutingResult.routing).not.toHaveProperty('passthrough');
+    expect(result.passageRoutingResult.routing.diagnostics).not.toHaveProperty('floorCount');
   });
 
   test('routes expose replacement scalar fields and do not guard deprecated scalar reads', () => {
@@ -299,7 +301,6 @@ describe('surface mass eligibility', () => {
       makeProfile({
         paragraphCount: 2,
         maxPassageLength: 4,
-        meanCoverageInLongestRun: 0.2,
         footprint: makeFootprint('c1', [
           {
             paragraphId: 'p1',
@@ -361,13 +362,18 @@ describe('surface mass eligibility', () => {
       })
     );
     const profile = result.passageRoutingResult.claimProfiles.c1;
-    const routed = result.passageRoutingResult.routing.loadBearingClaims[0];
     const scalarDiagnostic = result.passageRoutingResult.routing.diagnostics.scalarMigration[0];
 
     expect(profile.contestedShareRatio).toBe(0.5);
     expect(profile.dominantPresenceShare).toBe(0.8);
     expect(profile.dominantPassageShare).toBeCloseTo(4 / 6);
     expect(profile.maxStatementRun).toBe(4);
+    expect(profile).not.toHaveProperty('concentrationRatio');
+    expect(profile).not.toHaveProperty('densityRatio');
+    expect(profile).not.toHaveProperty('meanCoverageInLongestRun');
+    expect(profile).not.toHaveProperty('structuralContributors');
+    expect(profile).not.toHaveProperty('incidentalMentions');
+    expect(profile.routingMeasurements).not.toHaveProperty('contestedDominance');
     expect((profile as any).claimPresenceCount).toBe(5);
     expect((profile as any).paragraphPresenceCount).toBe(2);
     expect((profile as any).contestedParagraphCount).toBe(0);
@@ -384,24 +390,18 @@ describe('surface mass eligibility', () => {
         maxStatementRun: 4,
       })
     );
-    expect(routed).toEqual(
-      expect.objectContaining({
-        contestedShareRatio: 0.5,
-        dominantPresenceShare: 0.8,
-        dominantPassageShare: expect.any(Number),
-        maxStatementRun: 4,
-      })
-    );
+    expect(result.passageRoutingResult.routing).not.toHaveProperty('loadBearingClaims');
     expect(scalarDiagnostic).toEqual(
       expect.objectContaining({
-        legacyContestedDominance: 2,
         contestedShareRatio: 0.5,
         dominantPresenceShare: 0.8,
-        legacyMeanCoverageInLongestRun: 0.2,
         maxStatementRun: 4,
       })
     );
-    expect(scalarDiagnostic.legacyConcentrationRatio).toBeCloseTo(1 / 1.1);
+    expect(scalarDiagnostic).not.toHaveProperty('legacyContestedDominance');
+    expect(scalarDiagnostic).not.toHaveProperty('legacyConcentrationRatio');
+    expect(scalarDiagnostic).not.toHaveProperty('legacyDensityRatio');
+    expect(scalarDiagnostic).not.toHaveProperty('legacyMeanCoverageInLongestRun');
     expect(
       result.passageRoutingResult.routing.diagnostics.measurementGuardViolations?.map(
         (violation) => violation.key
@@ -416,7 +416,7 @@ describe('surface mass eligibility', () => {
     );
   });
 
-  test('routePlan, compatibility fields, and counts are structurally derived', () => {
+  test('routePlan and claimStatus replace deprecated route mirrors', () => {
     const c1 = makeProfile({
       claimId: 'c1',
       footprint: makeFootprint('c1', [
@@ -483,20 +483,16 @@ describe('surface mass eligibility', () => {
     expect(routing.routePlan.includedClaimIds).toEqual(routing.routePlan.orderedClaimIds);
     expect(routing.routePlan.includedClaimIds).toEqual(expect.arrayContaining(['c1', 'c2']));
     expect(routing.routePlan.nonPrimaryClaimIds).toEqual(['c3']);
-    expect(routing.loadBearingClaims.map((claim) => claim.claimId)).toEqual(
-      routing.routePlan.includedClaimIds
-    );
-    expect(routing.routedClaimIds).toEqual(routing.routePlan.includedClaimIds);
-    expect(routing.passthrough).toEqual(routing.routePlan.nonPrimaryClaimIds);
-    expect(routing.diagnostics.floorCount).toBe(routing.routePlan.nonPrimaryClaimIds.length);
+    expect(routing).not.toHaveProperty('loadBearingClaims');
+    expect(routing).not.toHaveProperty('routedClaimIds');
+    expect(routing).not.toHaveProperty('passthrough');
+    expect(routing).not.toHaveProperty('legacyCompatibility');
+    expect(routing.diagnostics).not.toHaveProperty('floorCount');
     expect(JSON.stringify(routing.routePlan)).not.toMatch(
       /northStar|eastStar|mechanism|floor|leadMinority|landscapePosition/
     );
-    expect(routing.legacyCompatibility.landscapePositionByClaim).toEqual(
-      expect.objectContaining({
-        c3: 'floor',
-      })
-    );
+    expect(result.passageRoutingResult.claimProfiles.c3.claimStatus.role).toBe('passthrough');
+    expect(result.passageRoutingResult.claimProfiles.c3).not.toHaveProperty('landscapePosition');
     expect(routing.diagnostics.labelExcision).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -519,10 +515,179 @@ describe('surface mass eligibility', () => {
     expect(routing.routePlan).not.toHaveProperty('projectedLandscapePosition');
     expect(routing.routePlan).not.toHaveProperty('isRouted');
     expect(routing.routePlan).not.toHaveProperty('isPassthrough');
+  });
 
-    for (const profile of Object.values(result.passageRoutingResult.claimProfiles) as any[]) {
-      delete profile.landscapePosition;
-    }
-    expect(routing.routePlan.includedClaimIds).toEqual(routing.routedClaimIds);
+  test('continuous dominance strength orders equally dominant claims', () => {
+    const strongDominance = makeProfile({
+      claimId: 'strong',
+      paragraphCount: 1,
+      maxPassageLength: 2,
+      footprint: makeFootprint('strong', [
+        {
+          paragraphId: 'p1',
+          modelIndex: 0,
+          paragraphIndex: 0,
+          claimPresenceCount: 9,
+          territorialMass: 9,
+          sovereignStatementCount: 9,
+          totalStatementMass: 10,
+          dominant: true,
+        },
+      ]),
+      statementPassages: [
+        {
+          modelIndex: 0,
+          statementIds: ['s1', 's2'],
+          statementLength: 2,
+          startParagraphIndex: 0,
+          endParagraphIndex: 0,
+          avgCoverage: 0.9,
+          spanParagraphCount: 1,
+        },
+      ],
+    });
+    const weakDominance = makeProfile({
+      claimId: 'weak',
+      paragraphCount: 1,
+      maxPassageLength: 2,
+      footprint: makeFootprint('weak', [
+        {
+          paragraphId: 'p2',
+          modelIndex: 1,
+          paragraphIndex: 1,
+          claimPresenceCount: 13,
+          territorialMass: 13,
+          sovereignStatementCount: 13,
+          totalStatementMass: 20,
+          dominant: true,
+        },
+      ]),
+      statementPassages: [
+        {
+          modelIndex: 1,
+          statementIds: ['s3', 's4'],
+          statementLength: 2,
+          startParagraphIndex: 1,
+          endParagraphIndex: 1,
+          avgCoverage: 0.65,
+          spanParagraphCount: 1,
+        },
+      ],
+    });
+
+    const result = runSurfaceWithProfiles(
+      { strong: strongDominance, weak: weakDominance },
+      [
+        { id: 'strong', label: 'Strong', text: 'Strong claim', supporters: [0] },
+        { id: 'weak', label: 'Weak', text: 'Weak claim', supporters: [1] },
+      ]
+    );
+    const inputs = result.passageRoutingResult.routing.routePlan.structuralInputsByClaim as any;
+
+    expect(inputs.strong.dominantParagraphCount).toBe(1);
+    expect(inputs.weak.dominantParagraphCount).toBe(1);
+    expect(inputs.strong.dominanceStrengthMean).toBeCloseTo(0.9);
+    expect(inputs.weak.dominanceStrengthMean).toBeCloseTo(0.65);
+    expect(inputs.strong.dominanceExcessShare).toBeGreaterThan(
+      inputs.weak.dominanceExcessShare
+    );
+    expect(result.passageRoutingResult.routing.routePlan.includedClaimIds.slice(0, 2)).toEqual([
+      'strong',
+      'weak',
+    ]);
+  });
+
+  test('global sovereign share uses total claim territory as denominator', () => {
+    const c1 = makeProfile({
+      claimId: 'c1',
+      footprint: makeFootprint('c1', [
+        {
+          paragraphId: 'p1',
+          claimPresenceCount: 3,
+          territorialMass: 3,
+          sharedTerritorialMass: 1,
+          sovereignStatementCount: 2,
+          sharedStatementCount: 2,
+          totalStatementMass: 4,
+        },
+      ]),
+    });
+    const c2 = makeProfile({
+      claimId: 'c2',
+      footprint: makeFootprint('c2', [
+        {
+          paragraphId: 'p2',
+          claimPresenceCount: 1,
+          territorialMass: 1,
+          sovereignStatementCount: 1,
+          totalStatementMass: 4,
+        },
+      ]),
+    });
+
+    const result = runSurfaceWithProfiles(
+      { c1, c2 },
+      [
+        { id: 'c1', label: 'Claim 1', text: 'Claim text', supporters: [0] },
+        { id: 'c2', label: 'Claim 2', text: 'Claim text', supporters: [1] },
+      ]
+    );
+    const c1Inputs = result.passageRoutingResult.routing.routePlan
+      .structuralInputsByClaim.c1 as any;
+
+    expect(c1Inputs.sovereignTerritoryMass).toBe(2);
+    expect(c1Inputs.globalSovereignTerritoryShare).toBeCloseTo(2 / 4);
+    expect(c1Inputs.globalTerritoryShare).toBeCloseTo(3 / 4);
+    expect(c1Inputs.globalSovereignTerritoryShare).not.toBeCloseTo(2 / 2);
+  });
+
+  test('query distance remains diagnostic and does not steer route ordering', () => {
+    const structurallyStrong = makeProfile({
+      claimId: 'structural',
+      maxPassageLength: 2,
+      queryDistance: 1,
+      footprint: makeFootprint('structural', [
+        {
+          paragraphId: 'p1',
+          claimPresenceCount: 9,
+          territorialMass: 9,
+          sovereignStatementCount: 9,
+          totalStatementMass: 10,
+        },
+      ]),
+    });
+    const queryNear = makeProfile({
+      claimId: 'near',
+      maxPassageLength: 2,
+      queryDistance: 0,
+      footprint: makeFootprint('near', [
+        {
+          paragraphId: 'p2',
+          claimPresenceCount: 13,
+          territorialMass: 13,
+          sovereignStatementCount: 13,
+          totalStatementMass: 20,
+        },
+      ]),
+    });
+
+    const result = runSurfaceWithProfiles(
+      { structural: structurallyStrong, near: queryNear },
+      [
+        { id: 'structural', label: 'Structural', text: 'Structural claim', supporters: [0] },
+        { id: 'near', label: 'Query near', text: 'Query-near claim', supporters: [1] },
+      ]
+    );
+    const structuralInputs = result.passageRoutingResult.routing.routePlan
+      .structuralInputsByClaim as any;
+
+    expect(structuralInputs.structural.queryDistance).toBeUndefined();
+    expect(structuralInputs.near.queryDistance).toBeUndefined();
+    expect(result.passageRoutingResult.claimProfiles.structural.queryDistance).toBe(1);
+    expect(result.passageRoutingResult.claimProfiles.near.queryDistance).toBe(0);
+    expect(result.passageRoutingResult.routing.routePlan.includedClaimIds.slice(0, 2)).toEqual([
+      'structural',
+      'near',
+    ]);
   });
 });

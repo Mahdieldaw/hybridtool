@@ -29,7 +29,6 @@ export interface EnrichmentResult {
 export interface QueryRelevanceStatementScore {
   querySimilarity: number; // [-1,1] raw cosine (CANONICAL for pipeline decisions)
   querySimilarityNormalized: number; // [0,1] (cos+1)/2 — for UI display only
-  simRaw: number; // [-1,1] deprecated alias for querySimilarity
   embeddingSource: 'statement' | 'paragraph' | 'none';
   paragraphSimRaw: number; // [-1,1] raw cosine at paragraph level
 }
@@ -156,15 +155,13 @@ export function computeQueryRelevance(input: {
         ? 'paragraph'
         : 'none';
 
-    const simRaw = emb ? cosineSimilarity(queryEmbedding, emb) : 0;
-    const querySimilarity = simRaw;
-    const querySimilarityNormalized = clamp01((simRaw + 1) / 2);
+    const querySimilarity = emb ? cosineSimilarity(queryEmbedding, emb) : 0;
+    const querySimilarityNormalized = clamp01((querySimilarity + 1) / 2);
     const paragraphSimRaw = paraEmb ? cosineSimilarity(queryEmbedding, paraEmb) : 0;
 
     statementScores.set(st.id, {
       querySimilarity,
       querySimilarityNormalized,
-      simRaw,
       embeddingSource,
       paragraphSimRaw,
     });

@@ -890,6 +890,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
               ? pausedMsg.failedProviderIds.map((p: any) => String(p))
               : [];
 
+            streamingBufferRef.current?.flushImmediate?.();
             setIsLoading(false);
             setUiPhase('paused');
             setLastActivityAt(Date.now());

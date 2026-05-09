@@ -12,6 +12,86 @@ export interface SimpleRecord {
   [key: string]: any;
 }
 
+const isRecordLike = (value: unknown): value is Record<string, any> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+function stripPassageRoutingResult(passageRouting: unknown): void {
+  if (!isRecordLike(passageRouting)) return;
+
+  const claimProfiles = passageRouting['claimProfiles'];
+  if (isRecordLike(claimProfiles)) {
+    for (const profile of Object.values(claimProfiles)) {
+      if (isRecordLike(profile)) {
+        delete profile['landscapePosition'];
+        delete profile['concentrationRatio'];
+        delete profile['densityRatio'];
+        delete profile['meanCoverageInLongestRun'];
+        delete profile['structuralContributors'];
+        delete profile['incidentalMentions'];
+        const routingMeasurements = profile['routingMeasurements'];
+        if (isRecordLike(routingMeasurements)) {
+          delete routingMeasurements['contestedDominance'];
+        }
+      }
+    }
+  }
+
+  const routing = passageRouting['routing'];
+  if (!isRecordLike(routing)) return;
+
+  delete routing['legacyCompatibility'];
+  delete routing['loadBearingClaims'];
+  delete routing['passthrough'];
+  delete routing['routedClaimIds'];
+
+  const diagnostics = routing['diagnostics'];
+  if (isRecordLike(diagnostics)) {
+    delete diagnostics['floorCount'];
+    delete diagnostics['concentrationDistribution'];
+    delete diagnostics['densityRatioDistribution'];
+    const scalarMigration = diagnostics['scalarMigration'];
+    if (Array.isArray(scalarMigration)) {
+      for (const entry of scalarMigration) {
+        if (!isRecordLike(entry)) continue;
+        delete entry['legacyContestedDominance'];
+        delete entry['legacyConcentrationRatio'];
+        delete entry['legacyDensityRatio'];
+        delete entry['legacyMeanCoverageInLongestRun'];
+        delete entry['legacyMinorityBucket'];
+        delete entry['legacyWouldFloorByScalarBucket'];
+      }
+    }
+  }
+}
+
+function stripClaimDensityResult(claimDensity: unknown): void {
+  if (!isRecordLike(claimDensity)) return;
+  const profiles = claimDensity['profiles'];
+  if (!isRecordLike(profiles)) return;
+  for (const profile of Object.values(profiles)) {
+    if (!isRecordLike(profile)) continue;
+    delete profile['meanCoverage'];
+    delete profile['meanCoverageInLongestRun'];
+  }
+}
+
+function stripArtifactContainer(value: unknown): void {
+  if (!isRecordLike(value)) return;
+  stripPassageRoutingResult(value['passageRouting']);
+  stripClaimDensityResult(value['claimDensity']);
+}
+
+export function stripDeprecatedPassageRoutingFieldsForRead<T>(record: T): T {
+  if (!isRecordLike(record)) return record;
+
+  stripArtifactContainer(record);
+  stripArtifactContainer(record['artifact']);
+  stripArtifactContainer(record['mapping']);
+  stripArtifactContainer(record['singularity']);
+
+  return record;
+}
+
 /**
  * Simplified IndexedDB adapter with minimal API surface
  */
@@ -102,7 +182,7 @@ export class SimpleIndexedDBAdapter {
         });
       });
 
-      return result;
+      return stripDeprecatedPassageRoutingFieldsForRead(result);
     } catch (error) {
       console.error(`persistence:get(${resolved}, ${key}) - error:`, error);
       throw error;
@@ -317,7 +397,7 @@ export class SimpleIndexedDBAdapter {
         });
       });
 
-      return result;
+      return result.map((record) => stripDeprecatedPassageRoutingFieldsForRead(record));
     } catch (error) {
       console.error(`persistence:getAll(${resolved}) - error:`, error);
       throw error;
@@ -351,7 +431,7 @@ export class SimpleIndexedDBAdapter {
           request.onerror = () => reject(request.error);
         });
       });
-      return result;
+      return result.map((record) => stripDeprecatedPassageRoutingFieldsForRead(record));
     } catch (error) {
       console.error(`persistence:getByIndex(${resolved}.${indexName}) - error:`, error);
       throw error;

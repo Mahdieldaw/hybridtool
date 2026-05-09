@@ -80,18 +80,18 @@ export function safeObj(v: any): Record<string, any> {
 // CONSTANTS
 // ============================================================================
 
-export const LANDSCAPE_COLORS: Record<string, string> = {
-  northStar: 'text-yellow-400',
-  leadMinority: 'text-blue-400',
+export const CLAIM_ROLE_COLORS: Record<string, string> = {
+  anchor: 'text-yellow-400',
+  supporting: 'text-blue-400',
   mechanism: 'text-green-400',
-  floor: 'text-text-muted',
+  passthrough: 'text-text-muted',
 };
 
-export const LANDSCAPE_LABELS: Record<string, string> = {
-  northStar: 'North Star',
-  leadMinority: 'Lead Minority',
+export const CLAIM_ROLE_LABELS: Record<string, string> = {
+  anchor: 'Anchor',
+  supporting: 'Supporting',
   mechanism: 'Mechanism',
-  floor: 'Floor',
+  passthrough: 'Passthrough',
 };
 
 // ============================================================================

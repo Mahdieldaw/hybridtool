@@ -18,12 +18,10 @@ function makeProfile(overrides: Partial<ClaimDensityProfile> = {}): ClaimDensity
     paragraphCount: 1,
     passageCount: 1,
     maxPassageLength: 3,
-    meanCoverageInLongestRun: 1,
     modelSpread: 1,
     modelsWithPassages: 1,
     totalClaimStatements: 3,
     presenceMass: 3,
-    meanCoverage: 1,
     presenceVector: [{ paragraphId: 'p1', value: 3 }],
     footprint: {
       schemaVersion: 2,
@@ -35,7 +33,9 @@ function makeProfile(overrides: Partial<ClaimDensityProfile> = {}): ClaimDensity
             modelIndex: 0,
             paragraphIndex: 0,
             claimPresenceCount: 3,
+            totalStatementMass: 3,
             territorialMass: 3,
+            paragraphTerritoryShare: 1,
             sharedTerritorialMass: 0,
             sovereignStatementCount: 3,
             sharedStatementCount: 0,
@@ -160,35 +160,37 @@ describe('Phase 4 label excision', () => {
       orderingReasonsByClaim: expect.any(Object),
       structuralInputsByClaim: expect.any(Object),
     });
-    expect(routing.routedClaimIds).toEqual(routing.routePlan.includedClaimIds);
-    expect(routing.passthrough).toEqual(routing.routePlan.nonPrimaryClaimIds);
-    expect(routing.diagnostics.floorCount).toBe(routing.routePlan.nonPrimaryClaimIds.length);
-    expect(routing.loadBearingClaims.map((claim) => claim.claimId)).toEqual(
-      routing.routePlan.includedClaimIds
-    );
+    expect(routing).not.toHaveProperty('routedClaimIds');
+    expect(routing).not.toHaveProperty('passthrough');
+    expect(routing).not.toHaveProperty('loadBearingClaims');
+    expect(routing.diagnostics).not.toHaveProperty('floorCount');
     expect(JSON.stringify(routing.routePlan)).not.toMatch(
       /northStar|eastStar|mechanism|floor|leadMinority|policyPosition|passthroughRole|routedStatus|primaryRole/
     );
   });
 
-  test('legacy labels are emitted only in legacyCompatibility and not guard-collected', () => {
+  test('claim status replaces legacy landscape compatibility outputs', () => {
     const result = runSurface({ c1: makeProfile() });
     const routing = result.passageRoutingResult.routing;
 
-    expect(routing.legacyCompatibility.landscapePositionByClaim).toEqual({
-      c1: 'northStar',
-      c2: 'floor',
+    expect(routing).not.toHaveProperty('legacyCompatibility');
+    expect(result.passageRoutingResult.claimProfiles.c1.claimStatus).toEqual({
+      routeRank: 1,
+      role: 'anchor',
     });
+    expect(result.passageRoutingResult.claimProfiles.c2.claimStatus).toEqual({
+      routeRank: null,
+      role: 'passthrough',
+    });
+    expect(result.passageRoutingResult.claimProfiles.c1).not.toHaveProperty('landscapePosition');
     expect(routing.diagnostics.labelExcision).toEqual([
       expect.objectContaining({
         claimId: 'c1',
-        oldLegacyLandscapePosition: 'northStar',
         newRoutePlanInclusion: true,
         routeOrderIndex: 0,
       }),
       expect.objectContaining({
         claimId: 'c2',
-        oldLegacyLandscapePosition: 'floor',
         newRoutePlanInclusion: false,
         routeOrderIndex: null,
       }),
@@ -212,6 +214,7 @@ describe('Phase 4 label excision', () => {
         text: 'Evidence text.',
         routeOrderIndex: 0,
         routeIncluded: true,
+        claimStatus: { routeRank: 1, role: 'anchor' },
         routeOrderingReasons: ['claimPresenceCount=3'],
         claimPresenceCount: 3,
         sovereignStatementCount: 3,

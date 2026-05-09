@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
-import type { LandscapePosition } from '../../reading/styles';
+import type { ClaimStatus } from '../../../shared/types';
 import type { CorpusIndex } from '../../../shared/types/corpus-tree';
 import { resolveModelDisplayName } from '../../../shared/citation-utils';
+
+const PASSTHROUGH_STATUS: ClaimStatus = { routeRank: null, role: 'passthrough' };
 
 export interface ResolvedPassage {
   kind: 'passage';
@@ -12,9 +14,9 @@ export interface ResolvedPassage {
   claimId: string;
   claimLabel: string;
   paragraphCount: number;
-  concentrationRatio: number;
-  densityRatio: number;
-  landscapePosition: LandscapePosition;
+  dominantPresenceShare: number;
+  dominantPassageShare: number;
+  claimStatus: ClaimStatus;
   conflictClusterIndex: number | null;
 }
 
@@ -153,9 +155,9 @@ export function usePassageResolver(
         claimId,
         claimLabel: claimLabels.get(claimId) || claimId,
         paragraphCount: passageEntry.spanParagraphCount,
-        concentrationRatio: rp?.concentrationRatio ?? 0,
-        densityRatio: rp?.densityRatio ?? 0,
-        landscapePosition: rp?.landscapePosition ?? 'floor',
+        dominantPresenceShare: rp?.dominantPresenceShare ?? 0,
+        dominantPassageShare: rp?.dominantPassageShare ?? 0,
+        claimStatus: rp?.claimStatus ?? PASSTHROUGH_STATUS,
         conflictClusterIndex: claimToClusterIndex.get(claimId) ?? null,
       };
     };

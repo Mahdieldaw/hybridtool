@@ -7,8 +7,8 @@ import {
   safeArr,
   CardSection,
   SortableTable,
-  LANDSCAPE_COLORS,
-  LANDSCAPE_LABELS,
+  CLAIM_ROLE_COLORS,
+  CLAIM_ROLE_LABELS,
 } from './CardBase';
 import { getArtifactParagraphs } from '../../../shared/corpus-utils';
 
@@ -58,7 +58,6 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       modelSpread: p.modelSpread ?? 0,
       modelsWithPassages: p.modelsWithPassages ?? 0,
       totalClaimStatements: p.totalClaimStatements ?? 0,
-      meanCoverage: p.meanCoverage ?? 0,
       queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
     }));
   }, [profiles, claimLabelById]);
@@ -115,7 +114,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       }));
   }, [selectedProfile, artifact]);
 
-  // --- Passage routing rows & position counts ---
+  // --- Passage routing rows & role counts ---
   const prRows = useMemo(() => {
     return Object.values(prClaimProfiles).map((p: any) => {
       const rm = p.routingMeasurements ?? null;
@@ -123,11 +122,20 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
       return {
         id: String(p.claimId ?? ''),
         label: claimLabelById.get(String(p.claimId ?? '')) ?? String(p.claimId ?? ''),
-        position: String(p.landscapePosition ?? 'floor'),
-        concentration: typeof p.concentrationRatio === 'number' ? p.concentrationRatio : 0,
-        density: typeof p.densityRatio === 'number' ? p.densityRatio : 0,
-        meanCoverageInLongestRun:
-          typeof p.meanCoverageInLongestRun === 'number' ? p.meanCoverageInLongestRun : 0,
+        role: String(p.claimStatus?.role ?? 'passthrough'),
+        routeRank: p.claimStatus?.routeRank ?? null,
+        dominantPresenceShare:
+          typeof p.dominantPresenceShare === 'number'
+            ? p.dominantPresenceShare
+            : typeof rm?.dominantPresenceShare === 'number'
+              ? rm.dominantPresenceShare
+              : 0,
+        dominantPassageShare:
+          typeof p.dominantPassageShare === 'number'
+            ? p.dominantPassageShare
+            : typeof rm?.dominantPassageShare === 'number'
+              ? rm.dominantPassageShare
+              : 0,
         claimPresenceCount:
           typeof p.claimPresenceCount === 'number'
             ? p.claimPresenceCount
@@ -144,14 +152,66 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
               : null,
         dominantParagraphCount:
           typeof p.dominantParagraphCount === 'number' ? p.dominantParagraphCount : null,
+        globalTerritoryShare:
+          typeof p.globalTerritoryShare === 'number'
+            ? p.globalTerritoryShare
+            : typeof rm?.globalTerritoryShare === 'number'
+              ? rm.globalTerritoryShare
+              : 0,
+        globalSovereignTerritoryShare:
+          typeof p.globalSovereignTerritoryShare === 'number'
+            ? p.globalSovereignTerritoryShare
+            : typeof rm?.globalSovereignTerritoryShare === 'number'
+              ? rm.globalSovereignTerritoryShare
+              : 0,
+        sovereignPurity:
+          typeof p.sovereignPurity === 'number'
+            ? p.sovereignPurity
+            : typeof rm?.sovereignPurity === 'number'
+              ? rm.sovereignPurity
+              : null,
+        dominanceExcessShare:
+          typeof p.dominanceExcessShare === 'number'
+            ? p.dominanceExcessShare
+            : typeof rm?.dominanceExcessShare === 'number'
+              ? rm.dominanceExcessShare
+              : 0,
+        dominanceStrengthMean:
+          typeof p.dominanceStrengthMean === 'number'
+            ? p.dominanceStrengthMean
+            : typeof rm?.dominanceStrengthMean === 'number'
+              ? rm.dominanceStrengthMean
+              : null,
+        sustainedTreatmentShare:
+          typeof p.sustainedTreatmentShare === 'number'
+            ? p.sustainedTreatmentShare
+            : typeof rm?.sustainedTreatmentShare === 'number'
+              ? rm.sustainedTreatmentShare
+              : null,
+        crossModelSustainedShare:
+          typeof p.crossModelSustainedShare === 'number'
+            ? p.crossModelSustainedShare
+            : typeof rm?.crossModelSustainedShare === 'number'
+              ? rm.crossModelSustainedShare
+              : 0,
         sharedTerritorialMass:
           typeof p.sharedTerritorialMass === 'number' ? p.sharedTerritorialMass : null,
+        contestedShareRatio:
+          typeof p.contestedShareRatio === 'number'
+            ? p.contestedShareRatio
+            : typeof rm?.contestedShareRatio === 'number'
+              ? rm.contestedShareRatio
+              : null,
+        maxStatementRun:
+          typeof p.maxStatementRun === 'number'
+            ? p.maxStatementRun
+            : typeof rm?.maxStatementRun === 'number'
+              ? rm.maxStatementRun
+              : 0,
         maxPassageLength: p.maxPassageLength ?? 0,
-        structContrib: p.structuralContributors?.length ?? 0,
         supporterCount: supportersById.get(String(p.claimId ?? '')) ?? 0,
         queryDistance: typeof p.queryDistance === 'number' ? p.queryDistance : 0,
         sustainedMassCohort: String(p.sustainedMassCohort ?? rm?.sustainedMassCohort ?? '–'),
-        contestedDominance: rm?.contestedDominance ?? null,
         sovereignStatementCount:
           typeof p.sovereignStatementCount === 'number'
             ? p.sovereignStatementCount
@@ -169,9 +229,9 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
     });
   }, [prClaimProfiles, claimLabelById, supportersById]);
 
-  const positionCounts = useMemo(() => {
-    const counts: Record<string, number> = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
-    for (const r of prRows) counts[r.position] = (counts[r.position] ?? 0) + 1;
+  const roleCounts = useMemo(() => {
+    const counts: Record<string, number> = { anchor: 0, supporting: 0, mechanism: 0, passthrough: 0 };
+    for (const r of prRows) counts[r.role] = (counts[r.role] ?? 0) + 1;
     return counts;
   }, [prRows]);
 
@@ -198,20 +258,20 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
             <span title="Legacy concentration threshold (μ + σ). No longer used for routing.">
               threshold={prGate?.concentrationThreshold?.toFixed(3) ?? '–'}
             </span>
-            <span title="Number of claims that passed the MAJ ≥ 1 precondition filter.">
+            <span title="Number of claims with canonical claim-footprint mass available for structural routing.">
               precondition pass={prGate?.preconditionPassCount ?? 0}
             </span>
           </div>
           <div className="flex gap-4 text-xs">
-            {(['northStar', 'leadMinority', 'mechanism', 'floor'] as const).map((pos) => (
-              <span key={pos} className={LANDSCAPE_COLORS[pos]}>
-                {LANDSCAPE_LABELS[pos]}: {positionCounts[pos] ?? 0}
+            {(['anchor', 'supporting', 'mechanism', 'passthrough'] as const).map((role) => (
+              <span key={role} className={CLAIM_ROLE_COLORS[role]}>
+                {CLAIM_ROLE_LABELS[role]}: {roleCounts[role] ?? 0}
               </span>
             ))}
           </div>
           {prRouting && (
             <div className="text-xs text-text-muted">
-              {prRouting.conflictClusters?.length ?? 0} conflict cluster(s), {prRouting.loadBearingClaims?.length ?? 0} passage-routed claim(s)
+              {prRouting.conflictClusters?.length ?? 0} conflict cluster(s), {prRouting.routePlan?.includedClaimIds?.length ?? 0} passage-routed claim(s)
             </div>
           )}
         </div>
@@ -312,19 +372,10 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 ),
               },
               {
-                key: 'meanCoverage',
-                header: '\u03BCCovg',
-                title: 'Mean per-paragraph coverage fraction',
-                sortValue: (r: any) => r.meanCoverage,
-                cell: (r: any) => (
-                  <span className="font-mono text-text-muted">{fmt(r.meanCoverage, 2)}</span>
-                ),
-              },
-              {
                 key: 'queryDistance',
-                header: 'q_dist',
+                header: 'q_diag',
                 title:
-                  'Query distance: 1 - cosine similarity to user query. Lower = more relevant.',
+                  'Diagnostic only: 1 - cosine similarity to user query. It does not steer primary route ordering.',
                 sortValue: (r: any) => r.queryDistance,
                 cell: (r: any) => (
                   <span className="font-mono text-text-muted">{fmt(r.queryDistance, 3)}</span>
@@ -524,40 +575,94 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 ),
               },
               {
-                key: 'position',
-                header: 'Position',
+                key: 'role',
+                header: 'Role',
                 title:
-                  'Landscape position: North Star (high-level goal), East Star (lateral insight), Mechanism (causal driver), or Floor (baseline/common).',
+                  'Route role derived from route rank: anchor, supporting, mechanism, or passthrough.',
                 cell: (r: any) => (
-                  <span className={LANDSCAPE_COLORS[r.position] ?? 'text-text-muted'}>
-                    {LANDSCAPE_LABELS[r.position] ?? r.position}
+                  <span className={CLAIM_ROLE_COLORS[r.role] ?? 'text-text-muted'}>
+                    {CLAIM_ROLE_LABELS[r.role] ?? r.role}
                   </span>
                 ),
-                sortValue: (r: any) => r.position,
+                sortValue: (r: any) => r.routeRank ?? Number.MAX_SAFE_INTEGER,
               },
               {
-                key: 'concentration',
-                header: 'Conc%',
+                key: 'dominantPresenceShare',
+                header: 'domPres%',
                 title:
-                  "Concentration ratio: fraction of this claim's majority paragraphs that are provided by its dominant model. 100% = all majority support comes from a single model.",
-                cell: (r: any) => <span>{(r.concentration * 100).toFixed(0)}%</span>,
-                sortValue: (r: any) => r.concentration,
+                  'Dominant model presence share from model treatment.',
+                cell: (r: any) => <span>{(r.dominantPresenceShare * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.dominantPresenceShare,
               },
               {
-                key: 'density',
-                header: 'Dens%',
+                key: 'dominantPassageShare',
+                header: 'domPass%',
                 title:
-                  "Density ratio: fraction of the claim's majority-support paragraphs (coverage > 50%) that form a single contiguous run in the dominant model. 100% = all primary support is grouped together.",
-                cell: (r: any) => <span>{(r.density * 100).toFixed(0)}%</span>,
-                sortValue: (r: any) => r.density,
+                  'Dominant model passage share from model treatment.',
+                cell: (r: any) => <span>{(r.dominantPassageShare * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.dominantPassageShare,
               },
               {
-                key: 'meanCoverageInLongestRun',
-                header: '\u03BCRunCovg',
+                key: 'dominanceExcessShare',
+                header: 'dom+',
                 title:
-                  "Mean coverage across paragraphs in the longest contiguous majority-support run. Measures 'purity' of the primary passage.",
-                cell: (r: any) => <span>{(r.meanCoverageInLongestRun * 100).toFixed(0)}%</span>,
-                sortValue: (r: any) => r.meanCoverageInLongestRun,
+                  'Continuous dominance strength: sum of paragraph ownership above 0.5, normalized by total paragraph surface.',
+                cell: (r: any) => <span>{(r.dominanceExcessShare * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.dominanceExcessShare,
+              },
+              {
+                key: 'globalTerritoryShare',
+                header: 'terr%',
+                title:
+                  'Claim territorial mass divided by total claim territory across the corpus.',
+                cell: (r: any) => <span>{(r.globalTerritoryShare * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.globalTerritoryShare,
+              },
+              {
+                key: 'globalSovereignTerritoryShare',
+                header: 'gSov%',
+                title:
+                  'Exclusive claim territory divided by total claim territory across the corpus.',
+                cell: (r: any) => (
+                  <span>{(r.globalSovereignTerritoryShare * 100).toFixed(0)}%</span>
+                ),
+                sortValue: (r: any) => r.globalSovereignTerritoryShare,
+              },
+              {
+                key: 'dominanceStrengthMean',
+                header: 'domAvg',
+                title:
+                  'Mean paragraph territory share for paragraphs where this claim owns more than 50%.',
+                cell: (r: any) =>
+                  r.dominanceStrengthMean == null ? (
+                    <span className="text-text-muted">-</span>
+                  ) : (
+                    <span>{(r.dominanceStrengthMean * 100).toFixed(0)}%</span>
+                  ),
+                sortValue: (r: any) => r.dominanceStrengthMean ?? -1,
+              },
+              {
+                key: 'sustainedTreatmentShare',
+                header: 'treat%',
+                title:
+                  'Longest sustained statement run divided by total claim-statement atoms.',
+                cell: (r: any) =>
+                  r.sustainedTreatmentShare == null ? (
+                    <span className="text-text-muted">-</span>
+                  ) : (
+                    <span>{(r.sustainedTreatmentShare * 100).toFixed(0)}%</span>
+                  ),
+                sortValue: (r: any) => r.sustainedTreatmentShare ?? -1,
+              },
+              {
+                key: 'crossModelSustainedShare',
+                header: 'xPass%',
+                title:
+                  'Share of all models that give the claim sustained passage treatment.',
+                cell: (r: any) => (
+                  <span>{(r.crossModelSustainedShare * 100).toFixed(0)}%</span>
+                ),
+                sortValue: (r: any) => r.crossModelSustainedShare,
               },
               {
                 key: 'claimPresenceCount',
@@ -575,12 +680,12 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 sortValue: (r: any) => r.maxPassageLength,
               },
               {
-                key: 'structContrib',
-                header: 'SC#',
+                key: 'maxStatementRun',
+                header: 'maxRun',
                 title:
-                  'Structural contributors: number of models that provide at least one majority paragraph for this claim.',
-                cell: (r: any) => r.structContrib,
-                sortValue: (r: any) => r.structContrib,
+                  'Max statement run paired with dominant passage share for sustained treatment display.',
+                cell: (r: any) => r.maxStatementRun,
+                sortValue: (r: any) => r.maxStatementRun,
               },
               {
                 key: 'supporterCount',
@@ -594,20 +699,20 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 key: 'sustainedMassCohort',
                 header: 'cohort',
                 title:
-                  'Sustained-mass cohort: maj-breadth (broad MAJ coverage), passage-heavy (long contiguous passages), or balanced. Drives Phase-2 minority ranking.',
+                  'Sustained-mass cohort retained for observation; active ordering reads continuous treatment-share and dominance fields.',
                 cell: (r: any) => (
                   <span className="font-mono text-text-muted">{r.sustainedMassCohort}</span>
                 ),
                 sortValue: (r: any) => r.sustainedMassCohort,
               },
               {
-                key: 'contestedDominance',
-                header: 'CD%',
+                key: 'contestedShareRatio',
+                header: 'cont%',
                 title:
-                  'Contested Dominance: Ratio of dominated paragraphs to total contested paragraphs the claim touches.',
+                  'Contested share ratio: shared territorial mass divided by shared statement count.',
                 cell: (r: any) =>
-                  r.contestedDominance == null ? <span className="text-text-muted">–</span> : <span>{(r.contestedDominance * 100).toFixed(0)}%</span>,
-                sortValue: (r: any) => r.contestedDominance ?? -1,
+                  r.contestedShareRatio == null ? <span className="text-text-muted">-</span> : <span>{(r.contestedShareRatio * 100).toFixed(0)}%</span>,
+                sortValue: (r: any) => r.contestedShareRatio ?? -1,
               },
               {
                 key: 'contestedParagraphCount',
@@ -631,7 +736,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 key: 'novelParagraphCount',
                 header: 'nov#',
                 title:
-                  'Novel Paragraph Count: how many MAJ paragraphs were unassigned when this claim was routed',
+                  'Novel Paragraph Count: how many dominant paragraphs were unassigned when this claim was routed',
                 cell: (r: any) =>
                   r.novelParagraphCount == null ? <span className="text-text-muted">–</span> : r.novelParagraphCount,
                 sortValue: (r: any) => r.novelParagraphCount ?? -1,
@@ -640,7 +745,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 key: 'claimNoveltyRatio',
                 header: 'cNov%',
                 title:
-                  'Claim Novelty Ratio: novel MAJ / total MAJ for this claim',
+                  'Claim Novelty Ratio: novel dominant paragraphs / total dominant paragraphs for this claim',
                 cell: (r: any) =>
                   r.claimNoveltyRatio == null ? <span className="text-text-muted">–</span> : <span>{(r.claimNoveltyRatio * 100).toFixed(0)}%</span>,
                 sortValue: (r: any) => r.claimNoveltyRatio ?? -1,
@@ -649,7 +754,7 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
                 key: 'corpusNoveltyRatio',
                 header: 'bNov%',
                 title:
-                  'Corpus Novelty Ratio: novel MAJ / unassigned corpus (the "board") at decision time',
+                  'Corpus Novelty Ratio: novel dominant paragraphs / unassigned corpus at decision time',
                 cell: (r: any) =>
                   r.corpusNoveltyRatio == null ? <span className="text-text-muted">–</span> : <span>{(r.corpusNoveltyRatio * 100).toFixed(0)}%</span>,
                 sortValue: (r: any) => r.corpusNoveltyRatio ?? -1,
@@ -689,15 +794,15 @@ export function ClaimDensityCard({ artifact }: { artifact: any }) {
               },
               {
                 key: 'queryDistance',
-                header: 'q_dist',
+                header: 'q_diag',
                 title:
-                  'Query distance: 1 - cosine similarity between claim centroid and user query. Lower = more relevant.',
+                  'Diagnostic only: 1 - cosine similarity between claim centroid and query. It does not steer primary route ordering.',
                 cell: (r: any) => fmt(r.queryDistance, 3),
                 sortValue: (r: any) => r.queryDistance,
               },
             ]}
             rows={prRows}
-            defaultSortKey="concentration"
+            defaultSortKey="dominanceExcessShare"
             defaultSortDir="desc"
           />
         </CardSection>

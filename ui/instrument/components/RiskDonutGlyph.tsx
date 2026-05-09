@@ -51,11 +51,11 @@ export const RiskDonutGlyph = memo(({ cx, cy, rv, isSel, isHov }: Props) => {
   const opac = isSel ? 1 : isHov ? 0.95 : 0.8;
 
   // Center fill density
-  const densityRatio = rv.canonicalCount > 0
+  const densityShare = rv.canonicalCount > 0
     ? Math.min(1, (rv.degradationDamage ?? 0) / rv.canonicalCount)
     : 0;
   const innerRadius = r - w;
-  const centerR = Math.max(2, densityRatio * (innerRadius - 2));
+  const centerR = Math.max(2, densityShare * (innerRadius - 2));
 
   return (
     <>
@@ -91,8 +91,8 @@ export const RiskDonutGlyph = memo(({ cx, cy, rv, isSel, isHov }: Props) => {
         cx={cx}
         cy={cy}
         r={centerR}
-        fill={densityRatio > 0.3 ? 'rgba(251,191,36,0.7)' : 'rgba(255,255,255,0.6)'}
-        opacity={0.6 + densityRatio * 0.4}
+        fill={densityShare > 0.3 ? 'rgba(251,191,36,0.7)' : 'rgba(255,255,255,0.6)'}
+        opacity={0.6 + densityShare * 0.4}
       />
     </>
   );

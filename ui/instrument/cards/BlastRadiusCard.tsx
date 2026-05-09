@@ -53,8 +53,11 @@ export function RoutingCard({
   }, [routing, claimId]);
 
   const isPassthrough = useMemo(() => {
-    return Array.isArray(routing?.passthrough) && routing.passthrough.map(String).includes(claimId);
-  }, [routing, claimId]);
+    return (
+      artifact?.passageRouting?.claimProfiles?.[String(claimId ?? '')]?.claimStatus?.role ===
+      'passthrough'
+    );
+  }, [artifact, claimId]);
 
   const category = inConflict
     ? 'conflict'

@@ -681,11 +681,11 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
         if (count === 1) singletonCells++;
       }
 
-      // Landscape distribution
-      const landscapeCounts = { northStar: 0, leadMinority: 0, mechanism: 0, floor: 0 };
+      // Route-role distribution
+      const roleCounts = { anchor: 0, supporting: 0, mechanism: 0, passthrough: 0 };
       for (const [, profile] of Object.entries(claimProfiles) as Array<[string, any]>) {
-        const pos = profile?.landscapePosition;
-        if (pos && pos in landscapeCounts) landscapeCounts[pos as keyof typeof landscapeCounts]++;
+        const role = profile?.claimStatus?.role;
+        if (role && role in roleCounts) roleCounts[role as keyof typeof roleCounts]++;
       }
 
       // Mapper-geometry conflict agreement
@@ -743,7 +743,7 @@ export function getLayerCopyText(layer: PipelineLayer, artifact: any): string {
         },
         semanticShape: {
           claimCount: claims.length,
-          landscape: landscapeCounts,
+          claimRoles: roleCounts,
           conflicts: {
             mapperLabeled,
             validated,

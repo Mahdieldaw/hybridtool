@@ -327,9 +327,9 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
         ? routing.damageOutliers.some((c: any) => String(c?.claimId ?? '') === selectedClaimId)
         : false;
       if (isolate) return 'isolate';
-      const passthrough = Array.isArray(routing?.passthrough)
-        ? routing.passthrough.map(String).includes(selectedClaimId)
-        : false;
+      const passthrough =
+        artifact?.passageRouting?.claimProfiles?.[selectedClaimId]?.claimStatus?.role ===
+        'passthrough';
       if (passthrough) return 'passthrough';
       return null;
     })();
@@ -340,15 +340,7 @@ export function useEvidenceRows(artifact: any, selectedClaimId: string | null): 
       const profile = artifact?.passageRouting?.claimProfiles?.[selectedClaimId];
       if (typeof profile?.queryDistance === 'number') return profile.queryDistance;
 
-      // 2. Fallback to load-bearing routed claims
-      const routed = Array.isArray(artifact?.passageRouting?.routing?.loadBearingClaims)
-        ? artifact.passageRouting.routing.loadBearingClaims.find(
-            (c: any) => String(c?.claimId ?? '') === selectedClaimId
-          )
-        : null;
-      if (typeof routed?.queryDistance === 'number') return routed.queryDistance;
-
-      // 3. Fallback to enriched claims metadata
+      // 2. Fallback to enriched claims metadata
       const ec = Array.isArray(artifact?.claims)
         ? artifact.claims.find((c: any) => String(c?.id ?? '') === selectedClaimId)
         : null;

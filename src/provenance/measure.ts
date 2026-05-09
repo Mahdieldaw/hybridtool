@@ -195,7 +195,9 @@ export function computeClaimFootprintMeasurement({
         modelIndex: meta?.modelIndex ?? atom.modelIndex,
         paragraphIndex: meta?.paragraphIndex ?? paragraphOrder.get(atom.paragraphId) ?? 0,
         claimPresenceCount: 0,
+        totalStatementMass: 0,
         territorialMass: 0,
+        paragraphTerritoryShare: null,
         sharedTerritorialMass: 0,
         sovereignStatementCount: 0,
         sharedStatementCount: 0,
@@ -255,7 +257,10 @@ export function computeClaimFootprintMeasurement({
         Array.from(stmtToParagraphId.values()).filter((pid) => pid === para.paragraphId).length,
       1
     );
-    para.dominant = para.claimPresenceCount > totalStatements / 2;
+    para.totalStatementMass = totalStatements;
+    para.paragraphTerritoryShare =
+      totalStatements > 0 ? para.territorialMass / totalStatements : null;
+    para.dominant = (para.paragraphTerritoryShare ?? 0) > 0.5;
 
     byClaim.paragraphPresenceCount += 1;
     const paragraphOwners = claimsByParagraph.get(para.paragraphId) ?? new Set([claimId]);
@@ -664,7 +669,7 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     // ── Statement-level passage builder ──────────────────────────────────────────
     // For each model, concatenate canonical statement IDs in (paragraphIndex, sentenceIndex)
     // order. Detect contiguous runs of ≥2 canonical claim statements. Run length is the
-    // continuous measurement — no MAJ threshold applied here.
+    // continuous measurement — no dominance threshold applied here.
     //
     // Paragraph-boundary annotations (boundaryCrossing, paragraphsCrossed, inParagraphPassage)
     // are deliberately omitted in this commit. The substrate (stmtToParagraphId) is already
@@ -739,14 +744,10 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
 
 
     // ── Derived measurements from statement passages ─────────────────────────────
-    let maxPassageLength = 0,
-      meanCoverageInLongestRun = 0;
+    let maxPassageLength = 0;
     for (const p of statementPassages) {
       if (p.statementLength > maxPassageLength) {
         maxPassageLength = p.statementLength;
-        meanCoverageInLongestRun = p.avgCoverage;
-      } else if (p.statementLength === maxPassageLength && p.avgCoverage > meanCoverageInLongestRun) {
-        meanCoverageInLongestRun = p.avgCoverage;
       }
     }
 
@@ -756,14 +757,12 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       paragraphCount: paragraphCoverage.length,
       passageCount: statementPassages.length,
       maxPassageLength,
-      meanCoverageInLongestRun,
       modelSpread: byModel.size,
       modelsWithPassages: new Set(
         statementPassages.map((p) => p.modelIndex)
       ).size,
       totalClaimStatements: Array.from(paraStmtCounts.values()).reduce((a, b) => a + b, 0),
       presenceMass,
-      meanCoverage: paragraphCoverage.length > 0 ? presenceMass / paragraphCoverage.length : 0,
       presenceVector: paragraphCoverage.map((pc) => ({
         paragraphId: pc.paragraphId,
         value: pc.coverage,
@@ -807,8 +806,8 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
       label: claim.label,
       text: claim.text,
       supporters,
-      type: 'assertive' as const,
-      role: 'supplement' as const,
+      ...(claim.type ? { type: claim.type } : {}),
+      ...(claim.role ? { role: claim.role } : {}),
       sourceRegionIds: Array.from(matchedRegionIds).sort(),
       supportRatio: totalModelCount > 0 ? supporters.length / totalModelCount : 0,
       provenanceBulk,

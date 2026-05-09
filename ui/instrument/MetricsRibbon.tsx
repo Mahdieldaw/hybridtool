@@ -82,10 +82,10 @@ function computeDualSignals(analysis: StructuralAnalysis, artifact?: MapperArtif
   if (passageRouting) {
     const profiles = Object.values(passageRouting.claimProfiles) as PassageClaimProfile[];
     passageBacked = profiles.filter(
-      (p) => p.landscapePosition === 'northStar' || p.landscapePosition === 'leadMinority' || p.landscapePosition === 'mechanism'
+      (p) => p.claimStatus.role !== 'passthrough'
     ).length;
     passageWeak = profiles.filter(
-      (p) => p.landscapePosition === 'floor'
+      (p) => p.claimStatus.role === 'passthrough'
     ).length;
   }
 
@@ -97,15 +97,16 @@ function computeDualSignals(analysis: StructuralAnalysis, artifact?: MapperArtif
 
   let geoHubId: string | null = null;
   let geoHubLabel: string | null = null;
-  let geoHubConcentration: number | null = null;
+  let geoHubDominantPresence: number | null = null;
   if (passageRouting) {
-    let maxConc = -1;
+    let maxDominantPresence = -1;
     for (const [id, profile] of Object.entries(passageRouting.claimProfiles)) {
       const p = profile as PassageClaimProfile;
-      if (p.concentrationRatio > maxConc) {
-        maxConc = p.concentrationRatio;
+      const dominantPresence = p.dominantPresenceShare ?? 0;
+      if (dominantPresence > maxDominantPresence) {
+        maxDominantPresence = dominantPresence;
         geoHubId = id;
-        geoHubConcentration = p.concentrationRatio;
+        geoHubDominantPresence = dominantPresence;
       }
     }
     if (geoHubId) {
@@ -133,7 +134,7 @@ function computeDualSignals(analysis: StructuralAnalysis, artifact?: MapperArtif
     hubZ,
     geoHubId,
     geoHubLabel,
-    geoHubConcentration,
+    geoHubConcentration: geoHubDominantPresence,
     hubAgree,
     componentCount,
     regionCount,

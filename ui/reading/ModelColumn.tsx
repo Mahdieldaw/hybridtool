@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import clsx from 'clsx';
-import { LANDSCAPE_STYLES } from './styles';
+import { ROUTE_ROLE_STYLES } from './styles';
 import type { ParagraphHighlight } from '../hooks/reading/usePassageHighlight';
 
 interface ModelColumnProps {
@@ -78,8 +78,8 @@ export const ModelColumn: React.FC<ModelColumnProps> = ({
           const stmts: any[] = Array.isArray(para.statements) ? para.statements : [];
           const hl = highlightMap.get(paraId);
           const hlState = hl?.state ?? 'none';
-          const hlPos = hl?.landscapePosition ?? 'floor';
-          const styles = LANDSCAPE_STYLES[hlPos];
+          const hlRole = hl?.role ?? 'passthrough';
+          const styles = ROUTE_ROLE_STYLES[hlRole];
 
           // Visual treatment per state
           const isReceded = hasFocus && hlState === 'none';

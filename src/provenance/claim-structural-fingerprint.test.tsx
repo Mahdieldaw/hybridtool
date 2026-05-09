@@ -89,12 +89,10 @@ function makeFingerprint() {
         paragraphCount: 2,
         passageCount: 1,
         maxPassageLength: 3,
-        meanCoverageInLongestRun: 1,
         modelSpread: 2,
         modelsWithPassages: 1,
         totalClaimStatements: 3,
         presenceMass: 2,
-        meanCoverage: 1,
         presenceVector: [
           { paragraphId: 'p1', value: 1 },
           { paragraphId: 'p2', value: 1 },

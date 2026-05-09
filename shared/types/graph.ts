@@ -10,7 +10,7 @@ export interface Claim {
   text: string;
   dimension?: string | null; // Optional legacy metadata
   supporters: number[];
-  type:
+  type?:
     | 'factual'
     | 'prescriptive'
     | 'cautionary'

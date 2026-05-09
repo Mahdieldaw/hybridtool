@@ -102,9 +102,9 @@
 - `src\persistence\transactions.ts` — withTransaction, batchWrite, batchDelete, updateWithVersionCheck, multiStoreTransaction, promisifyRequest, …
 - `src\persistence\persistence-monitor.ts` — PersistenceMonitor, PersistenceOperationRecord, PersistencePerformanceMetrics, PersistenceErrorRecord, PersistenceConnectionRecord, PersistenceMonitorMetrics, …
 - `src\persistence\database.ts` — openDatabase, getCurrentSchemaVersion, checkDatabaseHealth, deleteDatabase, SCHEMA_VERSION, STORE_CONFIGS
+- `src\persistence\simple-indexeddb-adapter.ts` — stripDeprecatedPassageRoutingFieldsForRead, SimpleIndexedDBAdapter, SimpleRecord
 - `src\persistence\embedding-codec.ts` — packEmbeddingMap, unpackEmbeddingMap
 - `src\persistence\schema-verification.ts` — verifySchemaAndRepair, SchemaHealth
-- `src\persistence\simple-indexeddb-adapter.ts` — SimpleIndexedDBAdapter, SimpleRecord
 - `src\persistence\index.ts` — initializePersistenceLayer
 - `src\persistence\session-manager.ts` — SessionManager
 

@@ -18,9 +18,9 @@
 - `ui\shared\CopyButton.tsx` — imported by **8** files
 - `shared\types\provider.ts` — imported by **7** files
 - `src\clustering\distance.ts` — imported by **7** files
+- `src\concierge-service\editorial-mapper.ts` — imported by **7** files
 - `shared\citation-utils.ts` — imported by **7** files
 - `src\errors\handler.ts` — imported by **7** files
-- `src\concierge-service\editorial-mapper.ts` — imported by **6** files
 - `src\errors\classifier.ts` — imported by **6** files
 
 ## Import Map (who imports what)

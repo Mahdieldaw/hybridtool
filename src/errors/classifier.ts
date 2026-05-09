@@ -46,14 +46,17 @@ function isProviderNativeAuthError(error: ErrorCandidate | null): boolean {
 
 function getAuthText(error: ErrorCandidate | null): string | undefined {
   const message = getMessage(error);
-  if (message && !PROVIDER_NATIVE_AUTH_TYPES[String(error?.name)]?.includes(message)) {
+  const messageExcluded =
+    message != null &&
+    PROVIDER_NATIVE_AUTH_TYPES[String(error?.name)]?.includes(message) === true;
+  if (message && !messageExcluded) {
     return message;
   }
   if (typeof error?.details === 'string') return error.details;
   if (isRecord(error?.details) && typeof error.details.message === 'string') {
     return error.details.message;
   }
-  return message;
+  return messageExcluded ? undefined : message;
 }
 
 function getStatus(error: ErrorCandidate | null): number | null {

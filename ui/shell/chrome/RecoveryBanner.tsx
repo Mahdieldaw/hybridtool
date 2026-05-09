@@ -88,7 +88,7 @@ export const RecoveryBanner: React.FC = () => {
     return Array.from(providerIds).map((providerId) => ({
       providerId,
       error:
-        providerErrors[providerId] || {
+        providerErrors?.[providerId] || {
           type: 'unknown',
           message: 'Provider did not complete this step.',
           retryable: true,
@@ -179,7 +179,11 @@ export const RecoveryBanner: React.FC = () => {
                   <button
                     type="button"
                     disabled={disabled || error.retryable === false}
-                    onClick={() => (isAuth ? reauthenticate(providerId) : retryProvider(providerId))}
+                    onClick={() => {
+                      (isAuth ? reauthenticate(providerId) : retryProvider(providerId)).catch(
+                        (e) => console.warn('[RecoveryBanner] action failed:', e)
+                      );
+                    }}
                     className={clsx(
                       'shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors',
                       disabled || error.retryable === false

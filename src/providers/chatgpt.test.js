@@ -33,8 +33,9 @@ describe('ChatGPTSessionApi access-token fetch', () => {
       }),
     });
 
-    await expect(api._ensureAccessToken()).rejects.toBeInstanceOf(ChatGPTProviderError);
-    await expect(api._ensureAccessToken()).rejects.toMatchObject({ type: 'cloudflare' });
+    const error = await api._ensureAccessToken().catch((e) => e);
+    expect(error).toBeInstanceOf(ChatGPTProviderError);
+    expect(error).toMatchObject({ type: 'cloudflare' });
   });
 
   test('refreshes cached access token before retrying an authenticated 401', async () => {

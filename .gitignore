@@ -50,7 +50,6 @@ scratch/
 .claude/worktrees/
 
 *.test.ts
-.json
 # Model files
 models/
 onnx/

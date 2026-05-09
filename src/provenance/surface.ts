@@ -16,7 +16,7 @@ import type {
   ValidatedConflict,
   PassageClaimProfile,
   PassageClaimRouting,
-  PassageRoutedClaim,
+  ClaimStatus,
   StatementPassageEntry,
   BlastSurfaceClaimScore,
   BlastSurfaceRiskVector,
@@ -114,9 +114,6 @@ type SurfaceScalarMeasurements = {
   dominantPresenceShare: number | null;
   dominantPassageShare: number | null;
   maxStatementRun: number;
-  legacyConcentrationRatio: number;
-  legacyDensityRatio: number;
-  legacyMeanCoverageInLongestRun: number;
 };
 
 function emptyFootprintRollup(claimId = ''): ClaimFootprintClaimRollup {
@@ -150,17 +147,162 @@ function isFootprintEligible(profile: ClaimDensityProfile | undefined): boolean 
 }
 
 function nullableScore(value: number | null): number {
-  return value ?? Number.NEGATIVE_INFINITY;
+  return typeof value === 'number' && Number.isFinite(value) ? value : -1;
 }
 
 function share(part: number, total: number): number | null {
   return total > 0 ? part / total : null;
 }
 
-function computeSurfaceScalarMeasurements(
-  profile: ClaimDensityProfile,
-  activeCoverage: ClaimDensityProfile['paragraphCoverage']
-): SurfaceScalarMeasurements {
+function shareOrZero(part: number, total: number): number {
+  return total > 0 ? part / total : 0;
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function getSovereignTerritoryMass(
+  profile: ClaimDensityProfile | undefined,
+  rollup: ClaimFootprintClaimRollup
+): number {
+  const atoms = profile?.footprint?.atoms ?? [];
+  if (atoms.length > 0) {
+    return atoms.reduce((sum, atom) => sum + (atom.isSovereign ? atom.ownershipShare : 0), 0);
+  }
+  return Math.max(0, rollup.territorialMass - rollup.sharedTerritorialMass);
+}
+
+function getParagraphTerritoryShare(
+  paragraph: ClaimDensityProfile['footprint']['rollups']['byParagraph'][number]
+): number | null {
+  const explicitShare = finiteNumber((paragraph as any).paragraphTerritoryShare, NaN);
+  if (Number.isFinite(explicitShare)) return explicitShare;
+
+  const totalStatementMass = finiteNumber(
+    (paragraph as any).totalStatementMass,
+    paragraph.claimPresenceCount
+  );
+  return totalStatementMass > 0 ? paragraph.territorialMass / totalStatementMass : null;
+}
+
+type ContinuousRoutingProfile = Pick<
+  PassageClaimProfile,
+  | 'globalTerritoryShare'
+  | 'sovereignTerritoryMass'
+  | 'globalSovereignTerritoryShare'
+  | 'sovereignPurity'
+  | 'contestedTerritoryShare'
+  | 'globalContestedTerritoryShare'
+  | 'paragraphPresenceShare'
+  | 'dominantParagraphShare'
+  | 'claimDominanceRate'
+  | 'dominanceStrengthMean'
+  | 'dominanceStrengthMax'
+  | 'dominanceExcessShare'
+  | 'sustainedTreatmentDepth'
+  | 'sustainedTreatmentShare'
+  | 'passageMassShare'
+  | 'dominantModelTerritoryShare'
+  | 'crossModelEvidenceShare'
+  | 'crossModelSustainedShare'
+>;
+
+function emptyContinuousRoutingProfile(): ContinuousRoutingProfile {
+  return {
+    globalTerritoryShare: 0,
+    sovereignTerritoryMass: 0,
+    globalSovereignTerritoryShare: 0,
+    sovereignPurity: null,
+    contestedTerritoryShare: null,
+    globalContestedTerritoryShare: 0,
+    paragraphPresenceShare: 0,
+    dominantParagraphShare: 0,
+    claimDominanceRate: null,
+    dominanceStrengthMean: null,
+    dominanceStrengthMax: null,
+    dominanceExcessShare: 0,
+    sustainedTreatmentDepth: 0,
+    sustainedTreatmentShare: null,
+    passageMassShare: null,
+    dominantModelTerritoryShare: null,
+    crossModelEvidenceShare: 0,
+    crossModelSustainedShare: 0,
+  };
+}
+
+function computeContinuousRoutingProfile({
+  profile,
+  rollup,
+  maxStatementRun,
+  modelSpread,
+  modelsWithPassages,
+  totalClaimTerritoryMass,
+  totalParagraphs,
+  totalModels,
+}: {
+  profile: ClaimDensityProfile | undefined;
+  rollup: ClaimFootprintClaimRollup;
+  maxStatementRun: number;
+  modelSpread: number;
+  modelsWithPassages: number;
+  totalClaimTerritoryMass: number;
+  totalParagraphs: number;
+  totalModels: number;
+}): ContinuousRoutingProfile {
+  if (!profile || rollup.claimPresenceCount <= 0) {
+    return emptyContinuousRoutingProfile();
+  }
+
+  const sovereignTerritoryMass = getSovereignTerritoryMass(profile, rollup);
+  const paragraphShares = profile.footprint.rollups.byParagraph
+    .map(getParagraphTerritoryShare)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const dominantParagraphShares = paragraphShares.filter((value) => value > 0.5);
+  const dominanceExcessMass = paragraphShares.reduce(
+    (sum, value) => sum + Math.max(0, value - 0.5),
+    0
+  );
+  const passageStatementMass = profile.statementPassages.reduce(
+    (sum, passage) => sum + passage.statementLength,
+    0
+  );
+  const dominantModelTerritoryMass = Math.max(
+    0,
+    ...profile.footprint.rollups.byModel.map((model) => model.territorialMass)
+  );
+
+  return {
+    globalTerritoryShare: shareOrZero(rollup.territorialMass, totalClaimTerritoryMass),
+    sovereignTerritoryMass,
+    globalSovereignTerritoryShare: shareOrZero(
+      sovereignTerritoryMass,
+      totalClaimTerritoryMass
+    ),
+    sovereignPurity: share(sovereignTerritoryMass, rollup.territorialMass),
+    contestedTerritoryShare: share(rollup.sharedTerritorialMass, rollup.territorialMass),
+    globalContestedTerritoryShare: shareOrZero(
+      rollup.sharedTerritorialMass,
+      totalClaimTerritoryMass
+    ),
+    paragraphPresenceShare: shareOrZero(rollup.paragraphPresenceCount, totalParagraphs),
+    dominantParagraphShare: shareOrZero(rollup.dominantParagraphCount, totalParagraphs),
+    claimDominanceRate: share(rollup.dominantParagraphCount, rollup.paragraphPresenceCount),
+    dominanceStrengthMean:
+      dominantParagraphShares.length > 0 ? mean(dominantParagraphShares) : null,
+    dominanceStrengthMax:
+      paragraphShares.length > 0 ? Math.max(...paragraphShares) : null,
+    dominanceExcessShare: shareOrZero(dominanceExcessMass, 0.5 * totalParagraphs),
+    sustainedTreatmentDepth: maxStatementRun,
+    sustainedTreatmentShare: share(maxStatementRun, rollup.claimPresenceCount),
+    passageMassShare: share(passageStatementMass, rollup.claimPresenceCount),
+    dominantModelTerritoryShare: share(dominantModelTerritoryMass, rollup.territorialMass),
+    crossModelEvidenceShare: clamp01(shareOrZero(modelSpread, totalModels)),
+    crossModelSustainedShare: clamp01(shareOrZero(modelsWithPassages, totalModels)),
+  };
+}
+
+function computeSurfaceScalarMeasurements(profile: ClaimDensityProfile): SurfaceScalarMeasurements {
   const presenceByModel = new Map<number, number>();
   for (const entry of profile.footprint.rollups.byModel) {
     presenceByModel.set(entry.modelIndex, entry.claimPresenceCount);
@@ -195,69 +337,25 @@ function computeSurfaceScalarMeasurements(
   const dominantPassageShare = share(dominantPassageStatementMass, totalPassageStatementMass);
   const maxStatementRun = profile.maxPassageLength;
 
-  const legacyPresenceByModel = new Map<number, number>();
-  let legacyDominantModel: number | null = null;
-  let legacyDominantPresenceMass = 0;
-  let legacyTotalPresenceMass = 0;
-  for (const entry of activeCoverage) {
-    const next = (legacyPresenceByModel.get(entry.modelIndex) ?? 0) + entry.coverage;
-    legacyPresenceByModel.set(entry.modelIndex, next);
-  }
-  for (const [modelIndex, mass] of legacyPresenceByModel) {
-    legacyTotalPresenceMass += mass;
-    if (mass > legacyDominantPresenceMass) {
-      legacyDominantPresenceMass = mass;
-      legacyDominantModel = modelIndex;
-    }
-  }
-  const legacyConcentrationRatio =
-    legacyTotalPresenceMass > 0 ? legacyDominantPresenceMass / legacyTotalPresenceMass : 0;
-
-  let maxPassageLengthOfLegacyDominant = 0;
-  for (const passage of profile.statementPassages) {
-    if (
-      passage.modelIndex === legacyDominantModel &&
-      passage.statementLength > maxPassageLengthOfLegacyDominant
-    ) {
-      maxPassageLengthOfLegacyDominant = passage.statementLength;
-    }
-  }
-  const legacyDensityRatio =
-    legacyDominantPresenceMass > 0
-      ? maxPassageLengthOfLegacyDominant / legacyDominantPresenceMass
-      : 0;
-
   return {
     dominantModel,
     dominantPresenceShare,
     dominantPassageShare,
     maxStatementRun,
-    legacyConcentrationRatio,
-    legacyDensityRatio,
-    legacyMeanCoverageInLongestRun: profile.meanCoverageInLongestRun,
   };
 }
 
 function buildScalarMigrationDiagnostic(
   claimId: string,
   scalars: SurfaceScalarMeasurements | null,
-  legacyContestedDominance: number | null,
   contestedShareRatio: number | null
 ): ScalarMigrationDiagnostic {
   return {
     claimId,
-    legacyContestedDominance,
     contestedShareRatio,
-    legacyConcentrationRatio: scalars?.legacyConcentrationRatio ?? 0,
     dominantPresenceShare: scalars?.dominantPresenceShare ?? null,
-    legacyDensityRatio: scalars?.legacyDensityRatio ?? 0,
     dominantPassageShare: scalars?.dominantPassageShare ?? null,
-    legacyMeanCoverageInLongestRun: scalars?.legacyMeanCoverageInLongestRun ?? 0,
     maxStatementRun: scalars?.maxStatementRun ?? 0,
-    legacyMinorityBucket: null,
-    legacyWouldFloorByScalarBucket: null,
-    newLandscapePosition: 'floor',
-    changedRoutingOutcome: false,
     reason: null,
   };
 }
@@ -313,19 +411,37 @@ function emptyRouteStructuralInputs(): RoutePlanStructuralInputs {
     claimPresenceCount: 0,
     territorialMass: 0,
     sharedTerritorialMass: 0,
+    globalTerritoryShare: 0,
+    sovereignTerritoryMass: 0,
+    globalSovereignTerritoryShare: 0,
+    sovereignPurity: null,
+    contestedTerritoryShare: null,
+    globalContestedTerritoryShare: 0,
     sovereignStatementCount: 0,
     sharedStatementCount: 0,
     paragraphPresenceCount: 0,
+    paragraphPresenceShare: 0,
     contestedParagraphCount: 0,
     dominantParagraphCount: 0,
+    dominantParagraphShare: 0,
+    claimDominanceRate: null,
+    dominanceStrengthMean: null,
+    dominanceStrengthMax: null,
+    dominanceExcessShare: 0,
     sovereignRatio: null,
     contestedShareRatio: null,
     dominantPresenceShare: null,
     dominantPassageShare: null,
     maxStatementRun: 0,
+    sustainedTreatmentDepth: 0,
+    sustainedTreatmentShare: null,
+    passageMassShare: null,
+    dominantModelTerritoryShare: null,
     passageCount: 0,
     modelSpread: 0,
     modelsWithPassages: 0,
+    crossModelEvidenceShare: 0,
+    crossModelSustainedShare: 0,
     sustainedMass: 0,
   };
 }
@@ -336,19 +452,37 @@ function buildRouteStructuralInputs(profile: PassageClaimProfile | undefined): R
     claimPresenceCount: profile.claimPresenceCount,
     territorialMass: profile.territorialMass,
     sharedTerritorialMass: profile.sharedTerritorialMass,
+    globalTerritoryShare: profile.globalTerritoryShare,
+    sovereignTerritoryMass: profile.sovereignTerritoryMass,
+    globalSovereignTerritoryShare: profile.globalSovereignTerritoryShare,
+    sovereignPurity: profile.sovereignPurity,
+    contestedTerritoryShare: profile.contestedTerritoryShare,
+    globalContestedTerritoryShare: profile.globalContestedTerritoryShare,
     sovereignStatementCount: profile.sovereignStatementCount,
     sharedStatementCount: profile.sharedStatementCount,
     paragraphPresenceCount: profile.paragraphPresenceCount,
+    paragraphPresenceShare: profile.paragraphPresenceShare,
     contestedParagraphCount: profile.contestedParagraphCount,
     dominantParagraphCount: profile.dominantParagraphCount,
+    dominantParagraphShare: profile.dominantParagraphShare,
+    claimDominanceRate: profile.claimDominanceRate,
+    dominanceStrengthMean: profile.dominanceStrengthMean,
+    dominanceStrengthMax: profile.dominanceStrengthMax,
+    dominanceExcessShare: profile.dominanceExcessShare,
     sovereignRatio: profile.sovereignRatio,
     contestedShareRatio: profile.contestedShareRatio,
     dominantPresenceShare: profile.dominantPresenceShare,
     dominantPassageShare: profile.dominantPassageShare,
     maxStatementRun: profile.maxStatementRun,
+    sustainedTreatmentDepth: profile.sustainedTreatmentDepth,
+    sustainedTreatmentShare: profile.sustainedTreatmentShare,
+    passageMassShare: profile.passageMassShare,
+    dominantModelTerritoryShare: profile.dominantModelTerritoryShare,
     passageCount: profile.passageCount,
     modelSpread: profile.modelSpread,
     modelsWithPassages: profile.modelsWithPassages,
+    crossModelEvidenceShare: profile.crossModelEvidenceShare,
+    crossModelSustainedShare: profile.crossModelSustainedShare,
     sustainedMass: profile.sustainedMass,
   };
 }
@@ -357,36 +491,37 @@ function compareRoutePlanInputs(
   a: RoutePlanStructuralInputs,
   b: RoutePlanStructuralInputs
 ): number {
-  const sustainedDiff = b.sustainedMass - a.sustainedMass;
-  if (sustainedDiff !== 0) return sustainedDiff;
+  const dominanceExcessDiff = b.dominanceExcessShare - a.dominanceExcessShare;
+  if (dominanceExcessDiff !== 0) return dominanceExcessDiff;
 
-  const contestedDiff = nullableScore(b.contestedShareRatio) - nullableScore(a.contestedShareRatio);
-  if (contestedDiff !== 0) return contestedDiff;
+  const territoryDiff = b.globalTerritoryShare - a.globalTerritoryShare;
+  if (territoryDiff !== 0) return territoryDiff;
 
-  const sovereignDiff = b.sovereignStatementCount - a.sovereignStatementCount;
+  const sustainedTreatmentDiff =
+    nullableScore(b.sustainedTreatmentShare) - nullableScore(a.sustainedTreatmentShare);
+  if (sustainedTreatmentDiff !== 0) return sustainedTreatmentDiff;
+
+  const sovereignDiff = b.globalSovereignTerritoryShare - a.globalSovereignTerritoryShare;
   if (sovereignDiff !== 0) return sovereignDiff;
 
-  const passageDiff = nullableScore(b.dominantPassageShare) - nullableScore(a.dominantPassageShare);
-  if (passageDiff !== 0) return passageDiff;
+  const crossModelSustainedDiff = b.crossModelSustainedShare - a.crossModelSustainedShare;
+  if (crossModelSustainedDiff !== 0) return crossModelSustainedDiff;
 
-  const presenceShareDiff =
-    nullableScore(b.dominantPresenceShare) - nullableScore(a.dominantPresenceShare);
-  if (presenceShareDiff !== 0) return presenceShareDiff;
-
-  const maxRunDiff = b.maxStatementRun - a.maxStatementRun;
-  if (maxRunDiff !== 0) return maxRunDiff;
+  const dominanceStrengthDiff =
+    nullableScore(b.dominanceStrengthMean) - nullableScore(a.dominanceStrengthMean);
+  if (dominanceStrengthDiff !== 0) return dominanceStrengthDiff;
 
   return b.claimPresenceCount - a.claimPresenceCount;
 }
 
 function buildOrderingReasons(inputs: RoutePlanStructuralInputs): string[] {
   return [
-    `sustainedMass=${inputs.sustainedMass.toFixed(3)}`,
-    `contestedShareRatio=${inputs.contestedShareRatio == null ? 'null' : inputs.contestedShareRatio.toFixed(3)}`,
-    `sovereignStatementCount=${inputs.sovereignStatementCount}`,
-    `dominantPassageShare=${inputs.dominantPassageShare == null ? 'null' : inputs.dominantPassageShare.toFixed(3)}`,
-    `dominantPresenceShare=${inputs.dominantPresenceShare == null ? 'null' : inputs.dominantPresenceShare.toFixed(3)}`,
-    `maxStatementRun=${inputs.maxStatementRun}`,
+    `dominanceExcessShare=${inputs.dominanceExcessShare.toFixed(3)}`,
+    `globalTerritoryShare=${inputs.globalTerritoryShare.toFixed(3)}`,
+    `sustainedTreatmentShare=${inputs.sustainedTreatmentShare == null ? 'null' : inputs.sustainedTreatmentShare.toFixed(3)}`,
+    `globalSovereignTerritoryShare=${inputs.globalSovereignTerritoryShare.toFixed(3)}`,
+    `crossModelSustainedShare=${inputs.crossModelSustainedShare.toFixed(3)}`,
+    `dominanceStrengthMean=${inputs.dominanceStrengthMean == null ? 'null' : inputs.dominanceStrengthMean.toFixed(3)}`,
     `claimPresenceCount=${inputs.claimPresenceCount}`,
   ];
 }
@@ -424,37 +559,53 @@ function buildRoutePlan(
   };
 }
 
-function projectLegacyLandscapeCompatibility(
-  routePlan: PassageRoutePlan
-): PassageClaimRouting['legacyCompatibility'] {
-  const landscapePositionByClaim: PassageClaimRouting['legacyCompatibility']['landscapePositionByClaim'] = {};
-  routePlan.includedClaimIds.forEach((claimId, index) => {
-    landscapePositionByClaim[claimId] =
-      index === 0 ? 'northStar' : index === 1 ? 'leadMinority' : 'mechanism';
-  });
-  for (const claimId of routePlan.nonPrimaryClaimIds) {
-    landscapePositionByClaim[claimId] = 'floor';
-  }
-  return { landscapePositionByClaim };
+function claimStatusForRouteRank(routeRank: number | null): ClaimStatus {
+  return {
+    routeRank,
+    role:
+      routeRank === null
+        ? 'passthrough'
+        : routeRank === 1
+          ? 'anchor'
+          : routeRank === 2
+            ? 'supporting'
+            : 'mechanism',
+  };
 }
 
-function buildLabelExcisionDiagnostics(
-  routePlan: PassageRoutePlan,
-  legacyCompatibility: PassageClaimRouting['legacyCompatibility']
-): LabelExcisionDiagnostic[] {
+function computeClaimStatusCompatibility(routePlan: PassageRoutePlan): Record<string, ClaimStatus> {
+  const claimStatusByClaim: Record<string, ClaimStatus> = {};
+  routePlan.includedClaimIds.forEach((claimId, index) => {
+    const status = claimStatusForRouteRank(index + 1);
+    claimStatusByClaim[claimId] = status;
+  });
+  for (const claimId of routePlan.nonPrimaryClaimIds) {
+    const status = claimStatusForRouteRank(null);
+    claimStatusByClaim[claimId] = status;
+  }
+  return claimStatusByClaim;
+}
+
+function applyClaimStatusToProfiles(
+  claimProfiles: Record<string, PassageClaimProfile>,
+  claimStatusByClaim: Record<string, ClaimStatus>
+): void {
+  for (const [claimId, status] of Object.entries(claimStatusByClaim)) {
+    if (!claimProfiles[claimId]) continue;
+    claimProfiles[claimId].claimStatus = status;
+  }
+}
+
+function buildLabelExcisionDiagnostics(routePlan: PassageRoutePlan): LabelExcisionDiagnostic[] {
   const includedSet = new Set(routePlan.includedClaimIds);
   const orderIndex = new Map(routePlan.orderedClaimIds.map((claimId, index) => [claimId, index]));
   return Object.keys(routePlan.structuralInputsByClaim).map((claimId) => {
-    const legacyPosition = legacyCompatibility.landscapePositionByClaim[claimId] ?? 'floor';
     const newRoutePlanInclusion = includedSet.has(claimId);
-    const changedRoutingOutcome = (legacyPosition !== 'floor') !== newRoutePlanInclusion;
     return {
       claimId,
-      oldLegacyLandscapePosition: legacyPosition,
       newRoutePlanInclusion,
       routeOrderIndex: orderIndex.get(claimId) ?? null,
       structuralValuesUsed: routePlan.structuralInputsByClaim[claimId],
-      changedRoutingOutcome,
       reason: newRoutePlanInclusion
         ? 'included by canonical footprint presence and ordered by mass-native structural keys'
         : 'not included because canonical footprint presence mass is zero',
@@ -462,8 +613,7 @@ function buildLabelExcisionDiagnostics(
         'routing',
         'route ordering',
         'load-bearing inclusion',
-        'passthrough derivation',
-        'floorCount derivation',
+        'route mirror exports',
         'editorial prompt input',
       ],
     };
@@ -769,6 +919,12 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   const profiles = claimDensityResult.profiles;
   const measurementGuardViolations: MeasurementViolation[] = [];
+  const totalClaimTerritoryMass = enrichedClaims.reduce((sum, claim) => {
+    const claimId = String(claim.id);
+    return sum + getFootprintRollup(profiles[claimId]).territorialMass;
+  }, 0);
+  const totalParagraphs = Math.max(0, claimDensityResult.meta.totalParagraphs);
+  const totalModels = Math.max(0, claimDensityResult.meta.totalModels);
 
   const filterPeripheral =
     periphery.corpusMode === 'dominant-core' && periphery.peripheralNodeIds.size > 0;
@@ -793,7 +949,11 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const id = String(claim.id);
     const profile = profiles[id];
 
-    let queryDistance: number | undefined;
+    let queryDistance: number | undefined =
+      typeof (profile as any)?.queryDistance === 'number' &&
+      Number.isFinite((profile as any).queryDistance)
+        ? (profile as any).queryDistance
+        : undefined;
     if (queryEmbedding && claimEmbeddings?.has(id)) {
       const emb = claimEmbeddings.get(id);
       if (emb) queryDistance = 1 - cosineSimilarity(emb, queryEmbedding);
@@ -802,7 +962,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     if (!profile) {
       claimProfiles[id] = {
         claimId: id,
-        landscapePosition: 'floor',
+        claimStatus: claimStatusForRouteRank(null),
         isMinority: false,
         routingMeasurements: null,
         paragraphPresenceCount: 0,
@@ -813,6 +973,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         sharedStatementCount: 0,
         contestedParagraphCount: 0,
         dominantParagraphCount: 0,
+        ...emptyContinuousRoutingProfile(),
         sovereignRatio: null,
         contestedShareRatio: null,
         sustainedMass: 0,
@@ -825,43 +986,21 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
         dominantPresenceShare: null,
         dominantPassageShare: null,
         maxStatementRun: 0,
-        concentrationRatio: 0,
-        densityRatio: 0,
         maxPassageLength: 0,
-        meanCoverageInLongestRun: 0,
-        structuralContributors: [],
-        incidentalMentions: [],
         ...(queryDistance !== undefined ? { queryDistance } : {}),
       };
       scalarMigrationByClaimId.set(
         id,
-        buildScalarMigrationDiagnostic(id, null, null, null)
+        buildScalarMigrationDiagnostic(id, null, null)
       );
       continue;
     }
 
-    const activeCoverage = profile.paragraphCoverage;
-
-    const scalars = computeSurfaceScalarMeasurements(profile, activeCoverage);
-
-    const allModels = new Set<number>();
-    for (const entry of activeCoverage) {
-      allModels.add(entry.modelIndex);
-    }
-
-    const structuralContributors: number[] = [];
-    const incidentalMentions: number[] = [];
-    for (const mi of allModels) {
-      // Legacy compatibility export only; Phase 2 routing decisions do not read this threshold.
-      const legacyHasMajorityCoverage = activeCoverage.some(
-        (pc) => pc.modelIndex === mi && pc.coverage > 0.5
-      );
-      (legacyHasMajorityCoverage ? structuralContributors : incidentalMentions).push(mi);
-    }
+    const scalars = computeSurfaceScalarMeasurements(profile);
 
     claimProfiles[id] = {
       claimId: id,
-      landscapePosition: 'floor',
+      claimStatus: claimStatusForRouteRank(null),
       isMinority: false,
       routingMeasurements: null,
       paragraphPresenceCount: 0,
@@ -872,6 +1011,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       sharedStatementCount: 0,
       contestedParagraphCount: 0,
       dominantParagraphCount: 0,
+      ...emptyContinuousRoutingProfile(),
       sovereignRatio: null,
       contestedShareRatio: null,
       sustainedMass: 0,
@@ -884,12 +1024,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       dominantPresenceShare: scalars.dominantPresenceShare,
       dominantPassageShare: scalars.dominantPassageShare,
       maxStatementRun: scalars.maxStatementRun,
-      concentrationRatio: scalars.legacyConcentrationRatio,
-      densityRatio: scalars.legacyDensityRatio,
       maxPassageLength: profile.maxPassageLength,
-      meanCoverageInLongestRun: profile.meanCoverageInLongestRun,
-      structuralContributors,
-      incidentalMentions,
       ...(queryDistance !== undefined ? { queryDistance } : {}),
     };
     scalarMigrationByClaimId.set(
@@ -897,7 +1032,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       buildScalarMigrationDiagnostic(
         id,
         scalars,
-        null,
         getFootprintRollup(profile).contestedShareRatio
       )
     );
@@ -953,11 +1087,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   if (candidates.length === 0) {
     const routePlan = buildRoutePlan(enrichedClaims, claimProfiles);
-    const legacyCompatibility = projectLegacyLandscapeCompatibility(routePlan);
-    for (const [claimId, position] of Object.entries(legacyCompatibility.landscapePositionByClaim)) {
-      if (claimProfiles[claimId]) claimProfiles[claimId].landscapePosition = position;
-    }
-    const labelExcision = buildLabelExcisionDiagnostics(routePlan, legacyCompatibility);
+    const claimStatusByClaim = computeClaimStatusCompatibility(routePlan);
+    applyClaimStatusToProfiles(claimProfiles, claimStatusByClaim);
+    const labelExcision = buildLabelExcisionDiagnostics(routePlan);
 
     const passageRoutingResult: PassageRoutingResult = {
       claimProfiles,
@@ -971,18 +1103,13 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       routing: {
         conflictClusters: [],
         routePlan,
-        legacyCompatibility,
-        loadBearingClaims: [],
-        passthrough: routePlan.nonPrimaryClaimIds,
-        routedClaimIds: routePlan.includedClaimIds,
         diagnostics: {
-          concentrationDistribution: [],
-          densityRatioDistribution: [],
+          dominantPresenceDistribution: [],
+          dominantPassageDistribution: [],
           massEligibility,
           scalarMigration: Array.from(scalarMigrationByClaimId.values()),
           labelExcision,
           totalClaims: enrichedClaims.length,
-          floorCount: routePlan.nonPrimaryClaimIds.length,
           corpusMode: periphery.corpusMode,
           peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
           peripheralRatio: periphery.peripheralRatio,
@@ -1012,7 +1139,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
   // ── Block C: Pre-phase compute over candidates
 
-  // Compute paragraphToAllClaims: any presence (not just MAJ)
+  // Compute paragraphToAllClaims from any claim presence.
   const paragraphToAllClaims = new Map<string, Set<string>>();
   for (const c of candidates) {
     const profile = profiles[c.claimId];
@@ -1041,11 +1168,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   }
 
   // Extended candidate interface with computed fields
-  interface ExtendedCandidate extends CandidateProfile {
+  interface ExtendedCandidate extends CandidateProfile, ContinuousRoutingProfile {
     /** Canonical sharedTerritorialMass / sharedStatementCount. Null when denominator is 0. */
     contestedShareRatio: number | null;
-    /** Legacy compatibility diagnostic. Not consumed by active routing after Phase 3. */
-    contestedDominance: number | null;
     claimPresenceCount: number;
     territorialMass: number;
     sharedTerritorialMass: number;
@@ -1086,7 +1211,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   const sortedMaxLen = candidates
     .map((c2) => profiles[c2.claimId]?.maxPassageLength ?? 0)
     .sort((a, b) => a - b);
-  // claimPresenceCount replaces MAJ count as the breadth signal in sustainedMass.
+  // claimPresenceCount is the breadth signal in sustainedMass.
   const sortedClaimPresence = candidates
     .map((c2) => getFootprintRollup(profiles[c2.claimId]).claimPresenceCount)
     .sort((a, b) => a - b);
@@ -1112,11 +1237,20 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const paragraphPresenceCount = rollup.paragraphPresenceCount;
     const dominantParagraphCount = rollup.dominantParagraphCount;
     const sovereignRatio = rollup.sovereignRatio;
+    const continuousRouting = computeContinuousRoutingProfile({
+      profile,
+      rollup,
+      maxStatementRun: claimProfiles[c.claimId].maxStatementRun,
+      modelSpread: profile.modelSpread,
+      modelsWithPassages: profile.modelsWithPassages,
+      totalClaimTerritoryMass,
+      totalParagraphs,
+      totalModels,
+    });
     const allParaSet = new Set<string>(footprintParagraphIds);
 
     // sustainedMass cohort computation: percentile ranks for MAXLEN and claimPresenceCount.
-    // claimPresenceCount replaces the old MAJ-paragraph-count breadth signal; it is a
-    // continuous analog that does not require a 0.5 threshold.
+    // claimPresenceCount is a continuous breadth axis that does not require a 0.5 threshold.
     const MAXLEN = profile.maxPassageLength;
 
     const normMAXLEN = percentileFromSortedAsc(MAXLEN, sortedMaxLen);
@@ -1124,7 +1258,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const sustainedMass = Math.sqrt(normMAXLEN * normClaimPresence);
 
     // Cohort assignment: passage-heavy ↔ depth-dominant, maj-breadth ↔ breadth-dominant.
-    // Semantics unchanged; only the breadth axis is now claimPresenceCount, not MAJ count.
     let sustainedMassCohort: 'passage-heavy' | 'balanced' | 'maj-breadth';
     if (normMAXLEN >= 2 / 3 && normClaimPresence < 1 / 3) {
       sustainedMassCohort = 'passage-heavy';
@@ -1136,12 +1269,8 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
 
     const contestedShareRatio = rollup.contestedShareRatio;
 
-    // Legacy compatibility diagnostic only. Active routing uses contestedShareRatio.
-    const contestedDominance: number | null =
-      sharedStatementCount > 0 ? territorialMass / sharedStatementCount : null;
     const scalarDiagnostic = scalarMigrationByClaimId.get(c.claimId);
     if (scalarDiagnostic) {
-      scalarDiagnostic.legacyContestedDominance = contestedDominance;
       scalarDiagnostic.contestedShareRatio = contestedShareRatio;
     }
 
@@ -1149,7 +1278,6 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     const extCand: ExtendedCandidate = {
       ...(c as any),
       contestedShareRatio,
-      contestedDominance,
       claimPresenceCount,
       territorialMass,
       sharedTerritorialMass,
@@ -1158,6 +1286,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       paragraphPresenceCount,
       contestedParagraphCount,
       dominantParagraphCount,
+      ...continuousRouting,
       sovereignRatio,
       sustainedMass,
       sustainedMassCohort,
@@ -1179,15 +1308,14 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     claimProfiles[c.claimId].sharedStatementCount = sharedStatementCount;
     claimProfiles[c.claimId].contestedParagraphCount = contestedParagraphCount;
     claimProfiles[c.claimId].dominantParagraphCount = dominantParagraphCount;
+    Object.assign(claimProfiles[c.claimId], continuousRouting);
     claimProfiles[c.claimId].sovereignRatio = sovereignRatio;
     claimProfiles[c.claimId].contestedShareRatio = contestedShareRatio;
-    claimProfiles[c.claimId].contestedDominance = contestedDominance;
     claimProfiles[c.claimId].sustainedMass = sustainedMass;
     claimProfiles[c.claimId].sustainedMassCohort = sustainedMassCohort;
   }
 
   // Phase 4 route planning: active inclusion and ordering are structural only.
-  // Fixed landscape labels are projected later into legacyCompatibility.
   for (const c of extendedCandidates) {
     c.isMinority = c.supporters.length < maxSupporterCount / 2;
     const profile = claimProfiles[c.claimId];
@@ -1203,12 +1331,30 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
       paragraphPresenceCount: c.paragraphPresenceCount,
       contestedParagraphCount: c.contestedParagraphCount,
       dominantParagraphCount: c.dominantParagraphCount,
+      globalTerritoryShare: c.globalTerritoryShare,
+      sovereignTerritoryMass: c.sovereignTerritoryMass,
+      globalSovereignTerritoryShare: c.globalSovereignTerritoryShare,
+      sovereignPurity: c.sovereignPurity,
+      contestedTerritoryShare: c.contestedTerritoryShare,
+      globalContestedTerritoryShare: c.globalContestedTerritoryShare,
+      paragraphPresenceShare: c.paragraphPresenceShare,
+      dominantParagraphShare: c.dominantParagraphShare,
+      claimDominanceRate: c.claimDominanceRate,
+      dominanceStrengthMean: c.dominanceStrengthMean,
+      dominanceStrengthMax: c.dominanceStrengthMax,
+      dominanceExcessShare: c.dominanceExcessShare,
       sovereignRatio: c.sovereignRatio,
       sustainedMassCohort: c.sustainedMassCohort,
       modelSpread: c.modelSpread,
       dominantPresenceShare: c.dominantPresenceShare,
       dominantPassageShare: c.dominantPassageShare,
       maxStatementRun: c.maxStatementRun,
+      sustainedTreatmentDepth: c.sustainedTreatmentDepth,
+      sustainedTreatmentShare: c.sustainedTreatmentShare,
+      passageMassShare: c.passageMassShare,
+      dominantModelTerritoryShare: c.dominantModelTerritoryShare,
+      crossModelEvidenceShare: c.crossModelEvidenceShare,
+      crossModelSustainedShare: c.crossModelSustainedShare,
       claimNoveltyRatio: 0,
       corpusNoveltyRatio: 0,
       novelParagraphCount: 0,
@@ -1217,7 +1363,7 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   }
 
   // Instrumentation: keep the legacy gate shape, but feed it the replacement
-  // modelTreatment dominant-presence share rather than concentrationRatio.
+  // modelTreatment dominant-presence share.
   const preconditionPass = candidates;
   const concentrationValues = preconditionPass.map((p) => p.dominantPresenceShare ?? 0);
   const muConcentration = mean(concentrationValues);
@@ -1225,11 +1371,9 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
   const concentrationThreshold = muConcentration + sigmaConcentration;
 
   const routePlan = buildRoutePlan(enrichedClaims, claimProfiles);
-  const legacyCompatibility = projectLegacyLandscapeCompatibility(routePlan);
-  for (const [claimId, position] of Object.entries(legacyCompatibility.landscapePositionByClaim)) {
-    if (claimProfiles[claimId]) claimProfiles[claimId].landscapePosition = position;
-  }
-  const labelExcision = buildLabelExcisionDiagnostics(routePlan, legacyCompatibility);
+  const claimStatusByClaim = computeClaimStatusCompatibility(routePlan);
+  applyClaimStatusToProfiles(claimProfiles, claimStatusByClaim);
+  const labelExcision = buildLabelExcisionDiagnostics(routePlan);
   const loadBearingCount = routePlan.includedClaimIds.length;
 
   // Conflict clusters remain compatibility/debug context only. They do not feed routePlan.
@@ -1276,73 +1420,22 @@ export function computeTopologicalSurface(input: SurfaceInput): SurfaceOutput {
     }
   }
 
-  // Compatibility assembly is derived from routePlan, not from landscape labels.
-  const claimMap = new Map<string, EnrichedClaim>();
-  for (const c of enrichedClaims) claimMap.set(String(c.id), c);
-
-  for (const diagnostic of scalarMigrationByClaimId.values()) {
-    const newLandscapePosition =
-      legacyCompatibility.landscapePositionByClaim[diagnostic.claimId] ?? 'floor';
-    diagnostic.newLandscapePosition = newLandscapePosition;
-    if (diagnostic.legacyWouldFloorByScalarBucket !== null) {
-      const newFloored = newLandscapePosition === 'floor';
-      diagnostic.changedRoutingOutcome =
-        diagnostic.legacyWouldFloorByScalarBucket !== newFloored;
-      if (diagnostic.changedRoutingOutcome) {
-        diagnostic.reason = diagnostic.legacyWouldFloorByScalarBucket
-          ? 'legacy contestedDominance bucket would have floored this minority claim; continuous contestedShareRatio routing did not'
-          : 'continuous contestedShareRatio routing floored this claim after legacy scalar bucket would have kept it';
-      }
-    }
-  }
   const scalarMigration = Array.from(scalarMigrationByClaimId.values());
-
-  const loadBearingClaims: PassageRoutedClaim[] = routePlan.includedClaimIds
-    .map((claimId) => claimProfiles[claimId])
-    .filter((p): p is PassageClaimProfile => Boolean(p))
-    .map((p) => {
-      const c = claimMap.get(p.claimId);
-      return {
-        claimId: p.claimId,
-        claimLabel: String((c as any)?.label ?? p.claimId),
-        claimText: String((c as any)?.text ?? ''),
-        landscapePosition: legacyCompatibility.landscapePositionByClaim[p.claimId] ?? 'floor',
-        contestedShareRatio: p.contestedShareRatio,
-        dominantPresenceShare: p.dominantPresenceShare,
-        dominantPassageShare: p.dominantPassageShare,
-        maxStatementRun: p.maxStatementRun,
-        concentrationRatio: p.concentrationRatio,
-        densityRatio: p.densityRatio,
-        meanCoverageInLongestRun: p.meanCoverageInLongestRun,
-        dominantModel: p.dominantModel,
-        structuralContributors: p.structuralContributors,
-        supporters: Array.isArray((c as any)?.supporters) ? (c as any).supporters : [],
-        ...(p.queryDistance !== undefined ? { queryDistance: p.queryDistance } : {}),
-      };
-    });
-
-  const routedClaimIds = [...routePlan.includedClaimIds];
-  const passthroughClaims = [...routePlan.nonPrimaryClaimIds];
 
   const routing: PassageClaimRouting = {
     conflictClusters,
     routePlan,
-    legacyCompatibility,
-    loadBearingClaims,
-    passthrough: passthroughClaims,
-    routedClaimIds,
     diagnostics: {
       massEligibility,
       scalarMigration,
       labelExcision,
-      concentrationDistribution: Object.values(claimProfiles).map(
+      dominantPresenceDistribution: Object.values(claimProfiles).map(
         (p) => p.dominantPresenceShare ?? 0
       ),
-      densityRatioDistribution: Object.values(claimProfiles).map(
+      dominantPassageDistribution: Object.values(claimProfiles).map(
         (p) => p.dominantPassageShare ?? 0
       ),
       totalClaims: enrichedClaims.length,
-      floorCount: routePlan.nonPrimaryClaimIds.length,
       corpusMode: periphery.corpusMode,
       peripheralNodeIds: Array.from(periphery.peripheralNodeIds),
       peripheralRatio: periphery.peripheralRatio,

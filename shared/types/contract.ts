@@ -17,6 +17,8 @@ export interface MapperClaim {
   label: string;
   text: string;
   supporters: number[];
+  type?: Claim['type'];
+  role?: Claim['role'];
 }
 
 export type MapperEdge =
@@ -107,9 +109,6 @@ export interface LinkedClaim {
   label: string;
   text: string;
   supporters: number[];
-  // Placeholder types for artifact compatibility (SA engine sets real values)
-  type: Claim['type'];
-  role: Claim['role'];
   // Canonical source regions (post mixed-method provenance filter)
   sourceRegionIds: string[]; // which regions the source statements live in
   supportRatio: number; // supporters.length / totalModelCount
@@ -369,7 +368,11 @@ export interface ClaimFootprintParagraphRollup {
   modelIndex: number;
   paragraphIndex: number;
   claimPresenceCount: number;
+  /** Total non-table statement mass in this paragraph; denominator for paragraphTerritoryShare. */
+  totalStatementMass: number;
   territorialMass: number;
+  /** territorialMass / totalStatementMass. Null when totalStatementMass = 0. */
+  paragraphTerritoryShare: number | null;
   sharedTerritorialMass: number;
   sovereignStatementCount: number;
   sharedStatementCount: number;
@@ -437,8 +440,6 @@ export interface ClaimDensityProfile {
   passageCount: number;
   /** Longest contiguous run in statement units */
   maxPassageLength: number;
-  /** Mean coverage across paragraphs spanned by the longest statement passage */
-  meanCoverageInLongestRun: number;
   /** Distinct models containing this claim */
   modelSpread: number;
   /** Distinct models containing a statement passage of length ≥ 2 */
@@ -447,8 +448,6 @@ export interface ClaimDensityProfile {
   totalClaimStatements: number;
   /** Σ(claimStmts/paraTotal) across paragraphs — continuous presence volume */
   presenceMass: number;
-  /** Derived on demand: presenceMass / paragraphCount */
-  meanCoverage: number;
   /** Per-paragraph presence contribution vector: [paragraphId → claimStmts/paraTotal] */
   presenceVector: ParagraphMassVectorEntry[];
   /** Canonical assignment-derived statement atoms and rollups. */
@@ -525,7 +524,20 @@ export interface ProvenanceRefinementResult {
 
 // ── Passage routing (evidence-concentration-based routing) ──────────────
 
-export type LandscapePosition = 'northStar' | 'leadMinority' | 'mechanism' | 'floor';
+export type ClaimStatusRole = 'anchor' | 'supporting' | 'mechanism' | 'passthrough';
+
+export interface ClaimStatus {
+  /**
+   * 1-indexed position within routePlan.includedClaimIds.
+   * null means the claim passes through outside the structural route.
+   */
+  routeRank: number | null;
+  /**
+   * Derived from routeRank for UI compatibility only; non-authoritative.
+   * 1 -> anchor, 2 -> supporting, >=3 -> mechanism, null -> passthrough.
+   */
+  role: ClaimStatusRole;
+}
 
 export type SustainedMassCohort = 'passage-heavy' | 'balanced' | 'maj-breadth';
 
@@ -559,6 +571,30 @@ export interface RoutingMeasurements {
   contestedParagraphCount: number;
   /** Count of claim-present paragraphs where this claim has strict local majority. */
   dominantParagraphCount: number;
+  /** This claim's territorialMass / total claim territorial mass across all claims. */
+  globalTerritoryShare: number;
+  /** Exclusive territory mass contributed by this claim. */
+  sovereignTerritoryMass: number;
+  /** sovereignTerritoryMass / total claim territorial mass across all claims. */
+  globalSovereignTerritoryShare: number;
+  /** sovereignTerritoryMass / territorialMass. Null when territorialMass = 0. */
+  sovereignPurity: number | null;
+  /** sharedTerritorialMass / territorialMass. Null when territorialMass = 0. */
+  contestedTerritoryShare: number | null;
+  /** sharedTerritorialMass / total claim territorial mass across all claims. */
+  globalContestedTerritoryShare: number;
+  /** paragraphPresenceCount / total corpus paragraphs. */
+  paragraphPresenceShare: number;
+  /** dominantParagraphCount / total corpus paragraphs. */
+  dominantParagraphShare: number;
+  /** dominantParagraphCount / paragraphPresenceCount. Null when paragraphPresenceCount = 0. */
+  claimDominanceRate: number | null;
+  /** Mean paragraphTerritoryShare among paragraphs where paragraphTerritoryShare > 0.5. */
+  dominanceStrengthMean: number | null;
+  /** Max paragraphTerritoryShare across claim-present paragraphs. */
+  dominanceStrengthMax: number | null;
+  /** Sum(max(0, paragraphTerritoryShare - 0.5)) / (0.5 * total corpus paragraphs). */
+  dominanceExcessShare: number;
   /**
    * Derived: sovereignStatementCount / claimPresenceCount.
    * Returns null when claimPresenceCount = 0.
@@ -574,19 +610,27 @@ export interface RoutingMeasurements {
   dominantPassageShare: number | null;
   /** passageShape.derived.maxStatementRun */
   maxStatementRun: number;
-  /** Legacy compatibility only. Not consumed by active routing after Phase 3. */
-  contestedDominance?: number | null;
+  /** Same as maxStatementRun, named for continuous routing profile consumers. */
+  sustainedTreatmentDepth: number;
+  /** maxStatementRun / claimPresenceCount. Null when claimPresenceCount = 0. */
+  sustainedTreatmentShare: number | null;
+  /** Total passage statement mass / claimPresenceCount. Null when claimPresenceCount = 0. */
+  passageMassShare: number | null;
+  /** max(model.territorialMass) / territorialMass. Null when territorialMass = 0. */
+  dominantModelTerritoryShare: number | null;
+  /** modelSpread / total model count. */
+  crossModelEvidenceShare: number;
+  /** modelsWithPassages / total model count. */
+  crossModelSustainedShare: number;
   /**
-   * Novel majority paragraphs (coverage > 0.5) / this claim's majority paragraph count.
-   * TODO: Redefine against claimPresenceCount once novelty ratios are migrated off MAJ.
+   * Novel dominant paragraphs (territory share > 0.5) / this claim's dominant paragraph count.
    */
   claimNoveltyRatio: number;
   /**
-   * Novel majority paragraphs (coverage > 0.5) / remaining unassigned corpus paragraphs.
-   * TODO: Redefine against claimPresenceCount once novelty ratios are migrated off MAJ.
+   * Novel dominant paragraphs (territory share > 0.5) / remaining unassigned corpus paragraphs.
    */
   corpusNoveltyRatio: number;
-  /** Count of novel majority paragraphs (coverage > 0.5) assigned at decision time */
+  /** Count of novel dominant paragraphs assigned at decision time */
   novelParagraphCount: number;
   /** Legacy novelty-gate payload retained for older diagnostics. Active routePlan does not read it. */
   majorityGateSnapshot: MajorityGateSnapshot | null;
@@ -594,8 +638,8 @@ export interface RoutingMeasurements {
 
 export interface PassageClaimProfile {
   claimId: string;
-  /** @deprecated Compatibility label. Active routing reads routing.routePlan instead. */
-  landscapePosition: LandscapePosition;
+  /** Canonical route projection for UI and compatibility consumers. */
+  claimStatus: ClaimStatus;
   /** True if this claim is classified as minority (lower cumulative coverage) */
   isMinority: boolean;
   /** Mass-native footprint/model/passage values plus legacy compatibility payload. */
@@ -617,6 +661,30 @@ export interface PassageClaimProfile {
   contestedParagraphCount: number;
   /** Count of claim-present paragraphs where this claim has strict local majority. */
   dominantParagraphCount: number;
+  /** This claim's territorialMass / total claim territorial mass across all claims. */
+  globalTerritoryShare: number;
+  /** Exclusive territory mass contributed by this claim. */
+  sovereignTerritoryMass: number;
+  /** sovereignTerritoryMass / total claim territorial mass across all claims. */
+  globalSovereignTerritoryShare: number;
+  /** sovereignTerritoryMass / territorialMass. Null when territorialMass = 0. */
+  sovereignPurity: number | null;
+  /** sharedTerritorialMass / territorialMass. Null when territorialMass = 0. */
+  contestedTerritoryShare: number | null;
+  /** sharedTerritorialMass / total claim territorial mass across all claims. */
+  globalContestedTerritoryShare: number;
+  /** paragraphPresenceCount / total corpus paragraphs. */
+  paragraphPresenceShare: number;
+  /** dominantParagraphCount / total corpus paragraphs. */
+  dominantParagraphShare: number;
+  /** dominantParagraphCount / paragraphPresenceCount. Null when paragraphPresenceCount = 0. */
+  claimDominanceRate: number | null;
+  /** Mean paragraphTerritoryShare among paragraphs where paragraphTerritoryShare > 0.5. */
+  dominanceStrengthMean: number | null;
+  /** Max paragraphTerritoryShare across claim-present paragraphs. */
+  dominanceStrengthMax: number | null;
+  /** Sum(max(0, paragraphTerritoryShare - 0.5)) / (0.5 * total corpus paragraphs). */
+  dominanceExcessShare: number;
   /** Derived: sovereignStatementCount / claimPresenceCount. Null when claimPresenceCount = 0. */
   sovereignRatio: number | null;
   /** Derived: sharedTerritorialMass / sharedStatementCount. Null when sharedStatementCount = 0. */
@@ -635,7 +703,7 @@ export interface PassageClaimProfile {
   isLoadBearing: boolean | null;
 
   /** Instrumentation only — not consumed by routing */
-  /** Model index of the structural contributor with the highest claimPresenceCount. */
+  /** Model index with the highest claimPresenceCount. */
   dominantModel: number | null;
   /** modelTreatment.derived.dominantPresenceShare */
   dominantPresenceShare: number | null;
@@ -643,40 +711,20 @@ export interface PassageClaimProfile {
   dominantPassageShare: number | null;
   /** passageShape.derived.maxStatementRun */
   maxStatementRun: number;
-  /** Legacy compatibility only. Not consumed by active routing after Phase 3. */
-  contestedDominance?: number | null;
-  /** claimPresenceCount(dominant) / claimPresenceCount(total) */
-  concentrationRatio: number;
-  /** MAXLEN(dominant) / claimPresenceCount(dominant) */
-  densityRatio: number;
+  /** Same as maxStatementRun, named for continuous routing profile consumers. */
+  sustainedTreatmentDepth: number;
+  /** maxStatementRun / claimPresenceCount. Null when claimPresenceCount = 0. */
+  sustainedTreatmentShare: number | null;
+  /** Total passage statement mass / claimPresenceCount. Null when claimPresenceCount = 0. */
+  passageMassShare: number | null;
+  /** max(model.territorialMass) / territorialMass. Null when territorialMass = 0. */
+  dominantModelTerritoryShare: number | null;
+  /** modelSpread / total model count. */
+  crossModelEvidenceShare: number;
+  /** modelsWithPassages / total model count. */
+  crossModelSustainedShare: number;
   /** Longest passage across all models (from density profile) */
   maxPassageLength: number;
-  /** Mean coverage across paragraphs in the longest contiguous run where coverage > 0.5 (majority re-thresholded) */
-  meanCoverageInLongestRun: number;
-  /** Model indices contributing ≥ 1 paragraph with coverage > 0.5 */
-  structuralContributors: number[];
-  /** Model indices contributing only minority statements */
-  incidentalMentions: number[];
-  /** Cosine distance (1 - similarity) to user query embedding */
-  queryDistance?: number;
-}
-
-export interface PassageRoutedClaim {
-  claimId: string;
-  claimLabel: string;
-  claimText: string;
-  /** @deprecated Compatibility label. Active routing reads routing.routePlan instead. */
-  landscapePosition: LandscapePosition;
-  contestedShareRatio: number | null;
-  dominantPresenceShare: number | null;
-  dominantPassageShare: number | null;
-  maxStatementRun: number;
-  concentrationRatio: number;
-  densityRatio: number;
-  meanCoverageInLongestRun: number;
-  dominantModel: number | null;
-  structuralContributors: number[];
-  supporters: number[];
   /** Cosine distance (1 - similarity) to user query embedding */
   queryDistance?: number;
 }
@@ -685,19 +733,37 @@ export interface RoutePlanStructuralInputs {
   claimPresenceCount: number;
   territorialMass: number;
   sharedTerritorialMass: number;
+  globalTerritoryShare: number;
+  sovereignTerritoryMass: number;
+  globalSovereignTerritoryShare: number;
+  sovereignPurity: number | null;
+  contestedTerritoryShare: number | null;
+  globalContestedTerritoryShare: number;
   sovereignStatementCount: number;
   sharedStatementCount: number;
   paragraphPresenceCount: number;
+  paragraphPresenceShare: number;
   contestedParagraphCount: number;
   dominantParagraphCount: number;
+  dominantParagraphShare: number;
+  claimDominanceRate: number | null;
+  dominanceStrengthMean: number | null;
+  dominanceStrengthMax: number | null;
+  dominanceExcessShare: number;
   sovereignRatio: number | null;
   contestedShareRatio: number | null;
   dominantPresenceShare: number | null;
   dominantPassageShare: number | null;
   maxStatementRun: number;
+  sustainedTreatmentDepth: number;
+  sustainedTreatmentShare: number | null;
+  passageMassShare: number | null;
+  dominantModelTerritoryShare: number | null;
   passageCount: number;
   modelSpread: number;
   modelsWithPassages: number;
+  crossModelEvidenceShare: number;
+  crossModelSustainedShare: number;
   sustainedMass: number;
 }
 
@@ -709,10 +775,6 @@ export interface PassageRoutePlan {
   structuralInputsByClaim: Record<string, RoutePlanStructuralInputs>;
 }
 
-export interface PassageRoutingLegacyCompatibility {
-  landscapePositionByClaim: Record<string, LandscapePosition>;
-}
-
 export interface PassageClaimRouting {
   conflictClusters: Array<{
     claimIds: string[];
@@ -720,14 +782,6 @@ export interface PassageClaimRouting {
   }>;
   /** Active structural route plan. Fixed landscape labels are not inputs to this object. */
   routePlan: PassageRoutePlan;
-  /** Dead-end compatibility export. Internal routing/synthesis code must not read this object. */
-  legacyCompatibility: PassageRoutingLegacyCompatibility;
-  /** @deprecated Derived from routePlan.includedClaimIds for older consumers. */
-  loadBearingClaims: PassageRoutedClaim[];
-  /** @deprecated Derived from routePlan.nonPrimaryClaimIds for older consumers. */
-  passthrough: string[];
-  /** @deprecated Derived from routePlan.includedClaimIds for older consumers. */
-  routedClaimIds: string[];
   diagnostics: {
     massEligibility: Array<{
       claimId: string;
@@ -748,35 +802,23 @@ export interface PassageClaimRouting {
     }>;
     scalarMigration: Array<{
       claimId: string;
-      legacyContestedDominance: number | null;
       contestedShareRatio: number | null;
-      legacyConcentrationRatio: number;
       dominantPresenceShare: number | null;
-      legacyDensityRatio: number;
       dominantPassageShare: number | null;
-      legacyMeanCoverageInLongestRun: number;
       maxStatementRun: number;
-      legacyMinorityBucket: number | null;
-      legacyWouldFloorByScalarBucket: boolean | null;
-      newLandscapePosition: LandscapePosition;
-      changedRoutingOutcome: boolean;
       reason: string | null;
     }>;
     labelExcision: Array<{
       claimId: string;
-      oldLegacyLandscapePosition: LandscapePosition;
       newRoutePlanInclusion: boolean;
       routeOrderIndex: number | null;
       structuralValuesUsed: RoutePlanStructuralInputs;
-      changedRoutingOutcome: boolean;
       reason: string;
       consumersRemoved: string[];
     }>;
-    concentrationDistribution: number[];
-    densityRatioDistribution: number[];
+    dominantPresenceDistribution: number[];
+    dominantPassageDistribution: number[];
     totalClaims: number;
-    /** @deprecated Derived from routePlan.nonPrimaryClaimIds.length for older consumers. */
-    floorCount: number;
     /** 'dominant-core' = largestBasinRatio > 0.5, periphery filtered before scoring.
      *  'parallel-cores' = no dominant basin, full corpus scored, basin membership annotated.
      *  'no-geometry' = no basin data available, full corpus scored (graceful degradation). */

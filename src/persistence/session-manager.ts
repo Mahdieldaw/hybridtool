@@ -547,8 +547,8 @@ export class SessionManager {
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId, result),
       ...(pipelineStatus ? { pipelineStatus } : {}),
-      ...(pauseReason ? { pauseReason } : {}),
-      ...(resumePoint !== undefined ? { resumePoint } : {}),
+      ...(pauseReason && pipelineStatus === 'paused' ? { pauseReason } : {}),
+      ...(resumePoint !== undefined && pipelineStatus === 'paused' ? { resumePoint } : {}),
     };
     await adapter.put('turns', aiTurnRecord);
 
@@ -734,8 +734,8 @@ export class SessionManager {
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId, result),
       ...(pipelineStatus ? { pipelineStatus } : {}),
-      ...(pauseReason ? { pauseReason } : {}),
-      ...(resumePoint !== undefined ? { resumePoint } : {}),
+      ...(pauseReason && pipelineStatus === 'paused' ? { pauseReason } : {}),
+      ...(resumePoint !== undefined && pipelineStatus === 'paused' ? { resumePoint } : {}),
     };
     await adapter.put('turns', aiTurnRecord);
 

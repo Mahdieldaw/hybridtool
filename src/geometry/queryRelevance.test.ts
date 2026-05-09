@@ -105,6 +105,7 @@ describe('computeQueryRelevance', () => {
     expect(s2).toBeDefined();
     // s0 aligned with query → querySimilarity near 1
     expect(s0!.querySimilarity).toBeGreaterThan(0.9);
+    expect(s0).not.toHaveProperty('simRaw');
     // s2 orthogonal to query → querySimilarity near 0.0 (raw cosine)
     expect(s2!.querySimilarity).toBeCloseTo(0.0, 1);
   });

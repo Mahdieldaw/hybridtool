@@ -1,7 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import type { ResolvedPassage, ResolvedUnclaimedGroup } from '../hooks/reading/usePassageResolver';
-import type { LandscapePosition } from './styles';
+import type { RouteRole } from './styles';
 
 interface PassageBlockProps {
   resolved: ResolvedPassage | ResolvedUnclaimedGroup;
@@ -16,11 +16,11 @@ const ROLE_LABELS: Record<string, string> = {
   alternative: 'Alternative',
 };
 
-const BORDER_COLORS: Record<LandscapePosition, string> = {
-  northStar: 'border-l-amber-400',
-  leadMinority: 'border-l-indigo-400',
+const BORDER_COLORS: Record<RouteRole, string> = {
+  anchor: 'border-l-amber-400',
+  supporting: 'border-l-indigo-400',
   mechanism: 'border-l-blue-400',
-  floor: 'border-l-white/25',
+  passthrough: 'border-l-white/25',
 };
 
 export const PassageBlock: React.FC<PassageBlockProps> = ({ resolved, role }) => {
@@ -43,17 +43,18 @@ export const PassageBlock: React.FC<PassageBlockProps> = ({ resolved, role }) =>
   }
 
   // Passage — apply geometric overlay via CSS custom properties
-  const concentration = Math.max(0, Math.min(1, resolved.concentrationRatio));
+  const dominantPresence = Math.max(0, Math.min(1, resolved.dominantPresenceShare));
   const style: React.CSSProperties = {
-    '--concentration': concentration,
-    fontSize: `calc(0.9375rem + ${concentration} * 0.125rem)`,
-    fontWeight: Math.round(400 + concentration * 200),
+    '--dominant-presence': dominantPresence,
+    fontSize: `calc(0.9375rem + ${dominantPresence} * 0.125rem)`,
+    fontWeight: Math.round(400 + dominantPresence * 200),
   } as React.CSSProperties;
 
-  // Color interpolation: muted → bright based on concentration
-  const lightness = 60 + concentration * 30;
+  // Color interpolation: muted to bright based on dominant presence.
+  const lightness = 60 + dominantPresence * 30;
 
-  const borderColor = BORDER_COLORS[resolved.landscapePosition] || BORDER_COLORS.floor;
+  const borderColor =
+    BORDER_COLORS[resolved.claimStatus.role] || BORDER_COLORS.passthrough;
   const isMultiParagraph = resolved.paragraphCount >= 3;
 
   return (

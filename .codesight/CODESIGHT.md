@@ -4,7 +4,7 @@
 
 > 0 routes | 0 models | 85 components | 124 lib files | 6 env vars | 4 middleware | 0% test coverage
 > **Token savings:** this file is ~11,100 tokens. Without it, AI exploration would cost ~70,800 tokens. **Saves ~59,700 tokens per conversation.**
-> **Last scanned:** 2026-05-08 09:38 — re-run after significant changes
+> **Last scanned:** 2026-05-09 09:06 — re-run after significant changes
 
 ---
 
@@ -321,7 +321,10 @@
   - _...1 more_
 - `src\persistence\schema-verification.ts` — function verifySchemaAndRepair: (autoRepair) => Promise<, interface SchemaHealth
 - `src\persistence\session-manager.ts` — class SessionManager
-- `src\persistence\simple-indexeddb-adapter.ts` — class SimpleIndexedDBAdapter, interface SimpleRecord
+- `src\persistence\simple-indexeddb-adapter.ts`
+  - function stripDeprecatedPassageRoutingFieldsForRead: (record) => T
+  - class SimpleIndexedDBAdapter
+  - interface SimpleRecord
 - `src\persistence\transactions.ts`
   - function withTransaction: (db, storeNames, mode, work) => void
   - function batchWrite: (db, storeName, records) => Promise<BatchWriteResult>
@@ -586,9 +589,9 @@
 - `ui\shared\CopyButton.tsx` — imported by **8** files
 - `shared\types\provider.ts` — imported by **7** files
 - `src\clustering\distance.ts` — imported by **7** files
+- `src\concierge-service\editorial-mapper.ts` — imported by **7** files
 - `shared\citation-utils.ts` — imported by **7** files
 - `src\errors\handler.ts` — imported by **7** files
-- `src\concierge-service\editorial-mapper.ts` — imported by **6** files
 - `src\errors\classifier.ts` — imported by **6** files
 
 ## Import Map (who imports what)
@@ -609,7 +612,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 28 test files found
+> 30 test files found
 
 ---
 

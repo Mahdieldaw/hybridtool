@@ -820,8 +820,34 @@ export class WorkflowEngine {
       result: { results: frozenBatchOutputs },
     });
 
-    await this._executeStep(mappingStep, context, stepResults, workflowContexts, resolvedContext);
-    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+    try {
+      await this._executeStep(mappingStep, context, stepResults, workflowContexts, resolvedContext);
+      await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logInfraError('WorkflowEngine/resumeFromPause: execution failed', error);
+      const adapter = this.sessionManager?.adapter;
+      if (adapter && context.canonicalAiTurnId) {
+        try {
+          const turn = await adapter.get('turns', context.canonicalAiTurnId);
+          if (turn) {
+            await adapter.put('turns', {
+              ...turn,
+              pipelineStatus: 'error',
+              meta: { ...(turn.meta || {}), pipelineError: msg },
+            });
+          }
+        } catch (persistError) {
+          logInfraError('WorkflowEngine/resumeFromPause: failed to mark turn as errored', persistError);
+        }
+      }
+      this._safePostMessage({
+        type: 'WORKFLOW_COMPLETE',
+        sessionId: context.sessionId,
+        workflowId: request.workflowId,
+        error: msg,
+      });
+    }
   }
 
   async handleRetryRequest(message: any): Promise<void> {

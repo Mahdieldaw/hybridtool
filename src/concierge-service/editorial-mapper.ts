@@ -8,6 +8,7 @@
 
 import type {
   Claim,
+  ClaimStatus,
   ClaimDensityResult,
   EditorialAST,
   EditorialThread,
@@ -32,19 +33,18 @@ export interface IndexedPassage {
   text: string;
   routeOrderIndex: number | null;
   routeIncluded: boolean;
+  claimStatus: ClaimStatus;
   routeOrderingReasons: string[];
-  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
-  concentrationRatio?: any;
-  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
-  densityRatio?: any;
-  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
-  meanCoverageInLongestRun?: any;
-  /** @deprecated Compatibility shim for old callers; buildEditorialPrompt does not read it. */
-  landscapePosition?: any;
   claimPresenceCount: number;
   sovereignStatementCount: number;
   sharedTerritorialMass: number;
   contestedShareRatio: number | null;
+  globalTerritoryShare?: number;
+  globalSovereignTerritoryShare?: number;
+  dominanceExcessShare?: number;
+  dominanceStrengthMean?: number | null;
+  sustainedTreatmentShare?: number | null;
+  crossModelSustainedShare?: number;
   maxStatementRun: number;
   dominantPresenceShare: number | null;
   dominantPassageShare: number | null;
@@ -86,8 +86,11 @@ export function buildPassageIndex(
   }
 
   const claimLabels = new Map<string, string>();
+  const claimsById = new Map<string, Claim>();
   for (const c of claims) {
-    claimLabels.set(String(c.id), c.label || '');
+    const claimId = String(c.id);
+    claimLabels.set(claimId, c.label || '');
+    claimsById.set(claimId, c);
   }
 
   const routing = passageRouting.routing;
@@ -122,6 +125,10 @@ export function buildPassageIndex(
 
       const continuity = continuityMap.get(passageKey);
       const modelName = resolveModelDisplayName(passageEntry.modelIndex, citationSourceOrder);
+      const modelTreatment =
+        (claimProfile as any).modelTreatment?.derived ??
+        (claimsById.get(claimId) as any)?.structuralFingerprint?.modelTreatment?.derived ??
+        null;
 
       passages.push({
         passageKey,
@@ -136,15 +143,24 @@ export function buildPassageIndex(
         text: textParts.join('\n\n'),
         routeOrderIndex: routeOrderIndexByClaim.get(claimId) ?? null,
         routeIncluded: routeIncludedClaimIds.has(claimId),
+        claimStatus: claimProfile.claimStatus,
         routeOrderingReasons: routePlan?.orderingReasonsByClaim?.[claimId] ?? [],
         claimPresenceCount: claimProfile.claimPresenceCount,
         sovereignStatementCount: claimProfile.sovereignStatementCount,
         sharedTerritorialMass: claimProfile.sharedTerritorialMass,
         contestedShareRatio: claimProfile.contestedShareRatio,
+        globalTerritoryShare: claimProfile.globalTerritoryShare,
+        globalSovereignTerritoryShare: claimProfile.globalSovereignTerritoryShare,
+        dominanceExcessShare: claimProfile.dominanceExcessShare,
+        dominanceStrengthMean: claimProfile.dominanceStrengthMean,
+        sustainedTreatmentShare: claimProfile.sustainedTreatmentShare,
+        crossModelSustainedShare: claimProfile.crossModelSustainedShare,
         maxStatementRun: claimProfile.maxStatementRun,
         dominantPresenceShare: claimProfile.dominantPresenceShare,
         dominantPassageShare: claimProfile.dominantPassageShare,
-        isSoleSource: (claimProfile.structuralContributors?.length ?? 0) === 1,
+        isSoleSource:
+          modelTreatment?.dominantPresenceShare === 1 ||
+          modelTreatment?.modelsWithEvidence === 1,
         conflictClusterIndex: claimToClusterIndex.get(claimId) ?? null,
         continuity: {
           prev: continuity?.prevPassageKey ?? null,
@@ -253,7 +269,7 @@ ${userQuery}`);
 - Model: ${p.modelName} (index ${p.modelIndex})
 - Claim: "${p.claimLabel}" (${p.claimId})
 - Route: ${route}
-- Structural: claimPresenceCount=${p.claimPresenceCount}, sovereignStatementCount=${p.sovereignStatementCount}, sharedTerritorialMass=${fmt(p.sharedTerritorialMass)}, contestedShareRatio=${fmt(p.contestedShareRatio)}, maxStatementRun=${p.maxStatementRun}, dominantPresenceShare=${fmt(p.dominantPresenceShare)}, dominantPassageShare=${fmt(p.dominantPassageShare)}${reasons}
+- Structural: claimPresenceCount=${p.claimPresenceCount}, globalTerritoryShare=${fmt(p.globalTerritoryShare ?? null)}, globalSovereignTerritoryShare=${fmt(p.globalSovereignTerritoryShare ?? null)}, dominanceExcessShare=${fmt(p.dominanceExcessShare ?? null)}, dominanceStrengthMean=${fmt(p.dominanceStrengthMean ?? null)}, sustainedTreatmentShare=${fmt(p.sustainedTreatmentShare ?? null)}, crossModelSustainedShare=${fmt(p.crossModelSustainedShare ?? null)}, sovereignStatementCount=${p.sovereignStatementCount}, sharedTerritorialMass=${fmt(p.sharedTerritorialMass)}, contestedShareRatio=${fmt(p.contestedShareRatio)}, maxStatementRun=${p.maxStatementRun}${reasons}
 - Passage: statementLength=${p.statementLength}${sole}${conflict}${extent}${contStr}
 
 ${p.text}`;

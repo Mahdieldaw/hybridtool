@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
-import { LandscapePosition, LANDSCAPE_ORDER } from '../../reading/styles';
+import type { ClaimStatus, ClaimStatusRole } from '../../../shared/types';
 import type { CorpusIndex } from '../../../shared/types/corpus-tree';
+
+const PASSTHROUGH_STATUS: ClaimStatus = { routeRank: null, role: 'passthrough' };
 
 export interface ParagraphHighlight {
   state: 'passage' | 'dispersed' | 'none';
-  landscapePosition: LandscapePosition;
+  role: ClaimStatusRole;
   claimId: string;
 }
 
@@ -32,12 +34,13 @@ export function usePassageHighlight(
 
     const densityProfiles: Record<string, any> = artifact?.claimDensity?.profiles ?? {};
     const routingProfiles: Record<string, any> = artifact?.passageRouting?.claimProfiles ?? {};
+    const getClaimStatus = (claimId: string): ClaimStatus =>
+      routingProfiles[claimId]?.claimStatus ?? PASSTHROUGH_STATUS;
 
     if (focusedClaimId !== null) {
       // ── Focused mode ─────────────────────────────────────────────
       const profile = densityProfiles[focusedClaimId];
-      const routingProfile = routingProfiles[focusedClaimId];
-      const pos: LandscapePosition = routingProfile?.landscapePosition ?? 'floor';
+      const role = getClaimStatus(focusedClaimId).role;
 
       // Mark passage-interior paragraphs
       const passageIds = new Set<string>();
@@ -52,7 +55,7 @@ export function usePassageHighlight(
             passageIds.add(paraId);
             map.set(paraId, {
               state: 'passage',
-              landscapePosition: pos,
+              role,
               claimId: focusedClaimId,
             });
           }
@@ -70,37 +73,32 @@ export function usePassageHighlight(
         if (!map.has(paraId)) {
           map.set(paraId, {
             state: 'dispersed',
-            landscapePosition: pos,
+            role,
             claimId: focusedClaimId,
           });
         }
       }
     } else {
       // ── Overview mode ─────────────────────────────────────────────
-      // Walk load-bearing claims in landscape priority order.
+      // Walk load-bearing claims in route-rank order.
       // For each paragraph, keep the highest-tier claim that has a passage there.
 
-      const tierIndex = (pos: LandscapePosition): number => {
-        const idx = LANDSCAPE_ORDER.indexOf(pos);
-        return idx >= 0 ? idx : LANDSCAPE_ORDER.length;
-      };
-
       const allClaimIds = Object.keys(densityProfiles);
-      // Sort by landscape tier ascending (northStar = 0 wins)
+      // Sort by routeRank ascending (rank 1 wins).
       const sorted = allClaimIds
         .filter((id) => {
-          const pos = routingProfiles[id]?.landscapePosition;
-          return pos && pos !== 'floor';
+          const routeRank = getClaimStatus(id).routeRank;
+          return typeof routeRank === 'number';
         })
         .sort((a, b) => {
-          const pa: LandscapePosition = routingProfiles[a]?.landscapePosition ?? 'floor';
-          const pb: LandscapePosition = routingProfiles[b]?.landscapePosition ?? 'floor';
-          return tierIndex(pa) - tierIndex(pb);
+          const rankA = getClaimStatus(a).routeRank ?? Number.MAX_SAFE_INTEGER;
+          const rankB = getClaimStatus(b).routeRank ?? Number.MAX_SAFE_INTEGER;
+          return rankA - rankB;
         });
 
       for (const claimId of sorted) {
         const profile = densityProfiles[claimId];
-        const pos: LandscapePosition = routingProfiles[claimId]?.landscapePosition ?? 'floor';
+        const role = getClaimStatus(claimId).role;
         const passages: any[] = Array.isArray(profile?.statementPassages) ? profile.statementPassages : [];
         for (const passage of passages) {
           const mi: number = passage.modelIndex ?? 0;
@@ -109,8 +107,8 @@ export function usePassageHighlight(
           for (let pi = start; pi <= end; pi++) {
             const paraId = paraIdByCoord.get(`${mi}:${pi}`);
             if (paraId && !map.has(paraId)) {
-              // First writer wins (sorted by priority, so lower tier wins = northStar first)
-              map.set(paraId, { state: 'passage', landscapePosition: pos, claimId });
+              // First writer wins (sorted by priority, so lower rank wins first).
+              map.set(paraId, { state: 'passage', role, claimId });
             }
           }
         }

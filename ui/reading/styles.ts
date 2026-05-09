@@ -1,15 +1,17 @@
-export type LandscapePosition = 'northStar' | 'leadMinority' | 'mechanism' | 'floor';
+import type { ClaimStatusRole } from '../../shared/types';
 
-export const LANDSCAPE_ORDER: LandscapePosition[] = ['northStar', 'leadMinority', 'mechanism', 'floor'];
+export type RouteRole = ClaimStatusRole;
 
-export const LANDSCAPE_LABEL: Record<LandscapePosition, string> = {
-  northStar: 'North Star',
-  leadMinority: 'Lead Minority',
+export const ROUTE_ROLE_ORDER: RouteRole[] = ['anchor', 'supporting', 'mechanism', 'passthrough'];
+
+export const ROUTE_ROLE_LABEL: Record<RouteRole, string> = {
+  anchor: 'Anchor',
+  supporting: 'Supporting',
   mechanism: 'Mechanism',
-  floor: 'Floor',
+  passthrough: 'Passthrough',
 };
 
-export interface LandscapeStyle {
+export interface RouteRoleStyle {
   chipBg: string;
   chipBorder: string;
   chipText: string;
@@ -19,8 +21,8 @@ export interface LandscapeStyle {
   dispersedBorder: string;
 }
 
-export const LANDSCAPE_STYLES: Record<LandscapePosition, LandscapeStyle> = {
-  northStar: {
+export const ROUTE_ROLE_STYLES: Record<RouteRole, RouteRoleStyle> = {
+  anchor: {
     chipBg: 'bg-amber-500/20',
     chipBorder: 'border-amber-500/50',
     chipText: 'text-amber-300',
@@ -29,7 +31,7 @@ export const LANDSCAPE_STYLES: Record<LandscapePosition, LandscapeStyle> = {
     dispersedBg: 'bg-amber-500/5',
     dispersedBorder: 'border-l-amber-500/40',
   },
-  leadMinority: {
+  supporting: {
     chipBg: 'bg-indigo-500/15',
     chipBorder: 'border-indigo-500/40',
     chipText: 'text-indigo-300',
@@ -47,7 +49,7 @@ export const LANDSCAPE_STYLES: Record<LandscapePosition, LandscapeStyle> = {
     dispersedBg: 'bg-blue-500/5',
     dispersedBorder: 'border-l-blue-500/30',
   },
-  floor: {
+  passthrough: {
     chipBg: 'bg-white/5',
     chipBorder: 'border-white/15',
     chipText: 'text-text-muted',
