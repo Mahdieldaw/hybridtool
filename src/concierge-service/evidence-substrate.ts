@@ -11,6 +11,7 @@ import type {
   EditorialAST,
   EditorialThread,
   CognitiveArtifact,
+  SurfacedUnclaimedEntry,
   UnclaimedRun,
 } from '../../shared/types';
 import { resolveModelDisplayName } from '../../shared/citation-utils';
@@ -62,13 +63,39 @@ function buildResolver(
     if (Array.isArray(ids)) claimStatementIds.set(cid, ids);
   }
 
-  // Unclaimed runs by runId.
+  // Surfaced unclaimed entries by synthetic ID (su_*).
+  const surfacedUnclaimedEntries: SurfacedUnclaimedEntry[] =
+    (artifact as any)?.editorialAST?.surfacedUnclaimed ?? [];
+  const surfacedById = new Map<string, SurfacedUnclaimedEntry>();
+  for (const e of surfacedUnclaimedEntries) surfacedById.set(e.syntheticId, e);
+
+  // Legacy unclaimed runs by runId (backward compat).
   const unclaimedRuns: UnclaimedRun[] = (artifact as any)?.unclaimedRuns ?? [];
   const runById = new Map<string, UnclaimedRun>();
   for (const r of unclaimedRuns) runById.set(r.runId, r);
 
   return (itemId: string): ItemResolution | null => {
-    // Unclaimed run
+    // Surfaced unclaimed (statement-level, new schema).
+    const surfaced = surfacedById.get(itemId);
+    if (surfaced) {
+      const texts: string[] = [];
+      const models = new Set<number>();
+      for (const sid of surfaced.statementIds) {
+        const t = statementTexts.get(sid);
+        if (t) texts.push(t);
+        const mi = statementModelIndex.get(sid);
+        if (typeof mi === 'number') models.add(mi);
+      }
+      const modelName =
+        models.size === 1
+          ? resolveModelDisplayName([...models][0], citationSourceOrder)
+          : models.size > 1
+          ? `${models.size} models`
+          : '';
+      return { text: texts.join(' ') || '', modelName, claimLabel: '' };
+    }
+
+    // Legacy: unclaimed run by runId.
     const run = runById.get(itemId);
     if (run) {
       return {

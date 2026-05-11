@@ -3,8 +3,8 @@
 > **Stack:** raw-http | none | react | typescript
 
 > 0 routes | 0 models | 83 components | 125 lib files | 6 env vars | 4 middleware | 0% test coverage
-> **Token savings:** this file is ~11,200 tokens. Without it, AI exploration would cost ~70,400 tokens. **Saves ~59,200 tokens per conversation.**
-> **Last scanned:** 2026-05-11 03:39 — re-run after significant changes
+> **Token savings:** this file is ~11,300 tokens. Without it, AI exploration would cost ~70,400 tokens. **Saves ~59,100 tokens per conversation.**
+> **Last scanned:** 2026-05-11 10:47 — re-run after significant changes
 
 ---
 
@@ -188,8 +188,9 @@
   - const ConciergeService
 - `src\concierge-service\editorial-mapper.ts`
   - function buildUnclaimedRuns: (corpus, claimedStatementIds) => UnclaimedRun[]
+  - function buildUnclaimedStatementMeta: (corpus, claimedStatementIds) => Map<string,
   - function buildEditorialPrompt: (userQuery, corpus, unclaimedRuns, claims, 'id' | 'label' | 'text'>>, claimedStatementIds) => string
-  - function parseEditorialOutput: (rawText, validClaimIds, validRunIds) => EditorialParseResult
+  - function parseEditorialOutput: (rawText, validClaimIds, unclaimedStatementMeta, SortKey>) => EditorialParseResult
   - interface EditorialParseResult
 - `src\concierge-service\evidence-substrate.ts` — function buildEvidenceSubstrate: (artifact, mappingText, citationSourceOrder, string>) => string
 - `src\concierge-service\position-brief.ts` — function buildPositionBriefFromClaims: (claims) => string, function buildPositionBrief: (analysis) => string

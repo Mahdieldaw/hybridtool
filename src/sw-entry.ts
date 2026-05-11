@@ -49,7 +49,7 @@ import { searchCorpus } from './clustering/corpus-search.js';
 import { canonicalCitationOrder, buildCitationSourceOrder } from '../shared/provider-config.js';
 import { extractShadowStatements, projectParagraphs } from './shadow/index.js';
 import { buildArtifactForProvider } from './execution/deterministic-pipeline.js';
-import { parseEditorialOutput, buildUnclaimedRuns, buildEditorialPrompt } from './concierge-service/editorial-mapper.js';
+import { parseEditorialOutput, buildUnclaimedRuns, buildUnclaimedStatementMeta, buildEditorialPrompt } from './concierge-service/editorial-mapper.js';
 
 
 // Global Services Registry
@@ -2013,15 +2013,15 @@ function doRegenerateEmbeddings(
           }
         }
         const unclaimedRuns = buildUnclaimedRuns(corpus, claimedStatementIds);
+        const unclaimedStatementMeta = buildUnclaimedStatementMeta(corpus, claimedStatementIds);
         (mapperArtifact as any).unclaimedRuns = unclaimedRuns;
         cognitiveArtifact.unclaimedRuns = unclaimedRuns;
 
         const validClaimIds = new Set(enrichedClaims.map((c: { id: string }) => String(c.id)));
-        const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
         const parsed = parseEditorialOutput(
           editorialResp.text as string,
           validClaimIds,
-          validRunIds
+          unclaimedStatementMeta
         );
 
         if (parsed.success && parsed.ast) {
@@ -2054,11 +2054,11 @@ function doRegenerateEmbeddings(
             }
           }
           const unclaimedRuns = buildUnclaimedRuns(corpus, claimedStatementIds);
+          const unclaimedStatementMeta = buildUnclaimedStatementMeta(corpus, claimedStatementIds);
           (mapperArtifact as any).unclaimedRuns = unclaimedRuns;
           cognitiveArtifact.unclaimedRuns = unclaimedRuns;
 
           const validClaimIds = new Set(enrichedClaims.map((c: { id: string }) => String(c.id)));
-          const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
 
           const editorialPrompt = buildEditorialPrompt(
             queryText,
@@ -2115,7 +2115,7 @@ function doRegenerateEmbeddings(
             const parsed = parseEditorialOutput(
               editorialResult.text,
               validClaimIds,
-              validRunIds
+              unclaimedStatementMeta
             );
             if (parsed.success && parsed.ast) {
               cognitiveArtifact.editorialAST = parsed.ast;

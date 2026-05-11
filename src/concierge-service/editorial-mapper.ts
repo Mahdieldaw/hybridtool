@@ -16,6 +16,8 @@ import type {
   Claim,
   EditorialAST,
   EditorialThread,
+  EditorialThreadItem,
+  SurfacedUnclaimedEntry,
   UnclaimedRun,
 } from '../../shared/types';
 import type { CorpusTree, ModelNode } from '../../shared/types/corpus-tree';
@@ -76,6 +78,34 @@ export function buildUnclaimedRuns(
   return runs;
 }
 
+/**
+ * Build a map from unclaimed statement ID → corpus sort keys.
+ * Used by parseEditorialOutput to validate and canonically sort statement_ids.
+ */
+export function buildUnclaimedStatementMeta(
+  corpus: CorpusTree,
+  claimedStatementIds: ReadonlySet<string>
+): Map<string, { modelIndex: number; paragraphOrdinal: number; statementOrdinal: number }> {
+  const meta = new Map<
+    string,
+    { modelIndex: number; paragraphOrdinal: number; statementOrdinal: number }
+  >();
+  for (const model of corpus.models) {
+    for (const para of model.paragraphs) {
+      for (const stmt of para.statements ?? []) {
+        const sid = String(stmt.statementId ?? '');
+        if (!sid || claimedStatementIds.has(sid)) continue;
+        meta.set(sid, {
+          modelIndex: model.modelIndex,
+          paragraphOrdinal: para.paragraphOrdinal,
+          statementOrdinal: stmt.statementOrdinal,
+        });
+      }
+    }
+  }
+  return meta;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Prompt builder
 // ─────────────────────────────────────────────────────────────────────────
@@ -123,7 +153,7 @@ function buildModelCorpusBody(
           lines.push(`⟦UNCLAIMED_RUN id="${runId}"⟧`);
           openRunId = runId;
         }
-        if (text) lines.push(text);
+        if (text) lines.push(`[${sid}] ${text}`);
       }
     }
 
@@ -177,7 +207,7 @@ The responses contain claimed text and unclaimed runs. Claimed text is evidence 
 
 Arrange relevant claimed IDs into threads by their utility to the solution of the user query. Include an unclaimed-run ID only when that unclaimed text gives a better answer path, adds new answer material.
 
-Unclaimed runs enter the output only by ID. Any unclaimed-run IDs you include are treated downstream as surfaced unclaimed text: one recovered-text group, selected run by run on individual merit. No separate claim assignment, category, or omission note is expected.
+Unclaimed text enters the output by statement ID. Each statement inside an unclaimed run is labeled with its ID in brackets (e.g. [s14]). Include specific statement IDs for the statements you want surfaced. Downstream treats all surfaced unclaimed statement IDs as one recovered-text group, selected statement by statement on individual merit. No separate claim assignment, category, or omission note is expected.
 
 ## User Query
 
@@ -223,8 +253,8 @@ Return only JSON inside a code fence.
       "why_care": "One sentence explaining why this passage matters for the query.",
       "start_here": true,
       "items": [
-        { "id": "<claim_id or unclaimed_run_id>", "role": "anchor" },
-        { "id": "<claim_id or unclaimed_run_id>", "role": "development" }
+        { "type": "claim", "id": "<claim_id>", "role": "anchor" },
+        { "type": "surfaced_unclaimed", "role": "development", "statement_ids": ["<sid>", "<sid>"] }
       ]
     }
   ],
@@ -237,9 +267,10 @@ Return only JSON inside a code fence.
 \`\`\`
 
 Output expectations:
-- Use IDs found in the Corpus or Claim Inventory.
+- Claim items: use claim IDs found in the Claim Inventory. Include \`"type": "claim"\` and \`"id"\`.
+- Surfaced unclaimed items: use statement IDs found inside ⟦UNCLAIMED_RUN⟧ blocks. Include \`"type": "surfaced_unclaimed"\` and \`"statement_ids"\` (no \`"id"\` field).
 - Each thread has an anchor.
-- Each ID appears at most once.
+- Each claim ID appears at most once across all items.
 - One thread has "start_here": true.
 - "thread_order" contains every thread id.
 - Thread count follows the relevant evidence shape, using claim count as the first estimate.`;
@@ -257,10 +288,30 @@ export interface EditorialParseResult {
 
 const VALID_ROLES = new Set(['anchor', 'development', 'alternative']);
 
+type SortKey = { modelIndex: number; paragraphOrdinal: number; statementOrdinal: number };
+
+function sortStatementIds(ids: string[], meta: ReadonlyMap<string, SortKey>): string[] {
+  return [...ids].sort((a, b) => {
+    const ka = meta.get(a);
+    const kb = meta.get(b);
+    if (!ka || !kb) return 0;
+    if (ka.modelIndex !== kb.modelIndex) return ka.modelIndex - kb.modelIndex;
+    if (ka.paragraphOrdinal !== kb.paragraphOrdinal) return ka.paragraphOrdinal - kb.paragraphOrdinal;
+    return ka.statementOrdinal - kb.statementOrdinal;
+  });
+}
+
+/**
+ * Parse the editorial model's JSON output.
+ *
+ * @param unclaimedStatementMeta  Map from unclaimed statementId → corpus sort key.
+ *   Built by `buildUnclaimedStatementMeta`. Used to validate statement IDs in
+ *   `surfaced_unclaimed` items and to restore canonical corpus order.
+ */
 export function parseEditorialOutput(
   rawText: string,
   validClaimIds: ReadonlySet<string>,
-  validRunIds: ReadonlySet<string>
+  unclaimedStatementMeta: ReadonlyMap<string, SortKey>
 ): EditorialParseResult {
   const errors: string[] = [];
   const parsed = extractJsonFromContent(rawText);
@@ -275,8 +326,8 @@ export function parseEditorialOutput(
     return { success: false, errors: ['Missing threads array'] };
   }
 
-  const usedIds = new Set<string>();
-  const elevatedRunIds: string[] = [];
+  const usedClaimIds = new Set<string>();
+  const surfacedUnclaimed: SurfacedUnclaimedEntry[] = [];
   const validThreads: EditorialThread[] = [];
 
   for (const thread of parsed.threads) {
@@ -299,41 +350,58 @@ export function parseEditorialOutput(
       continue;
     }
 
-    const validItems: Array<{
-      id: string;
-      role: 'anchor' | 'development' | 'alternative';
-    }> = [];
+    const validItems: EditorialThreadItem[] = [];
+    let surfacedIndexInThread = 0;
+
     for (const item of thread.items) {
       if (!item || typeof item !== 'object') continue;
-      const itemId = typeof item.id === 'string' ? item.id : '';
-      const role = typeof item.role === 'string' ? item.role : '';
-
-      const isClaim = validClaimIds.has(itemId);
-      const isRun = validRunIds.has(itemId);
-      if (!isClaim && !isRun) {
-        errors.push(`Hallucinated ID "${itemId}" in thread "${threadId}" — dropped`);
-        continue;
-      }
-      if (usedIds.has(itemId)) {
-        errors.push(`Duplicate ID "${itemId}" in thread "${threadId}" — dropped`);
-        continue;
-      }
-      if (!VALID_ROLES.has(role)) {
-        errors.push(`Invalid role "${role}" for item "${itemId}" — defaulting to "development"`);
+      const role = VALID_ROLES.has(item.role) ? (item.role as 'anchor' | 'development' | 'alternative') : 'development';
+      if (!VALID_ROLES.has(item.role)) {
+        errors.push(`Invalid role "${item.role}" in thread "${threadId}" item — defaulting to "development"`);
       }
 
-      usedIds.add(itemId);
-      if (isRun) elevatedRunIds.push(itemId);
-      validItems.push({
-        id: itemId,
-        role: VALID_ROLES.has(role) ? (role as any) : 'development',
-      });
+      const itemType: string = item.type ?? (validClaimIds.has(item.id) ? 'claim' : '');
+
+      if (itemType === 'surfaced_unclaimed') {
+        const rawIds: unknown[] = Array.isArray(item.statement_ids) ? item.statement_ids : [];
+        const validStmtIds: string[] = [];
+        for (const sid of rawIds) {
+          if (typeof sid !== 'string') continue;
+          if (!unclaimedStatementMeta.has(sid)) {
+            errors.push(`Unknown statement ID "${sid}" in surfaced_unclaimed item in thread "${threadId}" — dropped`);
+            continue;
+          }
+          validStmtIds.push(sid);
+        }
+        if (validStmtIds.length === 0) {
+          errors.push(`surfaced_unclaimed item in thread "${threadId}" had no valid statement IDs — dropped`);
+          continue;
+        }
+        const sorted = sortStatementIds(validStmtIds, unclaimedStatementMeta);
+        const syntheticId = `su_${threadId}_${surfacedIndexInThread++}`;
+        surfacedUnclaimed.push({ syntheticId, threadId, role, statementIds: sorted });
+        validItems.push({ type: 'surfaced_unclaimed', id: syntheticId, role, statement_ids: sorted });
+
+      } else {
+        // Treat as claim (explicit type: 'claim', legacy items without type, or type-less claim-id items)
+        const itemId = typeof item.id === 'string' ? item.id : '';
+        if (!validClaimIds.has(itemId)) {
+          errors.push(`Hallucinated claim ID "${itemId}" in thread "${threadId}" — dropped`);
+          continue;
+        }
+        if (usedClaimIds.has(itemId)) {
+          errors.push(`Duplicate claim ID "${itemId}" in thread "${threadId}" — dropped`);
+          continue;
+        }
+        usedClaimIds.add(itemId);
+        validItems.push({ type: 'claim', id: itemId, role });
+      }
     }
 
     const hasAnchor = validItems.some((i) => i.role === 'anchor');
     if (!hasAnchor) {
       if (validItems.length > 0) {
-        validItems[0].role = 'anchor';
+        (validItems[0] as { role: string }).role = 'anchor';
         errors.push(`Thread "${threadId}" had no anchor — promoted first item`);
       } else {
         errors.push(`Thread "${threadId}" is empty after validation — dropped`);
@@ -341,13 +409,7 @@ export function parseEditorialOutput(
       }
     }
 
-    validThreads.push({
-      id: threadId,
-      label,
-      why_care: whyCare,
-      start_here: startHere,
-      items: validItems,
-    });
+    validThreads.push({ id: threadId, label, why_care: whyCare, start_here: startHere, items: validItems });
   }
 
   if (validThreads.length === 0) {
@@ -361,10 +423,7 @@ export function parseEditorialOutput(
   } else if (startCount > 1) {
     let found = false;
     for (const t of validThreads) {
-      if (t.start_here && !found) {
-        found = true;
-        continue;
-      }
+      if (t.start_here && !found) { found = true; continue; }
       if (t.start_here) t.start_here = false;
     }
     errors.push('Multiple start_here threads — kept only first');
@@ -384,8 +443,7 @@ export function parseEditorialOutput(
     errors.push('Missing thread_order — using thread array order');
   }
 
-  const diag =
-    parsed.diagnostics && typeof parsed.diagnostics === 'object' ? parsed.diagnostics : {};
+  const diag = parsed.diagnostics && typeof parsed.diagnostics === 'object' ? parsed.diagnostics : {};
   const diagnostics = {
     flat_corpus: !!diag.flat_corpus,
     notes: typeof diag.notes === 'string' ? diag.notes : '',
@@ -393,13 +451,7 @@ export function parseEditorialOutput(
 
   return {
     success: true,
-    ast: {
-      orientation,
-      threads: validThreads,
-      thread_order: threadOrder,
-      elevatedRunIds,
-      diagnostics,
-    },
+    ast: { orientation, threads: validThreads, thread_order: threadOrder, surfacedUnclaimed, diagnostics },
     errors,
   };
 }

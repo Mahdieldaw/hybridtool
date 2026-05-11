@@ -90,8 +90,9 @@
   - const ConciergeService
 - `src\concierge-service\editorial-mapper.ts`
   - function buildUnclaimedRuns: (corpus, claimedStatementIds) => UnclaimedRun[]
+  - function buildUnclaimedStatementMeta: (corpus, claimedStatementIds) => Map<string,
   - function buildEditorialPrompt: (userQuery, corpus, unclaimedRuns, claims, 'id' | 'label' | 'text'>>, claimedStatementIds) => string
-  - function parseEditorialOutput: (rawText, validClaimIds, validRunIds) => EditorialParseResult
+  - function parseEditorialOutput: (rawText, validClaimIds, unclaimedStatementMeta, SortKey>) => EditorialParseResult
   - interface EditorialParseResult
 - `src\concierge-service\evidence-substrate.ts` — function buildEvidenceSubstrate: (artifact, mappingText, citationSourceOrder, string>) => string
 - `src\concierge-service\position-brief.ts` — function buildPositionBriefFromClaims: (claims) => string, function buildPositionBrief: (analysis) => string

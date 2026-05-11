@@ -9,7 +9,7 @@ import {
   buildCitationSourceOrder,
 } from '../../../shared/provider-config.js';
 import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
-import { parseEditorialOutput, buildUnclaimedRuns } from '../../concierge-service/editorial-mapper.js';
+import { parseEditorialOutput, buildUnclaimedRuns, buildUnclaimedStatementMeta } from '../../concierge-service/editorial-mapper.js';
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
 import { ConciergeService } from '../../concierge-service/concierge-service.js';
 import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings.js';
@@ -236,11 +236,11 @@ export async function handleRecompute(payload, options) {
               }
             }
             const unclaimedRuns = buildUnclaimedRuns(mappingArtifact.corpus, claimedStatementIds);
+            const unclaimedStatementMeta = buildUnclaimedStatementMeta(mappingArtifact.corpus, claimedStatementIds);
             mappingArtifact.unclaimedRuns = unclaimedRuns;
 
             const validClaimIds = new Set((mappingArtifact.claims ?? []).map((c) => String(c.id)));
-            const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
-            const parsed = parseEditorialOutput(editorialResponse.text, validClaimIds, validRunIds);
+            const parsed = parseEditorialOutput(editorialResponse.text, validClaimIds, unclaimedStatementMeta);
             if (parsed.success && parsed.ast) {
               mappingArtifact.editorialAST = parsed.ast;
               console.log(

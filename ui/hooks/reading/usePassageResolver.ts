@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { UnclaimedRun } from '../../../shared/types';
+import type { SurfacedUnclaimedEntry, UnclaimedRun } from '../../../shared/types';
 import { resolveModelDisplayName } from '../../../shared/citation-utils';
 
 export interface ResolvedClaim {
@@ -77,12 +77,47 @@ export function usePassageResolver(
       if (Array.isArray(ids)) claimStatementIds.set(cid, ids);
     }
 
-    // Unclaimed runs by runId.
+    // Surfaced unclaimed entries by synthetic ID (su_*).
+    const surfacedUnclaimedEntries: SurfacedUnclaimedEntry[] =
+      artifact?.editorialAST?.surfacedUnclaimed ?? [];
+    const surfacedById = new Map<string, SurfacedUnclaimedEntry>();
+    for (const e of surfacedUnclaimedEntries) surfacedById.set(e.syntheticId, e);
+
+    // Keep legacy unclaimed runs for backward compat with persisted run-level items.
     const unclaimedRuns: UnclaimedRun[] = artifact?.unclaimedRuns ?? [];
     const runById = new Map<string, UnclaimedRun>();
     for (const r of unclaimedRuns) runById.set(r.runId, r);
 
     const resolve = (itemId: string): ResolvedItem | null => {
+      // Surfaced unclaimed (statement-level, new schema).
+      const surfaced = surfacedById.get(itemId);
+      if (surfaced) {
+        const texts: string[] = [];
+        const modelIndices = new Set<number>();
+        for (const sid of surfaced.statementIds) {
+          const t = statementTexts.get(sid);
+          if (t) texts.push(t);
+          const mi = statementModelIndex.get(sid);
+          if (typeof mi === 'number') modelIndices.add(mi);
+        }
+        const modelIndex = modelIndices.size === 1 ? [...modelIndices][0] : -1;
+        const modelName =
+          modelIndices.size === 1
+            ? resolveModelDisplayName(modelIndex, cso)
+            : modelIndices.size > 1
+            ? `${modelIndices.size} models`
+            : 'unclaimed';
+        return {
+          kind: 'run',
+          itemId,
+          runId: itemId,
+          text: texts.join(' ') || '(no text)',
+          modelIndex,
+          modelName,
+        };
+      }
+
+      // Legacy: unclaimed run by runId (old schema / backward compat).
       const run = runById.get(itemId);
       if (run) {
         return {

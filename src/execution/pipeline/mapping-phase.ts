@@ -9,7 +9,7 @@ import { canonicalCitationOrder, buildCitationSourceOrder } from '../../../share
 import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
 import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from '../../provenance/semantic-mapper.js';
 import { executeArtifactPipeline } from '../deterministic-pipeline.js';
-import { buildUnclaimedRuns, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
+import { buildUnclaimedRuns, buildUnclaimedStatementMeta, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
 import { getConfigForModel } from '../../clustering/index.js';
 import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
 import { logInfraError } from '../../errors';
@@ -423,6 +423,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       }
 
                       const unclaimedRuns = buildUnclaimedRuns(corpus, claimedStatementIds);
+                      const unclaimedStatementMeta = buildUnclaimedStatementMeta(corpus, claimedStatementIds);
 
                       // Persist runs on the artifact so resolvers can find run text without recomputing.
                       mapperArtifact.unclaimedRuns = unclaimedRuns;
@@ -431,7 +432,6 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       }
 
                       const validClaimIds = new Set(enrichedClaims.map((c) => String(c.id)));
-                      const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
 
                       const editorialPrompt = buildEditorialPrompt(
                         payload.originalPrompt,
@@ -491,7 +491,7 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                         const parsed = parseEditorialOutput(
                           editorialResult.text,
                           validClaimIds,
-                          validRunIds
+                          unclaimedStatementMeta
                         );
                         if (parsed.success && parsed.ast) {
                           if (cognitiveArtifact) cognitiveArtifact.editorialAST = parsed.ast;

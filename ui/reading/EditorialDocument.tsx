@@ -51,8 +51,9 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
         if (!resolved) continue;
 
         if (resolved.kind === 'claim') {
+          const modelName = resolved.modelName || 'unclaimed';
           const label = resolved.claimLabel ? ` — ${resolved.claimLabel}` : '';
-          lines.push(`[${item.role.toUpperCase()}] ${resolved.modelName}${label}`);
+          lines.push(`[${item.role.toUpperCase()}] ${modelName}${label}`);
         } else {
           lines.push(`[${item.role.toUpperCase()}] ${resolved.modelName || 'unclaimed'}`);
         }

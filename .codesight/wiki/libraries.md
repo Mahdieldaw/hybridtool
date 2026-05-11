@@ -122,7 +122,7 @@
 
 ## Concierge-service (4 files)
 
-- `src\concierge-service\editorial-mapper.ts` — buildUnclaimedRuns, buildEditorialPrompt, parseEditorialOutput, EditorialParseResult
+- `src\concierge-service\editorial-mapper.ts` — buildUnclaimedRuns, buildUnclaimedStatementMeta, buildEditorialPrompt, parseEditorialOutput, EditorialParseResult
 - `src\concierge-service\concierge-service.ts` — buildConciergePrompt, ConciergePromptOptions, ConciergeService
 - `src\concierge-service\position-brief.ts` — buildPositionBriefFromClaims, buildPositionBrief
 - `src\concierge-service\evidence-substrate.ts` — buildEvidenceSubstrate

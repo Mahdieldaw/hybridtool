@@ -64,10 +64,22 @@ export interface SingularityOutput {
   pipeline?: any | null;
 }
 
-export interface EditorialThreadItem {
-  id: string; // claim ID (e.g. "claim_3") or unclaimed-run ID (e.g. "u_m1_2")
+export interface EditorialClaimItem {
+  type: 'claim';
+  id: string;
   role: 'anchor' | 'development' | 'alternative';
 }
+
+export interface EditorialSurfacedUnclaimedItem {
+  type: 'surfaced_unclaimed';
+  /** Synthetic ID assigned by the parser — e.g. "su_thread_1_0". Used as resolver key. */
+  id: string;
+  role: 'anchor' | 'development' | 'alternative';
+  /** Canonically sorted statement IDs (modelIndex → paragraphOrdinal → statementOrdinal). */
+  statement_ids: string[];
+}
+
+export type EditorialThreadItem = EditorialClaimItem | EditorialSurfacedUnclaimedItem;
 
 export interface EditorialThread {
   id: string;
@@ -77,12 +89,20 @@ export interface EditorialThread {
   items: EditorialThreadItem[];
 }
 
+/** One surfaced-unclaimed block — a resolver key mapped to its validated, sorted statement IDs. */
+export interface SurfacedUnclaimedEntry {
+  syntheticId: string; // "su_${threadId}_${index}"
+  threadId: string;
+  role: 'anchor' | 'development' | 'alternative';
+  statementIds: string[]; // canonically sorted
+}
+
 export interface EditorialAST {
   orientation: string;
   threads: EditorialThread[];
   thread_order: string[];
-  /** Run IDs referenced anywhere in threads — derived after parsing. Their statements are 'unclaimedclaimed'. */
-  elevatedRunIds: string[];
+  /** Surfaced unclaimed statement groups — derived after parsing. */
+  surfacedUnclaimed: SurfacedUnclaimedEntry[];
   diagnostics: {
     flat_corpus: boolean;
     notes: string;
@@ -122,7 +142,7 @@ export interface CognitiveArtifact {
 
 /**
  * A contiguous run of statements within a single model's output that are not assigned to any claim.
- * Editorial mapper decides whether each run is query-relevant (referenced in threads → 'unclaimedclaimed')
+ * Editorial mapper decides whether each run is query-relevant (referenced in threads → elevated)
  * or stays unclaimed (not referenced).
  */
 export interface UnclaimedRun {
