@@ -1,33 +1,27 @@
 import { useMemo } from 'react';
-import type { ClaimStatus } from '../../../shared/types';
-import type { CorpusIndex } from '../../../shared/types/corpus-tree';
+import type { UnclaimedRun } from '../../../shared/types';
 import { resolveModelDisplayName } from '../../../shared/citation-utils';
 
-const PASSTHROUGH_STATUS: ClaimStatus = { routeRank: null, role: 'passthrough' };
+export interface ResolvedClaim {
+  kind: 'claim';
+  itemId: string;
+  claimId: string;
+  claimLabel: string;
+  text: string;
+  modelName: string; // "multiple" / single model display / "" if unknown
+  modelCount: number;
+}
 
-export interface ResolvedPassage {
-  kind: 'passage';
-  passageKey: string;
+export interface ResolvedRun {
+  kind: 'run';
+  itemId: string;
+  runId: string;
   text: string;
   modelIndex: number;
   modelName: string;
-  claimId: string;
-  claimLabel: string;
-  paragraphCount: number;
-  dominantPresenceShare: number;
-  dominantPassageShare: number;
-  claimStatus: ClaimStatus;
-  conflictClusterIndex: number | null;
 }
 
-export interface ResolvedUnclaimedGroup {
-  kind: 'unclaimed';
-  groupKey: string;
-  nearestClaimId: string;
-  text: string;
-}
-
-export type ResolvedItem = ResolvedPassage | ResolvedUnclaimedGroup;
+export type ResolvedItem = ResolvedClaim | ResolvedRun;
 
 export interface PassageResolver {
   resolve: (itemId: string) => ResolvedItem | null;
@@ -40,126 +34,96 @@ export function usePassageResolver(
   return useMemo(() => {
     if (!artifact) return { resolve: () => null };
 
-    const idx: CorpusIndex | null = artifact?.index ?? null;
-
-    // Build paragraph lookup: (modelIndex, paragraphOrdinal) → { _fullParagraph }
-    // Reads from corpus index + corpus tree.
-    const paraLookup = new Map<string, { _fullParagraph?: string }>();
-    if (idx) {
-      for (const [pid, pCoords] of idx.paragraphIndex) {
-        const node = artifact?.corpus?.models
-          ?.find((m: any) => m.modelIndex === pCoords.modelIndex)
-          ?.paragraphs?.find((p: any) => p.paragraphId === pid);
-        paraLookup.set(`${pCoords.modelIndex}:${pCoords.paragraphOrdinal}`, {
-          _fullParagraph: node?._fullParagraph,
-        });
-      }
-    }
-
-    // Statement text lookup for unclaimed groups — read from corpus index.
-    const statementTexts = new Map<string, string>();
-    if (idx) {
-      for (const [sid, sCoords] of idx.statementIndex) {
-        if (sCoords.text) statementTexts.set(sid, sCoords.text);
-      }
-    }
-
-    // Claim label lookup
-    const claims: any[] = Array.isArray(artifact?.semantic?.claims) ? artifact.semantic.claims : [];
-    const claimLabels = new Map<string, string>();
-    for (const c of claims) {
-      claimLabels.set(String(c.id), c.label || '');
-    }
-
-    // Routing profiles for geometric metadata
-    const routingProfiles: Record<string, any> = artifact?.passageRouting?.claimProfiles ?? {};
-    const densityProfiles: Record<string, any> = artifact?.claimDensity?.profiles ?? {};
-
-    // Build conflict cluster index lookup
-    const claimToClusterIndex = new Map<string, number>();
-    const conflictClusters = artifact?.passageRouting?.routing?.conflictClusters;
-    if (Array.isArray(conflictClusters)) {
-      for (let ci = 0; ci < conflictClusters.length; ci++) {
-        for (const cid of conflictClusters[ci].claimIds ?? []) {
-          claimToClusterIndex.set(cid, ci);
-        }
-      }
-    }
-
-    // Unclaimed groups by groupKey
-    const unclaimedGroups = artifact?.statementClassification?.unclaimedGroups ?? [];
-    const unclaimedByKey = new Map<string, any>();
-    for (const group of unclaimedGroups) {
-      const firstPara = group.paragraphs?.[0];
-      if (!firstPara) continue;
-      const key = `unclaimed:${group.nearestClaimId}:${firstPara.modelIndex}:${firstPara.paragraphIndex}`;
-      unclaimedByKey.set(key, group);
-    }
-
     const cso = citationSourceOrder ?? {};
 
-    const resolve = (itemId: string): ResolvedItem | null => {
-      // Unclaimed group
-      if (itemId.startsWith('unclaimed:')) {
-        const group = unclaimedByKey.get(itemId);
-        if (!group) return null;
-
-        const texts: string[] = [];
-        for (const pe of group.paragraphs ?? []) {
-          for (const sid of pe.unclaimedStatementIds ?? []) {
-            const t = statementTexts.get(sid);
-            if (t) texts.push(t);
+    // Statement text + model lookup from corpus index (preferred) or corpus tree.
+    const statementTexts = new Map<string, string>();
+    const statementModelIndex = new Map<string, number>();
+    const idx = artifact?.index;
+    if (idx?.statementIndex) {
+      for (const [sid, sCoords] of idx.statementIndex) {
+        if (sCoords.text) statementTexts.set(sid, sCoords.text);
+        if (typeof sCoords.modelIndex === 'number')
+          statementModelIndex.set(sid, sCoords.modelIndex);
+      }
+    } else {
+      for (const model of artifact?.corpus?.models ?? []) {
+        for (const para of model.paragraphs ?? []) {
+          for (const s of para.statements ?? []) {
+            const sid = String(s.statementId ?? '');
+            if (!sid) continue;
+            if (s.text) statementTexts.set(sid, s.text);
+            if (typeof model.modelIndex === 'number')
+              statementModelIndex.set(sid, model.modelIndex);
           }
         }
+      }
+    }
+
+    // Claim labels + canonical-statement-ID lookup.
+    const claims: any[] = Array.isArray(artifact?.semantic?.claims) ? artifact.semantic.claims : [];
+    const claimById = new Map<string, { id: string; label: string; text: string }>();
+    for (const c of claims) {
+      claimById.set(String(c.id), {
+        id: String(c.id),
+        label: c.label || '',
+        text: c.text || '',
+      });
+    }
+    const claimStatementIds = new Map<string, string[]>();
+    const mixed = artifact?.mixedProvenanceResult ?? artifact?.mixedProvenance;
+    for (const [cid, entry] of Object.entries(mixed?.perClaim ?? {})) {
+      const ids = (entry as any)?.canonicalStatementIds;
+      if (Array.isArray(ids)) claimStatementIds.set(cid, ids);
+    }
+
+    // Unclaimed runs by runId.
+    const unclaimedRuns: UnclaimedRun[] = artifact?.unclaimedRuns ?? [];
+    const runById = new Map<string, UnclaimedRun>();
+    for (const r of unclaimedRuns) runById.set(r.runId, r);
+
+    const resolve = (itemId: string): ResolvedItem | null => {
+      const run = runById.get(itemId);
+      if (run) {
         return {
-          kind: 'unclaimed',
-          groupKey: itemId,
-          nearestClaimId: group.nearestClaimId,
-          text: texts.join('\n\n') || '(no text)',
+          kind: 'run',
+          itemId,
+          runId: run.runId,
+          text: run.text || '(no text)',
+          modelIndex: run.modelIndex,
+          modelName: resolveModelDisplayName(run.modelIndex, cso),
         };
       }
 
-      // Passage: parse ${claimId}:${modelIndex}:${startParagraphIndex}
-      const parts = itemId.split(':');
-      if (parts.length < 3) return null;
-      const claimId = parts.slice(0, -2).join(':'); // handle claim IDs with colons
-      const modelIndex = parseInt(parts[parts.length - 2], 10);
-      const startParagraphIndex = parseInt(parts[parts.length - 1], 10);
-      if (isNaN(modelIndex) || isNaN(startParagraphIndex)) return null;
-
-      // Find matching passage entry in density profiles
-      const profile = densityProfiles[claimId];
-      if (!profile?.statementPassages) return null;
-
-      const passageEntry = profile.statementPassages.find(
-        (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex
-      );
-      if (!passageEntry) return null;
-
-      // Concatenate text from shadow paragraphs
-      const textParts: string[] = [];
-      for (let pi = passageEntry.startParagraphIndex; pi <= passageEntry.endParagraphIndex; pi++) {
-        const sp = paraLookup.get(`${modelIndex}:${pi}`);
-        if (sp?._fullParagraph) textParts.push(sp._fullParagraph);
+      const claim = claimById.get(itemId);
+      if (claim) {
+        const sids = claimStatementIds.get(itemId) ?? [];
+        const texts: string[] = [];
+        const models = new Set<number>();
+        for (const sid of sids) {
+          const t = statementTexts.get(sid);
+          if (t) texts.push(t);
+          const mi = statementModelIndex.get(sid);
+          if (typeof mi === 'number') models.add(mi);
+        }
+        const modelName =
+          models.size === 1
+            ? resolveModelDisplayName([...models][0], cso)
+            : models.size > 1
+            ? `${models.size} models`
+            : '';
+        return {
+          kind: 'claim',
+          itemId,
+          claimId: claim.id,
+          claimLabel: claim.label,
+          text: texts.length > 0 ? texts.join(' ') : claim.text || '(no text)',
+          modelName,
+          modelCount: models.size,
+        };
       }
 
-      const rp = routingProfiles[claimId];
-      const modelName = resolveModelDisplayName(modelIndex, cso);
-
-      return {
-        kind: 'passage',
-        passageKey: itemId,
-        text: textParts.join('\n\n') || '(no text)',
-        modelIndex,
-        modelName,
-        claimId,
-        claimLabel: claimLabels.get(claimId) || claimId,
-        paragraphCount: passageEntry.spanParagraphCount,
-        dominantPresenceShare: rp?.dominantPresenceShare ?? 0,
-        dominantPassageShare: rp?.dominantPassageShare ?? 0,
-        claimStatus: rp?.claimStatus ?? PASSTHROUGH_STATUS,
-        conflictClusterIndex: claimToClusterIndex.get(claimId) ?? null,
-      };
+      return null;
     };
 
     return { resolve };

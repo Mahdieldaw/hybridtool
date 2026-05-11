@@ -26,6 +26,12 @@ import type {
   ClaimConcordanceResult,
   ParagraphCoverageEntry,
   StatementPassageEntry,
+  ClaimParagraphEnvironmentEntry,
+  ClaimParagraphEnvironmentMeasurement,
+  ClaimParagraphEnvironmentRelation,
+  ClaimParagraphEnvironmentStatement,
+  ScopeDenominator,
+  ScopeDenominatorTable,
 } from '../../shared/types';
 import type { MeasuredRegion, PeripheryResult } from '../geometry';
 import { cosineSimilarity } from '../clustering/distance';
@@ -62,6 +68,8 @@ export interface MeasurePhaseOutput {
   competitiveExcess: Map<string, Map<string, number>>;
   competitiveThresholds: Map<string, number>;
   claimConcordance: ClaimConcordanceResult;
+  claimParagraphEnvironment: ClaimParagraphEnvironmentMeasurement;
+  scopeDenominators: ScopeDenominatorTable;
 }
 
 export function emptyClaimFootprintMeasurement(): ClaimFootprintMeasurement {
@@ -336,6 +344,281 @@ export function buildClaimConcordance(
         'claimConcordance has no current consumers by design; it is the first matrix primitive and remains diagnostic/foundational until concordance lands.',
     },
   };
+}
+
+/**
+ * Per-paragraph statement partition from a focal claim's viewpoint.
+ *
+ * Emits one entry per (focalClaim, paragraph) for paragraphs where the focal
+ * claim either owns ≥1 statement (relation = 'ownedFootprint') OR appears in
+ * the paragraph's competitive pool with zero ownership (relation =
+ * 'competitiveCandidate'). Unlike ClaimFootprintMeasurement.atoms, every
+ * non-table statement in the paragraph is recorded — including rival-only
+ * and unclaimed — so the partition is complete.
+ */
+export function computeClaimParagraphEnvironment({
+  claimId,
+  ownershipMap,
+  competitivePoolParagraphIds,
+  paragraphById,
+  statementsById,
+  stmtToParagraphId,
+  paragraphMeta,
+  paragraphOrder,
+}: {
+  claimId: string;
+  ownershipMap: Map<string, Set<string>>;
+  competitivePoolParagraphIds: Iterable<string>;
+  paragraphById: Map<string, ShadowParagraph>;
+  statementsById: Map<string, ShadowStatement>;
+  stmtToParagraphId: Map<string, string>;
+  paragraphMeta: Map<string, { modelIndex: number; paragraphIndex: number; totalStatements: number }>;
+  paragraphOrder: Map<string, number>;
+}): ClaimParagraphEnvironmentMeasurement {
+  const ownedParagraphIds = new Set<string>();
+  for (const [statementId, owners] of ownershipMap) {
+    if (!owners.has(claimId)) continue;
+    const statement = statementsById.get(statementId);
+    if (statement?.isTableCell) continue;
+    const paragraphId = stmtToParagraphId.get(statementId);
+    if (paragraphId) ownedParagraphIds.add(paragraphId);
+  }
+
+  const candidateOnlyParagraphIds = new Set<string>();
+  for (const paragraphId of competitivePoolParagraphIds) {
+    if (!ownedParagraphIds.has(paragraphId)) candidateOnlyParagraphIds.add(paragraphId);
+  }
+
+  const buildEntry = (
+    paragraphId: string,
+    relation: ClaimParagraphEnvironmentRelation
+  ): ClaimParagraphEnvironmentEntry | null => {
+    const para = paragraphById.get(paragraphId);
+    if (!para) return null;
+    const meta = paragraphMeta.get(paragraphId);
+    const modelIndex = meta?.modelIndex ?? para.modelIndex;
+    const paragraphIndex = meta?.paragraphIndex ?? para.paragraphIndex;
+
+    const statements: ClaimParagraphEnvironmentStatement[] = [];
+    let selfMass = 0;
+    let rivalMass = 0;
+    let unclaimedMass = 0;
+    let claimedCount = 0;
+    let unclaimedCount = 0;
+
+    for (const sid of para.statementIds) {
+      const statement = statementsById.get(sid);
+      if (statement?.isTableCell) continue;
+      const ownerSet = ownershipMap.get(sid);
+      const owners = ownerSet ? Array.from(ownerSet).map(String).sort() : [];
+      const ownerCount = owners.length;
+
+      let selfShare = 0;
+      let rivalShare = 0;
+      let unclaimedShare = 0;
+      if (ownerCount === 0) {
+        unclaimedShare = 1;
+        unclaimedCount += 1;
+      } else if (ownerSet!.has(claimId)) {
+        selfShare = 1 / ownerCount;
+        rivalShare = (ownerCount - 1) / ownerCount;
+        claimedCount += 1;
+      } else {
+        rivalShare = 1;
+        claimedCount += 1;
+      }
+
+      selfMass += selfShare;
+      rivalMass += rivalShare;
+      unclaimedMass += unclaimedShare;
+
+      statements.push({
+        statementId: sid,
+        owners,
+        ownerCount,
+        selfShare,
+        rivalShare,
+        unclaimedShare,
+      });
+    }
+
+    if (statements.length === 0) return null;
+    if (relation === 'ownedFootprint' && selfMass <= 0) return null;
+    if (relation === 'competitiveCandidate' && selfMass > 0) return null;
+
+    return {
+      claimId,
+      paragraphId,
+      modelIndex,
+      paragraphIndex,
+      relation,
+      statements,
+      totals: {
+        selfTerritoryMass: selfMass,
+        rivalTerritoryMass: rivalMass,
+        unclaimedTerritoryMass: unclaimedMass,
+        statementCount: statements.length,
+        claimedStatementCount: claimedCount,
+        unclaimedStatementCount: unclaimedCount,
+      },
+    };
+  };
+
+  const entries: ClaimParagraphEnvironmentEntry[] = [];
+  for (const pid of ownedParagraphIds) {
+    const entry = buildEntry(pid, 'ownedFootprint');
+    if (entry) entries.push(entry);
+  }
+  for (const pid of candidateOnlyParagraphIds) {
+    const entry = buildEntry(pid, 'competitiveCandidate');
+    if (entry) entries.push(entry);
+  }
+  entries.sort((a, b) => {
+    const ai = paragraphOrder.get(a.paragraphId) ?? Number.MAX_SAFE_INTEGER;
+    const bi = paragraphOrder.get(b.paragraphId) ?? Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    return a.claimId.localeCompare(b.claimId);
+  });
+
+  return { schemaVersion: 1, entries };
+}
+
+/**
+ * Build the global scope denominator table — counts of total/claimed/unclaimed
+ * non-table statements per scope (corpus, model, paragraph, region, passage).
+ *
+ * Per-claim scoped shares are NOT precomputed; consumers derive them on read
+ * via shared/scoped-mass.ts:scopedShare(weight, scope, table, mode).
+ *
+ * Notes:
+ *   - Region scopes are not a partition: a statement may belong to multiple
+ *     regions, so Σ region.statementCount can exceed corpus.statementCount.
+ *   - Passage scopes are claim-specific by construction. scopeId is prefixed
+ *     with the owning claim ID so passage rows stay disjoint across claims.
+ *     For passages, claimedStatementCount === statementCount by definition.
+ */
+export function buildScopeDenominatorTable({
+  shadowStatements,
+  shadowParagraphs,
+  ownershipMap,
+  paragraphToRegionIds,
+  statementPassagesByClaim,
+}: {
+  shadowStatements: ShadowStatement[];
+  shadowParagraphs: ShadowParagraph[];
+  ownershipMap: Map<string, Set<string>>;
+  paragraphToRegionIds: Map<string, string[]>;
+  statementPassagesByClaim: Map<string, StatementPassageEntry[]>;
+}): ScopeDenominatorTable {
+  const statementsById = new Map<string, ShadowStatement>(
+    shadowStatements.map((s) => [s.id, s])
+  );
+
+  type Counter = { all: number; claimed: number; unclaimed: number };
+  const newCounter = (): Counter => ({ all: 0, claimed: 0, unclaimed: 0 });
+  const isClaimed = (sid: string): boolean => {
+    const owners = ownershipMap.get(sid);
+    return !!owners && owners.size > 0;
+  };
+  const tally = (counter: Counter, sid: string): void => {
+    counter.all += 1;
+    if (isClaimed(sid)) counter.claimed += 1;
+    else counter.unclaimed += 1;
+  };
+
+  const corpus: Counter = newCounter();
+  const byModel = new Map<number, Counter>();
+  const byParagraph = new Map<string, Counter>();
+  const byRegion = new Map<string, Counter>();
+
+  for (const para of shadowParagraphs) {
+    let paraCounter = byParagraph.get(para.id);
+    if (!paraCounter) {
+      paraCounter = newCounter();
+      byParagraph.set(para.id, paraCounter);
+    }
+    const regionIds = paragraphToRegionIds.get(para.id) ?? [];
+    const regionCounters: Counter[] = [];
+    for (const rid of regionIds) {
+      let r = byRegion.get(rid);
+      if (!r) {
+        r = newCounter();
+        byRegion.set(rid, r);
+      }
+      regionCounters.push(r);
+    }
+
+    for (const sid of para.statementIds) {
+      const stmt = statementsById.get(sid);
+      if (stmt?.isTableCell) continue;
+
+      tally(corpus, sid);
+      tally(paraCounter, sid);
+      for (const r of regionCounters) tally(r, sid);
+
+      const modelIndex = stmt?.modelIndex ?? para.modelIndex ?? 0;
+      let modelCounter = byModel.get(modelIndex);
+      if (!modelCounter) {
+        modelCounter = newCounter();
+        byModel.set(modelIndex, modelCounter);
+      }
+      tally(modelCounter, sid);
+    }
+  }
+
+  const passageRows: ScopeDenominator[] = [];
+  for (const [cid, passages] of statementPassagesByClaim) {
+    for (const passage of passages) {
+      const len = passage.statementLength;
+      const id = `${cid}#${passage.modelIndex}#${passage.startParagraphIndex}-${passage.endParagraphIndex}`;
+      passageRows.push({
+        scopeKind: 'passage',
+        scopeId: id,
+        statementCount: len,
+        claimedStatementCount: len,
+        unclaimedStatementCount: 0,
+      });
+    }
+  }
+
+  const rows: ScopeDenominator[] = [
+    {
+      scopeKind: 'corpus',
+      scopeId: 'corpus',
+      statementCount: corpus.all,
+      claimedStatementCount: corpus.claimed,
+      unclaimedStatementCount: corpus.unclaimed,
+    },
+    ...Array.from(byModel.entries()).map(([modelIndex, c]) => ({
+      scopeKind: 'model' as const,
+      scopeId: String(modelIndex),
+      statementCount: c.all,
+      claimedStatementCount: c.claimed,
+      unclaimedStatementCount: c.unclaimed,
+    })),
+    ...Array.from(byParagraph.entries()).map(([pid, c]) => ({
+      scopeKind: 'paragraph' as const,
+      scopeId: pid,
+      statementCount: c.all,
+      claimedStatementCount: c.claimed,
+      unclaimedStatementCount: c.unclaimed,
+    })),
+    ...Array.from(byRegion.entries()).map(([rid, c]) => ({
+      scopeKind: 'region' as const,
+      scopeId: rid,
+      statementCount: c.all,
+      claimedStatementCount: c.claimed,
+      unclaimedStatementCount: c.unclaimed,
+    })),
+    ...passageRows,
+  ];
+
+  rows.sort((a, b) => {
+    if (a.scopeKind !== b.scopeKind) return a.scopeKind.localeCompare(b.scopeKind);
+    return a.scopeId.localeCompare(b.scopeId);
+  });
+
+  return { schemaVersion: 1, byScope: rows };
 }
 
 export async function measureProvenance(input: MeasurePhaseInput): Promise<MeasurePhaseOutput> {
@@ -881,6 +1164,45 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
 
   const claimConcordance = buildClaimConcordance(canonicalSets);
 
+  const allEnvironmentEntries: ClaimParagraphEnvironmentEntry[] = [];
+  const statementPassagesByClaim = new Map<string, StatementPassageEntry[]>();
+  for (const claim of claims) {
+    const id = String(claim.id);
+    const profile = densityProfiles[id];
+    if (!profile) continue;
+    statementPassagesByClaim.set(id, profile.statementPassages);
+
+    const env = computeClaimParagraphEnvironment({
+      claimId: id,
+      ownershipMap,
+      competitivePoolParagraphIds: claimPools.get(id) ?? [],
+      paragraphById,
+      statementsById,
+      stmtToParagraphId,
+      paragraphMeta,
+      paragraphOrder,
+    });
+    for (const entry of env.entries) allEnvironmentEntries.push(entry);
+  }
+  allEnvironmentEntries.sort((a, b) => {
+    const ai = paragraphOrder.get(a.paragraphId) ?? Number.MAX_SAFE_INTEGER;
+    const bi = paragraphOrder.get(b.paragraphId) ?? Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    return a.claimId.localeCompare(b.claimId);
+  });
+  const claimParagraphEnvironment: ClaimParagraphEnvironmentMeasurement = {
+    schemaVersion: 1,
+    entries: allEnvironmentEntries,
+  };
+
+  const scopeDenominators = buildScopeDenominatorTable({
+    shadowStatements,
+    shadowParagraphs,
+    ownershipMap,
+    paragraphToRegionIds,
+    statementPassagesByClaim,
+  });
+
   return {
     enrichedClaims,
     mixedProvenance: { perClaim: perClaimMixed, recoveryRate, expansionRate, removalRate },
@@ -901,5 +1223,7 @@ export async function measureProvenance(input: MeasurePhaseInput): Promise<Measu
     competitiveExcess: rawExcess,
     competitiveThresholds: thresholdByParagraph,
     claimConcordance,
+    claimParagraphEnvironment,
+    scopeDenominators,
   };
 }

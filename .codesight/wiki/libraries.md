@@ -2,7 +2,7 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**124 library files** across 12 modules
+**125 library files** across 12 modules
 
 ## Ui (37 files)
 
@@ -10,7 +10,7 @@
 - `ui\hooks\instrument\useInstrumentState.ts` — useInstrumentState, InstrumentState, InstrumentActions, PipelineLayer, SelectedEntity, EvidenceScope
 - `ui\utils\provider-helpers.ts` — getProviderConfig, getProviderName, getProviderColor, getProviderLogo, getProviderAbbreviation, resolveProviderIdFromCitationOrder
 - `ui\config\provider-registry.ts` — getProviderById, ProviderConfig, INITIAL_PROVIDERS, PROVIDER_COLORS, PROVIDER_ACCENT_COLORS
-- `ui\hooks\reading\usePassageResolver.ts` — usePassageResolver, ResolvedPassage, ResolvedUnclaimedGroup, PassageResolver, ResolvedItem
+- `ui\hooks\reading\usePassageResolver.ts` — usePassageResolver, ResolvedClaim, ResolvedRun, PassageResolver, ResolvedItem
 - `ui\hooks\providers\useProviderStatus.ts` — useProviderStatus, UseProviderStatusOptions, UseProviderStatusReturn
 - `ui\hooks\reading\useCorpusSearch.ts` — useCorpusSearch, CorpusSearchHit, ProbeSearchResult
 - `ui\instrument\expression-engine.ts` — compileExpression, validateExpression, CompiledExpression
@@ -70,7 +70,7 @@
 - `src\providers\grok-adapter.js` — GrokAdapter
 - `src\providers\qwen-adapter.js` — QwenAdapter
 
-## Shared (12 files)
+## Shared (13 files)
 
 - `shared\corpus-utils.ts` — deriveArtifactIndex, buildCorpusTree, buildCorpusIndex, getParagraphsForClaim, getModelsForClaim, getBasinsForClaim, …
 - `shared\types\turns.ts` — isUserTurn, isAiTurn, ProbeResult, ProbeCorpusHit, ProbeSessionResponse, ProbeSession, …
@@ -80,6 +80,7 @@
 - `shared\citation-utils.ts` — normalizeProviderId, normalizeCitationSourceOrder, resolveProviderId, resolveModelDisplayName, getCitationSourceOrder
 - `shared\embedding-models.ts` — getConfigForModel, EmbeddingConfig, EmbeddingModelEntry, EMBEDDING_MODELS, DEFAULT_CONFIG
 - `shared\parsing-utils.ts` — repairJson, extractJsonObject, extractJsonFromContent, parseSemanticMapperOutput
+- `shared\scoped-mass.ts` — scopedShare, getScopeDenominator, ScopeRef, ScopeDenominatorMode
 - `shared\artifact-processor.ts` — ArtifactProcessor, Artifact, ProcessedResponse
 - `shared\think-utils.ts` — computeThinkFlag, ComputeThinkFlagArgs, AI_THINK_FLAG
 - `shared\text-prep.ts` — structuredTruncate, stripInlineMarkdown
@@ -110,7 +111,7 @@
 
 ## Provenance (8 files)
 
-- `src\provenance\measure.ts` — emptyClaimFootprintMeasurement, computeClaimFootprintMeasurement, buildClaimConcordance, measureProvenance, ClaimExclusivity, MeasurePhaseInput, …
+- `src\provenance\measure.ts` — emptyClaimFootprintMeasurement, computeClaimFootprintMeasurement, buildClaimConcordance, computeClaimParagraphEnvironment, buildScopeDenominatorTable, measureProvenance, …
 - `src\provenance\surface.ts` — buildMassEligibilityDiagnostic, computeNounSurvivalRatio, computeTopologicalSurface, buildSourceContinuityMap, SurfaceInput, SurfaceOutput, …
 - `src\provenance\structure.ts` — analyzeGlobalStructure, StructurePhaseOutput, computeStructuralAnalysis, runStructurePhase
 - `src\provenance\claim-structural-fingerprint.ts` — computeContestedShareRatio, buildClaimStructuralFingerprints, ClaimStructuralFingerprintInput
@@ -121,10 +122,10 @@
 
 ## Concierge-service (4 files)
 
-- `src\concierge-service\editorial-mapper.ts` — buildPassageIndex, buildEditorialPrompt, parseEditorialOutput, IndexedPassage, IndexedUnclaimedGroup, EditorialParseResult
+- `src\concierge-service\editorial-mapper.ts` — buildUnclaimedRuns, buildEditorialPrompt, parseEditorialOutput, EditorialParseResult
 - `src\concierge-service\concierge-service.ts` — buildConciergePrompt, ConciergePromptOptions, ConciergeService
-- `src\concierge-service\evidence-substrate.ts` — buildLookupCacheFromIndex, buildEvidenceSubstrate
 - `src\concierge-service\position-brief.ts` — buildPositionBriefFromClaims, buildPositionBrief
+- `src\concierge-service\evidence-substrate.ts` — buildEvidenceSubstrate
 
 ## Errors (4 files)
 

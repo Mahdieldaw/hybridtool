@@ -227,12 +227,10 @@ export async function executeSingularityPhase(
             let evidenceSubstrate = '';
             try {
               const cso = mappingArtifact?.citationSourceOrder || {};
-              const lookupCache = mappingArtifact?._editorialLookupCache;
               evidenceSubstrate = buildEvidenceSubstrate(
                 mappingArtifact,
                 mappingResult?.text || '',
-                cso,
-                lookupCache ? { lookupCache } : undefined
+                cso
               );
               if (evidenceSubstrate) {
                 console.log(

@@ -49,15 +49,14 @@ import { searchCorpus } from './clustering/corpus-search.js';
 import { canonicalCitationOrder, buildCitationSourceOrder } from '../shared/provider-config.js';
 import { extractShadowStatements, projectParagraphs } from './shadow/index.js';
 import { buildArtifactForProvider } from './execution/deterministic-pipeline.js';
-import { buildSourceContinuityMap } from './provenance/surface.js';
-import { parseEditorialOutput, buildPassageIndex, buildEditorialPrompt } from './concierge-service/editorial-mapper.js';
+import { parseEditorialOutput, buildUnclaimedRuns, buildEditorialPrompt } from './concierge-service/editorial-mapper.js';
 
 
 // Global Services Registry
 import { ServiceRegistry } from './system/service-registry.js';
 
 // Shared types
-import type { EnrichedClaim, MapperClaim, ClaimDensityResult, PassageRoutingResult, StatementClassificationResult } from '../shared/types/contract';
+import type { EnrichedClaim, MapperClaim } from '../shared/types/contract';
 import type { AiTurn } from '../shared/types/turns';
 
 // ============================================================================
@@ -2004,29 +2003,25 @@ function doRegenerateEmbeddings(
             (a, b) => ((b.updatedAt as number) || (b.createdAt as number) || 0) - ((a.updatedAt as number) || (a.createdAt as number) || 0)
           )[0] || null;
 
-      if (
-        editorialResp?.text &&
-        mapperArtifact.claimDensity &&
-        mapperArtifact.passageRouting &&
-        mapperArtifact.statementClassification
-      ) {
-        const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity as ClaimDensityResult);
-        const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
-          mapperArtifact.claimDensity as ClaimDensityResult,
-          mapperArtifact.passageRouting as PassageRoutingResult,
-          mapperArtifact.statementClassification as StatementClassificationResult,
-          (mapperArtifact.corpus as any) ?? { models: [] },
-          enrichedClaims,
-          (mapperArtifact.citationSourceOrder as Record<string, string>) || {},
-          continuityMap
-        );
+      if (editorialResp?.text && mapperArtifact.corpus) {
+        const corpus = mapperArtifact.corpus as any;
+        const claimedStatementIds = new Set<string>();
+        const mixed = (mapperArtifact as any).mixedProvenance ?? (mapperArtifact as any).mixedProvenanceResult;
+        for (const entry of Object.values<any>(mixed?.perClaim ?? {})) {
+          for (const sid of entry?.canonicalStatementIds ?? []) {
+            claimedStatementIds.add(String(sid));
+          }
+        }
+        const unclaimedRuns = buildUnclaimedRuns(corpus, claimedStatementIds);
+        (mapperArtifact as any).unclaimedRuns = unclaimedRuns;
+        cognitiveArtifact.unclaimedRuns = unclaimedRuns;
 
-        const validPassageKeys = new Set(idxPassages.map((p: { passageKey: string }) => p.passageKey));
-        const validUnclaimedKeys = new Set(idxUnclaimed.map((u: { groupKey: string }) => u.groupKey));
+        const validClaimIds = new Set(enrichedClaims.map((c: { id: string }) => String(c.id)));
+        const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
         const parsed = parseEditorialOutput(
           editorialResp.text as string,
-          validPassageKeys,
-          validUnclaimedKeys
+          validClaimIds,
+          validRunIds
         );
 
         if (parsed.success && parsed.ast) {
@@ -2046,41 +2041,36 @@ function doRegenerateEmbeddings(
     }
 
     // ── Generate editorial AST if not restored from persistence ──────
-    if (
-      !cognitiveArtifact.editorialAST &&
-      mapperArtifact.claimDensity &&
-      mapperArtifact.passageRouting &&
-      mapperArtifact.statementClassification
-    ) {
+    if (!cognitiveArtifact.editorialAST && mapperArtifact.corpus) {
       try {
         const orchestrator = services.get('orchestrator') as FaultTolerantOrchestrator | undefined;
         if (orchestrator) {
-          const continuityMap = buildSourceContinuityMap(mapperArtifact.claimDensity as ClaimDensityResult);
-          const { passages: idxPassages, unclaimed: idxUnclaimed } = buildPassageIndex(
-            mapperArtifact.claimDensity as ClaimDensityResult,
-            mapperArtifact.passageRouting as PassageRoutingResult,
-            mapperArtifact.statementClassification as StatementClassificationResult,
-            (mapperArtifact.corpus as any) ?? { models: [] },
-            enrichedClaims,
-            (mapperArtifact.citationSourceOrder as Record<string, string>) || {},
-            continuityMap
+          const corpus = mapperArtifact.corpus as any;
+          const claimedStatementIds = new Set<string>();
+          const mixed = (mapperArtifact as any).mixedProvenance ?? (mapperArtifact as any).mixedProvenanceResult;
+          for (const entry of Object.values<any>(mixed?.perClaim ?? {})) {
+            for (const sid of entry?.canonicalStatementIds ?? []) {
+              claimedStatementIds.add(String(sid));
+            }
+          }
+          const unclaimedRuns = buildUnclaimedRuns(corpus, claimedStatementIds);
+          (mapperArtifact as any).unclaimedRuns = unclaimedRuns;
+          cognitiveArtifact.unclaimedRuns = unclaimedRuns;
+
+          const validClaimIds = new Set(enrichedClaims.map((c: { id: string }) => String(c.id)));
+          const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
+
+          const editorialPrompt = buildEditorialPrompt(
+            queryText,
+            corpus,
+            unclaimedRuns,
+            enrichedClaims.map((c: { id: string; label: string; text: string }) => ({
+              id: String(c.id),
+              label: c.label,
+              text: c.text,
+            })),
+            claimedStatementIds
           );
-
-          const validPassageKeys = new Set(idxPassages.map((p: { passageKey: string }) => p.passageKey));
-          const validUnclaimedKeys = new Set(idxUnclaimed.map((u: { groupKey: string }) => u.groupKey));
-
-          const routePlan = (mapperArtifact.passageRouting as PassageRoutingResult | undefined)
-            ?.routing?.routePlan;
-
-          const editorialPrompt = buildEditorialPrompt(queryText, idxPassages, idxUnclaimed, {
-            passageCount: idxPassages.length,
-            claimCount: enrichedClaims.length,
-            conflictCount: (mapperArtifact.passageRouting as { routing?: { conflictClusters?: unknown[] } } | undefined)?.routing?.conflictClusters?.length ?? 0,
-            routePlanSummary: {
-              includedCount: routePlan?.includedClaimIds?.length ?? 0,
-              nonPrimaryCount: routePlan?.nonPrimaryClaimIds?.length ?? 0,
-            },
-          });
 
           // Thread continuation: prefer mapping cursor (semantic mapper's thread),
           // fall back to batch cursor, fall back to fresh conversation.
@@ -2124,8 +2114,8 @@ function doRegenerateEmbeddings(
           if (editorialResult?.text) {
             const parsed = parseEditorialOutput(
               editorialResult.text,
-              validPassageKeys,
-              validUnclaimedKeys
+              validClaimIds,
+              validRunIds
             );
             if (parsed.success && parsed.ast) {
               cognitiveArtifact.editorialAST = parsed.ast;

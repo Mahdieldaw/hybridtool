@@ -1,6 +1,7 @@
 import type { ClaimDensityProfile, ClaimDensityResult } from '../../shared/types';
 import type { ShadowParagraph } from '../shadow';
-import { buildEditorialPrompt, type IndexedPassage } from '../concierge-service/editorial-mapper';
+import { buildEditorialPrompt } from '../concierge-service/editorial-mapper';
+import type { CorpusTree } from '../../shared/types/corpus-tree';
 import { computeTopologicalSurface } from './surface';
 
 const LABEL_KEYS = [
@@ -200,44 +201,41 @@ describe('Phase 4 label excision', () => {
   });
 
   test('buildEditorialPrompt is free of landscape label inputs and output text', () => {
-    const passages: IndexedPassage[] = [
-      {
-        passageKey: 'c1:0:0',
-        claimId: 'c1',
-        claimLabel: 'Claim 1',
-        modelIndex: 0,
-        modelName: 'Model A',
-        startParagraphIndex: 0,
-        endParagraphIndex: 0,
-        paragraphCount: 1,
-        statementLength: 3,
-        text: 'Evidence text.',
-        routeOrderIndex: 0,
-        routeIncluded: true,
-        claimStatus: { routeRank: 1, role: 'anchor' },
-        routeOrderingReasons: ['claimPresenceCount=3'],
-        claimPresenceCount: 3,
-        sovereignStatementCount: 3,
-        sharedTerritorialMass: 0,
-        contestedShareRatio: null,
-        maxStatementRun: 3,
-        dominantPresenceShare: 1,
-        dominantPassageShare: 1,
-        isSoleSource: true,
-        conflictClusterIndex: null,
-        continuity: { prev: null, next: null },
-      },
-    ];
+    const corpus: CorpusTree = {
+      models: [
+        {
+          modelIndex: 1,
+          paragraphs: [
+            {
+              paragraphId: 'p1',
+              modelIndex: 1,
+              paragraphOrdinal: 0,
+              statements: [
+                {
+                  statementId: 's1',
+                  paragraphId: 'p1',
+                  modelIndex: 1,
+                  statementOrdinal: 0,
+                  text: 'Evidence text.',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
 
-    const prompt = buildEditorialPrompt('question?', passages, [], {
-      passageCount: 1,
-      claimCount: 1,
-      conflictCount: 0,
-    });
+    const prompt = buildEditorialPrompt(
+      'question?',
+      corpus,
+      [],
+      [{ id: 'claim_1', label: 'Claim 1', text: 'Claim body' }],
+      new Set(['s1'])
+    );
 
     expect(prompt).not.toContain('Landscape:');
     expect(prompt).not.toMatch(/northStar|eastStar|mechanism|floor|leadMinority/);
-    expect(prompt).toContain('claimPresenceCount=3');
-    expect(prompt).toContain('Route: included, order=0');
+    expect(prompt).toContain('## Corpus');
+    expect(prompt).toContain('claim_1');
   });
 });

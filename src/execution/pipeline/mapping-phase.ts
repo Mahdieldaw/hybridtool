@@ -9,9 +9,7 @@ import { canonicalCitationOrder, buildCitationSourceOrder } from '../../../share
 import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
 import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from '../../provenance/semantic-mapper.js';
 import { executeArtifactPipeline } from '../deterministic-pipeline.js';
-import { buildSourceContinuityMap } from '../../provenance/surface.js';
-import { buildPassageIndex, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
-import { buildLookupCacheFromIndex } from '../../concierge-service/evidence-substrate.js';
+import { buildUnclaimedRuns, buildEditorialPrompt, parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
 import { getConfigForModel } from '../../clustering/index.js';
 import { packEmbeddingMap } from '../../persistence/embedding-codec.js';
 import { logInfraError } from '../../errors';
@@ -413,59 +411,38 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                   }
 
                   // ── EDITORIAL MODEL CALL (executeMappingPhase-only) ──────────────
-                  if (mapperArtifact && pipelineResult?.claimDensityResult) {
+                  if (mapperArtifact?.corpus) {
                     try {
-                      const continuityMap = buildSourceContinuityMap(
-                        pipelineResult.claimDensityResult
-                      );
-                      const editorialCitationSourceOrder = buildCitationSourceOrder(citationOrder);
-                      const { passages: indexedPassages, unclaimed: indexedUnclaimed } =
-                        buildPassageIndex(
-                          pipelineResult.claimDensityResult,
-                          pipelineResult.passageRoutingResult,
-                          pipelineResult.statementClassification,
-                          mapperArtifact?.corpus ?? { models: [] },
-                          enrichedClaims,
-                          editorialCitationSourceOrder,
-                          continuityMap
-                        );
-
-                      // Build lookup cache now while index arrays are in scope;
-                      // attach to cognitiveArtifact so singularity-phase can reuse it
-                      // without rebuilding all maps from the artifact.
-                      try {
-                        const editorialLookupCache = buildLookupCacheFromIndex(
-                          indexedPassages,
-                          indexedUnclaimed
-                        );
-                        if (cognitiveArtifact) {
-                          (cognitiveArtifact as any)._editorialLookupCache = editorialLookupCache;
+                      const corpus = mapperArtifact.corpus;
+                      const claimedStatementIds = new Set();
+                      const mixed = pipelineResult.mixedProvenanceResult;
+                      for (const entry of Object.values(mixed?.perClaim ?? {})) {
+                        for (const sid of entry?.canonicalStatementIds ?? []) {
+                          claimedStatementIds.add(String(sid));
                         }
-                      } catch (cacheErr) {
-                        // Non-blocking — substrate builder falls back to artifact resolution
-                        console.warn('[executeMappingPhase] Lookup cache build failed:', cacheErr);
                       }
 
-                      const validPassageKeys = new Set(indexedPassages.map((p) => p.passageKey));
-                      const validUnclaimedKeys = new Set(indexedUnclaimed.map((u) => u.groupKey));
+                      const unclaimedRuns = buildUnclaimedRuns(corpus, claimedStatementIds);
 
-                      const routePlan = pipelineResult.passageRoutingResult?.routing?.routePlan;
+                      // Persist runs on the artifact so resolvers can find run text without recomputing.
+                      mapperArtifact.unclaimedRuns = unclaimedRuns;
+                      if (cognitiveArtifact) {
+                        cognitiveArtifact.unclaimedRuns = unclaimedRuns;
+                      }
+
+                      const validClaimIds = new Set(enrichedClaims.map((c) => String(c.id)));
+                      const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
 
                       const editorialPrompt = buildEditorialPrompt(
                         payload.originalPrompt,
-                        indexedPassages,
-                        indexedUnclaimed,
-                        {
-                          passageCount: indexedPassages.length,
-                          claimCount: enrichedClaims.length,
-                          conflictCount:
-                            pipelineResult.passageRoutingResult?.routing?.conflictClusters
-                              ?.length ?? 0,
-                          routePlanSummary: {
-                            includedCount: routePlan?.includedClaimIds?.length ?? 0,
-                            nonPrimaryCount: routePlan?.nonPrimaryClaimIds?.length ?? 0,
-                          },
-                        }
+                        corpus,
+                        unclaimedRuns,
+                        enrichedClaims.map((c) => ({
+                          id: String(c.id),
+                          label: c.label,
+                          text: c.text,
+                        })),
+                        claimedStatementIds
                       );
 
                       const editorialResult = await runWithProviderHealth(
@@ -513,8 +490,8 @@ export async function executeMappingPhase(step, context, stepResults, workflowCo
                       if (editorialResult?.text) {
                         const parsed = parseEditorialOutput(
                           editorialResult.text,
-                          validPassageKeys,
-                          validUnclaimedKeys
+                          validClaimIds,
+                          validRunIds
                         );
                         if (parsed.success && parsed.ast) {
                           if (cognitiveArtifact) cognitiveArtifact.editorialAST = parsed.ast;

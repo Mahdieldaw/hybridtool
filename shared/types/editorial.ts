@@ -65,8 +65,8 @@ export interface SingularityOutput {
 }
 
 export interface EditorialThreadItem {
-  id: string; // passageKey or unclaimed group key
-  role: 'anchor' | 'support' | 'context' | 'reframe' | 'alternative';
+  id: string; // claim ID (e.g. "claim_3") or unclaimed-run ID (e.g. "u_m1_2")
+  role: 'anchor' | 'development' | 'alternative';
 }
 
 export interface EditorialThread {
@@ -81,9 +81,10 @@ export interface EditorialAST {
   orientation: string;
   threads: EditorialThread[];
   thread_order: string[];
+  /** Run IDs referenced anywhere in threads — derived after parsing. Their statements are 'unclaimedclaimed'. */
+  elevatedRunIds: string[];
   diagnostics: {
     flat_corpus: boolean;
-    conflict_count: number;
     notes: string;
   };
 }
@@ -109,7 +110,8 @@ export interface CognitiveArtifact {
     narrative?: string;
   };
   citationSourceOrder?: Record<number, string>;
-  _editorialLookupCache?: EvidenceSubstrateLookupCache;
+  /** Unclaimed runs computed at editorial-mapper time. Persisted so the resolver can find run text without recomputing. */
+  unclaimedRuns?: UnclaimedRun[];
   meta?: {
     modelCount?: number;
     query?: string;
@@ -118,7 +120,14 @@ export interface CognitiveArtifact {
   };
 }
 
-export interface EvidenceSubstrateLookupCache {
-  passages: Map<string, { text: string; modelName: string; claimLabel: string }>;
-  unclaimed: Map<string, { text: string; claimLabel: string }>;
+/**
+ * A contiguous run of statements within a single model's output that are not assigned to any claim.
+ * Editorial mapper decides whether each run is query-relevant (referenced in threads → 'unclaimedclaimed')
+ * or stays unclaimed (not referenced).
+ */
+export interface UnclaimedRun {
+  runId: string; // "u_m{modelIndex}_{runOrdinal}"
+  modelIndex: number;
+  statementIds: string[];
+  text: string;
 }

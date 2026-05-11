@@ -9,7 +9,7 @@ import {
   buildCitationSourceOrder,
 } from '../../../shared/provider-config.js';
 import { extractShadowStatements, projectParagraphs } from '../../shadow/index.js';
-import { parseEditorialOutput } from '../../concierge-service/editorial-mapper.js';
+import { parseEditorialOutput, buildUnclaimedRuns } from '../../concierge-service/editorial-mapper.js';
 import { buildEvidenceSubstrate } from '../../concierge-service/evidence-substrate.js';
 import { ConciergeService } from '../../concierge-service/concierge-service.js';
 import { cleanupPendingEmbeddingsBuffers } from '../../clustering/embeddings.js';
@@ -226,29 +226,21 @@ export async function handleRecompute(payload, options) {
           .sort(
             (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
           )?.[0];
-        if (editorialResponse?.text) {
+        if (editorialResponse?.text && mappingArtifact?.corpus) {
           try {
-            // Collect valid passage/unclaimed keys from the artifact
-            const validPassageKeys = new Set();
-            const densityProfiles = mappingArtifact?.claimDensity?.profiles ?? {};
-            for (const [claimId, profile] of Object.entries(densityProfiles)) {
-              for (const p of profile?.statementPassages || []) {
-                validPassageKeys.add(`${claimId}:${p.modelIndex}:${p.startParagraphIndex}`);
+            const claimedStatementIds = new Set();
+            const mixed = mappingArtifact.mixedProvenance ?? mappingArtifact.mixedProvenanceResult;
+            for (const entry of Object.values(mixed?.perClaim ?? {})) {
+              for (const sid of entry?.canonicalStatementIds ?? []) {
+                claimedStatementIds.add(String(sid));
               }
             }
-            const validUnclaimedKeys = new Set();
-            for (const group of mappingArtifact?.statementClassification?.unclaimedGroups ?? []) {
-              const fp = group.paragraphs?.[0];
-              if (fp)
-                validUnclaimedKeys.add(
-                  `unclaimed:${group.nearestClaimId}:${fp.modelIndex}:${fp.paragraphIndex}`
-                );
-            }
-            const parsed = parseEditorialOutput(
-              editorialResponse.text,
-              validPassageKeys,
-              validUnclaimedKeys
-            );
+            const unclaimedRuns = buildUnclaimedRuns(mappingArtifact.corpus, claimedStatementIds);
+            mappingArtifact.unclaimedRuns = unclaimedRuns;
+
+            const validClaimIds = new Set((mappingArtifact.claims ?? []).map((c) => String(c.id)));
+            const validRunIds = new Set(unclaimedRuns.map((r) => r.runId));
+            const parsed = parseEditorialOutput(editorialResponse.text, validClaimIds, validRunIds);
             if (parsed.success && parsed.ast) {
               mappingArtifact.editorialAST = parsed.ast;
               console.log(

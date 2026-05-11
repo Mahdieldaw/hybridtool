@@ -2,8 +2,7 @@
  * Evidence Substrate Builder
  *
  * Builds the text substrate sent to the singularity provider.
- * Resolves editorial thread item IDs → actual batch text using
- * the same logic as the UI's usePassageResolver hook.
+ * Resolves editorial thread item IDs (claim IDs or unclaimed-run IDs) → text.
  *
  * Substrate = mapping response + editorial threads (arranged batch text).
  */
@@ -12,155 +11,100 @@ import type {
   EditorialAST,
   EditorialThread,
   CognitiveArtifact,
-  EvidenceSubstrateLookupCache,
+  UnclaimedRun,
 } from '../../shared/types';
 import { resolveModelDisplayName } from '../../shared/citation-utils';
-import type { IndexedPassage, IndexedUnclaimedGroup } from './editorial-mapper';
 
-export type { EvidenceSubstrateLookupCache };
-
-export function buildLookupCacheFromIndex(
-  passages: IndexedPassage[],
-  unclaimed: IndexedUnclaimedGroup[]
-): EvidenceSubstrateLookupCache {
-  const passageMap = new Map<string, { text: string; modelName: string; claimLabel: string }>();
-  for (const p of passages) {
-    passageMap.set(p.passageKey, { text: p.text, modelName: p.modelName, claimLabel: p.claimLabel });
-  }
-  const unclaimedMap = new Map<string, { text: string; claimLabel: string }>();
-  for (const u of unclaimed) {
-    const text = u.paragraphs.flatMap((p) => p.unclaimedStatementTexts).join('\n\n');
-    unclaimedMap.set(u.groupKey, { text, claimLabel: u.nearestClaimId });
-  }
-  return { passages: passageMap, unclaimed: unclaimedMap };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Resolve a single editorial item ID → text
-// (mirrors ui/components/editorial/usePassageResolver.ts)
-// ─────────────────────────────────────────────────────────────────────────
-
-interface PassageResolution {
+interface ItemResolution {
   text: string;
   modelName: string;
   claimLabel: string;
-  role?: string;
 }
 
 function buildResolver(
   artifact: CognitiveArtifact,
   citationSourceOrder: Record<string | number, string>
-) {
-  // Build paragraph lookup: (modelIndex:paragraphOrdinal) → { _fullParagraph }
-  // Reads from corpus tree attached to cognitive artifact.
-  const paraLookup = new Map<string, { _fullParagraph?: string; statements?: any[] }>();
-  for (const model of (artifact as any)?.corpus?.models ?? []) {
-    for (const para of model.paragraphs ?? []) {
-      paraLookup.set(`${para.modelIndex}:${para.paragraphOrdinal}`, para);
-    }
-  }
-
+): (itemId: string) => ItemResolution | null {
   const claims: any[] = Array.isArray(artifact?.semantic?.claims) ? artifact.semantic.claims : [];
-  const claimLabels = new Map<string, string>();
+  const claimById = new Map<string, { id: string; label: string; text: string }>();
   for (const c of claims) {
-    claimLabels.set(String(c.id), c.label || '');
+    claimById.set(String(c.id), { id: String(c.id), label: c.label || '', text: c.text || '' });
   }
 
-  const densityProfiles: Record<string, any> = (artifact as any)?.claimDensity?.profiles ?? {};
-
-  // Statement text lookup for unclaimed groups — read from corpus index when available.
+  // Statement text + model lookup — used for claims (resolving to canonical statements)
+  // and as a fallback for runs that lost their pre-computed text.
   const statementTexts = new Map<string, string>();
+  const statementModelIndex = new Map<string, number>();
   const idx = (artifact as any)?.index;
   if (idx?.statementIndex) {
     for (const [sid, sCoords] of idx.statementIndex) {
       if (sCoords.text) statementTexts.set(sid, sCoords.text);
+      if (typeof sCoords.modelIndex === 'number') statementModelIndex.set(sid, sCoords.modelIndex);
     }
   } else {
-    for (const para of paraLookup.values()) {
-      for (const s of para.statements ?? []) {
-        const sid = String(s.statementId ?? s.id ?? '');
-        if (sid) statementTexts.set(sid, s.text ?? '');
+    for (const model of (artifact as any)?.corpus?.models ?? []) {
+      for (const para of model.paragraphs ?? []) {
+        for (const s of para.statements ?? []) {
+          const sid = String(s.statementId ?? '');
+          if (!sid) continue;
+          if (s.text) statementTexts.set(sid, s.text);
+          if (typeof model.modelIndex === 'number') statementModelIndex.set(sid, model.modelIndex);
+        }
       }
     }
   }
 
-  // Unclaimed groups by groupKey
-  const unclaimedGroups = (artifact as any)?.statementClassification?.unclaimedGroups ?? [];
-  const unclaimedByKey = new Map<string, any>();
-  for (const group of unclaimedGroups) {
-    const firstPara = group.paragraphs?.[0];
-    if (!firstPara) continue;
-    const key = `unclaimed:${group.nearestClaimId}:${firstPara.modelIndex}:${firstPara.paragraphIndex}`;
-    unclaimedByKey.set(key, group);
+  // Per-claim canonical statement IDs (from mixed-method provenance).
+  const claimStatementIds = new Map<string, string[]>();
+  const mixed = (artifact as any)?.mixedProvenanceResult ?? (artifact as any)?.mixedProvenance;
+  for (const [cid, entry] of Object.entries(mixed?.perClaim ?? {})) {
+    const ids = (entry as any)?.canonicalStatementIds;
+    if (Array.isArray(ids)) claimStatementIds.set(cid, ids);
   }
 
-  return (itemId: string): PassageResolution | null => {
-    // Unclaimed group
-    if (itemId.startsWith('unclaimed:')) {
-      const group = unclaimedByKey.get(itemId);
-      if (!group) return null;
-      const texts: string[] = [];
-      for (const pe of group.paragraphs ?? []) {
-        for (const sid of pe.unclaimedStatementIds ?? []) {
-          const t = statementTexts.get(sid);
-          if (t) texts.push(t);
-        }
-      }
+  // Unclaimed runs by runId.
+  const unclaimedRuns: UnclaimedRun[] = (artifact as any)?.unclaimedRuns ?? [];
+  const runById = new Map<string, UnclaimedRun>();
+  for (const r of unclaimedRuns) runById.set(r.runId, r);
+
+  return (itemId: string): ItemResolution | null => {
+    // Unclaimed run
+    const run = runById.get(itemId);
+    if (run) {
       return {
-        text: texts.join('\n\n') || '',
-        modelName: 'unclaimed',
-        claimLabel: group.nearestClaimId || '',
+        text: run.text,
+        modelName: resolveModelDisplayName(run.modelIndex, citationSourceOrder),
+        claimLabel: '',
       };
     }
 
-    // Passage: ${claimId}:${modelIndex}:${startParagraphIndex}
-    const parts = itemId.split(':');
-    if (parts.length < 3) return null;
-    const claimId = parts.slice(0, -2).join(':');
-    const modelIndex = parseInt(parts[parts.length - 2], 10);
-    const startParagraphIndex = parseInt(parts[parts.length - 1], 10);
-    if (isNaN(modelIndex) || isNaN(startParagraphIndex)) return null;
-
-    const profile = densityProfiles[claimId];
-    if (!profile?.statementPassages) return null;
-
-    const passageEntry = profile.statementPassages.find(
-      (p: any) => p.modelIndex === modelIndex && p.startParagraphIndex === startParagraphIndex
-    );
-    if (!passageEntry) return null;
-
-    const textParts: string[] = [];
-    for (let pi = passageEntry.startParagraphIndex; pi <= passageEntry.endParagraphIndex; pi++) {
-      const sp = paraLookup.get(`${modelIndex}:${pi}`);
-      if (sp?._fullParagraph) textParts.push(sp._fullParagraph);
+    // Claim
+    const claim = claimById.get(itemId);
+    if (claim) {
+      const sids = claimStatementIds.get(itemId) ?? [];
+      const texts: string[] = [];
+      const models = new Set<number>();
+      for (const sid of sids) {
+        const t = statementTexts.get(sid);
+        if (t) texts.push(t);
+        const mi = statementModelIndex.get(sid);
+        if (typeof mi === 'number') models.add(mi);
+      }
+      const modelName =
+        models.size === 1
+          ? resolveModelDisplayName([...models][0], citationSourceOrder)
+          : models.size > 1
+          ? `${models.size} models`
+          : '';
+      return {
+        text: texts.length > 0 ? texts.join(' ') : claim.text,
+        modelName,
+        claimLabel: claim.label,
+      };
     }
 
-    const modelName = resolveModelDisplayName(modelIndex, citationSourceOrder);
-
-    return {
-      text: textParts.join('\n\n') || '',
-      modelName,
-      claimLabel: claimLabels.get(claimId) || claimId,
-    };
+    return null;
   };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Fast-path resolver: uses pre-built lookup cache
-// ─────────────────────────────────────────────────────────────────────────
-
-function resolveFromCache(
-  itemId: string,
-  cache: EvidenceSubstrateLookupCache
-): PassageResolution | null {
-  if (itemId.startsWith('unclaimed:')) {
-    const entry = cache.unclaimed.get(itemId);
-    if (!entry) return null;
-    return { text: entry.text, modelName: 'unclaimed', claimLabel: entry.claimLabel };
-  }
-  const entry = cache.passages.get(itemId);
-  if (!entry) return null;
-  return { text: entry.text, modelName: entry.modelName, claimLabel: entry.claimLabel };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -169,7 +113,7 @@ function resolveFromCache(
 
 function formatEditorialThreads(
   ast: EditorialAST,
-  resolve: (id: string) => PassageResolution | null
+  resolve: (id: string) => ItemResolution | null
 ): string {
   const lines: string[] = [];
 
@@ -178,7 +122,6 @@ function formatEditorialThreads(
     lines.push('');
   }
 
-  // Walk threads in display order
   const orderedThreads: EditorialThread[] = [];
   const threadMap = new Map<string, EditorialThread>();
   for (const t of ast.threads) threadMap.set(t.id, t);
@@ -186,7 +129,6 @@ function formatEditorialThreads(
     const t = threadMap.get(tid);
     if (t) orderedThreads.push(t);
   }
-  // Append any threads not in thread_order
   for (const t of ast.threads) {
     if (!ast.thread_order.includes(t.id)) orderedThreads.push(t);
   }
@@ -203,7 +145,8 @@ function formatEditorialThreads(
       if (!resolved || !resolved.text) continue;
 
       const role = String(item.role || 'UNKNOWN').toUpperCase();
-      lines.push(`[${role} | ${resolved.modelName} | ${resolved.claimLabel}]`);
+      const tag = [role, resolved.modelName, resolved.claimLabel].filter(Boolean).join(' | ');
+      lines.push(`[${tag}]`);
       lines.push(resolved.text);
       lines.push('');
     }
@@ -219,7 +162,7 @@ function formatEditorialThreads(
 /**
  * Build the evidence substrate for the singularity prompt.
  *
- * @param artifact  The cognitive artifact (contains editorialAST, shadow, claimDensity, etc.)
+ * @param artifact  The cognitive artifact (contains editorialAST, unclaimedRuns, semantic.claims, etc.)
  * @param mappingText  The raw mapping response text
  * @param citationSourceOrder  Maps modelIndex → provider name
  * @returns A string to pass as `evidenceSubstrate` in ConciergePromptOptions, or empty string
@@ -227,25 +170,19 @@ function formatEditorialThreads(
 export function buildEvidenceSubstrate(
   artifact: CognitiveArtifact | null,
   mappingText: string,
-  citationSourceOrder: Record<string | number, string>,
-  options?: { lookupCache?: EvidenceSubstrateLookupCache }
+  citationSourceOrder: Record<string | number, string>
 ): string {
   const sections: string[] = [];
 
-  // 1. Editorial threads (arranged batch text)
   const editorialAST = (artifact as any)?.editorialAST as EditorialAST | undefined;
   if (editorialAST?.threads?.length && artifact) {
-    const cache = options?.lookupCache ?? (artifact as any)?._editorialLookupCache as EvidenceSubstrateLookupCache | undefined;
-    const resolve = cache
-      ? (id: string) => resolveFromCache(id, cache)
-      : buildResolver(artifact, citationSourceOrder);
+    const resolve = buildResolver(artifact, citationSourceOrder);
     const editorialText = formatEditorialThreads(editorialAST, resolve);
     if (editorialText) {
       sections.push('=== EDITORIAL THREADS ===\n' + editorialText);
     }
   }
 
-  // 2. Mapping response
   const trimmedMapping = (mappingText || '').trim();
   if (trimmedMapping) {
     sections.push('=== MAPPING RESPONSE ===\n' + trimmedMapping);

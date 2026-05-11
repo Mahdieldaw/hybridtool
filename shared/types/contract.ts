@@ -416,6 +416,103 @@ export interface ClaimFootprintMeasurement {
   };
 }
 
+/**
+ * Per-statement partition row from a focal claim's viewpoint.
+ *
+ * Invariant: selfShare + rivalShare + unclaimedShare === 1 for every row.
+ *
+ *   selfShare      = focal ∈ owners ? 1 / ownerCount : 0
+ *   rivalShare     = focal ∈ owners ? (ownerCount - 1) / ownerCount
+ *                    : ownerCount > 0 ? 1 : 0
+ *   unclaimedShare = ownerCount === 0 ? 1 : 0
+ */
+export interface ClaimParagraphEnvironmentStatement {
+  statementId: string;
+  /** Owners of this statement (sorted, deduped). Empty array means unclaimed. */
+  owners: string[];
+  ownerCount: number;
+  selfShare: number;
+  rivalShare: number;
+  unclaimedShare: number;
+}
+
+/**
+ * Discriminator distinguishing a paragraph where the focal claim has actual
+ * ownership from one where it appears only in the competitive pool.
+ *
+ *   ownedFootprint        — totals.selfTerritoryMass > 0
+ *   competitiveCandidate  — totals.selfTerritoryMass === 0 AND focal ∈ paragraph competitive pool
+ */
+export type ClaimParagraphEnvironmentRelation = 'ownedFootprint' | 'competitiveCandidate';
+
+/**
+ * One entry per (focal claim, paragraph) describing the full statement
+ * partition of that paragraph from the focal claim's viewpoint. Records
+ * every non-table statement — including rival-only and unclaimed — so the
+ * partition is complete (in contrast to ClaimFootprintMeasurement.atoms,
+ * which only carries statements the focal claim owns).
+ */
+export interface ClaimParagraphEnvironmentEntry {
+  claimId: string;
+  paragraphId: string;
+  modelIndex: number;
+  paragraphIndex: number;
+  relation: ClaimParagraphEnvironmentRelation;
+  statements: ClaimParagraphEnvironmentStatement[];
+  /**
+   * Sums over statements[]. Rederivable; kept for cheap reads.
+   *
+   * Invariants:
+   *   selfTerritoryMass + rivalTerritoryMass + unclaimedTerritoryMass === statementCount
+   *   claimedStatementCount + unclaimedStatementCount === statementCount
+   *   relation === 'ownedFootprint'       ⇒ selfTerritoryMass > 0
+   *   relation === 'competitiveCandidate' ⇒ selfTerritoryMass === 0
+   *
+   * Cross-structure: for ownedFootprint entries,
+   *   totals.selfTerritoryMass equals
+   *   ClaimFootprintMeasurement.rollups.byParagraph[paragraphId].territorialMass.
+   */
+  totals: {
+    selfTerritoryMass: number;
+    rivalTerritoryMass: number;
+    unclaimedTerritoryMass: number;
+    statementCount: number;
+    claimedStatementCount: number;
+    unclaimedStatementCount: number;
+  };
+}
+
+export interface ClaimParagraphEnvironmentMeasurement {
+  schemaVersion: 1;
+  /** Sorted by (paragraphIndex, claimId) for deterministic output. */
+  entries: ClaimParagraphEnvironmentEntry[];
+}
+
+export type ScopeKind = 'corpus' | 'model' | 'paragraph' | 'region' | 'passage';
+
+/**
+ * One row per scope. Holds the three denominator counts needed to compute
+ * scoped shares (statementCount, claimedStatementCount, unclaimedStatementCount).
+ * Per-claim scoped shares are NOT precomputed — they are derived on read via
+ * scopedShare() in shared/scoped-mass.ts.
+ */
+export interface ScopeDenominator {
+  scopeKind: ScopeKind;
+  scopeId: string;
+  /** All non-table statements in scope. */
+  statementCount: number;
+  /** Subset with ownerCount > 0. */
+  claimedStatementCount: number;
+  /** Subset with ownerCount === 0. */
+  unclaimedStatementCount: number;
+}
+
+export interface ScopeDenominatorTable {
+  schemaVersion: 1;
+  /** Sorted by (scopeKind, scopeId) for deterministic output. */
+  byScope: ScopeDenominator[];
+}
+
 export interface StatementPassageEntry {
   modelIndex: number;
   /** Statement IDs forming this contiguous run, in document order */

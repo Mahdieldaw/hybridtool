@@ -50,10 +50,11 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
         const resolved = resolver.resolve(item.id);
         if (!resolved) continue;
 
-        if (resolved.kind === 'passage') {
-          lines.push(`[${item.role.toUpperCase()}] ${resolved.modelName} — ${resolved.claimLabel}`);
+        if (resolved.kind === 'claim') {
+          const label = resolved.claimLabel ? ` — ${resolved.claimLabel}` : '';
+          lines.push(`[${item.role.toUpperCase()}] ${resolved.modelName}${label}`);
         } else {
-          lines.push(`[${item.role.toUpperCase()}] unclaimed`);
+          lines.push(`[${item.role.toUpperCase()}] ${resolved.modelName || 'unclaimed'}`);
         }
         lines.push(resolved.text);
         lines.push('');
@@ -171,9 +172,6 @@ export const EditorialDocument: React.FC<EditorialDocumentProps> = ({
         {ast.diagnostics?.notes && (
           <div className="px-6 py-4 border-t border-border-subtle text-xs text-text-muted">
             {ast.diagnostics.flat_corpus && <span className="mr-3">[flat corpus]</span>}
-            {ast.diagnostics.conflict_count > 0 && (
-              <span className="mr-3">{ast.diagnostics.conflict_count} conflict(s)</span>
-            )}
             <span>{ast.diagnostics.notes}</span>
           </div>
         )}

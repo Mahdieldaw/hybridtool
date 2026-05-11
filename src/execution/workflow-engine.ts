@@ -847,6 +847,8 @@ export class WorkflowEngine {
         workflowId: request.workflowId,
         error: msg,
       });
+    } finally {
+      this.streamingManager.clearCache(context?.sessionId);
     }
   }
 

@@ -46,6 +46,11 @@
   - type ProviderRole
   - const CANONICAL_PROVIDER_ORDER: readonly string[]
   - _...1 more_
+- `shared\scoped-mass.ts`
+  - function scopedShare: (weight, scope, table, mode) => number | null
+  - function getScopeDenominator: (table, scope, mode) => number | null
+  - interface ScopeRef
+  - type ScopeDenominatorMode
 - `shared\text-prep.ts` — function structuredTruncate: (text, maxChars) => string, function stripInlineMarkdown: (text) => string
 - `shared\think-utils.ts`
   - function computeThinkFlag: ({...}, input, inputFlags }) => boolean
@@ -84,13 +89,11 @@
   - interface ConciergePromptOptions
   - const ConciergeService
 - `src\concierge-service\editorial-mapper.ts`
-  - function buildPassageIndex: (claimDensity, passageRouting, statementClassification, corpus, claims, citationSourceOrder, string>, continuityMap, SourceContinuityEntry>) => void
-  - function buildEditorialPrompt: (userQuery, passages, unclaimed, corpusShape) => string
-  - function parseEditorialOutput: (rawText, validPassageKeys, validUnclaimedKeys) => EditorialParseResult
-  - interface IndexedPassage
-  - interface IndexedUnclaimedGroup
+  - function buildUnclaimedRuns: (corpus, claimedStatementIds) => UnclaimedRun[]
+  - function buildEditorialPrompt: (userQuery, corpus, unclaimedRuns, claims, 'id' | 'label' | 'text'>>, claimedStatementIds) => string
+  - function parseEditorialOutput: (rawText, validClaimIds, validRunIds) => EditorialParseResult
   - interface EditorialParseResult
-- `src\concierge-service\evidence-substrate.ts` — function buildLookupCacheFromIndex: (passages, unclaimed) => EvidenceSubstrateLookupCache, function buildEvidenceSubstrate: (artifact, mappingText, citationSourceOrder, string>, options?) => string
+- `src\concierge-service\evidence-substrate.ts` — function buildEvidenceSubstrate: (artifact, mappingText, citationSourceOrder, string>) => string
 - `src\concierge-service\position-brief.ts` — function buildPositionBriefFromClaims: (claims) => string, function buildPositionBrief: (analysis) => string
 - `src\errors\classifier.ts`
   - function classifyError: (error) => ProviderError
@@ -250,10 +253,18 @@
   paragraphOrder, number>;
   paragraphMeta?, {...}) => ClaimFootprintMeasurement
   - function buildClaimConcordance: (canonicalSets, Set<string>>) => ClaimConcordanceResult
+  - function computeClaimParagraphEnvironment: ({...}, ownershipMap, competitivePoolParagraphIds, paragraphById, statementsById, stmtToParagraphId, paragraphMeta, paragraphOrder, }, Set<string>>;
+  competitivePoolParagraphIds, ShadowParagraph>;
+  statementsById, ShadowStatement>;
+  stmtToParagraphId, string>;
+  paragraphMeta, {...}, number>;
+}) => ClaimParagraphEnvironmentMeasurement
+  - function buildScopeDenominatorTable: ({...}, shadowParagraphs, ownershipMap, paragraphToRegionIds, statementPassagesByClaim, }, Set<string>>;
+  paragraphToRegionIds, string[]>;
+  statementPassagesByClaim, StatementPassageEntry[]>;
+}) => ScopeDenominatorTable
   - function measureProvenance: (input) => Promise<MeasurePhaseOutput>
-  - interface ClaimExclusivity
-  - interface MeasurePhaseInput
-  - _...1 more_
+  - _...3 more_
 - `src\provenance\semantic-mapper.ts`
   - function buildSemanticMapperPrompt: (userQuery, responses) => string
   - function parseSemanticMapperOutput: (rawResponse, _shadowStatements?) => ParseResult
@@ -386,8 +397,8 @@
 - `ui\hooks\reading\usePassageHighlight.ts` — function usePassageHighlight: (artifact, focusedClaimId) => Map<string, ParagraphHighlight>, interface ParagraphHighlight
 - `ui\hooks\reading\usePassageResolver.ts`
   - function usePassageResolver: (artifact, citationSourceOrder, string> | null) => PassageResolver
-  - interface ResolvedPassage
-  - interface ResolvedUnclaimedGroup
+  - interface ResolvedClaim
+  - interface ResolvedRun
   - interface PassageResolver
   - type ResolvedItem
 - `ui\hooks\ui\useClipActions.ts` — function useClipActions: () => void

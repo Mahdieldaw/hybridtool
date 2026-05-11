@@ -49,8 +49,6 @@
 - **SupporterOrbs** — props: supporters, citationSourceOrder, size — `ui\instrument\SupporterOrbs.tsx`
 - **ToggleBar** — props: state, actions, hasBasinData — `ui\instrument\ToggleBar.tsx`
 - **ClaimRibbon** — props: artifact, focusedClaimId, onFocusClaim — `ui\reading\ClaimRibbon.tsx`
-- **ConflictPair** — props: anchor, alternative — `ui\reading\ConflictPair.tsx`
-- **ContextCollapse** — props: items — `ui\reading\ContextCollapse.tsx`
 - **CorpusSearchPanel** — props: aiTurnId, citationSourceOrder — `ui\reading\CorpusSearchPanel.tsx`
 - **EditorialDocument** — props: ast, artifact, citationSourceOrder, onCollapse, onClose — `ui\reading\EditorialDocument.tsx`
 - **EditorialPreview** — props: ast, onExpand — `ui\reading\EditorialPreview.tsx`
